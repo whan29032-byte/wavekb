@@ -13,7 +13,8 @@ test.describe("authenticated posting acceptance", () => {
     await page.getByLabel("密码").fill(password || "");
     await page.getByRole("button", { name: "登录" }).click();
     await expect(page).toHaveURL(/\/community\/idea_sharing\/new/, { timeout: 15_000 });
-    await expect(page.getByRole("button", { name: "退出登录" }).or(page.getByRole("button", { name: "账户菜单" }))).toBeVisible({ timeout: 15_000 });
+    const accountMenu = page.locator('summary[aria-label="账户菜单"]');
+    await expect(page.getByRole("button", { name: "退出登录" }).or(accountMenu)).toBeVisible({ timeout: 15_000 });
 
     const marker = `验收发帖 ${Date.now()}`;
     let published = false;
@@ -73,7 +74,6 @@ test.describe("authenticated posting acceptance", () => {
         await page.getByRole("button", { name: "删除帖子" }).click();
         await expect(page).toHaveURL(/\/community\/idea_sharing$/);
       }
-      const accountMenu = page.getByRole("button", { name: "账户菜单" });
       if (await accountMenu.isVisible().catch(() => false)) await accountMenu.click();
       await page.getByRole("button", { name: "退出登录" }).click();
       await expect(page).toHaveURL("/");
