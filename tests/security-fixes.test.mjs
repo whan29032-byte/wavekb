@@ -100,6 +100,18 @@ test("security migration validates external reference domains on the server", as
   assert.match(sql, /to anon, authenticated/);
 });
 
+test("authenticated post inserts can execute the external reference constraint validator", async () => {
+  const sql = await readFile(
+    new URL("../supabase/migrations/202608140007_external_reference_constraint_permissions.sql", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    sql,
+    /grant execute on function public\.external_reference_kind\(text\) to authenticated/,
+  );
+});
+
 test("Supabase migration versions are unique", async () => {
   const names = (await readdir(
     new URL("../supabase/migrations/", import.meta.url),
