@@ -18,6 +18,13 @@ test("member profiles preserve the destination through login", async ({ page }) 
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("登录 WaveKB");
 });
 
+test("friends and messages remain private", async ({ page }) => {
+  await page.goto("/friends");
+  await expect(page).toHaveURL(/\/login\?next=%2Ffriends/);
+  await page.goto("/messages");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmessages/);
+});
+
 test("knowledge search opens a fully migrated article", async ({ page }) => {
   await page.goto("/knowledge");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("规则、指南与原书证据");

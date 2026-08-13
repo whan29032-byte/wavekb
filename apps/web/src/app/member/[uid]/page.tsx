@@ -59,7 +59,7 @@ export default async function MemberProfilePage({ params }: PageProps) {
               <p className="max-w-[62ch] text-sm leading-6 text-muted-foreground">{profile.bio || "这位研究者还没有填写个人签名。"}</p>
             </div>
           </div>
-          <MemberProfileActions actorId={actor.id} profileId={profile.id} profileUid={profile.public_uid || Number(uid)} initialFollowing={social.following} initialConnection={social.connection} legacySite={legacySiteUrl()} />
+          <MemberProfileActions actorId={actor.id} profileId={profile.id} initialFollowing={social.following} initialConnection={social.connection} legacySite={legacySiteUrl()} />
         </div>
       </section>
 

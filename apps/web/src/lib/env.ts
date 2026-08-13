@@ -22,3 +22,10 @@ export function publicPostImageUrl(storagePath: string) {
   const encoded = storagePath.split("/").map(encodeURIComponent).join("/");
   return `${url}/storage/v1/object/public/post-images/${encoded}`;
 }
+
+export function publicChatStickerUrl(storagePath: string) {
+  const { url, configured } = publicSupabaseConfig();
+  if (!configured) return "";
+  const encoded = storagePath.split("/").map(encodeURIComponent).join("/");
+  return `${url}/storage/v1/object/public/chat-stickers/${encoded}`;
+}

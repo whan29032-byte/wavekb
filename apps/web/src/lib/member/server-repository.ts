@@ -1,5 +1,5 @@
 import "server-only";
-import type { FriendshipConnection, MemberProfile } from "@wavekb/domain";
+import type { DirectConversation, DirectMessage, FriendshipConnection, MemberProfile } from "@wavekb/domain";
 import { createClient } from "@/lib/supabase/server";
 
 export type MemberSocialState = {
@@ -29,4 +29,31 @@ export async function getMemberSocialState(actorId: string, targetId: string): P
     following: (followingResult.data ?? []).length > 0,
     connection: connections.find((item) => item.other_id === targetId) ?? null,
   };
+}
+
+export async function listFriendships(): Promise<FriendshipConnection[]> {
+  const client = await createClient();
+  const result = await client.rpc("list_my_friendships");
+  if (result.error) throw result.error;
+  return (result.data ?? []) as FriendshipConnection[];
+}
+
+function missingRpc(error: unknown) {
+  const message = error instanceof Error ? error.message : JSON.stringify(error ?? "");
+  return /does not exist|schema cache|could not find the function|PGRST202|42883/i.test(message);
+}
+
+export async function listConversations(): Promise<DirectConversation[]> {
+  const client = await createClient();
+  const modern = await client.rpc("list_my_conversations_v2");
+  const result = modern.error && missingRpc(modern.error) ? await client.rpc("list_my_conversations") : modern;
+  if (result.error) throw result.error;
+  return (result.data ?? []).map((item: Record<string, unknown>) => ({ ...item, unread_count: Number(item.unread_count ?? 0) })) as DirectConversation[];
+}
+
+export async function listDirectMessages(conversationId: string): Promise<DirectMessage[]> {
+  const client = await createClient();
+  const result = await client.rpc("list_conversation_messages", { p_conversation: conversationId });
+  if (result.error) throw result.error;
+  return (result.data ?? []) as DirectMessage[];
 }

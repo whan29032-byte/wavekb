@@ -47,6 +47,36 @@ export type FriendshipConnection = {
   status: "pending" | "accepted" | "declined";
   direction: "incoming" | "outgoing";
   other_id: string;
+  public_uid?: number | null;
+  display_name?: string;
+  avatar_url?: string | null;
+  bio?: string;
+  role?: string;
+  display_title?: string;
+  nameplate_style?: string;
+};
+
+export type DirectConversation = {
+  conversation_id: string;
+  other_id: string;
+  public_uid: number | null;
+  display_name: string;
+  avatar_url: string | null;
+  display_title: string;
+  nameplate_style: string;
+  last_message: string | null;
+  last_message_at: string | null;
+  unread_count?: number;
+};
+
+export type DirectMessage = {
+  id: number;
+  sender_id: string;
+  body: string;
+  created_at: string;
+  display_name: string;
+  public_uid: number | null;
+  avatar_url: string | null;
 };
 
 export type PostImage = {

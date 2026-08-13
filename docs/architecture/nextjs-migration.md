@@ -41,13 +41,16 @@ supabase                数据库迁移和 Edge Functions
 /community/post/[id]           帖子详情
 /community/post/[id]/edit      作者编辑
 /member/[uid]                  登录后公开主页与社交动作
+/friends                       UID 查找与好友请求处理
+/messages                      私聊会话列表
+/messages/[id]                 私聊消息与快捷表情
 ```
 
 现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
 
 知识数据由 `pnpm knowledge:extract` 从当前 `index.html` 的 `elliott-kb-data` 生成。提取脚本校验唯一 ID，并移除构建机绝对路径。Next 在构建期预生成全部 161 个详情页，原书图片仍由现有静态资源目录提供。
 
-会员公开主页通过现有 `search_profile_by_uid`、`list_my_friendships` 和 `profile_follows` 读取，不复制用户资料。关注与好友请求已迁移；资料编辑和即时聊天在对应新模块完成前保留显式旧站入口。
+会员公开主页通过现有 `search_profile_by_uid`、`list_my_friendships` 和 `profile_follows` 读取，不复制用户资料。关注、好友请求、私聊和未读清理已迁移；资料编辑器仍保留显式旧站入口。
 
 ## UI 约束
 
