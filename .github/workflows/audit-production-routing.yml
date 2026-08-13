@@ -52,7 +52,16 @@ jobs:
                 }
               ' "$config_file"
             fi
-          done < <(sudo find /etc/nginx/conf.d /etc/nginx/sites-enabled -maxdepth 2 -type f -print 2>/dev/null | sort -u)
+          done < <(
+            sudo nginx -T 2>/dev/null | awk '
+              /^# configuration file / {
+                line=$0
+                sub(/^# configuration file /, "", line)
+                sub(/:$/, "", line)
+                print line
+              }
+            ' | sort -u
+          )
           test "$found" -eq 1
           echo "WaveKB matching configs: ${found}"
           echo "Nginx: $(systemctl is-active nginx)"
