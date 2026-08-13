@@ -142,13 +142,8 @@ jobs:
 
           sudo test -s /etc/elliott-wave/gateway.env
           sudo install -d -m 0755 "$releases_root"
-          if [ -z "$previous_release" ] && sudo test -f "$application_root/src/server.ts"; then
-            previous_release="${releases_root}/bootstrap"
-            sudo install -d -m 0755 "$previous_release"
-            sudo cp -a "$application_root/src" "$application_root/package.json" "$previous_release/"
-            if sudo test -f "$application_root/tsconfig.json"; then
-              sudo cp -a "$application_root/tsconfig.json" "$previous_release/"
-            fi
+          if [ -n "$previous_release" ] && ! curl --fail --silent --max-time 5 http://127.0.0.1:8787/health > /dev/null; then
+            previous_release=""
           fi
           printf '%s\n' "$previous_release" > "$rollback_marker"
 
@@ -164,8 +159,6 @@ jobs:
               else
                 sudo systemctl stop elliott-wave-ai-worker.service || true
               fi
-            else
-              sudo systemctl stop elliott-wave-ai-worker.service elliott-wave-gateway.service || true
             fi
             exit "$status"
           }

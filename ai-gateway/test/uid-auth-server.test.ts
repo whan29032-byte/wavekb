@@ -189,6 +189,29 @@ test("login rate limit returns Retry-After without calling the provider", async 
   assert.equal(calls, 2);
 });
 
+test("a forged forwarded address cannot bypass the login rate limit", async () => {
+  const server = buildServer({
+    config,
+    authApi,
+    authRateLimiter: new AuthRateLimiter(config.AI_SECRET_MASTER_KEY, () => 0),
+  });
+  const request = (forgedAddress: string) => server.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    headers: {
+      origin: "https://knowledge.example.com",
+      "x-forwarded-for": `${forgedAddress}, 203.0.113.10`,
+    },
+    payload: { identifier: "583104", password: "wrong" },
+  });
+
+  await request("198.51.100.1");
+  await request("198.51.100.2");
+  const denied = await request("198.51.100.3");
+
+  assert.equal(denied.statusCode, 429);
+});
+
 test("auth routes reject unapproved origins", async () => {
   const server = buildServer({ config, authApi });
   const response = await server.inject({

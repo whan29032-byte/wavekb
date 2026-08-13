@@ -22,6 +22,25 @@ export type StructuredPost = {
   alternateCount: string; confirmation: string; application: string; notes: string;
 };
 
+const sectionKeys: Record<string, keyof StructuredPost> = {
+  "核心观点": "thesis",
+  "问题与当前判断": "thesis",
+  "复盘对象与原始判断": "thesis",
+  "分析背景": "thesis",
+  "首选计数": "primaryCount",
+  "备选计数": "alternateCount",
+  "规则与指南依据": "evidence",
+  "成立条件": "confirmation",
+  "失效条件": "invalidation",
+  "适用边界与反例": "invalidation",
+  "最终走势与偏差": "invalidation",
+  "实际应用": "application",
+  "希望讨论的问题": "question",
+  "希望得到的回答": "question",
+  "需要讨论的问题": "question",
+  "补充说明": "notes",
+};
+
 const clean = (value: unknown) => String(value ?? "").trim();
 const section = (title: string, value: unknown) => clean(value) ? `【${title}】\n${clean(value)}` : "";
 const labelOf = (options: readonly (readonly [string, string])[], value: string) => options.find(([key]) => key === value)?.[1] || value;
@@ -47,4 +66,38 @@ export function compileStructuredPost(input: StructuredPost, board: BoardSlug) {
   ];
   const structured = [context ? `【分析对象】\n${context}` : "", ...sections].filter(Boolean).join("\n\n");
   return structured || clean(input.notes);
+}
+
+export function parseStructuredPost(body: string): StructuredPost | null {
+  const parsed: StructuredPost = {
+    market: "crypto", instrument: "", timeframe: "4小时", pattern: "unknown", position: "unknown", direction: "unknown",
+    thesis: "", evidence: "", invalidation: "", question: "", primaryCount: "", alternateCount: "", confirmation: "", application: "", notes: "",
+  };
+  let recognized = false;
+  const sections = body.matchAll(/(?:^|\n\n)【([^】]+)】\n([\s\S]*?)(?=\n\n【|$)/g);
+  for (const match of sections) {
+    const title = match[1];
+    const value = clean(match[2]);
+    if (title === "分析对象") {
+      recognized = true;
+      for (const item of value.split("　")) {
+        const separator = item.indexOf("：");
+        if (separator < 1) continue;
+        const label = item.slice(0, separator);
+        const fieldValue = item.slice(separator + 1);
+        if (label === "品种") parsed.instrument = fieldValue;
+        else if (label === "市场") parsed.market = MARKET_GROUPS.find(([, name]) => name === fieldValue)?.[0] || "other";
+        else if (label === "周期") parsed.timeframe = fieldValue;
+        else if (label === "浪型") parsed.pattern = WAVE_PATTERNS.find(([, name]) => name === fieldValue)?.[0] || "unknown";
+        else if (label === "当前位置") parsed.position = fieldValue;
+        else if (label === "方向") parsed.direction = DIRECTIONS.find(([, name]) => name === fieldValue)?.[0] || "unknown";
+      }
+      continue;
+    }
+    const key = sectionKeys[title];
+    if (!key) continue;
+    recognized = true;
+    parsed[key] = value;
+  }
+  return recognized ? parsed : null;
 }

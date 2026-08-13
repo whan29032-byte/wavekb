@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileStructuredPost } from "./research-catalog";
+import { compileStructuredPost, parseStructuredPost } from "./research-catalog";
 
 describe("professional post compiler", () => {
   it("preserves the legacy case-analysis structure", () => {
@@ -11,5 +11,23 @@ describe("professional post compiler", () => {
     expect(body).toContain("【分析对象】\n品种：BTC　市场：加密资产　周期：4小时　浪型：普通推动浪　当前位置：浪3　方向：上涨");
     expect(body).toContain("【首选计数】\n当前处于浪3");
     expect(body).toContain("【失效条件】\n跌破结构起点");
+  });
+
+  it("round-trips professional fields so an edit does not erase them", () => {
+    const body = compileStructuredPost({
+      market: "crypto", instrument: "BINANCE:BTCUSDT", timeframe: "4小时", pattern: "impulse", position: "浪3", direction: "up",
+      thesis: "等待同级别确认", evidence: "硬规则先淘汰", invalidation: "跌破起点", question: "是否延长？",
+      primaryCount: "", alternateCount: "", confirmation: "", application: "控制仓位", notes: "补充观察成交量",
+    }, "idea_sharing");
+
+    expect(parseStructuredPost(body)).toEqual({
+      market: "crypto", instrument: "BINANCE:BTCUSDT", timeframe: "4小时", pattern: "impulse", position: "浪3", direction: "up",
+      thesis: "等待同级别确认", evidence: "硬规则先淘汰", invalidation: "跌破起点", question: "是否延长？",
+      primaryCount: "", alternateCount: "", confirmation: "", application: "控制仓位", notes: "补充观察成交量",
+    });
+  });
+
+  it("does not mistake ordinary prose for a professional post", () => {
+    expect(parseStructuredPost("普通正文，即使很长也应继续使用简易发布模式。")).toBeNull();
   });
 });

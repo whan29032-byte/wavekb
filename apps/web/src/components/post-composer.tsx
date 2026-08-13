@@ -6,7 +6,7 @@ import { ImageSquare, Trash, UploadSimple } from "@phosphor-icons/react";
 import { MAX_IMAGES, validateImages, validatePost, type BoardSlug, type CommunityPost, type PrivateEntry } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { createPost, updatePost } from "@/lib/community/client-repository";
-import { compileStructuredPost, DIRECTIONS, MARKET_GROUPS, RESEARCH_TIMEFRAMES, WAVE_PATTERNS, WAVE_POSITIONS, type StructuredPost } from "@/lib/community/research-catalog";
+import { compileStructuredPost, DIRECTIONS, MARKET_GROUPS, parseStructuredPost, RESEARCH_TIMEFRAMES, WAVE_PATTERNS, WAVE_POSITIONS, type StructuredPost } from "@/lib/community/research-catalog";
 import { createClient } from "@/lib/supabase/client";
 import { publicPostImageUrl } from "@/lib/env";
 import { buildTradingViewPackage, tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
@@ -32,11 +32,12 @@ function friendlyError(error: unknown): string {
 export function PostComposer({ board, userId, post, source }: { board: BoardSlug; userId: string; post?: CommunityPost; source?: PrivateEntry }) {
   const router = useRouter();
   const draftKey = `wavekb:next:composer:${userId}:${board}:${post?.id || "new"}`;
+  const restoredPost = post ? parseStructuredPost(post.body) : null;
   const [title, setTitle] = useState(post?.title || source?.title || "");
-  const [body, setBody] = useState(post?.body || source?.body || "");
+  const [body, setBody] = useState(restoredPost?.notes || post?.body || source?.body || "");
   const [externalUrl, setExternalUrl] = useState(post?.external_url || "");
-  const [mode, setMode] = useState<EditorMode>(post?.chart_package ? "professional" : "simple");
-  const [structured, setStructured] = useState<StructuredPost>(blankStructured);
+  const [mode, setMode] = useState<EditorMode>(post?.chart_package || restoredPost ? "professional" : "simple");
+  const [structured, setStructured] = useState<StructuredPost>(restoredPost || blankStructured);
   const initialChart = post?.chart_package as TradingViewPackage | null;
   const [chartSource, setChartSource] = useState(initialChart?.chart_url || initialChart?.symbol || "");
   const [chartSymbol, setChartSymbol] = useState(initialChart?.symbol || "");
@@ -190,6 +191,25 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
     setStructured((current) => ({ ...current, [key]: value }));
   }
 
+  function changeMode(value: EditorMode) {
+    if (value === mode) return;
+    if (value === "professional") {
+      const parsed = parseStructuredPost(body);
+      if (parsed) {
+        setStructured(parsed);
+        setBody(parsed.notes);
+      } else if (!structured.thesis.trim()) {
+        setStructured((current) => ({ ...current, thesis: body.trim() }));
+        setBody("");
+      }
+    } else {
+      const nextStructured = { ...structured, notes: body };
+      setStructured(nextStructured);
+      setBody(compileStructuredPost(nextStructured, board));
+    }
+    setMode(value);
+  }
+
   function refreshChart() {
     try {
       const value = buildTradingViewPackage({ source: chartSource, symbol: chartSymbol, interval: chartInterval, theme: chartTheme });
@@ -205,7 +225,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
     <form className="grid gap-7 rounded-xl border bg-surface p-5 md:p-8" onSubmit={submit} onPaste={handlePaste}>
       {source ? <div className="rounded-lg border border-primary/25 bg-primary/8 p-3 text-sm leading-6"><strong>正在整理私人记录的公开副本。</strong><span className="text-muted-foreground"> 只有标题、正文和本页新增的公开图片会进入帖子，复盘核验字段与私密图片不会公开。</span></div> : null}
       <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-1" role="tablist" aria-label="发布模式">
-        {([ ["simple", "简易发布"], ["professional", "专业分析"] ] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`min-h-10 rounded-lg px-3 text-sm font-semibold ${mode === value ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground"}`} onClick={() => setMode(value)}>{label}</button>)}
+        {([ ["simple", "简易发布"], ["professional", "专业分析"] ] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`min-h-10 rounded-lg px-3 text-sm font-semibold ${mode === value ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground"}`} onClick={() => changeMode(value)}>{label}</button>)}
       </div>
       <Field>
         <Label htmlFor="post-title">标题</Label>

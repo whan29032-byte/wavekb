@@ -208,7 +208,8 @@ function authOriginAllowed(config: GatewayConfig, headers: Record<string, string
 }
 
 function clientIp(headers: Record<string, string>): string {
-  return String(headers["x-forwarded-for"] || "unknown").split(",")[0]?.trim() || "unknown";
+  const chain = String(headers["x-forwarded-for"] || "unknown").split(",");
+  return chain.at(-1)?.trim() || "unknown";
 }
 
 async function authRoute(

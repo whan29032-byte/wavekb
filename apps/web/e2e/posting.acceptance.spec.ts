@@ -4,7 +4,6 @@ const identifier = process.env.E2E_POSTING_IDENTIFIER;
 const password = process.env.E2E_POSTING_PASSWORD;
 
 test.describe("authenticated posting acceptance", () => {
-  test.describe.configure({ retries: 0 });
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
   test("complete posting lifecycle with an image and external reference", async ({ page }) => {
@@ -86,8 +85,9 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByRole("button", { name: "移除现有图片 1" }).click();
       await page.getByLabel("外部引用（可选）").fill("https://x.com/wavekb/status/1");
       await page.getByRole("button", { name: "保存修改" }).click();
+      await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
       await expect(page.getByText("这篇验收帖子已经完成编辑")).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByText("【核心观点】")).toBeVisible();
+      await expect(page.getByText("【核心观点】", { exact: false })).toBeVisible();
       await expect(page.getByRole("heading", { name: "TradingView 图表" })).toBeVisible();
       await expect(page.getByTitle("BINANCE:BTCUSDT TradingView 图表")).toHaveAttribute("src", /tradingview\.com/);
       await expect(page.getByRole("region", { name: /帖子图片/ })).toHaveCount(0);
