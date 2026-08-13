@@ -117,7 +117,9 @@ jobs:
           done
 
           sudo nginx -t
-          curl --fail --silent --show-error --retry 3 http://127.0.0.1/ > /dev/null
+          curl --fail --silent --show-error --retry 3 \
+            --header 'Host: wavekb.com' \
+            http://127.0.0.1/index.html > /dev/null
           trap - ERR
           sudo find "${backup_root}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf -- {} +
           rm -rf -- "${release_dir}"
