@@ -23,7 +23,7 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    environment: production
+    environment: next-preview
     steps:
       - name: Check out source
         uses: actions/checkout@v4
