@@ -1,0 +1,142 @@
+name: Test and deploy static production
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-static-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run website tests
+        run: node --test tests/*.test.mjs
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@v4
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Upload static release candidate
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          remote_release="wavekb-static-${RELEASE_ID}"
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "rm -rf -- \"\$HOME/${remote_release}\" && mkdir -p \"\$HOME/${remote_release}\""
+          rsync -az --delete -e "ssh -i $HOME/.ssh/deploy_key -o BatchMode=yes" \
+            index.html elliott-wave-preview.html elliott-wave-knowledge-tree.html \
+            assets community admin workbench \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_release}/"
+
+      - name: Back up and activate release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "DEPLOY_PATH='${DEPLOY_PATH}' RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          release_dir="$HOME/wavekb-static-${RELEASE_ID}"
+          site_root="${DEPLOY_PATH}"
+          backup_root="/var/backups/elliott-wave/actions"
+          backup_dir="${backup_root}/${RELEASE_ID}"
+
+          test -f "${release_dir}/index.html"
+          test -d "${release_dir}/community"
+          sudo install -d -m 0750 "${backup_dir}"
+          sudo tar -C "${site_root}" -czf "${backup_dir}/site.tar.gz" .
+
+          rollback() {
+            status=$?
+            trap - ERR
+            restore_dir="${backup_dir}/restore"
+            sudo install -d -m 0750 "${restore_dir}"
+            sudo tar -C "${restore_dir}" -xzf "${backup_dir}/site.tar.gz"
+            sudo rsync -a --delete "${restore_dir}/" "${site_root}/"
+            sudo rm -rf -- "${restore_dir}"
+            exit "$status"
+          }
+          trap rollback ERR
+
+          for page in index.html elliott-wave-preview.html elliott-wave-knowledge-tree.html; do
+            sudo install -m 0644 "${release_dir}/${page}" "${site_root}/${page}"
+          done
+          for directory in assets community admin workbench; do
+            sudo install -d -m 0755 "${site_root}/${directory}"
+            sudo rsync -a --delete "${release_dir}/${directory}/" "${site_root}/${directory}/"
+          done
+
+          sudo nginx -t
+          curl --fail --silent --show-error --retry 3 http://127.0.0.1/ > /dev/null
+          trap - ERR
+          sudo find "${backup_root}" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf -- {} +
+          rm -rf -- "${release_dir}"
+          REMOTE
+
+      - name: Verify public site
+        run: |
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 \
+            https://wavekb.com/ > /dev/null
+          curl --fail --silent --show-error --retry 8 --retry-delay 5 \
+            https://wavekb.com/community/member-ui.js > /dev/null
+
+      - name: Remove failed release candidate
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "rm -rf -- \"\$HOME/wavekb-static-${RELEASE_ID}\"" || true
