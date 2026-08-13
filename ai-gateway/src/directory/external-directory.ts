@@ -66,7 +66,8 @@ export function discordInviteCode(value: unknown): string {
     : parts[0] === "invite"
       ? parts[1]
       : "";
-  return /^[A-Za-z0-9_-]{2,64}$/.test(candidate || "") ? candidate : "";
+  const code = candidate ?? "";
+  return /^[A-Za-z0-9_-]{2,64}$/.test(code) ? code : "";
 }
 
 function avatarUrl(value: unknown): string | null {
@@ -227,4 +228,3 @@ export async function normalizeDirectoryResource(
     sort_order: sortOrder,
   };
 }
-
