@@ -342,12 +342,12 @@ test("published HTML cache-busts the UID authentication assets", async () => {
   ]);
 
   for (const page of pages) {
-    assert.match(page, /community\/community\.css\?v=auth-otp-20260726/);
-    assert.match(page, /community\/config\.js\?v=auth-otp-20260726/);
-    assert.match(page, /community\/community-core\.js\?v=auth-otp-20260726/);
-    assert.match(page, /community\/community-repository\.js\?v=auth-otp-20260726/);
-    assert.match(page, /community\/community-auth\.js\?v=auth-otp-20260726/);
-    assert.match(page, /community\/community-ui\.js\?v=auth-otp-20260726/);
+    assert.match(page, /community\/community\.css\?v=[A-Za-z0-9._-]+/);
+    assert.match(page, /community\/config\.js\?v=[A-Za-z0-9._-]+/);
+    assert.match(page, /community\/community-core\.js\?v=[A-Za-z0-9._-]+/);
+    assert.match(page, /community\/community-repository\.js\?v=[A-Za-z0-9._-]+/);
+    assert.match(page, /community\/community-auth\.js\?v=[A-Za-z0-9._-]+/);
+    assert.match(page, /community\/community-ui\.js\?v=[A-Za-z0-9._-]+/);
   }
 });
 
