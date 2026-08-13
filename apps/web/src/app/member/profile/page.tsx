@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ProfileEditor } from "@/components/profile-editor";
-import { requireCurrentUser } from "@/lib/auth/dal";
+import { requireActiveMember } from "@/lib/auth/dal";
 import { getMyNameplates, getMyProfile } from "@/lib/member/server-repository";
 
 export const metadata: Metadata = { title: "编辑个人资料" };
 
 export default async function EditMemberProfilePage() {
-  const actor = await requireCurrentUser("/member/profile");
+  const actor = await requireActiveMember("/member/profile");
   const [profile, nameplates] = await Promise.all([
     getMyProfile(actor.id),
     getMyNameplates().catch(() => []),

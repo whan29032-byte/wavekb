@@ -108,6 +108,15 @@ export type DirectMessage = {
   avatar_url: string | null;
 };
 
+export type ChatSticker = {
+  id: string;
+  owner_id: string;
+  storage_path: string;
+  label: string;
+  mime_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  created_at: string;
+};
+
 export type PostImage = {
   id: string;
   storage_path: string;
@@ -126,7 +135,20 @@ export type CommunityPost = {
   external_url: string | null;
   external_kind: ExternalKind;
   chart_package: Record<string, unknown> | null;
+  comments_enabled: boolean;
   post_images: PostImage[];
+  profiles: PublicProfile | null;
+};
+
+export type PostComment = {
+  id: string;
+  post_id: string;
+  author_id: string;
+  parent_id: string | null;
+  body: string;
+  status: "visible" | "deleted_by_author" | "hidden_by_admin";
+  created_at: string;
+  updated_at: string;
   profiles: PublicProfile | null;
 };
 
@@ -185,6 +207,27 @@ export type PrivateEntryInput = {
   tags: string[];
   knowledgeIds: string[];
   reviewData: PrivateEntryReviewData;
+};
+
+export type WorkbenchAnalysis = {
+  id: string;
+  owner_id: string;
+  schema_version: string;
+  input_source: "manual" | "image_recognition" | "market_api";
+  instrument: string;
+  market: string;
+  primary_timeframe: string;
+  parent_timeframe: string;
+  child_timeframe: string;
+  holding_style: string;
+  step_data: Record<string, Record<string, unknown>>;
+  rule_result: Record<string, unknown>;
+  score_result: Record<string, unknown>;
+  risk_result: Record<string, unknown>;
+  drawdown_result: Record<string, unknown>;
+  execution_status: "draft" | "waiting" | "ready" | "executed" | "closed";
+  created_at: string;
+  updated_at: string;
 };
 
 export type PrivateEntryValidation = {

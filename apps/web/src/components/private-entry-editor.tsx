@@ -10,6 +10,7 @@ import { MAX_IMAGES, splitEntryTags, validateImages, validatePrivateEntry, type 
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { savePrivateEntry, softDeletePrivateEntry } from "@/lib/workbench/client-repository";
+import { buildTradingViewPackage, parseTradingViewPackage, tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
 
 type SelectedImage = { key: string; file: File; previewUrl: string };
 type EntryErrors = Partial<Record<"kind" | "title" | "body" | "instrument" | "market" | "timeframe" | "tags" | "knowledgeIds" | "images" | "form", string>>;
@@ -62,6 +63,13 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
   const [ruleCompliance, setRuleCompliance] = useState<NonNullable<PrivateEntryReviewData["rule_compliance"]>>(initialReview.rule_compliance || "");
   const [executionScore, setExecutionScore] = useState(initialReview.execution_score ? String(initialReview.execution_score) : "");
   const [lesson, setLesson] = useState(String(initialReview.lesson || ""));
+  const initialTradingView = initialReview.tradingview as TradingViewPackage | null | undefined;
+  const [tradingViewSource, setTradingViewSource] = useState(initialTradingView?.chart_url || initialTradingView?.symbol || "");
+  const [tradingViewSymbol, setTradingViewSymbol] = useState(initialTradingView?.symbol || "");
+  const [tradingViewInterval, setTradingViewInterval] = useState(initialTradingView?.interval || "D");
+  const [tradingViewTheme, setTradingViewTheme] = useState(initialTradingView?.theme || "auto");
+  const [tradingViewLayout, setTradingViewLayout] = useState(initialTradingView?.layout || null);
+  const [tradingViewPreview, setTradingViewPreview] = useState<TradingViewPackage | null>(initialTradingView || null);
   const [existingImages, setExistingImages] = useState(entry?.private_entry_images || []);
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [errors, setErrors] = useState<EntryErrors>({});
@@ -141,8 +149,54 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
     addImages(imageFiles(event.dataTransfer.files));
   }
 
+  function refreshTradingView() {
+    try {
+      const value = buildTradingViewPackage({ source: tradingViewSource, symbol: tradingViewSymbol, interval: tradingViewInterval, theme: tradingViewTheme, layout: tradingViewLayout });
+      setTradingViewPreview(value);
+      if (value) {
+        setTradingViewSymbol(value.symbol);
+        setTradingViewInterval(value.interval);
+        setErrors((current) => ({ ...current, form: undefined }));
+      }
+    } catch (error) {
+      setErrors((current) => ({ ...current, form: error instanceof Error ? error.message : "图表链接无效。" }));
+    }
+  }
+
+  async function importTradingView(file: File) {
+    try {
+      const value = parseTradingViewPackage(await file.text());
+      setTradingViewSource(value.chart_url || value.symbol);
+      setTradingViewSymbol(value.symbol);
+      setTradingViewInterval(value.interval);
+      setTradingViewTheme(value.theme);
+      setTradingViewLayout(value.layout);
+      setTradingViewPreview(value);
+      setErrors((current) => ({ ...current, form: undefined }));
+    } catch (error) {
+      setErrors((current) => ({ ...current, form: error instanceof Error ? error.message : "图表配置导入失败。" }));
+    }
+  }
+
+  function exportTradingView() {
+    if (!tradingViewPreview) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(tradingViewPreview, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `wavekb-tv-${tradingViewPreview.symbol || "chart"}-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    let tradingViewValue: TradingViewPackage | null;
+    try {
+      tradingViewValue = buildTradingViewPackage({ source: tradingViewSource, symbol: tradingViewSymbol, interval: tradingViewInterval, theme: tradingViewTheme, layout: tradingViewLayout });
+    } catch (error) {
+      setErrors({ form: error instanceof Error ? error.message : "图表配置无效。" });
+      return;
+    }
     const validation = validatePrivateEntry({
       kind,
       title,
@@ -163,7 +217,7 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
         pattern,
         position,
         direction,
-        tradingview: initialReview.tradingview || null,
+        tradingview: tradingViewValue,
       },
     });
     const imageError = validateImages(images.map((image) => image.file));
@@ -242,6 +296,8 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
       </section>
 
       {mode === "professional" && kind === "review" ? <section className="grid gap-5 rounded-xl border bg-surface p-5 md:p-7" aria-labelledby="review-check-title"><header><h2 id="review-check-title" className="text-xl font-semibold">复盘核验</h2><p className="mt-1 text-sm text-muted-foreground">把结构判断与交易执行分开记录，避免用盈亏替代规则核验。</p></header><div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4"><Field><Label htmlFor="entry-outcome">最终结果</Label><select id="entry-outcome" className={selectClassName} value={outcome} onChange={(event) => setOutcome(event.target.value as NonNullable<PrivateEntryReviewData["outcome"]>)}><option value="">尚未结束</option><option value="win">盈利</option><option value="loss">亏损</option><option value="breakeven">保本</option><option value="cancelled">未执行</option></select></Field><Field><Label htmlFor="entry-count-result">数浪结果</Label><select id="entry-count-result" className={selectClassName} value={countResult} onChange={(event) => setCountResult(event.target.value as NonNullable<PrivateEntryReviewData["count_result"]>)}><option value="">待核验</option><option value="correct">主计数成立</option><option value="alternate">备选计数成立</option><option value="invalid">计数失效</option></select></Field><Field><Label htmlFor="entry-rule-compliance">规则遵守</Label><select id="entry-rule-compliance" className={selectClassName} value={ruleCompliance} onChange={(event) => setRuleCompliance(event.target.value as NonNullable<PrivateEntryReviewData["rule_compliance"]>)}><option value="">待核验</option><option value="yes">遵守全部硬规则</option><option value="no">存在规则违规</option><option value="unclear">证据不足</option></select></Field><Field><Label htmlFor="entry-score">执行纪律</Label><Input id="entry-score" type="number" min={1} max={5} value={executionScore} onChange={(event) => setExecutionScore(event.target.value)} placeholder="1-5" /></Field></div><Field><Label htmlFor="entry-lesson">本次经验与下次改进</Label><Textarea id="entry-lesson" value={lesson} onChange={(event) => setLesson(event.target.value)} rows={4} maxLength={2000} /></Field></section> : null}
+
+      {mode === "professional" && kind === "review" ? <section className="grid gap-5 rounded-xl border bg-surface p-5 md:p-7" aria-labelledby="tradingview-title"><header><h2 id="tradingview-title" className="text-xl font-semibold">TradingView 图表</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">粘贴公开图表链接或输入品种代码。TradingView 不向普通第三方网站开放账号登录授权，私人布局可通过 JSON 配置导入。</p></header><div className="grid gap-5 sm:grid-cols-2"><Field className="sm:col-span-2"><Label htmlFor="tradingview-source">图表链接或品种代码</Label><Input id="tradingview-source" value={tradingViewSource} onChange={(event) => setTradingViewSource(event.target.value)} maxLength={2000} placeholder="https://www.tradingview.com/chart/... 或 BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="tradingview-symbol">品种代码</Label><Input id="tradingview-symbol" value={tradingViewSymbol} onChange={(event) => setTradingViewSymbol(event.target.value)} maxLength={80} placeholder="BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="tradingview-interval">图表周期</Label><select id="tradingview-interval" className={selectClassName} value={tradingViewInterval} onChange={(event) => setTradingViewInterval(event.target.value)}><option value="15">15分钟</option><option value="60">1小时</option><option value="240">4小时</option><option value="D">日线</option><option value="W">周线</option><option value="M">月线</option></select></Field><Field><Label htmlFor="tradingview-theme">图表主题</Label><select id="tradingview-theme" className={selectClassName} value={tradingViewTheme} onChange={(event) => setTradingViewTheme(event.target.value as "auto" | "light" | "dark")}><option value="auto">跟随网站</option><option value="dark">深色</option><option value="light">浅色</option></select></Field><Field><Label htmlFor="tradingview-import">导入图表配置</Label><Input id="tradingview-import" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importTradingView(file); }} /></Field></div><div className="flex flex-wrap gap-2"><Button type="button" onClick={refreshTradingView}>刷新图表</Button><Button type="button" variant="secondary" disabled={!tradingViewPreview} onClick={exportTradingView}>导出图表配置</Button><Button asChild type="button" variant="ghost"><a href="https://www.tradingview.com/chart/" target="_blank" rel="noreferrer">打开 TradingView</a></Button></div>{tradingViewPreview ? <div className="overflow-hidden rounded-xl border bg-muted"><iframe title={`${tradingViewPreview.symbol || "TradingView"} 图表`} src={tradingViewEmbedUrl(tradingViewPreview)} className="h-[460px] w-full" loading="lazy" referrerPolicy="no-referrer" /></div> : <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">填写链接或品种代码后刷新，即可预览并把图表配置绑定到本次复盘。</p>}</section> : null}
 
       {errors.form ? <FieldMessage role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 p-3">{errors.form}</FieldMessage> : null}
       <footer className="flex flex-col gap-4 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"><div className="grid gap-1">{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : <p className="text-xs text-muted-foreground">新记录的文字草稿会保存在当前设备，图片只在保存时上传。</p>}{entry ? <Link href={`/community/public_viewpoint/new?source=${entry.id}`} className="text-sm font-medium text-primary hover:underline">整理为公开社区副本</Link> : null}</div><div className="flex flex-wrap gap-2">{entry ? <Button type="button" variant="danger" disabled={pending} onClick={removeEntry}><Trash aria-hidden size={17} />移除记录</Button> : null}<Button asChild type="button" variant="secondary"><Link href="/workbench">取消</Link></Button><Button type="submit" disabled={pending}>{pending ? "正在保存" : "保存私人记录"}</Button></div></footer>

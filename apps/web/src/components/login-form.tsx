@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
+import { safeReturnPath } from "@/lib/auth/forms";
 
 export function LoginForm() {
   const searchParams = useSearchParams();
@@ -19,14 +20,16 @@ export function LoginForm() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ identifier: form.get("identifier"), password: form.get("password") }),
     }).catch(() => null);
-    const payload = response ? await response.json().catch(() => ({})) as { error?: string } : {};
+    const payload = response ? await response.json().catch(() => ({})) as { error?: string; needsUidActivation?: boolean } : {};
     if (!response?.ok) {
       setError(payload.error || "登录服务暂时不可用，请稍后再试。");
       setPending(false);
       return;
     }
-    const next = searchParams.get("next");
-    const destination = next?.startsWith("/") && !next.startsWith("//") ? next : "/community/idea_sharing";
+    const next = safeReturnPath(searchParams.get("next"));
+    const destination = payload.needsUidActivation
+      ? `/activate-uid?next=${encodeURIComponent(next)}`
+      : next;
     window.location.replace(destination);
   }
 

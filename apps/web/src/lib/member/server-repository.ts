@@ -1,5 +1,5 @@
 import "server-only";
-import type { DirectConversation, DirectMessage, EditableMemberProfile, FriendshipConnection, MemberProfile } from "@wavekb/domain";
+import type { ChatSticker, DirectConversation, DirectMessage, EditableMemberProfile, FriendshipConnection, MemberProfile } from "@wavekb/domain";
 import { createClient } from "@/lib/supabase/server";
 
 export type MemberSocialState = {
@@ -82,4 +82,14 @@ export async function listDirectMessages(conversationId: string): Promise<Direct
   const result = await client.rpc("list_conversation_messages", { p_conversation: conversationId });
   if (result.error) throw result.error;
   return (result.data ?? []) as DirectMessage[];
+}
+
+export async function listChatStickers(userId: string): Promise<ChatSticker[]> {
+  const client = await createClient();
+  const result = await client.from("chat_stickers")
+    .select("id,owner_id,storage_path,label,mime_type,created_at")
+    .eq("owner_id", userId)
+    .order("created_at", { ascending: false });
+  if (result.error) throw result.error;
+  return (result.data ?? []) as ChatSticker[];
 }

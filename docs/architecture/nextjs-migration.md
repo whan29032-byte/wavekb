@@ -46,6 +46,8 @@ supabase                数据库迁移和 Edge Functions
 /messages                      私聊会话列表
 /messages/[id]                 私聊消息与快捷表情
 /workbench                     私人复盘、日记与草稿
+/workbench/analysis/[id]       11 步波浪分析、规则、回撤与风险计算
+/workbench/ai                  用户自带模型与密钥轮换
 /workbench/entries/new         新建私人记录
 /workbench/entries/[id]        编辑、软删除与公开副本
 /mentors                       公开导师目录与进行中辅导入口
@@ -59,7 +61,10 @@ supabase                数据库迁移和 Edge Functions
 /admin/directory               X 与 Discord 首页推荐管理
 /admin/mentors                 导师、方案、收款方式与订单权益
 /admin/audit                   不可删除的后台治理审计记录
+/admin/ai                      AI 网关概览与平台备用供应商
 ```
+
+逐项功能状态与生产验收证据见 [nextjs-feature-parity.md](nextjs-feature-parity.md)。
 
 现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
 

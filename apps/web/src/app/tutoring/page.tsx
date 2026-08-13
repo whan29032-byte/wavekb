@@ -4,7 +4,7 @@ import { ArrowRight, ChatsCircle, GraduationCap, Storefront } from "@phosphor-ic
 import { remainingMentorQuota } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
 import { MentorAvatar } from "@/components/mentor-avatar";
-import { requireCurrentUser } from "@/lib/auth/dal";
+import { requireActiveMember } from "@/lib/auth/dal";
 import { getMyMentorSettings, listMyMentorAccess } from "@/lib/mentor/server-repository";
 
 export const metadata: Metadata = { title: "我的辅导" };
@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "我的辅导" };
 const statusLabels = { active: "进行中", expired: "已到期", revoked: "已撤销", refunded: "已退款" } as const;
 
 export default async function TutoringPage() {
-  await requireCurrentUser("/tutoring");
+  await requireActiveMember("/tutoring");
   const [accessList, settings] = await Promise.all([listMyMentorAccess(), getMyMentorSettings()]);
   return (
     <main className="mx-auto grid max-w-5xl gap-8 px-4 py-10 md:px-6 md:py-14">

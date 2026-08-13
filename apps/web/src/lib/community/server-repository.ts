@@ -1,12 +1,13 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BoardSlug, CommunityPost, PublicProfile } from "@wavekb/domain";
+import type { BoardSlug, CommunityPost, PostComment, PublicProfile } from "@wavekb/domain";
 import { publicSupabaseConfig } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 
 const POST_SELECT = [
   "id", "board", "title", "body", "author_id", "status", "created_at", "updated_at",
   "external_url", "external_kind", "chart_package", "post_images(id,storage_path,sort_order)",
+  "comments_enabled",
 ].join(",");
 
 type PostRow = Omit<CommunityPost, "profiles">;
@@ -62,6 +63,25 @@ export async function getPost(id: string): Promise<CommunityPost | null> {
   if (!result.data) return null;
   const [post] = await attachProfiles(client, [result.data as unknown as PostRow]);
   return post ?? null;
+}
+
+export async function listPostComments(postId: string): Promise<PostComment[]> {
+  if (!publicSupabaseConfig().configured) return [];
+  const client = await createClient();
+  const result = await client.from("post_comments")
+    .select("id,post_id,author_id,parent_id,body,status,created_at,updated_at")
+    .eq("post_id", postId)
+    .eq("status", "visible")
+    .order("created_at", { ascending: true });
+  if (result.error) throw result.error;
+  const rows = (result.data ?? []) as Omit<PostComment, "profiles">[];
+  const authorIds = [...new Set(rows.map((comment) => comment.author_id))];
+  if (!authorIds.length) return [];
+  const primary = await client.rpc("get_public_post_profiles", { p_ids: authorIds });
+  const profilesResult = primary.error ? await client.rpc("get_public_profiles", { p_ids: authorIds }) : primary;
+  if (profilesResult.error) throw profilesResult.error;
+  const profileById = new Map(((profilesResult.data ?? []) as PublicProfile[]).map((profile) => [profile.id, profile]));
+  return rows.map((comment) => ({ ...comment, profiles: profileById.get(comment.author_id) ?? null }));
 }
 
 export function postImageUrl(client: SupabaseClient, storagePath: string): string {

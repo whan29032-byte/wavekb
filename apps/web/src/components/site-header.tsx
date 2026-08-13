@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BookOpenText, ChatsCircle, GraduationCap } from "@phosphor-icons/react/dist/ssr";
 import { AccountNavigation } from "@/components/account-navigation";
+import { AppearanceSettings } from "@/components/appearance-settings";
 
 export function SiteHeader() {
   return (
@@ -20,6 +21,7 @@ export function SiteHeader() {
           <Link href="/mentors" className="hidden items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground sm:flex">
             <GraduationCap aria-hidden size={18} weight="duotone" />导师
           </Link>
+          <AppearanceSettings />
           <AccountNavigation />
         </nav>
       </div>

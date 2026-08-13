@@ -1,5 +1,5 @@
 import "server-only";
-import type { PrivateEntry, PrivateEntryImage, PrivateEntryKind } from "@wavekb/domain";
+import type { PrivateEntry, PrivateEntryImage, PrivateEntryKind, WorkbenchAnalysis } from "@wavekb/domain";
 import { createClient } from "@/lib/supabase/server";
 
 const ENTRY_SELECT = "id,owner_id,kind,title,body,instrument,market,timeframe,tags,knowledge_ids,workbench_analysis_id,review_data,created_at,updated_at,deleted_at";
@@ -45,4 +45,19 @@ export async function getPrivateEntry(id: string, ownerId: string): Promise<Priv
     return { ...image, signed_url: signed.data.signedUrl };
   }));
   return { ...(result.data as EntryRow), private_entry_images: images };
+}
+
+export async function listWorkbenchAnalyses(ownerId: string): Promise<WorkbenchAnalysis[]> {
+  const client = await createClient();
+  const result = await client.from("workbench_analyses").select("*").eq("owner_id", ownerId).order("updated_at", { ascending: false }).limit(20);
+  if (result.error) throw result.error;
+  return (result.data ?? []) as WorkbenchAnalysis[];
+}
+
+export async function getWorkbenchAnalysis(id: string, ownerId: string): Promise<WorkbenchAnalysis | null> {
+  if (!isUuid(id)) return null;
+  const client = await createClient();
+  const result = await client.from("workbench_analyses").select("*").eq("id", id).eq("owner_id", ownerId).maybeSingle();
+  if (result.error) throw result.error;
+  return result.data as WorkbenchAnalysis | null;
 }

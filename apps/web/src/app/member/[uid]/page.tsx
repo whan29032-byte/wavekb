@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { IdentificationCard } from "@phosphor-icons/react/dist/ssr";
 import { MemberProfileActions } from "@/components/member-profile-actions";
 import { PostCard } from "@/components/post-card";
-import { requireCurrentUser } from "@/lib/auth/dal";
+import { requireActiveMember } from "@/lib/auth/dal";
 import { listPostsByAuthor } from "@/lib/community/server-repository";
 import { getMemberProfileByUid, getMemberSocialState } from "@/lib/member/server-repository";
 
@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function MemberProfilePage({ params }: PageProps) {
   const { uid } = await params;
   if (!/^\d{5,6}$/.test(uid)) notFound();
-  const actor = await requireCurrentUser(`/member/${uid}`);
+  const actor = await requireActiveMember(`/member/${uid}`);
   const profile = await getMemberProfileByUid(Number(uid));
   if (!profile) notFound();
   const [posts, social] = await Promise.all([

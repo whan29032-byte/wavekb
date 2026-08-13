@@ -17,3 +17,13 @@ export async function requireCurrentUser(returnPath: string) {
   if (!user) redirect(`/login?next=${encodeURIComponent(returnPath)}`);
   return user;
 }
+
+export async function requireActiveMember(returnPath: string) {
+  const user = await requireCurrentUser(returnPath);
+  const supabase = await createClient();
+  const profile = await supabase.from("profiles").select("public_uid").eq("id", user.id).maybeSingle();
+  if (profile.error || profile.data?.public_uid == null) {
+    redirect(`/activate-uid?next=${encodeURIComponent(returnPath)}`);
+  }
+  return { ...user, publicUid: Number(profile.data.public_uid) };
+}

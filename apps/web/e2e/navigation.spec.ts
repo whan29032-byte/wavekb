@@ -18,6 +18,25 @@ test("member profiles preserve the destination through login", async ({ page }) 
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("登录 WaveKB");
 });
 
+test("account creation and recovery routes are available", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.getByRole("link", { name: "创建账号" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "忘记密码" })).toBeVisible();
+  await page.getByRole("link", { name: "创建账号" }).click();
+  await expect(page).toHaveURL(/\/register$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("加入 WaveKB");
+  await expect(page.getByLabel("昵称")).toBeVisible();
+  await page.goto("/recover");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("重置密码");
+  await expect(page.getByLabel("注册邮箱")).toBeVisible();
+});
+
+test("UID activation API rejects anonymous requests", async ({ request }) => {
+  const response = await request.get("/api/auth/uid-selection/status");
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "登录状态已失效，请重新登录。" });
+});
+
 test("friends and messages remain private", async ({ page }) => {
   await page.goto("/member/profile");
   await expect(page).toHaveURL(/\/login\?next=%2Fmember%2Fprofile/);
@@ -29,6 +48,10 @@ test("friends and messages remain private", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Fworkbench/);
   await page.goto("/workbench/entries/new");
   await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fentries%2Fnew/);
+  await page.goto("/workbench/analysis/new?step=0");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fanalysis%2Fnew%3Fstep%3D0/);
+  await page.goto("/workbench/ai");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fai/);
   await page.goto("/tutoring");
   await expect(page).toHaveURL(/\/login\?next=%2Ftutoring/);
   await page.goto("/mentor/manage");
@@ -45,10 +68,18 @@ test("friends and messages remain private", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fdirectory/);
   await page.goto("/admin/mentors");
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fmentors/);
+  await page.goto("/admin/ai");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fai/);
 });
 
 test("admin API rejects anonymous requests before contacting the gateway", async ({ request }) => {
   const response = await request.get("/api/admin/users");
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
+});
+
+test("AI API rejects anonymous requests before contacting the gateway", async ({ request }) => {
+  const response = await request.get("/api/ai/user/ai-connections");
   expect(response.status()).toBe(401);
   await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
 });

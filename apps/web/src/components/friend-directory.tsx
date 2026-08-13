@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChatCircleDots, Check, MagnifyingGlass, UserPlus, X } from "@phosphor-icons/react";
@@ -21,6 +21,31 @@ export function FriendDirectory({ actorId, initialConnections }: { actorId: stri
   const [searchResult, setSearchResult] = useState<MemberProfile | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
+  const [onlineIds, setOnlineIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    const client = createClient();
+    const channel = client.channel("wavekb-member-presence", { config: { presence: { key: actorId } } });
+    const sync = () => {
+      const state = channel.presenceState();
+      const ids = new Set<string>();
+      Object.entries(state).forEach(([key, entries]) => {
+        ids.add(String(key));
+        entries.forEach((entry) => {
+          const value = entry as { user_id?: string };
+          if (value.user_id) ids.add(String(value.user_id));
+        });
+      });
+      setOnlineIds(ids);
+    };
+    channel.on("presence", { event: "sync" }, sync).subscribe(async (status) => {
+      if (status === "SUBSCRIBED") await channel.track({ user_id: actorId, online_at: new Date().toISOString() });
+    });
+    return () => {
+      void channel.untrack();
+      void client.removeChannel(channel);
+    };
+  }, [actorId]);
 
   async function search() {
     if (!/^\d{5,6}$/.test(query.trim())) {
@@ -114,7 +139,7 @@ export function FriendDirectory({ actorId, initialConnections }: { actorId: stri
         <div className="flex items-end justify-between gap-4"><div><h2 id="friend-list-title" className="text-2xl font-semibold">好友与请求</h2><p className="mt-1 text-sm text-muted-foreground">只有已接受好友关系才能打开私聊。</p></div><Button asChild variant="secondary"><Link href="/messages">会话列表</Link></Button></div>
         {connections.length ? <div className="grid gap-3">{connections.map((item) => (
           <article key={item.friendship_id} className="flex flex-col gap-4 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0"><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"} className="font-semibold hover:text-primary hover:underline">{item.display_name || `UID ${item.public_uid || "未设置"}`}</Link><p className="truncate text-sm text-muted-foreground">{item.bio || (item.status === "accepted" ? "已成为好友" : item.direction === "incoming" ? "向你发送了好友请求" : "好友请求等待处理")}</p></div>
+            <div className="min-w-0"><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${onlineIds.has(item.other_id) ? "bg-emerald-500" : "bg-muted-foreground/35"}`} aria-label={onlineIds.has(item.other_id) ? "在线" : "离线"} /><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"} className="font-semibold hover:text-primary hover:underline">{item.display_name || `UID ${item.public_uid || "未设置"}`}</Link></div><p className="truncate text-sm text-muted-foreground">{item.bio || (item.status === "accepted" ? "已成为好友" : item.direction === "incoming" ? "向你发送了好友请求" : "好友请求等待处理")}</p></div>
             <div className="flex shrink-0 flex-wrap gap-2">
               {item.status === "accepted" ? <Button type="button" onClick={() => openConversation(item)} disabled={pending}><ChatCircleDots aria-hidden size={18} />私聊</Button> : item.status === "pending" && item.direction === "incoming" ? <><Button type="button" onClick={() => respond(item, true)} disabled={pending}><Check aria-hidden size={18} />接受</Button><Button type="button" variant="secondary" onClick={() => respond(item, false)} disabled={pending}><X aria-hidden size={18} />拒绝</Button></> : <Button type="button" variant="secondary" disabled>{item.status === "declined" ? "已拒绝" : "等待接受"}</Button>}
             </div>

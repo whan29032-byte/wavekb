@@ -2,13 +2,13 @@ import { notFound } from "next/navigation";
 import { BOARDS } from "@wavekb/domain";
 import { PostComposer } from "@/components/post-composer";
 import { getPost } from "@/lib/community/server-repository";
-import { requireCurrentUser } from "@/lib/auth/dal";
+import { requireActiveMember } from "@/lib/auth/dal";
 
 type PageProps = { params: Promise<{ id: string }> };
 
 export default async function EditPostPage({ params }: PageProps) {
   const { id } = await params;
-  const [user, post] = await Promise.all([requireCurrentUser(`/community/post/${id}/edit`), getPost(id)]);
+  const [user, post] = await Promise.all([requireActiveMember(`/community/post/${id}/edit`), getPost(id)]);
   if (!post || post.author_id !== user.id || post.status === "hidden") notFound();
 
   return (

@@ -18,7 +18,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-wavekb-mode="light"]) {
     --background: oklch(0.17 0.018 255);
     --surface: oklch(0.205 0.02 255);
     --foreground: oklch(0.94 0.008 80);
@@ -33,6 +33,29 @@
     --destructive-foreground: oklch(0.17 0.018 255);
   }
 }
+
+:root[data-wavekb-mode="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.17 0.018 255);
+  --surface: oklch(0.205 0.02 255);
+  --foreground: oklch(0.94 0.008 80);
+  --muted: oklch(0.255 0.022 255);
+  --muted-foreground: oklch(0.72 0.018 255);
+  --border: oklch(0.33 0.024 255);
+  --input: oklch(0.4 0.026 255);
+  --ring: oklch(0.68 0.105 225);
+  --primary: oklch(0.7 0.105 225);
+  --primary-foreground: oklch(0.17 0.018 255);
+  --destructive: oklch(0.65 0.17 25);
+  --destructive-foreground: oklch(0.17 0.018 255);
+}
+
+:root[data-wavekb-mode="light"] { color-scheme: light; }
+:root[data-wavekb-theme="sakura"] { --primary: oklch(0.5 0.14 350); --ring: oklch(0.57 0.12 350); }
+:root[data-wavekb-theme="aurora"] { --primary: oklch(0.48 0.1 185); --ring: oklch(0.58 0.09 185); }
+:root[data-wavekb-theme="star"] { --primary: oklch(0.5 0.13 295); --ring: oklch(0.6 0.11 295); }
+:root[data-wavekb-theme="ink"] { --primary: oklch(0.43 0.035 250); --ring: oklch(0.55 0.035 250); }
+:root[data-wavekb-theme="custom"] { --primary: var(--wavekb-user-accent, #557fb8); --ring: var(--wavekb-user-accent, #557fb8); --primary-foreground: var(--wavekb-user-on-accent, #f7fbff); }
 
 @theme inline {
   --color-background: var(--background);

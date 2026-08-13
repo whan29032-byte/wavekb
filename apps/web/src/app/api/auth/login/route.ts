@@ -46,7 +46,11 @@ export async function POST(request: NextRequest) {
 
   const payload = await upstream.json().catch(() => ({})) as {
     error?: string;
-    session?: { access_token?: string; refresh_token?: string };
+    session?: {
+      access_token?: string;
+      refresh_token?: string;
+      user?: { public_uid?: number | null };
+    };
   };
   if (!upstream.ok || !payload.session?.access_token || !payload.session.refresh_token) {
     const message = ERROR_MESSAGES[payload.error ?? ""] || ERROR_MESSAGES.service_unavailable;
@@ -59,5 +63,5 @@ export async function POST(request: NextRequest) {
     refresh_token: payload.session.refresh_token,
   });
   if (result.error) return json({ error: ERROR_MESSAGES.service_unavailable }, 503);
-  return json({ ok: true });
+  return json({ ok: true, needsUidActivation: payload.session.user?.public_uid == null });
 }

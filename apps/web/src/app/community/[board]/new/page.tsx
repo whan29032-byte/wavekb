@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { BOARDS, isBoardSlug } from "@wavekb/domain";
 import { PostComposer } from "@/components/post-composer";
 import { publicSupabaseConfig } from "@/lib/env";
-import { requireCurrentUser } from "@/lib/auth/dal";
+import { requireActiveMember } from "@/lib/auth/dal";
 import { getPrivateEntry } from "@/lib/workbench/server-repository";
 
 type PageProps = { params: Promise<{ board: string }>; searchParams: Promise<{ source?: string }> };
@@ -20,7 +20,7 @@ export default async function NewPostPage({ params, searchParams }: PageProps) {
   }
   const { source: sourceId } = await searchParams;
   const returnPath = `/community/${board}/new${sourceId ? `?source=${encodeURIComponent(sourceId)}` : ""}`;
-  const user = await requireCurrentUser(returnPath);
+  const user = await requireActiveMember(returnPath);
   const source = sourceId ? await getPrivateEntry(sourceId, user.id) : null;
   if (sourceId && !source) notFound();
 

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BoardSlug, CommunityPost, ExternalKind } from "@wavekb/domain";
+import type { TradingViewPackage } from "@/lib/workbench/tradingview";
 
 type CreatePostInput = {
   userId: string;
@@ -10,6 +11,7 @@ type CreatePostInput = {
   externalKind: ExternalKind;
   files: File[];
   privateEntryId?: string;
+  chartPackage?: TradingViewPackage | null;
 };
 
 type PublishingGateway = {
@@ -31,6 +33,7 @@ type UpdatePostInput = {
   externalKind: ExternalKind;
   keptImageIds: string[];
   files: File[];
+  chartPackage?: TradingViewPackage | null;
 };
 
 function unwrap(result: { error: unknown }) {
@@ -90,7 +93,7 @@ export async function createPost(
     body: input.body,
     external_url: input.externalUrl || null,
     external_kind: input.externalKind,
-    chart_package: null,
+    chart_package: input.chartPackage ?? null,
     author_id: input.userId,
     status: "draft",
   });
@@ -130,6 +133,7 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
   const kept = post.post_images.filter((image) => keptIds.has(image.id));
   const removed = post.post_images.filter((image) => !keptIds.has(image.id));
   const uploadedPaths: string[] = [];
+  let postUpdated = false;
 
   try {
     for (const file of input.files) {
@@ -156,8 +160,11 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
       p_external_kind: input.externalKind,
     });
     if (result.error) throw result.error;
+    postUpdated = true;
+    const chart = await client.from("posts").update({ chart_package: input.chartPackage ?? null }).eq("id", post.id).eq("author_id", input.userId);
+    if (chart.error) throw chart.error;
   } catch (error) {
-    if (uploadedPaths.length) await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
+    if (!postUpdated && uploadedPaths.length) await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
     throw error;
   }
 
@@ -180,4 +187,30 @@ export async function deletePost(client: SupabaseClient, post: CommunityPost, us
   }
   const row = await client.from("posts").delete().eq("id", post.id);
   if (row.error) throw row.error;
+}
+
+export async function addPostComment(client: SupabaseClient, input: {
+  postId: string;
+  userId: string;
+  body: string;
+  parentId?: string | null;
+}) {
+  const body = input.body.trim();
+  if (!body || body.length > 2000) throw new Error("评论需要 1 到 2000 个字符。");
+  const result = await client.from("post_comments").insert({
+    post_id: input.postId,
+    author_id: input.userId,
+    parent_id: input.parentId ?? null,
+    body,
+    status: "visible",
+  });
+  if (result.error) throw result.error;
+}
+
+export async function deletePostComment(client: SupabaseClient, commentId: string, userId: string) {
+  const result = await client.from("post_comments")
+    .update({ status: "deleted_by_author", body: "该评论已由作者删除。" })
+    .eq("id", commentId)
+    .eq("author_id", userId);
+  if (result.error) throw result.error;
 }

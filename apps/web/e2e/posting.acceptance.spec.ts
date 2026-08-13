@@ -32,8 +32,14 @@ test.describe("authenticated posting acceptance", () => {
       await expect(page.getByRole("img", { name: `${marker}，图片 1` })).toBeVisible();
       await expect(page.getByRole("link", { name: "查看引用的 YouTube 视频" })).toHaveAttribute("href", /youtube\.com/);
 
+      const commentMarker = `验收评论 ${Date.now()}`;
+      await page.getByLabel("发表评论").fill(`${commentMarker}，用于确认评论写入、详情刷新和级联清理。`);
+      await page.getByRole("button", { name: "发表评论" }).click();
+      await expect(page.getByText(commentMarker, { exact: false })).toBeVisible();
+
       await page.reload();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
+      await expect(page.getByText(commentMarker, { exact: false })).toBeVisible();
 
       const authorProfileLink = page.locator('article header a[href^="/member/"]');
       await expect(authorProfileLink).toHaveCount(1);
@@ -43,11 +49,19 @@ test.describe("authenticated posting acceptance", () => {
       await page.goBack();
 
       await page.getByRole("link", { name: "编辑帖子" }).click();
+      await page.getByRole("tab", { name: "专业分析" }).click();
+      await page.getByLabel("品种").fill("BINANCE:BTCUSDT");
+      await page.getByLabel("核心观点").fill("当前结构仍需等待同级别确认。 ");
+      await page.getByLabel("规则与指南依据").fill("硬规则先淘汰，比例关系只用于排序。 ");
+      await page.getByLabel("公开图表链接或品种代码").fill("BINANCE:BTCUSDT");
       await page.getByLabel("正文").fill("这篇验收帖子已经完成编辑，用于确认作者修改链路和详情页刷新。 ");
       await page.getByRole("button", { name: "移除现有图片 1" }).click();
       await page.getByLabel("外部引用（可选）").fill("https://x.com/wavekb/status/1");
       await page.getByRole("button", { name: "保存修改" }).click();
       await expect(page.getByText("这篇验收帖子已经完成编辑")).toBeVisible();
+      await expect(page.getByText("【核心观点】")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "TradingView 图表" })).toBeVisible();
+      await expect(page.getByTitle("BINANCE:BTCUSDT TradingView 图表")).toHaveAttribute("src", /tradingview\.com/);
       await expect(page.getByRole("region", { name: /帖子图片/ })).toHaveCount(0);
       await expect(page.getByRole("link", { name: "查看引用的 X 帖子" })).toHaveAttribute("href", "https://x.com/wavekb/status/1");
     } finally {

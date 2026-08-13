@@ -2,13 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { UsersThree } from "@phosphor-icons/react/dist/ssr";
 import { Button } from "@wavekb/ui";
-import { requireCurrentUser } from "@/lib/auth/dal";
+import { requireActiveMember } from "@/lib/auth/dal";
 import { listConversations } from "@/lib/member/server-repository";
 
 export const metadata: Metadata = { title: "私聊" };
 
 export default async function MessagesPage() {
-  await requireCurrentUser("/messages");
+  await requireActiveMember("/messages");
   const conversations = await listConversations();
   return (
     <main className="mx-auto grid max-w-4xl gap-8 px-4 py-10 md:px-6 md:py-14">

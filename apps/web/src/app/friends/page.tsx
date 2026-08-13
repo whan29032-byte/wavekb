@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import { FriendDirectory } from "@/components/friend-directory";
-import { requireCurrentUser } from "@/lib/auth/dal";
+import { requireActiveMember } from "@/lib/auth/dal";
 import { listFriendships } from "@/lib/member/server-repository";
 
 export const metadata: Metadata = { title: "好友" };
 
 export default async function FriendsPage() {
-  const actor = await requireCurrentUser("/friends");
+  const actor = await requireActiveMember("/friends");
   const connections = await listFriendships();
   return (
     <main className="mx-auto grid max-w-5xl gap-8 px-4 py-10 md:px-6 md:py-14">
