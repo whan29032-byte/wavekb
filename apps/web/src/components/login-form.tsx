@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -27,8 +26,8 @@ export function LoginForm() {
       return;
     }
     const next = searchParams.get("next");
-    router.replace(next?.startsWith("/") && !next.startsWith("//") ? next : "/community/idea_sharing");
-    router.refresh();
+    const destination = next?.startsWith("/") && !next.startsWith("//") ? next : "/community/idea_sharing";
+    window.location.replace(destination);
   }
 
   return (
