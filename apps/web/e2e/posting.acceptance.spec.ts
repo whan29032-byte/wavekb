@@ -12,6 +12,7 @@ test.describe("authenticated posting acceptance", () => {
     await page.getByLabel("密码").fill(password || "");
     await page.getByRole("button", { name: "登录" }).click();
     await expect(page).toHaveURL(/\/community\/idea_sharing\/new/);
+    await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
 
     const marker = `验收发帖 ${Date.now()}`;
     let published = false;
@@ -50,6 +51,9 @@ test.describe("authenticated posting acceptance", () => {
         await page.getByRole("button", { name: "删除帖子" }).click();
         await expect(page).toHaveURL(/\/community\/idea_sharing$/);
       }
+      await page.getByRole("button", { name: "退出登录" }).click();
+      await expect(page).toHaveURL("/");
+      await expect(page.getByRole("link", { name: "登录" })).toBeVisible();
     }
   });
 });

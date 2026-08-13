@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { BookOpenText, ChatsCircle, UserCircle } from "@phosphor-icons/react/dist/ssr";
+import { BookOpenText, ChatsCircle } from "@phosphor-icons/react/dist/ssr";
+import { AccountNavigation } from "@/components/account-navigation";
 
 export function SiteHeader() {
   return (
@@ -16,9 +17,7 @@ export function SiteHeader() {
           <Link href="/community/idea_sharing" className="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
             <ChatsCircle aria-hidden size={18} weight="duotone" />社区
           </Link>
-          <Link href="/login" className="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
-            <UserCircle aria-hidden size={18} weight="duotone" />登录
-          </Link>
+          <AccountNavigation />
         </nav>
       </div>
     </header>
