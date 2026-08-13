@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export type AdminActor = { id: string; displayName: string };
 
-const getAdminActor = cache(async (): Promise<AdminActor | null> => {
+export const getAdminActor = cache(async (): Promise<AdminActor | null> => {
   const user = await getCurrentUser();
   if (!user) return null;
   const client = await createClient();

@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ListMagnifyingGlass, ShieldCheck, Users } from "@phosphor-icons/react/dist/ssr";
+import { Coins, ListMagnifyingGlass, ShieldCheck, Users } from "@phosphor-icons/react/dist/ssr";
 
 const items = [
   { href: "/admin/users", label: "用户管理", copy: "账户、权限与 UID", icon: Users },
+  { href: "/admin/rewards", label: "积分商城", copy: "商品、钱包与兑换", icon: Coins },
   { href: "/admin/audit", label: "操作日志", copy: "治理审计记录", icon: ListMagnifyingGlass },
 ] as const;
 

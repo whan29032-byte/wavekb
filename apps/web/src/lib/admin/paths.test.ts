@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedAdminPath } from "./paths";
+import { adminMutationBodyLimit, isAllowedAdminBodyLength, isAllowedAdminPath } from "./paths";
 
 describe("admin proxy path allowlist", () => {
   it("allows only the explicit read endpoints", () => {
@@ -16,5 +16,12 @@ describe("admin proxy path allowlist", () => {
     expect(isAllowedAdminPath(`users/${userId}/uid`, "POST")).toBe(true);
     expect(isAllowedAdminPath(`users/${userId}/delete`, "POST")).toBe(false);
     expect(isAllowedAdminPath("users/not-a-uuid/status", "POST")).toBe(false);
+  });
+
+  it("caps mutation payloads before proxying them", () => {
+    expect(isAllowedAdminBodyLength(0)).toBe(true);
+    expect(isAllowedAdminBodyLength(adminMutationBodyLimit)).toBe(true);
+    expect(isAllowedAdminBodyLength(adminMutationBodyLimit + 1)).toBe(false);
+    expect(isAllowedAdminBodyLength(Number.NaN)).toBe(false);
   });
 });

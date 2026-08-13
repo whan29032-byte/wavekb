@@ -55,6 +55,7 @@ supabase                数据库迁移和 Edge Functions
 /mentor/manage                 导师方案、收款核对与学员管理
 /rewards                       积分钱包、签到、商城、排行与账本
 /admin/users                   用户状态、权限、禁言与公开 UID
+/admin/rewards                 商品、钱包、铭牌与兑换管理
 /admin/audit                   不可删除的后台治理审计记录
 ```
 
@@ -71,6 +72,8 @@ supabase                数据库迁移和 Edge Functions
 积分中心通过 `get_my_reward_center` 读取当前钱包、任务账本、商品和有效铭牌，并通过登录后可见的 `list_reward_leaderboard` 读取排行。签到、兑换和佩戴分别交给 `reward_daily_checkin`、`redeem_reward_product` 与 `equip_my_nameplate`；余额扣减、库存锁定、重复任务防护和限时所有权都在数据库事务与 RLS 内完成，浏览器只显示服务器结果。
 
 后台布局先通过 Supabase 服务端会话确认当前资料是有效管理员，再显示治理页面。用户邮箱、账号状态和审计记录仍由现有 `ai-gateway` 使用 service-role RPC 返回；Next 只携带当前管理员 JWT 访问内网网关，并通过显式白名单代理用户概览、筛选、封禁、禁言、角色、UID 和审计接口。Next 应用及浏览器都不保存 service-role key，所有变更要求操作原因、二次确认并由数据库落审计记录。
+
+后台积分模块通过现有 `admin_*` RPC 读取和修改商品、钱包、兑换与铭牌授权。商品只能新建、编辑或下架，不提供物理删除；积分扣减不能产生负余额；退款使用兑换 ID 作为唯一引用幂等返还；铭牌发放按用户和商品续期，撤销后由数据库重新同步有效样式。浏览器仍只持有公开 key 和当前管理员 JWT。
 
 ## UI 约束
 
