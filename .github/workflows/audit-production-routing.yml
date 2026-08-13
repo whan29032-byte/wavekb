@@ -1,0 +1,62 @@
+name: Audit production routing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Read the active WaveKB routing shape
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          found=0
+          while IFS= read -r config_file; do
+            if sudo grep -Eq 'server_name[^;]*wavekb\.com' "$config_file"; then
+              found=$((found + 1))
+              echo "WaveKB config: ${config_file}"
+              sudo awk '
+                /^[[:space:]]*(listen|server_name|root|index|location|proxy_pass|include)[[:space:]]/ {
+                  line=$0
+                  sub(/^[[:space:]]+/, "", line)
+                  print "  " line
+                }
+              ' "$config_file"
+            fi
+          done < <(sudo find /etc/nginx/conf.d /etc/nginx/sites-enabled -maxdepth 2 -type f -print 2>/dev/null | sort -u)
+          test "$found" -eq 1
+          echo "WaveKB matching configs: ${found}"
+          echo "Nginx: $(systemctl is-active nginx)"
+          echo "Auth gateway: $(systemctl is-active elliott-wave-gateway.service)"
+          echo "Next preview: $(systemctl is-active wavekb-next-preview.service)"
+          curl --fail --silent --show-error http://127.0.0.1:3100/api/health
+          REMOTE
