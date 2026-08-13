@@ -8,6 +8,11 @@ test.describe("authenticated posting acceptance", () => {
 
   test("complete posting lifecycle with an image and external reference", async ({ page }) => {
     test.setTimeout(150_000);
+    page.on("console", (message) => {
+      if (message.type() === "error" && message.text().includes("wavekb:post-save-failed")) {
+        console.log("Browser post-save diagnostic", message.text());
+      }
+    });
     await page.goto("/login?next=/community/idea_sharing/new");
     await page.getByLabel("邮箱或 UID").fill(identifier || "");
     await page.getByLabel("密码").fill(password || "");

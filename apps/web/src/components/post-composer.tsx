@@ -28,6 +28,17 @@ function friendlyError(error: unknown): string {
   return "发布没有完成。草稿仍在本机，请稍后重试。";
 }
 
+function safeErrorDiagnostic(error: unknown) {
+  const candidate = error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown; status?: unknown };
+  return {
+    code: String(candidate?.code ?? ""),
+    message: String(candidate?.message ?? error ?? "").slice(0, 500),
+    details: String(candidate?.details ?? "").slice(0, 500),
+    hint: String(candidate?.hint ?? "").slice(0, 500),
+    status: String(candidate?.status ?? ""),
+  };
+}
+
 export function PostComposer({ board, userId, post, source }: { board: BoardSlug; userId: string; post?: CommunityPost; source?: PrivateEntry }) {
   const draftKey = `wavekb:next:composer:${userId}:${board}:${post?.id || "new"}`;
   const restoredPost = post ? parseStructuredPost(post.body) : null;
@@ -184,6 +195,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
       localStorage.removeItem(draftKey);
       window.location.assign(new URL(`/community/post/${postId}`, window.location.origin));
     } catch (error) {
+      console.error("wavekb:post-save-failed", JSON.stringify(safeErrorDiagnostic(error)));
       setErrors({ form: friendlyError(error) });
       setPending(false);
     }

@@ -157,19 +157,25 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
       if (upload.error) throw upload.error;
     });
 
-    const result = await client.rpc("update_my_post_v3", {
-      p_post_id: post.id,
-      p_title: input.title,
-      p_body: input.body,
-      p_images: [
-        ...kept.map((image) => ({ storage_path: image.storage_path })),
-        ...uploadedPaths.map((storagePath) => ({ storage_path: storagePath })),
-      ],
-      p_external_url: input.externalUrl || null,
-      p_external_kind: input.externalKind,
-      p_chart_package: input.chartPackage ?? null,
-    });
-    if (result.error) throw result.error;
+    let updateError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await client.rpc("update_my_post_v3", {
+        p_post_id: post.id,
+        p_title: input.title,
+        p_body: input.body,
+        p_images: [
+          ...kept.map((image) => ({ storage_path: image.storage_path })),
+          ...uploadedPaths.map((storagePath) => ({ storage_path: storagePath })),
+        ],
+        p_external_url: input.externalUrl || null,
+        p_external_kind: input.externalKind,
+        p_chart_package: input.chartPackage ?? null,
+      });
+      updateError = result.error;
+      if (!updateError) break;
+      if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
+    }
+    if (updateError) throw updateError;
   } catch (error) {
     if (uploadedPaths.length) await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
     throw error;
