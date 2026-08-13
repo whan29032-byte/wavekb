@@ -10,6 +10,13 @@ on:
 permissions:
   contents: read
 
+env:
+  NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
+  NEXT_PUBLIC_LEGACY_SITE_URL: https://wavekb.com
+  AUTH_GATEWAY_INTERNAL_URL: http://127.0.0.1:8787
+  AUTH_GATEWAY_PUBLIC_ORIGIN: https://wavekb.com
+
 concurrency:
   group: wavekb-static-production
   cancel-in-progress: false

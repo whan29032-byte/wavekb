@@ -41,7 +41,7 @@ test.describe("authenticated posting acceptance", () => {
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByText(commentMarker, { exact: false })).toBeVisible();
 
-      const authorProfileLink = page.locator('article header a[href^="/member/"]');
+      const authorProfileLink = page.locator("main > article").locator('header a[href^="/member/"]');
       await expect(authorProfileLink).toHaveCount(1);
       await authorProfileLink.click();
       await expect(page).toHaveURL(/\/member\/\d{5,6}$/);
@@ -72,6 +72,8 @@ test.describe("authenticated posting acceptance", () => {
         await page.getByRole("button", { name: "删除帖子" }).click();
         await expect(page).toHaveURL(/\/community\/idea_sharing$/);
       }
+      const accountMenu = page.getByRole("button", { name: "账户菜单" });
+      if (await accountMenu.isVisible().catch(() => false)) await accountMenu.click();
       await page.getByRole("button", { name: "退出登录" }).click();
       await expect(page).toHaveURL("/");
       await expect(page.getByRole("link", { name: "登录" })).toBeVisible();
