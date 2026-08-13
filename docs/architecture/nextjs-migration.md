@@ -54,6 +54,8 @@ supabase                数据库迁移和 Edge Functions
 /tutoring/[id]                 双方消息与服务端周额度
 /mentor/manage                 导师方案、收款核对与学员管理
 /rewards                       积分钱包、签到、商城、排行与账本
+/admin/users                   用户状态、权限、禁言与公开 UID
+/admin/audit                   不可删除的后台治理审计记录
 ```
 
 现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
@@ -67,6 +69,8 @@ supabase                数据库迁移和 Edge Functions
 导师目录继续读取现有导师、方案、订单、权益、会话和消息表。付款按 `create_manual_mentor_order` 创建价格快照，再由 `submit_mentor_payment_claim` 提交声明；只有导师本人通过 `review_mentor_payment_claim` 确认实际到账后，数据库才创建权益和专属会话。学员问题由 `send_mentor_message` 在服务端核验参与者、有效期和自然周额度，导师回复不消耗学员额度。导师管理 RPC 只返回当前导师本人名下的付款声明和学员，不因管理员身份扩大读取范围。
 
 积分中心通过 `get_my_reward_center` 读取当前钱包、任务账本、商品和有效铭牌，并通过登录后可见的 `list_reward_leaderboard` 读取排行。签到、兑换和佩戴分别交给 `reward_daily_checkin`、`redeem_reward_product` 与 `equip_my_nameplate`；余额扣减、库存锁定、重复任务防护和限时所有权都在数据库事务与 RLS 内完成，浏览器只显示服务器结果。
+
+后台布局先通过 Supabase 服务端会话确认当前资料是有效管理员，再显示治理页面。用户邮箱、账号状态和审计记录仍由现有 `ai-gateway` 使用 service-role RPC 返回；Next 只携带当前管理员 JWT 访问内网网关，并通过显式白名单代理用户概览、筛选、封禁、禁言、角色、UID 和审计接口。Next 应用及浏览器都不保存 service-role key，所有变更要求操作原因、二次确认并由数据库落审计记录。
 
 ## UI 约束
 

@@ -37,6 +37,14 @@ test("friends and messages remain private", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Ftutoring%2Fnot-a-thread/);
   await page.goto("/rewards");
   await expect(page).toHaveURL(/\/login\?next=%2Frewards/);
+  await page.goto("/admin/users");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fusers/);
+});
+
+test("admin API rejects anonymous requests before contacting the gateway", async ({ request }) => {
+  const response = await request.get("/api/admin/users");
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
 });
 
 test("mentor catalog is public and degrades safely without preview credentials", async ({ page }) => {
