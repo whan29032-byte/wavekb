@@ -1,0 +1,309 @@
+name: Cut over Next.js production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type CUTOVER_WAVEKB_NEXT to replace the static production route
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-production-routing
+  cancel-in-progress: false
+
+env:
+  NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
+  NEXT_PUBLIC_LEGACY_SITE_URL: https://wavekb.com
+  AUTH_GATEWAY_INTERNAL_URL: http://127.0.0.1:8787
+  AUTH_GATEWAY_PUBLIC_ORIGIN: https://wavekb.com
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    outputs:
+      routing_release: ${{ steps.routing.outputs.routing_release }}
+    steps:
+      - name: Require explicit confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: test "$CONFIRMATION" = CUTOVER_WAVEKB_NEXT
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Activate the Next.js route atomically
+        id: routing
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROUTING_RELEASE: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$ROUTING_RELEASE" =~ ^[0-9]+-[0-9]+$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "ROUTING_RELEASE='${ROUTING_RELEASE}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          active_link=/etc/nginx/sites-enabled/elliott-wave
+          active_config=$(readlink -f "$active_link")
+          test -f "$active_config"
+          test "$(sudo grep -Ec 'server_name[^;]*wavekb\.com' "$active_config")" -eq 2
+          backup_root=/var/backups/elliott-wave/nginx-next-cutover
+          backup_file="${backup_root}/${ROUTING_RELEASE}.conf"
+          marker="$HOME/wavekb-nginx-rollback-${ROUTING_RELEASE}"
+          sudo install -d -m 0750 "$backup_root"
+          sudo cp --preserve=mode,ownership,timestamps "$active_config" "$backup_file"
+          printf '%s\n%s\n' "$active_config" "$backup_file" > "$marker"
+
+          rollback() {
+            status=$?
+            trap - ERR
+            sudo cp --preserve=mode,ownership,timestamps "$backup_file" "$active_config"
+            sudo nginx -t
+            sudo systemctl reload nginx
+            rm -f -- "$marker"
+            exit "$status"
+          }
+          trap rollback ERR
+
+          curl --fail --silent --show-error http://127.0.0.1:3100/api/health | grep -F '"ok":true' > /dev/null
+          candidate=$(mktemp)
+          trap 'rm -f -- "$candidate"' EXIT
+          cat > "$candidate" <<'NGINX'
+          server {
+              listen [::]:443 ssl ipv6only=on;
+              listen 443 ssl;
+              server_name wavekb.com www.wavekb.com;
+
+              if ($host = www.wavekb.com) {
+                  return 301 https://wavekb.com$request_uri;
+              }
+
+              ssl_certificate /etc/letsencrypt/live/wavekb.com/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/wavekb.com/privkey.pem;
+              include /etc/letsencrypt/options-ssl-nginx.conf;
+              ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+              charset utf-8;
+              server_tokens off;
+              client_max_body_size 20m;
+
+              gzip on;
+              gzip_vary on;
+              gzip_min_length 1024;
+              gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+              add_header X-Content-Type-Options "nosniff" always;
+              add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+              add_header X-Frame-Options "SAMEORIGIN" always;
+              add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+              location /v1/ {
+                  client_max_body_size 12m;
+                  proxy_pass http://127.0.0.1:8787;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $remote_addr;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_connect_timeout 5s;
+                  proxy_read_timeout 120s;
+                  proxy_send_timeout 120s;
+                  proxy_buffering off;
+                  add_header Cache-Control "no-store" always;
+              }
+
+              location / {
+                  proxy_pass http://127.0.0.1:3100;
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $remote_addr;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection $connection_upgrade;
+                  proxy_connect_timeout 5s;
+                  proxy_read_timeout 120s;
+                  proxy_send_timeout 120s;
+                  proxy_buffering off;
+              }
+          }
+
+          map $http_upgrade $connection_upgrade {
+              default upgrade;
+              '' close;
+          }
+
+          server {
+              if ($host = www.wavekb.com) {
+                  return 301 https://wavekb.com$request_uri;
+              }
+
+              if ($host = wavekb.com) {
+                  return 301 https://wavekb.com$request_uri;
+              }
+
+              listen 80 default_server;
+              listen [::]:80 default_server;
+              server_name wavekb.com www.wavekb.com;
+              return 404;
+          }
+          NGINX
+          sudo install -m 0644 "$candidate" "$active_config"
+          sudo nginx -t
+          sudo systemctl reload nginx
+          curl --fail --silent --show-error --retry 8 --retry-delay 2 \
+            --resolve wavekb.com:443:127.0.0.1 https://wavekb.com/api/health | grep -F '"ok":true' > /dev/null
+          trap - ERR
+          REMOTE
+          echo "routing_release=${ROUTING_RELEASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify public Next.js routes
+        run: |
+          set -Eeuo pipefail
+          for path in / /api/health /knowledge /community/idea_sharing /login; do
+            curl --fail --silent --show-error --retry 8 --retry-delay 3 \
+              "https://wavekb.com${path}" > /dev/null
+          done
+          curl --fail --silent --show-error https://wavekb.com/api/health | grep -F '"service":"wavekb-next"' > /dev/null
+
+      - name: Roll back production routing
+        if: failure() && steps.routing.outputs.routing_release != ''
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROUTING_RELEASE: ${{ steps.routing.outputs.routing_release }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "ROUTING_RELEASE='${ROUTING_RELEASE}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          marker="$HOME/wavekb-nginx-rollback-${ROUTING_RELEASE}"
+          test -f "$marker"
+          readarray -t routing < "$marker"
+          active_config=${routing[0]}
+          backup_file=${routing[1]}
+          test -f "$backup_file"
+          sudo cp --preserve=mode,ownership,timestamps "$backup_file" "$active_config"
+          sudo nginx -t
+          sudo systemctl reload nginx
+          rm -f -- "$marker"
+          REMOTE
+
+      - name: Report routing state after failure
+        if: failure()
+        run: |
+          curl --silent --show-error https://wavekb.com/api/health || true
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 https://wavekb.com/ > /dev/null
+
+  production-acceptance:
+    needs: cutover
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: next-preview
+    steps:
+      - name: Check out the routed main release
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Install acceptance dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @wavekb/web exec playwright install --with-deps chromium
+
+      - name: Run real production posting lifecycle
+        env:
+          E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
+          E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
+          PLAYWRIGHT_BASE_URL: https://wavekb.com
+        run: |
+          test -n "$E2E_POSTING_IDENTIFIER"
+          test -n "$E2E_POSTING_PASSWORD"
+          pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts
+
+  finalize:
+    if: always() && needs.cutover.result == 'success'
+    needs: [cutover, production-acceptance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Finalize or roll back the production route
+        env:
+          ACCEPTANCE_RESULT: ${{ needs.production-acceptance.result }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ROUTING_RELEASE: ${{ needs.cutover.outputs.routing_release }}
+        run: |
+          set -Eeuo pipefail
+          if [ "$ACCEPTANCE_RESULT" = success ]; then
+            ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "rm -f -- \"\$HOME/wavekb-nginx-rollback-${ROUTING_RELEASE}\""
+            curl --fail --silent --show-error https://wavekb.com/api/health | grep -F '"service":"wavekb-next"' > /dev/null
+            exit 0
+          fi
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "ROUTING_RELEASE='${ROUTING_RELEASE}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          marker="$HOME/wavekb-nginx-rollback-${ROUTING_RELEASE}"
+          readarray -t routing < "$marker"
+          active_config=${routing[0]}
+          backup_file=${routing[1]}
+          sudo cp --preserve=mode,ownership,timestamps "$backup_file" "$active_config"
+          sudo nginx -t
+          sudo systemctl reload nginx
+          rm -f -- "$marker"
+          REMOTE
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 https://wavekb.com/ > /dev/null
+          false

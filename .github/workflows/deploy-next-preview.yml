@@ -2,7 +2,7 @@ name: Deploy Next.js preview
 
 on:
   push:
-    branches: [main, agent/nextjs-full-migration]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -106,7 +106,10 @@ jobs:
           release_dir="${releases_root}/${RELEASE_ID}"
           current_link="${application_root}/current"
           upload_archive="$HOME/wavekb-next-preview-${RELEASE_ID}.tar.gz"
+          rollback_marker="$HOME/wavekb-next-preview-rollback-${RELEASE_ID}"
           previous_release=$(readlink -f "$current_link" 2>/dev/null || true)
+
+          printf '%s\n' "$previous_release" > "$rollback_marker"
 
           sudo install -d -m 0755 "$releases_root"
           sudo rm -rf -- "$release_dir"
@@ -240,6 +243,42 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:3110/api/health > /dev/null
           pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts
+
+      - name: Finalize the accepted preview release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "rm -f -- \"\$HOME/wavekb-next-preview-rollback-${RELEASE_ID}\""
+
+      - name: Roll back a release that failed acceptance
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          test -f "$HOME/.ssh/deploy_key" || exit 0
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          marker="$HOME/wavekb-next-preview-rollback-${RELEASE_ID}"
+          test -f "$marker" || exit 0
+          previous_release=$(cat "$marker")
+          current_link=/srv/wavekb-next-preview/current
+          if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
+            sudo ln -sfn "$previous_release" "${current_link}.rollback"
+            sudo mv -Tf "${current_link}.rollback" "$current_link"
+            sudo systemctl restart wavekb-next-preview.service
+            curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+              --retry-connrefused http://127.0.0.1:3100/api/health > /dev/null
+          fi
+          rm -f -- "$marker"
+          REMOTE
 
       - name: Print preview service diagnostics
         if: failure()
