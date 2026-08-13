@@ -11,9 +11,23 @@ test.describe("authenticated posting acceptance", () => {
     await page.goto("/login?next=/community/idea_sharing/new");
     await page.getByLabel("邮箱或 UID").fill(identifier || "");
     await page.getByLabel("密码").fill(password || "");
+    const loginResponsePromise = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/auth/login");
     await page.getByRole("button", { name: "登录" }).click();
+    const loginResponse = await loginResponsePromise;
+    const loginResult = await loginResponse.json().catch(() => ({})) as { error?: string; ok?: boolean };
+    expect(loginResponse.ok(), `Login failed (${loginResponse.status()}): ${loginResult.error || "unknown response"}`).toBe(true);
     await expect(page).toHaveURL(/\/community\/idea_sharing\/new/, { timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "发布到「观点分享」" })).toBeVisible({ timeout: 15_000 });
+    const composerHeading = page.getByRole("heading", { name: "发布到「观点分享」" });
+    try {
+      await expect(composerHeading).toBeVisible({ timeout: 15_000 });
+    } catch (error) {
+      console.log("Authenticated destination diagnostic", JSON.stringify({
+        url: page.url(),
+        title: await page.title().catch(() => ""),
+        body: (await page.locator("body").innerText().catch(() => "")).slice(0, 1_000),
+      }));
+      throw error;
+    }
     const accountMenu = page.locator('summary[aria-label="账户菜单"]');
     const signOutButton = page.getByRole("button", { name: "退出登录" });
     await expect.poll(async () => await signOutButton.isVisible() || await accountMenu.isVisible(), { timeout: 15_000 }).toBe(true);

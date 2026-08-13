@@ -233,6 +233,16 @@ jobs:
           curl --fail --silent http://127.0.0.1:3110/api/health > /dev/null
           pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts
 
+      - name: Print preview service diagnostics
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo systemctl --no-pager --full status wavekb-next-preview.service; sudo journalctl --no-pager -u wavekb-next-preview.service -n 120" || true
+
       - name: Remove failed upload
         if: failure()
         env:
