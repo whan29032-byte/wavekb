@@ -2,7 +2,7 @@ name: Deploy Next.js preview
 
 on:
   push:
-    branches: [agent/nextjs-full-migration]
+    branches: [main, agent/nextjs-full-migration]
   workflow_dispatch:
 
 permissions:
