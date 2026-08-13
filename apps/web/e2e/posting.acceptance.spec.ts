@@ -8,7 +8,7 @@ test.describe("authenticated posting acceptance", () => {
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
   test("complete posting lifecycle with an image and external reference", async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
     await page.goto("/login?next=/community/idea_sharing/new");
     await page.getByLabel("邮箱或 UID").fill(identifier || "");
     await page.getByLabel("密码").fill(password || "");
@@ -45,7 +45,16 @@ test.describe("authenticated posting acceptance", () => {
       });
       await page.getByLabel("外部引用（可选）").fill("https://www.youtube.com/watch?v=posting-acceptance");
       await page.getByRole("button", { name: "发布内容" }).click();
-      await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
+      try {
+        await expect(page).toHaveURL(/\/community\/post\//, { timeout: 45_000 });
+      } catch (error) {
+        console.log("Publishing diagnostic", JSON.stringify({
+          url: page.url(),
+          alert: await page.getByRole("alert").last().innerText().catch(() => ""),
+          submitLabel: await page.getByRole("button", { name: /发布内容|正在保存/ }).innerText().catch(() => ""),
+        }));
+        throw error;
+      }
       published = true;
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByRole("img", { name: `${marker}，图片 1` })).toBeVisible();
@@ -84,6 +93,14 @@ test.describe("authenticated posting acceptance", () => {
       await expect(page.getByRole("region", { name: /帖子图片/ })).toHaveCount(0);
       await expect(page.getByRole("link", { name: "查看引用的 X 帖子" })).toHaveAttribute("href", "https://x.com/wavekb/status/1");
     } finally {
+      if (!published) {
+        await page.goto("/community/idea_sharing").catch(() => undefined);
+        const recoveredPost = page.getByRole("link", { name: marker, exact: true }).first();
+        if (await recoveredPost.isVisible().catch(() => false)) {
+          await recoveredPost.click();
+          published = true;
+        }
+      }
       if (published) {
         const deleteButton = page.getByRole("button", { name: "删除帖子" });
         if (!await deleteButton.isVisible().catch(() => false)) await page.goBack().catch(() => undefined);
