@@ -19,6 +19,8 @@ test("member profiles preserve the destination through login", async ({ page }) 
 });
 
 test("friends and messages remain private", async ({ page }) => {
+  await page.goto("/member/profile");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmember%2Fprofile/);
   await page.goto("/friends");
   await expect(page).toHaveURL(/\/login\?next=%2Ffriends/);
   await page.goto("/messages");

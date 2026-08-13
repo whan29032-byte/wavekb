@@ -1,10 +1,21 @@
 import "server-only";
-import type { DirectConversation, DirectMessage, FriendshipConnection, MemberProfile } from "@wavekb/domain";
+import type { DirectConversation, DirectMessage, EditableMemberProfile, FriendshipConnection, MemberProfile } from "@wavekb/domain";
 import { createClient } from "@/lib/supabase/server";
 
 export type MemberSocialState = {
   following: boolean;
   connection: FriendshipConnection | null;
+};
+
+export type NameplateEntitlement = {
+  id: string;
+  product_id: string;
+  product_name: string;
+  style: MemberProfile["nameplate_style"];
+  starts_at: string;
+  expires_at: string;
+  equipped: boolean;
+  source: "redeemed" | "admin_grant";
 };
 
 export async function getMemberProfileByUid(uid: number): Promise<MemberProfile | null> {
@@ -13,6 +24,21 @@ export async function getMemberProfileByUid(uid: number): Promise<MemberProfile 
   if (result.error) throw result.error;
   const value = Array.isArray(result.data) ? result.data[0] : result.data;
   return (value as MemberProfile | null) ?? null;
+}
+
+export async function getMyProfile(userId: string): Promise<EditableMemberProfile | null> {
+  const client = await createClient();
+  const result = await client.from("profiles").select("id,public_uid,display_name,avatar_url,bio,markets,timeframes,role,display_title,nameplate_style,cover_url,cover_style,created_at").eq("id", userId).maybeSingle();
+  if (result.error) throw result.error;
+  return (result.data as EditableMemberProfile | null) ?? null;
+}
+
+export async function getMyNameplates(): Promise<NameplateEntitlement[]> {
+  const client = await createClient();
+  const result = await client.rpc("get_my_reward_center");
+  if (result.error) throw result.error;
+  const center = result.data as { nameplates?: NameplateEntitlement[] } | null;
+  return Array.isArray(center?.nameplates) ? center.nameplates : [];
 }
 
 export async function getMemberSocialState(actorId: string, targetId: string): Promise<MemberSocialState> {

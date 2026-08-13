@@ -36,10 +36,39 @@ export type PublicProfile = {
 
 export type MemberProfile = PublicProfile & {
   bio: string;
+  markets?: string[];
+  timeframes?: string[];
   display_title: string;
-  nameplate_style: "classic" | "blackgold" | "platinum" | "purplegold" | "rainbow";
+  nameplate_style: "classic" | "blackgold" | "platinum" | "purplegold" | "rainbow" | "newyear";
   cover_url: string | null;
   cover_style: "chart-dark" | "wave-blue" | "paper" | "midnight";
+  created_at?: string;
+};
+
+export type EditableMemberProfile = MemberProfile & {
+  markets: string[];
+  timeframes: string[];
+  created_at: string;
+};
+
+export type MemberProfileInput = {
+  displayName: string;
+  bio: string;
+  markets: string[];
+  timeframes: string[];
+  coverStyle: string;
+};
+
+export type MemberProfileValidation = {
+  ok: boolean;
+  fields: Partial<Record<"displayName" | "bio" | "markets" | "timeframes" | "coverStyle", string>>;
+  value: {
+    displayName: string;
+    bio: string;
+    markets: string[];
+    timeframes: string[];
+    coverStyle: EditableMemberProfile["cover_style"];
+  };
 };
 
 export type FriendshipConnection = {
@@ -125,6 +154,8 @@ export type PostValidation = {
 export const MAX_IMAGES = 9;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+export const PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const COVER_STYLES = new Set<EditableMemberProfile["cover_style"]>(["chart-dark", "wave-blue", "paper", "midnight"]);
 
 export function isBoardSlug(value: string): value is BoardSlug {
   return Object.prototype.hasOwnProperty.call(BOARDS, value);
@@ -196,6 +227,33 @@ export function validateImages(files: Iterable<Pick<File, "type" | "size">>): st
   if (items.length > MAX_IMAGES) return "每篇帖子最多上传 9 张图片。";
   if (items.some((file) => !IMAGE_TYPES.has(file.type))) return "图片只支持 JPG、PNG 或 WebP。";
   if (items.some((file) => file.size > MAX_IMAGE_BYTES)) return "单张图片不能超过 10 MiB。";
+  return null;
+}
+
+export function splitProfileTags(value: string): string[] {
+  return [...new Set(String(value ?? "").split(/[、,，]/).map((item) => item.trim()).filter(Boolean))];
+}
+
+export function validateMemberProfile(input: MemberProfileInput): MemberProfileValidation {
+  const fields: MemberProfileValidation["fields"] = {};
+  const displayName = String(input.displayName ?? "").trim();
+  const bio = String(input.bio ?? "").trim();
+  const markets = [...new Set(input.markets.map((item) => String(item).trim()).filter(Boolean))];
+  const timeframes = [...new Set(input.timeframes.map((item) => String(item).trim()).filter(Boolean))];
+  const coverStyle = COVER_STYLES.has(input.coverStyle as EditableMemberProfile["cover_style"])
+    ? input.coverStyle as EditableMemberProfile["cover_style"]
+    : "chart-dark";
+  if (displayName.length < 2 || displayName.length > 32) fields.displayName = "昵称需要 2-32 个字符。";
+  if (bio.length > 200) fields.bio = "个性签名不能超过 200 个字符。";
+  if (markets.length > 8) fields.markets = "最多填写 8 个关注市场。";
+  if (timeframes.length > 8) fields.timeframes = "最多填写 8 个常用周期。";
+  if (!COVER_STYLES.has(input.coverStyle as EditableMemberProfile["cover_style"])) fields.coverStyle = "请选择有效的背景色调。";
+  return { ok: Object.keys(fields).length === 0, fields, value: { displayName, bio, markets: markets.slice(0, 8), timeframes: timeframes.slice(0, 8), coverStyle } };
+}
+
+export function validateProfileImage(file: Pick<File, "type" | "size">, label = "图片"): string | null {
+  if (!IMAGE_TYPES.has(file.type)) return `${label}只支持 JPG、PNG 或 WebP。`;
+  if (file.size < 1 || file.size > PROFILE_IMAGE_MAX_BYTES) return `${label}不能超过 5 MiB。`;
   return null;
 }
 

@@ -13,7 +13,6 @@ type Props = {
   profileId: string;
   initialFollowing: boolean;
   initialConnection: FriendshipConnection | null;
-  legacySite: string;
 };
 
 function socialError(error: unknown): string {
@@ -23,7 +22,7 @@ function socialError(error: unknown): string {
   return "操作没有完成，请稍后重试。";
 }
 
-export function MemberProfileActions({ actorId, profileId, initialFollowing, initialConnection, legacySite }: Props) {
+export function MemberProfileActions({ actorId, profileId, initialFollowing, initialConnection }: Props) {
   const router = useRouter();
   const [following, setFollowing] = useState(initialFollowing);
   const [connection, setConnection] = useState(initialConnection);
@@ -35,8 +34,7 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
       <div className="flex flex-wrap items-center gap-3">
         <Button asChild><Link href="/messages">私聊</Link></Button>
         <Button asChild variant="secondary"><Link href="/friends">好友</Link></Button>
-        <Button asChild variant="secondary"><a href={`${legacySite}/#space=profile`}>编辑个人资料</a></Button>
-        <p className="text-xs text-muted-foreground">资料编辑器迁移完成前继续使用原入口。</p>
+        <Button asChild variant="secondary"><Link href="/member/profile">编辑个人资料</Link></Button>
       </div>
     );
   }

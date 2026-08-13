@@ -41,6 +41,7 @@ supabase                数据库迁移和 Edge Functions
 /community/post/[id]           帖子详情
 /community/post/[id]/edit      作者编辑
 /member/[uid]                  登录后公开主页与社交动作
+/member/profile               资料、头像、封面与铭牌管理
 /friends                       UID 查找与好友请求处理
 /messages                      私聊会话列表
 /messages/[id]                 私聊消息与快捷表情
@@ -50,7 +51,7 @@ supabase                数据库迁移和 Edge Functions
 
 知识数据由 `pnpm knowledge:extract` 从当前 `index.html` 的 `elliott-kb-data` 生成。提取脚本校验唯一 ID，并移除构建机绝对路径。Next 在构建期预生成全部 161 个详情页，原书图片仍由现有静态资源目录提供。
 
-会员公开主页通过现有 `search_profile_by_uid`、`list_my_friendships` 和 `profile_follows` 读取，不复制用户资料。关注、好友请求、私聊和未读清理已迁移；资料编辑器仍保留显式旧站入口。
+会员公开主页通过现有 `search_profile_by_uid`、`list_my_friendships` 和 `profile_follows` 读取，不复制用户资料。关注、好友请求、私聊、未读清理和资料编辑已迁移。头像在浏览器内裁切后上传，资料 RPC 成功后才安全清理旧文件。
 
 ## UI 约束
 

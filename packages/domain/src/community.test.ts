@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseExternalReference, validatePost } from "./community";
+import { parseExternalReference, splitProfileTags, validateMemberProfile, validatePost, validateProfileImage } from "./community";
 
 describe("community post validation", () => {
   it("accepts a complete public post", () => {
@@ -26,5 +26,25 @@ describe("community post validation", () => {
 
   it("rejects unsupported external links", () => {
     expect(parseExternalReference("https://example.com/post")).toMatchObject({ ok: false });
+  });
+});
+
+describe("member profile validation", () => {
+  it("normalizes unique profile tags", () => {
+    expect(splitProfileTags("加密、黄金, 加密，股指")).toEqual(["加密", "黄金", "股指"]);
+  });
+
+  it("accepts a complete editable profile", () => {
+    expect(validateMemberProfile({
+      displayName: "浪型记录者",
+      bio: "只保留可以复查的判断。",
+      markets: ["加密", "黄金"],
+      timeframes: ["日线", "4小时"],
+      coverStyle: "wave-blue",
+    })).toMatchObject({ ok: true, value: { coverStyle: "wave-blue" } });
+  });
+
+  it("rejects unsafe profile images", () => {
+    expect(validateProfileImage({ type: "image/svg+xml", size: 200 }, "头像")).toBe("头像只支持 JPG、PNG 或 WebP。");
   });
 });
