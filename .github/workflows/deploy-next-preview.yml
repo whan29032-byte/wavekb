@@ -314,32 +314,22 @@ jobs:
       - name: Install Chromium for real posting acceptance
         run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
 
-      - name: Isolate the acceptance login rate-limit bucket
-        run: |
-          sequence=$((GITHUB_RUN_ID + GITHUB_RUN_ATTEMPT))
-          third_octet=$((sequence / 253 % 254 + 1))
-          fourth_octet=$((sequence % 254 + 1))
-          echo "E2E_POSTING_CLIENT_IP=198.18.${third_octet}.${fourth_octet}" >> "$GITHUB_ENV"
-
-      - name: Run real posting lifecycle through an SSH tunnel
+      - name: Run real posting lifecycle through production HTTPS
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
           E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
-          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3110
+          PLAYWRIGHT_BASE_URL: https://wavekb.com
+          RELEASE_ID: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o ExitOnForwardFailure=yes \
-            -N -L 3110:127.0.0.1:3100 "${DEPLOY_USER}@${DEPLOY_HOST}" &
-          tunnel_pid=$!
-          trap 'kill "$tunnel_pid" 2>/dev/null || true' EXIT
           for attempt in 1 2 3 4 5 6; do
-            curl --fail --silent http://127.0.0.1:3110/api/health > /dev/null && break
+            health_payload=$(curl --fail --silent https://wavekb.com/api/health) || true
+            grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "${health_payload:-}" > /dev/null && break
             sleep 2
           done
-          curl --fail --silent http://127.0.0.1:3110/api/health > /dev/null
-          pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts
+          health_payload=$(curl --fail --silent https://wavekb.com/api/health)
+          grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$health_payload" > /dev/null
+          pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts --workers=1
 
       - name: Finalize the accepted preview release
         env:

@@ -35,6 +35,7 @@ test.describe("authenticated posting acceptance", () => {
     const marker = `验收发帖 ${Date.now()}`;
     let published = false;
     try {
+      await expect(page.getByRole("button", { name: "发布内容" })).toBeEnabled();
       await page.getByLabel("标题").fill(marker);
       await page.getByLabel("正文").fill("这是一篇由 Playwright 专用账号创建的验收帖子，用于确认发布和详情读取链路。 ");
       await page.locator("#post-images").setInputFiles({
@@ -51,6 +52,7 @@ test.describe("authenticated posting acceptance", () => {
           url: page.url(),
           alert: await page.getByRole("alert").last().innerText().catch(() => ""),
           submitLabel: await page.getByRole("button", { name: /发布内容|正在保存/ }).innerText().catch(() => ""),
+          form: (await page.locator("main form").innerText().catch(() => "")).slice(0, 2_000),
         }));
         throw error;
       }

@@ -47,9 +47,14 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
   const [existingImages, setExistingImages] = useState(() => [...(post?.post_images || [])].sort((a, b) => a.sort_order - b.sort_order));
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [errors, setErrors] = useState<ComposerErrors>({});
+  const [hydrated, setHydrated] = useState(false);
   const [pending, setPending] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const imagesRef = useRef(images);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   useEffect(() => {
     if (post) return;
@@ -321,7 +326,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
       {errors.form ? <FieldMessage role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 p-3">{errors.form}</FieldMessage> : null}
       <div className="flex flex-col-reverse gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-muted-foreground">{post ? "保存成功后，移除的旧图片会从存储中清理。" : "文字草稿自动保存在这台设备。图片需要发布时才上传。"}</p>
-        <Button type="submit" size="large" disabled={pending}>{pending ? "正在保存" : post ? "保存修改" : "发布内容"}</Button>
+        <Button type="submit" size="large" disabled={!hydrated || pending}>{pending ? "正在保存" : post ? "保存修改" : "发布内容"}</Button>
       </div>
     </form>
   );
