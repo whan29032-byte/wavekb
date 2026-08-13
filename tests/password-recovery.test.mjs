@@ -118,7 +118,7 @@ test("both entry documents cache-bust the hardened recovery scripts", async () =
     read("elliott-wave-preview.html")
   ]);
   for (const html of documents) {
-    assert.match(html, /community-auth\.js\?v=wavekb-password-recovery-20260812-1/);
-    assert.match(html, /community-ui\.js\?v=wavekb-password-recovery-20260812-1/);
+    assert.match(html, /community-auth\.js\?v=security-fixes-20260813-1/);
+    assert.match(html, /community-ui\.js\?v=security-fixes-20260813-1/);
   }
 });

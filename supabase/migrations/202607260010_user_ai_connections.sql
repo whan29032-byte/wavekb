@@ -1,4 +1,4 @@
-create table public.user_ai_connections (
+create table if not exists public.user_ai_connections (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references public.profiles(id) on delete cascade,
   label text not null check (char_length(label) between 2 and 60),
@@ -19,17 +19,19 @@ create table public.user_ai_connections (
   updated_at timestamptz not null default now()
 );
 
-create unique index user_ai_connections_one_default_idx
+create unique index if not exists user_ai_connections_one_default_idx
 on public.user_ai_connections(owner_id) where is_default and enabled;
 
-create index user_ai_connections_owner_idx
+create index if not exists user_ai_connections_owner_idx
 on public.user_ai_connections(owner_id, created_at desc);
 
+drop trigger if exists user_ai_connections_touch_updated_at
+on public.user_ai_connections;
 create trigger user_ai_connections_touch_updated_at
 before update on public.user_ai_connections
 for each row execute function public.touch_updated_at();
 
-create table public.user_ai_connection_secrets (
+create table if not exists public.user_ai_connection_secrets (
   id uuid primary key default gen_random_uuid(),
   connection_id uuid not null references public.user_ai_connections(id) on delete cascade,
   owner_id uuid not null references public.profiles(id) on delete cascade,
@@ -43,17 +45,19 @@ create table public.user_ai_connection_secrets (
   rotated_at timestamptz
 );
 
-create unique index user_ai_connection_secrets_one_active_idx
+create unique index if not exists user_ai_connection_secrets_one_active_idx
 on public.user_ai_connection_secrets(connection_id) where active;
 
 alter table public.ai_jobs
-  add column user_connection_id uuid
+  add column if not exists user_connection_id uuid
   references public.user_ai_connections(id) on delete set null,
-  add column connection_snapshot jsonb not null default '{}'::jsonb;
+  add column if not exists connection_snapshot jsonb not null default '{}'::jsonb;
 
 alter table public.user_ai_connections enable row level security;
 alter table public.user_ai_connection_secrets enable row level security;
 
+drop policy if exists "owners read their ai connection metadata"
+on public.user_ai_connections;
 create policy "owners read their ai connection metadata"
 on public.user_ai_connections for select to authenticated
 using (owner_id = auth.uid());

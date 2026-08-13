@@ -8,8 +8,12 @@
   },
   "scripts": {
     "test": "node --test test/*.test.ts",
-    "typecheck": "node --experimental-strip-types src/typecheck.ts",
+    "typecheck": "tsc --noEmit",
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
   }
 }

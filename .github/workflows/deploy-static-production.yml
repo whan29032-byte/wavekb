@@ -27,8 +27,25 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Install gateway development dependencies
+        working-directory: ai-gateway
+        run: pnpm install --frozen-lockfile
+
       - name: Run website tests
         run: node --test tests/*.test.mjs
+
+      - name: Run gateway tests
+        working-directory: ai-gateway
+        run: pnpm test
+
+      - name: Run strict TypeScript checks
+        working-directory: ai-gateway
+        run: pnpm typecheck
 
   deploy:
     if: github.event_name != 'pull_request'

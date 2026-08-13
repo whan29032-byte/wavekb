@@ -20,7 +20,6 @@
     "external_url",
     "external_kind",
     "chart_package",
-    "profiles!posts_author_id_fkey(public_uid,display_name,avatar_url,role,display_title,nameplate_style)",
     "post_images(id,storage_path,sort_order)"
   ].join(",");
 
@@ -31,13 +30,33 @@
     return result ? result.data : null;
   }
 
+  async function attachPublicProfiles(client, posts) {
+    const rows = Array.isArray(posts) ? posts : posts ? [posts] : [];
+    const authorIds = [...new Set(rows.map(post => post.author_id).filter(Boolean))];
+    if (!authorIds.length) return posts;
+    const primaryResult = await client.rpc("get_public_post_profiles", {
+      p_ids: authorIds
+    });
+    const profiles = primaryResult && !primaryResult.error
+      ? throwIfError(primaryResult) || []
+      : throwIfError(await client.rpc("get_public_profiles", {
+          p_ids: authorIds
+        })) || [];
+    const profileById = new Map(profiles.map(profile => [profile.id, profile]));
+    const hydrated = rows.map(post => ({
+      ...post,
+      profiles: profileById.get(post.author_id) || null
+    }));
+    return Array.isArray(posts) ? hydrated : hydrated[0] || null;
+  }
+
   function defaultGateway(client) {
     return {
       makeId() {
         return crypto.randomUUID();
       },
       async list(board, from, to) {
-        return throwIfError(
+        const posts = throwIfError(
           await client
             .from("posts")
             .select(POST_SELECT)
@@ -46,11 +65,13 @@
             .order("created_at", {ascending: false})
             .range(from, to)
         );
+        return attachPublicProfiles(client, posts);
       },
       async one(id) {
-        return throwIfError(
+        const post = throwIfError(
           await client.from("posts").select(POST_SELECT).eq("id", id).single()
         );
+        return attachPublicProfiles(client, post);
       },
       async insertDraft(value) {
         throwIfError(await client.from("posts").insert(value));

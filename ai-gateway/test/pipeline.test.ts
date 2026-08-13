@@ -57,5 +57,8 @@ test("hard-rule violation moves a scenario out of the valid list", () => {
   });
   assert.equal(output.valid_scenarios.length, 0);
   assert.equal(output.eliminated_scenarios[0]?.key, "primary");
-  assert.equal(output.eliminated_scenarios[0]?.violations[0]?.rule_id, "ewp-rule-impulse-core");
+  assert.equal(
+    output.eliminated_scenarios[0]?.violations?.[0]?.rule_id,
+    "ewp-rule-impulse-core",
+  );
 });

@@ -329,8 +329,9 @@ test("public posts expose the author's public UID without exposing email", async
   });
 
   assert.equal(model.publicUid, 583104);
-  assert.match(repository, /public_uid/);
-  assert.doesNotMatch(repository, /profiles![^(]*\([^)]*\bemail\b/);
+  assert.match(repository, /get_public_post_profiles/);
+  assert.doesNotMatch(repository, /profiles!posts_author_id_fkey/);
+  assert.doesNotMatch(repository, /\bemail\b/);
 });
 
 test("published HTML cache-busts the UID authentication assets", async () => {
@@ -341,13 +342,22 @@ test("published HTML cache-busts the UID authentication assets", async () => {
     readFile(new URL("elliott-wave-knowledge-tree.html", root), "utf8"),
   ]);
 
+  const expectedAssets = [
+    "community/community.css?v=security-fixes-20260813-1",
+    "community/config.js?v=security-fixes-20260813-1",
+    "community/community-core.js?v=security-fixes-20260813-1",
+    "community/community-repository.js?v=security-fixes-20260813-1",
+    "community/community-auth.js?v=security-fixes-20260813-1",
+    "community/community-ui.js?v=security-fixes-20260813-1",
+  ];
+
   for (const page of pages) {
-    assert.match(page, /community\/community\.css\?v=[A-Za-z0-9._-]+/);
-    assert.match(page, /community\/config\.js\?v=[A-Za-z0-9._-]+/);
-    assert.match(page, /community\/community-core\.js\?v=[A-Za-z0-9._-]+/);
-    assert.match(page, /community\/community-repository\.js\?v=[A-Za-z0-9._-]+/);
-    assert.match(page, /community\/community-auth\.js\?v=[A-Za-z0-9._-]+/);
-    assert.match(page, /community\/community-ui\.js\?v=[A-Za-z0-9._-]+/);
+    const actualAssets = [...page.matchAll(
+      /<(?:script|link)\b[^>]*(?:src|href)="([^"]+)"[^>]*>/gi,
+    )].map((match) => match[1]);
+    for (const asset of expectedAssets) {
+      assert.ok(actualAssets.includes(asset), `missing real asset tag: ${asset}`);
+    }
   }
 });
 
