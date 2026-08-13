@@ -1,0 +1,94 @@
+@import "tailwindcss";
+@source "../../../../packages/ui/src";
+
+:root {
+  color-scheme: light dark;
+  --background: oklch(0.975 0.006 75);
+  --surface: oklch(0.995 0.003 75);
+  --foreground: oklch(0.22 0.025 255);
+  --muted: oklch(0.94 0.008 75);
+  --muted-foreground: oklch(0.47 0.022 255);
+  --border: oklch(0.86 0.012 75);
+  --input: oklch(0.79 0.016 75);
+  --ring: oklch(0.49 0.12 230);
+  --primary: oklch(0.42 0.115 230);
+  --primary-foreground: oklch(0.985 0.004 75);
+  --destructive: oklch(0.48 0.18 25);
+  --destructive-foreground: oklch(0.985 0.004 75);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-wavekb-mode="light"]) {
+    --background: oklch(0.17 0.018 255);
+    --surface: oklch(0.205 0.02 255);
+    --foreground: oklch(0.94 0.008 80);
+    --muted: oklch(0.255 0.022 255);
+    --muted-foreground: oklch(0.72 0.018 255);
+    --border: oklch(0.33 0.024 255);
+    --input: oklch(0.4 0.026 255);
+    --ring: oklch(0.68 0.105 225);
+    --primary: oklch(0.7 0.105 225);
+    --primary-foreground: oklch(0.17 0.018 255);
+    --destructive: oklch(0.65 0.17 25);
+    --destructive-foreground: oklch(0.17 0.018 255);
+  }
+}
+
+:root[data-wavekb-mode="dark"] {
+  color-scheme: dark;
+  --background: oklch(0.17 0.018 255);
+  --surface: oklch(0.205 0.02 255);
+  --foreground: oklch(0.94 0.008 80);
+  --muted: oklch(0.255 0.022 255);
+  --muted-foreground: oklch(0.72 0.018 255);
+  --border: oklch(0.33 0.024 255);
+  --input: oklch(0.4 0.026 255);
+  --ring: oklch(0.68 0.105 225);
+  --primary: oklch(0.7 0.105 225);
+  --primary-foreground: oklch(0.17 0.018 255);
+  --destructive: oklch(0.65 0.17 25);
+  --destructive-foreground: oklch(0.17 0.018 255);
+}
+
+:root[data-wavekb-mode="light"] { color-scheme: light; }
+:root[data-wavekb-theme="sakura"] { --primary: oklch(0.5 0.14 350); --ring: oklch(0.57 0.12 350); }
+:root[data-wavekb-theme="aurora"] { --primary: oklch(0.48 0.1 185); --ring: oklch(0.58 0.09 185); }
+:root[data-wavekb-theme="star"] { --primary: oklch(0.5 0.13 295); --ring: oklch(0.6 0.11 295); }
+:root[data-wavekb-theme="ink"] { --primary: oklch(0.43 0.035 250); --ring: oklch(0.55 0.035 250); }
+:root[data-wavekb-theme="custom"] { --primary: var(--wavekb-user-accent, #557fb8); --ring: var(--wavekb-user-accent, #557fb8); --primary-foreground: var(--wavekb-user-on-accent, #f7fbff); }
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* { border-color: var(--border); }
+
+html { background: var(--background); }
+
+body {
+  min-height: 100dvh;
+  background: var(--background);
+  color: var(--foreground);
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--primary) 24%, transparent);
+}
+
+a, button, input, textarea { -webkit-tap-highlight-color: transparent; }
+
+:focus-visible { outline: none; }

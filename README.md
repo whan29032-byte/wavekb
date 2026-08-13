@@ -38,6 +38,18 @@ python3 -m http.server 8877
 
 打开 `http://127.0.0.1:8877/index.html`。
 
+## Next.js 迁移应用
+
+新的全栈前端位于 `apps/web`，由根目录的 pnpm workspace 管理。它当前作为旁路应用开发和验收，不会替换上述静态入口，也不会复制生产数据。
+
+```bash
+cp apps/web/.env.example apps/web/.env.local
+pnpm install
+pnpm dev
+```
+
+架构边界、路由兼容和灰度切流方案见 [docs/architecture/nextjs-migration.md](docs/architecture/nextjs-migration.md)。
+
 ## 数据库
 
 全新项目请按文件名顺序执行 `supabase/migrations/` 中的 SQL。已有生产库只执行尚未应用的迁移，禁止重复初始化或删除现有用户表。
@@ -62,4 +74,3 @@ cp ai-gateway/.env.example ai-gateway/.env
 - 不包含：生产数据库、用户上传内容、用户账户资料、服务器密钥、API Key、历史部署包或缓存。
 
 详细步骤见 [DEPLOYMENT.md](DEPLOYMENT.md)。
-

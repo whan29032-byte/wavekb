@@ -1,0 +1,106 @@
+# WaveKB Next.js 全栈迁移架构
+
+## 目标
+
+在不停止现有网站、不复制生产数据的前提下，将浏览器全局脚本逐步迁移到可测试的 Next.js App Router 架构。旧静态站仍由当前 GitHub Actions 工作流发布，直到新应用通过功能对照和生产验收。
+
+## 工作区
+
+```text
+apps/web                Next.js App Router 全栈应用
+ai-gateway              现有 UID 登录、管理与 AI 网关
+packages/domain         板块、帖子、验证与领域类型
+packages/knowledge      从旧 HTML 抽出的 161 个知识条目
+packages/ui             定制 shadcn/ui 基础组件
+community               仍在线的旧社区实现
+assets                  原书图片与知识库资源
+supabase                数据库迁移和 Edge Functions
+```
+
+所有工作区由根目录的 `pnpm-workspace.yaml` 和单一 `pnpm-lock.yaml` 管理。`apps/web` 使用 Next.js Server Components 读取公开内容，交互式发布器被隔离为 Client Component。
+
+## 数据边界
+
+- 新旧前端共用现有 `posts`、`post_images`、`profiles` 表和 `post-images` 存储桶。
+- 新应用使用 publishable key 和用户 JWT，所有写操作继续由现有 RLS 约束。
+- UID 登录仍由 `ai-gateway` 在服务端解析，浏览器和 Next.js 都不会获得用户邮箱映射或 service-role key。
+- 发帖先写入不可见草稿，图片和元数据全部完成后才发布。失败会清理已上传文件和草稿行。
+- 数据库迁移、生产密钥、用户上传内容不进入前端发布包。
+
+## 路由兼容
+
+首批新路由：
+
+```text
+/                              新应用入口
+/login                         邮箱或 UID 登录
+/knowledge                     可搜索的知识库入口
+/knowledge/[id]                规则、图示与原书来源
+/community/[board]             板块列表
+/community/[board]/new         登录后发布
+/community/post/[id]           帖子详情
+/community/post/[id]/edit      作者编辑
+/member/[uid]                  登录后公开主页与社交动作
+/member/profile                资料、头像、封面与铭牌管理
+/friends                       UID 查找与好友请求处理
+/messages                      私聊会话列表
+/messages/[id]                 私聊消息与快捷表情
+/workbench                     私人复盘、日记与草稿
+/workbench/analysis/[id]       11 步波浪分析、规则、回撤与风险计算
+/workbench/ai                  用户自带模型与密钥轮换
+/workbench/entries/new         新建私人记录
+/workbench/entries/[id]        编辑、软删除与公开副本
+/mentors                       公开导师目录与进行中辅导入口
+/mentors/[id]                  导师资料、方案与人工付款声明
+/tutoring                      学员权益与历史会话
+/tutoring/[id]                 双方消息与服务端周额度
+/mentor/manage                 导师方案、收款核对与学员管理
+/rewards                       积分钱包、签到、商城、排行与账本
+/admin/users                   用户状态、权限、禁言与公开 UID
+/admin/rewards                 商品、钱包、铭牌与兑换管理
+/admin/directory               X 与 Discord 首页推荐管理
+/admin/mentors                 导师、方案、收款方式与订单权益
+/admin/audit                   不可删除的后台治理审计记录
+/admin/ai                      AI 网关概览与平台备用供应商
+```
+
+逐项功能状态与生产验收证据见 [nextjs-feature-parity.md](nextjs-feature-parity.md)。
+
+现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
+
+知识数据由 `pnpm knowledge:extract` 从当前 `index.html` 的 `elliott-kb-data` 生成。提取脚本校验唯一 ID，并移除构建机绝对路径。Next 在构建期预生成全部 161 个详情页，原书图片仍由现有静态资源目录提供。
+
+会员公开主页通过现有 `search_profile_by_uid`、`list_my_friendships` 和 `profile_follows` 读取，不复制用户资料。关注、好友请求、私聊、未读清理和资料编辑已迁移。头像在浏览器内裁切后上传，资料 RPC 成功后才安全清理旧文件。
+
+交易工作台继续读取现有 `private_entries` 和私有 `private-entry-images` 存储桶。服务端只按当前 owner 查询并签发短期图片地址；保存失败会清理本次上传，移除记录沿用可恢复的软删除。公开发布先创建独立草稿并写入 `post_sources`，只复制标题、正文和显式新增的公开图片，`review_data` 与私密图片不会进入社区帖子。
+
+导师目录继续读取现有导师、方案、订单、权益、会话和消息表。付款按 `create_manual_mentor_order` 创建价格快照，再由 `submit_mentor_payment_claim` 提交声明；只有导师本人通过 `review_mentor_payment_claim` 确认实际到账后，数据库才创建权益和专属会话。学员问题由 `send_mentor_message` 在服务端核验参与者、有效期和自然周额度，导师回复不消耗学员额度。导师管理 RPC 只返回当前导师本人名下的付款声明和学员，不因管理员身份扩大读取范围。
+
+积分中心通过 `get_my_reward_center` 读取当前钱包、任务账本、商品和有效铭牌，并通过登录后可见的 `list_reward_leaderboard` 读取排行。签到、兑换和佩戴分别交给 `reward_daily_checkin`、`redeem_reward_product` 与 `equip_my_nameplate`；余额扣减、库存锁定、重复任务防护和限时所有权都在数据库事务与 RLS 内完成，浏览器只显示服务器结果。
+
+后台布局先通过 Supabase 服务端会话确认当前资料是有效管理员，再显示治理页面。用户邮箱、账号状态和审计记录仍由现有 `ai-gateway` 使用 service-role RPC 返回；Next 只携带当前管理员 JWT 访问内网网关，并通过显式白名单代理用户概览、筛选、封禁、禁言、角色、UID 和审计接口。Next 应用及浏览器都不保存 service-role key，所有变更要求操作原因、二次确认并由数据库落审计记录。
+
+后台积分模块通过现有 `admin_*` RPC 读取和修改商品、钱包、兑换与铭牌授权。商品只能新建、编辑或下架，不提供物理删除；积分扣减不能产生负余额；退款使用兑换 ID 作为唯一引用幂等返还；铭牌发放按用户和商品续期，撤销后由数据库重新同步有效样式。浏览器仍只持有公开 key 和当前管理员 JWT。
+
+首页推荐继续通过内网网关规范 X 与 Discord 地址并读取公开元数据，Next 代理只放行目录的固定读写路径并限制请求体大小。导师后台使用管理员目录 RPC 原子保存导师与首个方案，其他方案、收款方式和订单更新继续受现有 RLS 约束。订单状态更新同时匹配原状态，避免并发覆盖；数据库触发器负责在支付时发放权益、在退款或取消时撤销权益。
+
+## UI 约束
+
+- 单一冷灰底色和蓝色主强调色，亮色与暗色跟随系统设置。
+- 卡片统一使用 12px 圆角，表单使用 8px 圆角，按钮文字不换行。
+- 页面默认无自动动效，交互只使用 hover、focus 和 active 反馈。
+- 组件库代码由项目持有，Storybook 对共享组件执行可访问性检查。
+- 表单具备明确标签、帮助文本、字段错误、加载状态和失败恢复提示。
+
+## 部署阶段
+
+1. 旁路构建：Actions 验证 Next、Storybook 和 Playwright，但生产仍只部署旧静态站。
+2. 预发布：服务器新增 `wavekb-next` systemd 服务，只通过受保护的预览域访问。
+3. 功能对照：逐项验证知识库、账户、社区、会员、导师、好友、聊天、工作台和后台。
+4. 发帖验收：使用专用账号在预发布环境完成文本、多图、外链、编辑、删除、权限和失败清理测试。
+5. 灰度切流：Nginx 只将已通过的路径转发给 Next，未迁移路径继续由旧站处理。
+6. 全量切流：保留静态站备份和一条命令回滚，观察稳定后再归档旧脚本。
+
+## 完成定义
+
+新应用不能因为“页面能打开”就视为迁移完成。每个功能需要领域测试、组件状态、Playwright 用户路径、移动端检查、权限验证和生产健康检查全部通过。发帖最终验收必须使用专用账号并在测试后清理内容和上传文件。

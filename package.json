@@ -1,0 +1,21 @@
+{
+  "name": "wavekb",
+  "version": "2.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @wavekb/web dev",
+    "build": "pnpm --filter @wavekb/web build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "test": "node --test tests/*.test.mjs && pnpm -r --if-present test",
+    "test:web": "pnpm --filter @wavekb/web test",
+    "test:e2e": "pnpm --filter @wavekb/web test:e2e",
+    "storybook": "pnpm --filter @wavekb/web storybook",
+    "storybook:build": "pnpm --filter @wavekb/web storybook:build",
+    "knowledge:extract": "node scripts/extract-knowledge.mjs"
+  }
+}

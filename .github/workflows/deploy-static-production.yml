@@ -10,6 +10,13 @@ on:
 permissions:
   contents: read
 
+env:
+  NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
+  NEXT_PUBLIC_LEGACY_SITE_URL: https://wavekb.com
+  AUTH_GATEWAY_INTERNAL_URL: http://127.0.0.1:8787
+  AUTH_GATEWAY_PUBLIC_ORIGIN: https://wavekb.com
+
 concurrency:
   group: wavekb-static-production
   cancel-in-progress: false
@@ -17,7 +24,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -32,20 +39,29 @@ jobs:
         with:
           version: 11.19.0
 
-      - name: Install gateway development dependencies
-        working-directory: ai-gateway
+      - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run website tests
-        run: node --test tests/*.test.mjs
-
-      - name: Run gateway tests
-        working-directory: ai-gateway
+      - name: Run legacy and workspace tests
         run: pnpm test
 
       - name: Run strict TypeScript checks
-        working-directory: ai-gateway
         run: pnpm typecheck
+
+      - name: Lint the Next.js application
+        run: pnpm --filter @wavekb/web lint
+
+      - name: Build the Next.js application
+        run: pnpm --filter @wavekb/web build
+
+      - name: Build Storybook
+        run: pnpm --filter @wavekb/web storybook:build
+
+      - name: Install the Playwright browser
+        run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
+
+      - name: Run public route acceptance tests
+        run: pnpm --filter @wavekb/web test:e2e
 
   deploy:
     if: github.event_name != 'pull_request'

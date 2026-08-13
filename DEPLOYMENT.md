@@ -6,6 +6,10 @@
 
 Actions 只长期保留 `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_PATH` 和 `DEPLOY_SSH_KEY`。服务器的 ED25519 指纹固定在工作流中，避免连接到冒充服务器。工作流只更新根目录三个 HTML 文件以及 `assets/`、`community/`、`admin/`、`workbench/`，不会执行数据库迁移、覆盖后端环境变量或读取用户数据库。
 
+迁移分支还包含 `deploy-next-preview.yml`。该工作流在 `main` 或 `agent/nextjs-full-migration` 更新后构建独立的 Next.js standalone 发布包，部署到 `/srv/wavekb-next-preview/releases/<commit>`，原子切换 `current` 链接，并在 `127.0.0.1:3100` 完成健康检查。部署失败会恢复上一个链接和进程。预览服务只监听服务器回环地址，不修改生产 Nginx，也不替换 `wavekb.com` 静态站点。
+
+如需让 Actions 完成真实发帖全生命周期验收，在 GitHub `next-preview` 环境增加专用测试账号 Secrets：`E2E_POSTING_IDENTIFIER` 和 `E2E_POSTING_PASSWORD`。测试通过 SSH 隧道访问回环预览服务，依次验证登录、发帖、图片上传、外链、详情刷新、作者主页、编辑、删图、删除帖子和退出；缺少凭据时只跳过这一步，不会使用普通用户账号。预览环境与只允许 `main` 部署的 `production` 环境相互独立。
+
 ## 1. 上线前备份
 
 先备份服务器当前静态目录、Nginx 配置和数据库。不要用本仓库覆盖生产数据库；迁移必须增量执行。

@@ -1,0 +1,101 @@
+import { expect, test } from "@playwright/test";
+
+test("home exposes the knowledge and community paths", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚");
+  await expect(page.getByRole("link", { name: "进入社区" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+});
+
+test("unknown community boards return a real not-found page", async ({ page }) => {
+  const response = await page.goto("/community/not-a-board");
+  expect(response?.status()).toBe(404);
+});
+
+test("member profiles preserve the destination through login", async ({ page }) => {
+  await page.goto("/member/12345");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmember%2F12345/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("登录 WaveKB");
+});
+
+test("account creation and recovery routes are available", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.getByRole("link", { name: "创建账号" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "忘记密码" })).toBeVisible();
+  await page.getByRole("link", { name: "创建账号" }).click();
+  await expect(page).toHaveURL(/\/register$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("加入 WaveKB");
+  await expect(page.getByLabel("昵称")).toBeVisible();
+  await page.goto("/recover");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("重置密码");
+  await expect(page.getByLabel("注册邮箱")).toBeVisible();
+});
+
+test("UID activation API rejects anonymous requests", async ({ request }) => {
+  const response = await request.get("/api/auth/uid-selection/status");
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "登录状态已失效，请重新登录。" });
+});
+
+test("friends and messages remain private", async ({ page }) => {
+  await page.goto("/member/profile");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmember%2Fprofile/);
+  await page.goto("/friends");
+  await expect(page).toHaveURL(/\/login\?next=%2Ffriends/);
+  await page.goto("/messages");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmessages/);
+  await page.goto("/workbench");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench/);
+  await page.goto("/workbench/entries/new");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fentries%2Fnew/);
+  await page.goto("/workbench/analysis/new?step=0");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fanalysis%2Fnew%3Fstep%3D0/);
+  await page.goto("/workbench/ai");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fai/);
+  await page.goto("/tutoring");
+  await expect(page).toHaveURL(/\/login\?next=%2Ftutoring/);
+  await page.goto("/mentor/manage");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmentor%2Fmanage/);
+  await page.goto("/tutoring/not-a-thread");
+  await expect(page).toHaveURL(/\/login\?next=%2Ftutoring%2Fnot-a-thread/);
+  await page.goto("/rewards");
+  await expect(page).toHaveURL(/\/login\?next=%2Frewards/);
+  await page.goto("/admin/users");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fusers/);
+  await page.goto("/admin/rewards");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Frewards/);
+  await page.goto("/admin/directory");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fdirectory/);
+  await page.goto("/admin/mentors");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fmentors/);
+  await page.goto("/admin/ai");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fai/);
+});
+
+test("admin API rejects anonymous requests before contacting the gateway", async ({ request }) => {
+  const response = await request.get("/api/admin/users");
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
+});
+
+test("AI API rejects anonymous requests before contacting the gateway", async ({ request }) => {
+  const response = await request.get("/api/ai/user/ai-connections");
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
+});
+
+test("mentor catalog is public and degrades safely without preview credentials", async ({ page }) => {
+  await page.goto("/mentors");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(/和导师一起拆解|导师专区尚未连接 Supabase/);
+  await expect(page.getByText("导师确认收款后发放权益").or(page.getByText("配置预览环境后即可读取导师目录"))).toBeVisible();
+});
+
+test("knowledge search opens a fully migrated article", async ({ page }) => {
+  await page.goto("/knowledge");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("规则、指南与原书证据");
+  await page.getByLabel("搜索知识标题和正文").fill("购买力指数");
+  await page.getByRole("link", { name: /名义价格与定值价格应并行检查/ }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("名义价格与定值价格应并行检查");
+  await expect(page.getByRole("heading", { name: "强制规则" })).toBeVisible();
+  await expect(page.getByText("原书来源", { exact: true })).toBeVisible();
+});

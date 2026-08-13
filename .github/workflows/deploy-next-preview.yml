@@ -1,0 +1,263 @@
+name: Deploy Next.js preview
+
+on:
+  push:
+    branches: [main, agent/nextjs-full-migration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-next-preview
+  cancel-in-progress: false
+
+env:
+  NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
+  NEXT_PUBLIC_LEGACY_SITE_URL: https://wavekb.com
+  AUTH_GATEWAY_INTERNAL_URL: http://127.0.0.1:8787
+  AUTH_GATEWAY_PUBLIC_ORIGIN: https://wavekb.com
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: next-preview
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify the release candidate
+        run: |
+          set -Eeuo pipefail
+          pnpm test
+          pnpm typecheck
+          pnpm --filter @wavekb/web lint
+
+      - name: Build the standalone application
+        env:
+          DEPLOYMENT_VERSION: ${{ github.sha }}
+        run: pnpm --filter @wavekb/web build
+
+      - name: Package the standalone application
+        run: tar -C apps/web/.next/standalone -czf wavekb-next-preview.tar.gz .
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Upload the preview release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}$ ]]
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            wavekb-next-preview.tar.gz \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-next-preview-${RELEASE_ID}.tar.gz"
+
+      - name: Activate the preview release with rollback
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "DEPLOY_USER='${DEPLOY_USER}' RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}$ ]]
+
+          application_root=/srv/wavekb-next-preview
+          releases_root="${application_root}/releases"
+          release_dir="${releases_root}/${RELEASE_ID}"
+          current_link="${application_root}/current"
+          upload_archive="$HOME/wavekb-next-preview-${RELEASE_ID}.tar.gz"
+          previous_release=$(readlink -f "$current_link" 2>/dev/null || true)
+
+          sudo install -d -m 0755 "$releases_root"
+          sudo rm -rf -- "$release_dir"
+          sudo install -d -m 0755 "$release_dir"
+          sudo tar -xzf "$upload_archive" -C "$release_dir" --no-same-owner
+          test -f "$release_dir/apps/web/server.js"
+
+          unit_file=$(mktemp)
+          environment_file=$(mktemp)
+          trap 'rm -f -- "$unit_file" "$environment_file"' EXIT
+          cat > "$unit_file" <<UNIT
+          [Unit]
+          Description=WaveKB Next.js preview
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=${DEPLOY_USER}
+          WorkingDirectory=/srv/wavekb-next-preview/current
+          EnvironmentFile=/etc/wavekb/next-preview.env
+          ExecStart=/usr/bin/node apps/web/server.js
+          Restart=on-failure
+          RestartSec=5
+          TimeoutStopSec=20
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ProtectHome=true
+          ReadWritePaths=/srv/wavekb-next-preview
+          UMask=0027
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          cat > "$environment_file" <<ENV
+          NODE_ENV=production
+          HOSTNAME=127.0.0.1
+          PORT=3100
+          NEXT_PUBLIC_SUPABASE_URL=https://odmtxwlnlvwldrjttyqu.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
+          NEXT_PUBLIC_LEGACY_SITE_URL=https://wavekb.com
+          AUTH_GATEWAY_INTERNAL_URL=http://127.0.0.1:8787
+          AUTH_GATEWAY_PUBLIC_ORIGIN=https://wavekb.com
+          DEPLOYMENT_VERSION=${RELEASE_ID}
+          ENV
+          sudo install -d -m 0755 /etc/wavekb
+          sudo install -m 0644 "$unit_file" /etc/systemd/system/wavekb-next-preview.service
+          sudo install -m 0640 "$environment_file" /etc/wavekb/next-preview.env
+
+          rollback() {
+            status=$?
+            trap - ERR
+            if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
+              sudo ln -sfn "$previous_release" "${current_link}.rollback"
+              sudo mv -Tf "${current_link}.rollback" "$current_link"
+              sudo systemctl restart wavekb-next-preview.service || true
+            else
+              sudo rm -f -- "$current_link"
+              sudo systemctl stop wavekb-next-preview.service || true
+            fi
+            exit "$status"
+          }
+          trap rollback ERR
+
+          sudo ln -sfn "$release_dir" "${current_link}.new"
+          sudo mv -Tf "${current_link}.new" "$current_link"
+          sudo systemctl daemon-reload
+          sudo systemctl enable wavekb-next-preview.service
+          sudo systemctl restart wavekb-next-preview.service
+          if ! curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+            --retry-connrefused http://127.0.0.1:3100/api/health | grep -F '"ok":true' > /dev/null; then
+            sudo systemctl --no-pager --full status wavekb-next-preview.service || true
+            sudo journalctl --no-pager -u wavekb-next-preview.service -n 80 || true
+            false
+          fi
+
+          trap - ERR
+          rm -f -- "$upload_archive"
+          current_release=$(readlink -f "$current_link")
+          while IFS= read -r stale_release; do
+            [ "$stale_release" = "$current_release" ] && continue
+            case "$stale_release" in
+              "$releases_root"/[0-9a-f]*) sudo rm -rf -- "$stale_release" ;;
+            esac
+          done < <(find "$releases_root" -mindepth 1 -maxdepth 1 -type d -mtime +14 -print)
+          REMOTE
+
+      - name: Detect real posting acceptance credentials
+        id: posting-acceptance
+        env:
+          E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
+          E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
+        run: |
+          if [ -n "$E2E_POSTING_IDENTIFIER" ] && [ -n "$E2E_POSTING_PASSWORD" ]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo 'Real posting acceptance is waiting for E2E_POSTING_IDENTIFIER and E2E_POSTING_PASSWORD.'
+          fi
+
+      - name: Install Chromium for real posting acceptance
+        if: steps.posting-acceptance.outputs.enabled == 'true'
+        run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
+
+      - name: Isolate the acceptance login rate-limit bucket
+        if: steps.posting-acceptance.outputs.enabled == 'true'
+        run: |
+          sequence=$((GITHUB_RUN_ID + GITHUB_RUN_ATTEMPT))
+          third_octet=$((sequence / 253 % 254 + 1))
+          fourth_octet=$((sequence % 254 + 1))
+          echo "E2E_POSTING_CLIENT_IP=198.18.${third_octet}.${fourth_octet}" >> "$GITHUB_ENV"
+
+      - name: Run real posting lifecycle through an SSH tunnel
+        if: steps.posting-acceptance.outputs.enabled == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
+          E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3110
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o ExitOnForwardFailure=yes \
+            -N -L 3110:127.0.0.1:3100 "${DEPLOY_USER}@${DEPLOY_HOST}" &
+          tunnel_pid=$!
+          trap 'kill "$tunnel_pid" 2>/dev/null || true' EXIT
+          for attempt in 1 2 3 4 5 6; do
+            curl --fail --silent http://127.0.0.1:3110/api/health > /dev/null && break
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3110/api/health > /dev/null
+          pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts
+
+      - name: Print preview service diagnostics
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo systemctl --no-pager --full status wavekb-next-preview.service; sudo journalctl --no-pager -u wavekb-next-preview.service -n 120" || true
+
+      - name: Remove failed upload
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "rm -f -- \"\$HOME/wavekb-next-preview-${RELEASE_ID}.tar.gz\"" || true
