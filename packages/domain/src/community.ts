@@ -203,6 +203,136 @@ export type PrivateEntryValidation = {
   };
 };
 
+export type MentorOffer = {
+  id: string;
+  mentor_id?: string;
+  name: string;
+  description: string;
+  price_cents: number;
+  currency: string;
+  duration_days: number;
+  weekly_questions: number;
+  active: boolean;
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type MentorCatalogItem = {
+  mentor_id: string;
+  display_name: string;
+  headline: string;
+  bio: string;
+  avatar_url: string | null;
+  specialties: string[];
+  credentials: string[];
+  languages: string[];
+  verification_label: string;
+  offers: MentorOffer[];
+};
+
+export type MentorAccess = {
+  entitlement_id: string;
+  mentor_id: string;
+  mentor_name: string;
+  mentor_avatar_url: string | null;
+  thread_id: string;
+  status: "active" | "expired" | "revoked" | "refunded";
+  weekly_question_limit: number;
+  questions_used: number;
+  starts_at: string;
+  ends_at: string;
+};
+
+export type MentorPaymentMethod = {
+  id: string;
+  mentor_id?: string;
+  kind: "alipay" | "wechat" | "bank" | "binance" | "crypto" | "other";
+  label: string;
+  account_name: string;
+  account_value: string;
+  network: string;
+  instructions: string;
+  active?: boolean;
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type MentorThread = {
+  thread_id: string;
+  mentor_id: string;
+  mentor_name: string;
+  mentor_avatar_url: string | null;
+  student_id: string;
+  status: MentorAccess["status"];
+  weekly_question_limit: number;
+  questions_used: number;
+  starts_at: string;
+  ends_at: string;
+};
+
+export type MentorMessage = {
+  id: number;
+  sender_id: string;
+  body: string;
+  message_kind: "question" | "reply" | "system";
+  created_at: string;
+};
+
+export type MentorProfileSettings = {
+  id: string;
+  owner_id: string;
+  display_name: string;
+  headline: string;
+  bio: string;
+  avatar_url: string | null;
+  specialties: string[];
+  credentials: string[];
+  languages: string[];
+  verification_label: string;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MentorSettings = {
+  profile: MentorProfileSettings;
+  offers: MentorOffer[];
+  payment_methods: MentorPaymentMethod[];
+};
+
+export type MentorStudent = {
+  thread_id: string;
+  student_id: string;
+  public_uid: number | null;
+  display_name: string;
+  avatar_url: string | null;
+  bio: string;
+  display_title: string;
+  nameplate_style: string;
+  access_status: MentorAccess["status"];
+  last_message: string | null;
+  last_message_at: string | null;
+};
+
+export type MentorPaymentClaim = {
+  claim_id: string;
+  order_id: string;
+  buyer_id: string;
+  public_uid: number | null;
+  display_name: string;
+  avatar_url: string | null;
+  offer_name: string;
+  amount_cents: number;
+  currency: string;
+  payment_label: string | null;
+  buyer_note: string;
+  status: "submitted" | "confirmed" | "rejected" | "cancelled";
+  submitted_at: string;
+};
+
 export type PostInput = {
   board: string;
   title: string;
@@ -368,6 +498,26 @@ export function validatePrivateEntry(input: PrivateEntryInput): PrivateEntryVali
       reviewData: { ...(input.reviewData ?? {}) },
     },
   };
+}
+
+export function formatMentorPrice(cents: number, currency = "USDT"): string {
+  const amount = Math.max(0, Number(cents || 0)) / 100;
+  const code = String(currency || "USDT").toUpperCase();
+  if (code === "USDT") {
+    return `${new Intl.NumberFormat("zh-CN", { minimumFractionDigits: amount % 1 ? 2 : 0, maximumFractionDigits: 2 }).format(amount)} USDT`;
+  }
+  return new Intl.NumberFormat("zh-CN", { style: "currency", currency: code, minimumFractionDigits: amount % 1 ? 2 : 0 }).format(amount);
+}
+
+export function remainingMentorQuota(value: Pick<MentorAccess, "weekly_question_limit" | "questions_used">): number {
+  return Math.max(0, Number(value.weekly_question_limit || 0) - Number(value.questions_used || 0));
+}
+
+export function validateMentorQuestion(rawValue: string): { ok: boolean; value: string; message?: string } {
+  const value = String(rawValue ?? "").trim();
+  if (value.length < 5) return { ok: false, value, message: "问题至少需要 5 个字符。" };
+  if (value.length > 5000) return { ok: false, value, message: "单次提问不能超过 5000 个字符。" };
+  return { ok: true, value };
 }
 
 export function plainTextExcerpt(value: string, limit = 140): string {

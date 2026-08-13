@@ -48,6 +48,11 @@ supabase                数据库迁移和 Edge Functions
 /workbench                     私人复盘、日记与草稿
 /workbench/entries/new         新建私人记录
 /workbench/entries/[id]        编辑、软删除与公开副本
+/mentors                       公开导师目录与进行中辅导入口
+/mentors/[id]                  导师资料、方案与人工付款声明
+/tutoring                      学员权益与历史会话
+/tutoring/[id]                 双方消息与服务端周额度
+/mentor/manage                 导师方案、收款核对与学员管理
 ```
 
 现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
@@ -57,6 +62,8 @@ supabase                数据库迁移和 Edge Functions
 会员公开主页通过现有 `search_profile_by_uid`、`list_my_friendships` 和 `profile_follows` 读取，不复制用户资料。关注、好友请求、私聊、未读清理和资料编辑已迁移。头像在浏览器内裁切后上传，资料 RPC 成功后才安全清理旧文件。
 
 交易工作台继续读取现有 `private_entries` 和私有 `private-entry-images` 存储桶。服务端只按当前 owner 查询并签发短期图片地址；保存失败会清理本次上传，移除记录沿用可恢复的软删除。公开发布先创建独立草稿并写入 `post_sources`，只复制标题、正文和显式新增的公开图片，`review_data` 与私密图片不会进入社区帖子。
+
+导师目录继续读取现有导师、方案、订单、权益、会话和消息表。付款按 `create_manual_mentor_order` 创建价格快照，再由 `submit_mentor_payment_claim` 提交声明；只有导师本人通过 `review_mentor_payment_claim` 确认实际到账后，数据库才创建权益和专属会话。学员问题由 `send_mentor_message` 在服务端核验参与者、有效期和自然周额度，导师回复不消耗学员额度。导师管理 RPC 只返回当前导师本人名下的付款声明和学员，不因管理员身份扩大读取范围。
 
 ## UI 约束
 

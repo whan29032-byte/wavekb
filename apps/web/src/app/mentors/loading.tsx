@@ -1,0 +1,3 @@
+export default function MentorsLoading() {
+  return <main className="mx-auto grid max-w-6xl gap-8 px-4 py-12 md:px-6"><div className="grid min-h-72 gap-5 rounded-xl border bg-surface p-7 md:grid-cols-2"><div className="grid content-center gap-4"><div className="h-6 w-44 rounded-md bg-muted" /><div className="h-20 max-w-xl rounded-lg bg-muted" /><div className="h-5 max-w-lg rounded-md bg-muted" /></div><div className="rounded-xl bg-muted" /></div><div className="grid gap-4 md:grid-cols-2">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-56 rounded-xl border bg-surface" />)}</div></main>;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseExternalReference, splitEntryTags, splitProfileTags, validateMemberProfile, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
+import { formatMentorPrice, parseExternalReference, remainingMentorQuota, splitEntryTags, splitProfileTags, validateMemberProfile, validateMentorQuestion, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
 
 describe("community post validation", () => {
   it("accepts a complete public post", () => {
@@ -72,5 +72,22 @@ describe("private workbench record validation", () => {
     expect(result.ok).toBe(false);
     expect(result.fields.kind).toBeTruthy();
     expect(result.fields.title).toBeTruthy();
+  });
+});
+
+describe("mentor tutoring domain rules", () => {
+  it("formats USDT prices without treating cents as whole tokens", () => {
+    expect(formatMentorPrice(12800, "USDT")).toBe("128 USDT");
+    expect(formatMentorPrice(12850, "USDT")).toBe("128.50 USDT");
+  });
+
+  it("calculates remaining weekly quota without going below zero", () => {
+    expect(remainingMentorQuota({ weekly_question_limit: 3, questions_used: 1 })).toBe(2);
+    expect(remainingMentorQuota({ weekly_question_limit: 3, questions_used: 8 })).toBe(0);
+  });
+
+  it("validates a concrete tutoring question", () => {
+    expect(validateMentorQuestion("  这段三浪的失效位应该放在哪里？  ")).toMatchObject({ ok: true, value: "这段三浪的失效位应该放在哪里？" });
+    expect(validateMentorQuestion("太短")).toMatchObject({ ok: false });
   });
 });

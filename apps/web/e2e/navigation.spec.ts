@@ -29,6 +29,18 @@ test("friends and messages remain private", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Fworkbench/);
   await page.goto("/workbench/entries/new");
   await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fentries%2Fnew/);
+  await page.goto("/tutoring");
+  await expect(page).toHaveURL(/\/login\?next=%2Ftutoring/);
+  await page.goto("/mentor/manage");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmentor%2Fmanage/);
+  await page.goto("/tutoring/not-a-thread");
+  await expect(page).toHaveURL(/\/login\?next=%2Ftutoring%2Fnot-a-thread/);
+});
+
+test("mentor catalog is public and explains the payment boundary", async ({ page }) => {
+  await page.goto("/mentors");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("和导师一起拆解");
+  await expect(page.getByText("导师确认收款后发放权益")).toBeVisible();
 });
 
 test("knowledge search opens a fully migrated article", async ({ page }) => {
