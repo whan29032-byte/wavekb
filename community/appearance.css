@@ -1,0 +1,673 @@
+/* WaveKB appearance layer. It changes color tokens only and preserves site layout. */
+html[data-wavekb-mode="system"] { color-scheme: light dark; }
+html[data-wavekb-mode="light"] { color-scheme: light; }
+html[data-wavekb-mode="dark"] { color-scheme: dark; }
+
+html[data-wavekb-theme] {
+  --wavekb-page: light-dark(#f3f6fa, #0b111a);
+  --wavekb-surface: light-dark(#ffffff, #101822);
+  --wavekb-surface-raised: light-dark(#f7f9fc, #131d29);
+  --wavekb-sidebar: light-dark(#f1f6fc, #101c2b);
+  --wavekb-text: light-dark(#122033, #e7edf5);
+  --wavekb-heading: light-dark(#0f1e32, #f1f5f9);
+  --wavekb-muted: light-dark(#64748b, #9ba9ba);
+  --wavekb-line: light-dark(#d8e0ea, #2d3948);
+  --wavekb-line-strong: light-dark(#c6d1df, #3a495c);
+  --wavekb-accent: light-dark(#557fb8, #78a6e4);
+  --wavekb-accent-strong: light-dark(#315f9d, #9bbdf0);
+  --wavekb-on-accent: light-dark(#f7fbff, #102033);
+  --wavekb-accent-soft: color-mix(in srgb, var(--wavekb-accent) 14%, var(--wavekb-surface));
+  --wavekb-accent-wash: color-mix(in srgb, var(--wavekb-accent) 8%, transparent);
+  --wavekb-shadow: light-dark(0 18px 48px rgb(30 56 88 / 10%), 0 18px 48px rgb(0 0 0 / 26%));
+  --wavekb-atmosphere:
+    radial-gradient(circle at 8% -8%, color-mix(in srgb, var(--wavekb-accent) 17%, transparent), transparent 31rem),
+    var(--wavekb-page);
+}
+
+html[data-wavekb-theme="sakura"] {
+  --wavekb-page: light-dark(#f8f4f7, #171118);
+  --wavekb-surface: light-dark(#fffafd, #1c151d);
+  --wavekb-surface-raised: light-dark(#fcf5f9, #241a22);
+  --wavekb-sidebar: light-dark(#fbf0f6, #211520);
+  --wavekb-text: light-dark(#352530, #f3e8ee);
+  --wavekb-heading: light-dark(#251820, #fff5fa);
+  --wavekb-muted: light-dark(#806b78, #b9a2af);
+  --wavekb-line: light-dark(#ead8e2, #493442);
+  --wavekb-line-strong: light-dark(#d9bdcb, #5b4152);
+  --wavekb-accent: light-dark(#a6426d, #ef8ab4);
+  --wavekb-accent-strong: light-dark(#813052, #ffaccb);
+  --wavekb-on-accent: light-dark(#fff9fc, #2b1420);
+  --wavekb-atmosphere:
+    radial-gradient(circle at 6% 2%, color-mix(in srgb, var(--wavekb-accent) 17%, transparent) 0 0.18rem, transparent 0.22rem),
+    radial-gradient(circle at 16% -8%, color-mix(in srgb, var(--wavekb-accent) 14%, transparent), transparent 27rem),
+    var(--wavekb-page);
+  background-size: 3.4rem 3.4rem, auto, auto;
+}
+
+html[data-wavekb-theme="aurora"] {
+  --wavekb-page: light-dark(#f1f7f7, #091716);
+  --wavekb-surface: light-dark(#fbffff, #0e1d1d);
+  --wavekb-surface-raised: light-dark(#f3faf9, #142625);
+  --wavekb-sidebar: light-dark(#eaf6f5, #0e2220);
+  --wavekb-text: light-dark(#183332, #def2ef);
+  --wavekb-heading: light-dark(#102625, #effbf9);
+  --wavekb-muted: light-dark(#617d7a, #91b1ad);
+  --wavekb-line: light-dark(#cfe2df, #284844);
+  --wavekb-line-strong: light-dark(#bad5d1, #38605b);
+  --wavekb-accent: light-dark(#187f7a, #52c7bc);
+  --wavekb-accent-strong: light-dark(#0f615d, #78d9cf);
+  --wavekb-on-accent: light-dark(#f4fffd, #0b2725);
+  --wavekb-atmosphere:
+    radial-gradient(ellipse at 12% -12%, color-mix(in srgb, var(--wavekb-accent) 18%, transparent), transparent 35rem),
+    radial-gradient(ellipse at 88% 0%, color-mix(in srgb, #65a9cb 10%, transparent), transparent 32rem),
+    var(--wavekb-page);
+}
+
+html[data-wavekb-theme="star"] {
+  --wavekb-page: light-dark(#f5f4f9, #11101a);
+  --wavekb-surface: light-dark(#fdfcff, #171622);
+  --wavekb-surface-raised: light-dark(#f7f5fc, #1e1c2a);
+  --wavekb-sidebar: light-dark(#f0eef8, #191727);
+  --wavekb-text: light-dark(#302d40, #ece9f7);
+  --wavekb-heading: light-dark(#211e31, #f8f5ff);
+  --wavekb-muted: light-dark(#716d83, #aaa5bd);
+  --wavekb-line: light-dark(#dcd8e9, #39364c);
+  --wavekb-line-strong: light-dark(#c8c1df, #4c4864);
+  --wavekb-accent: light-dark(#6959aa, #a79ae2);
+  --wavekb-accent-strong: light-dark(#4e408c, #c4b9f3);
+  --wavekb-on-accent: light-dark(#fbfaff, #1d1931);
+  --wavekb-atmosphere:
+    radial-gradient(circle at 8% 2%, color-mix(in srgb, #d9c8ff 35%, transparent) 0 0.08rem, transparent 0.12rem),
+    radial-gradient(circle at 8% -8%, color-mix(in srgb, var(--wavekb-accent) 17%, transparent), transparent 31rem),
+    var(--wavekb-page);
+  background-size: 4.8rem 4.8rem, auto, auto;
+}
+
+html[data-wavekb-theme="ink"] {
+  --wavekb-page: light-dark(#f3f4f4, #101214);
+  --wavekb-surface: light-dark(#fbfcfc, #171a1d);
+  --wavekb-surface-raised: light-dark(#f4f6f6, #1d2125);
+  --wavekb-sidebar: light-dark(#eef1f2, #171b1e);
+  --wavekb-text: light-dark(#252c31, #e6e9eb);
+  --wavekb-heading: light-dark(#151a1e, #f4f5f6);
+  --wavekb-muted: light-dark(#68737a, #9fa8ad);
+  --wavekb-line: light-dark(#d7dcdf, #353c41);
+  --wavekb-line-strong: light-dark(#bec6cb, #485158);
+  --wavekb-accent: light-dark(#526370, #9cabb5);
+  --wavekb-accent-strong: light-dark(#344550, #bdc7cd);
+  --wavekb-on-accent: light-dark(#f8fafb, #172027);
+  --wavekb-atmosphere:
+    linear-gradient(130deg, color-mix(in srgb, var(--wavekb-accent) 7%, transparent), transparent 34%),
+    var(--wavekb-page);
+}
+
+html[data-wavekb-theme="custom"] {
+  --wavekb-accent: var(--wavekb-user-accent, #557fb8);
+  --wavekb-accent-strong: color-mix(in srgb, var(--wavekb-user-accent, #557fb8) 78%, light-dark(#102033, #f7fbff));
+  --wavekb-on-accent: var(--wavekb-user-on-accent, #f7fbff);
+}
+
+html[data-wavekb-theme] body:has(#elliott-kb-inline) {
+  color: var(--wavekb-text) !important;
+  background: var(--wavekb-atmosphere) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline {
+  --foreground: var(--wavekb-text);
+  --muted-foreground: var(--wavekb-muted);
+  --border: var(--wavekb-line);
+  --accent: var(--wavekb-accent-soft);
+  --accent-foreground: var(--wavekb-accent-strong);
+  --card: var(--wavekb-surface);
+  --kb-surface: var(--wavekb-surface-raised);
+  --taste-panel-soft: var(--wavekb-surface-raised);
+  --taste-line-strong: var(--wavekb-line-strong);
+  --taste-accent: var(--wavekb-accent);
+  --taste-accent-strong: var(--wavekb-accent-strong);
+  color: var(--wavekb-text) !important;
+  border-color: var(--wavekb-line) !important;
+  background: var(--wavekb-surface) !important;
+  box-shadow: var(--wavekb-shadow) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-tree-pane {
+  border-inline-end-color: var(--wavekb-line) !important;
+  background:
+    linear-gradient(180deg, var(--wavekb-accent-wash), transparent 15rem),
+    var(--wavekb-sidebar) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(.kb-site-header, .kb-home-nav, .community-heading-row) {
+  border-color: var(--wavekb-line) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(h1, h2, h3, .kb-site-header > strong):not(.is-dark-surface *) {
+  color: var(--wavekb-heading) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-site-home-hero {
+  color: var(--wavekb-text) !important;
+  border-color: var(--wavekb-line-strong) !important;
+  background:
+    radial-gradient(circle at 88% 10%, color-mix(in srgb, var(--wavekb-accent) 18%, transparent), transparent 23rem),
+    linear-gradient(135deg, var(--wavekb-surface-raised), color-mix(in srgb, var(--wavekb-accent) 8%, var(--wavekb-surface)), var(--wavekb-surface-raised)) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wavekb-text) 9%, transparent) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-site-home-hero::before {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--wavekb-accent) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--wavekb-accent) 7%, transparent) 1px, transparent 1px) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-site-home-hero h1 {
+  color: var(--wavekb-heading) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-site-home-hero > p {
+  color: var(--wavekb-muted) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(
+  .kb-directory-group,
+  .kb-problem-navigator,
+  .community-empty-state,
+  .community-notice,
+  .research-editor-section,
+  .member-social-shell,
+  .member-message-shell
+) {
+  color: var(--wavekb-text) !important;
+  border-color: var(--wavekb-line) !important;
+  background: var(--wavekb-surface-raised) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(.text-muted, .community-muted, .member-muted) {
+  color: var(--wavekb-muted) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(a:not(.btn), .member-tool-arrow) {
+  color: var(--wavekb-accent-strong);
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(.btn-primary, .community-auth-primary) {
+  color: var(--wavekb-on-accent) !important;
+  border-color: var(--wavekb-accent) !important;
+  background: var(--wavekb-accent) !important;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--wavekb-accent) 22%, transparent) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-home-button {
+  color: var(--wavekb-text) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(.kb-home-button[aria-current="page"], .kb-tree-item > .btn[aria-pressed="true"]) {
+  color: var(--wavekb-accent-strong) !important;
+  border-color: color-mix(in srgb, var(--wavekb-accent) 40%, var(--wavekb-line)) !important;
+  background: var(--wavekb-accent-soft) !important;
+  box-shadow: inset 3px 0 0 var(--wavekb-accent) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(
+  .kb-theory-button,
+  .kb-directory-card,
+  .community-post-card,
+  .research-live-preview,
+  .member-review-fields,
+  .member-publish-panel,
+  .member-entry-card,
+  .member-person-card,
+  .member-conversation-card,
+  .member-message-bubble,
+  .member-tool-card,
+  .member-profile-stat,
+  .member-sticker-panel,
+  input,
+  select,
+  textarea
+) {
+  color: var(--wavekb-text) !important;
+  border-color: var(--wavekb-line) !important;
+  background: var(--wavekb-surface-raised) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(.btn, input, select, textarea, .kb-search-result):focus-visible {
+  outline-color: var(--wavekb-accent) !important;
+}
+
+html[data-wavekb-theme] .community-auth-dialog {
+  color: var(--wavekb-text);
+  border-color: var(--wavekb-line) !important;
+  background: var(--wavekb-surface) !important;
+}
+
+html[data-wavekb-theme] .community-auth-dialog :is(.community-auth-input, input) {
+  color: var(--wavekb-text) !important;
+  border-color: var(--wavekb-line) !important;
+  background: var(--wavekb-surface-raised) !important;
+}
+
+html[data-wavekb-theme] .community-auth-dialog .community-auth-primary {
+  color: var(--wavekb-on-accent) !important;
+  border-color: var(--wavekb-accent) !important;
+  background: var(--wavekb-accent) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html[data-wavekb-theme] body #elliott-kb-inline :is(.btn:hover, .kb-search-result:hover) {
+    color: var(--wavekb-accent-strong) !important;
+    border-color: color-mix(in srgb, var(--wavekb-accent) 42%, var(--wavekb-line)) !important;
+    background: var(--wavekb-accent-soft) !important;
+  }
+
+  html[data-wavekb-theme] body #elliott-kb-inline .btn-primary:hover {
+    color: var(--wavekb-on-accent) !important;
+    border-color: var(--wavekb-accent-strong) !important;
+    background: var(--wavekb-accent-strong) !important;
+  }
+}
+
+/* Compact top-left appearance control. */
+body #elliott-kb-inline .wavekb-appearance {
+  position: relative;
+  z-index: 40;
+  margin-block-end: 0.75rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-toggle {
+  display: grid;
+  grid-template-columns: 1.35rem minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  width: 100%;
+  min-height: 2.8rem;
+  padding: 0.48rem 0.62rem;
+  color: var(--wavekb-text);
+  border: 1px solid var(--wavekb-line);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--wavekb-surface) 90%, var(--wavekb-accent) 10%);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--wavekb-accent) 8%, transparent);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+body #elliott-kb-inline .wavekb-current-swatch,
+body #elliott-kb-inline .wavekb-theme-swatch {
+  display: block;
+  border: 1px solid color-mix(in srgb, var(--wavekb-accent) 45%, var(--wavekb-line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--wavekb-accent) 48%, var(--wavekb-surface)), var(--wavekb-accent));
+  box-shadow: inset 0 1px rgb(255 255 255 / 24%);
+}
+
+body #elliott-kb-inline .wavekb-current-swatch {
+  width: 1.35rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+
+body #elliott-kb-inline .wavekb-appearance-toggle-copy {
+  display: grid;
+  line-height: 1.15;
+}
+
+body #elliott-kb-inline .wavekb-appearance-toggle-copy strong {
+  font-size: 0.84rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-toggle-copy small,
+body #elliott-kb-inline .wavekb-appearance-action {
+  color: var(--wavekb-muted);
+  font-size: 0.7rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-panel {
+  position: absolute;
+  inset-block-start: calc(100% + 0.5rem);
+  inset-inline-start: 0;
+  z-index: 90;
+  width: min(20rem, calc(100vw - 2rem));
+  padding: 0.9rem;
+  color: var(--wavekb-text);
+  border: 1px solid var(--wavekb-line-strong);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--wavekb-surface) 94%, transparent);
+  box-shadow: 0 22px 54px color-mix(in srgb, var(--wavekb-heading) 20%, transparent), inset 0 1px rgb(255 255 255 / 10%);
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+}
+
+body #elliott-kb-inline .wavekb-appearance-panel[hidden] { display: none; }
+
+body #elliott-kb-inline .wavekb-appearance-heading {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-block-end: 0.8rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-heading strong {
+  color: var(--wavekb-heading);
+  font-size: 1rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-heading p {
+  margin: 0.08rem 0 0;
+  color: var(--wavekb-muted);
+  font-size: 0.72rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-close,
+body #elliott-kb-inline .wavekb-appearance-footer button {
+  padding: 0;
+  color: var(--wavekb-accent-strong);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline :is(.wavekb-mode-picker, .wavekb-theme-picker) {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+body #elliott-kb-inline :is(.wavekb-mode-picker, .wavekb-theme-picker) legend,
+body #elliott-kb-inline .wavekb-custom-color > label {
+  display: block;
+  margin-block-end: 0.42rem;
+  color: var(--wavekb-muted);
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+body #elliott-kb-inline .wavekb-mode-picker > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.22rem;
+  margin-block-end: 0.8rem;
+  padding: 0.22rem;
+  border: 1px solid var(--wavekb-line);
+  border-radius: 11px;
+  background: var(--wavekb-surface-raised);
+}
+
+body #elliott-kb-inline .wavekb-mode-picker button {
+  min-height: 2rem;
+  color: var(--wavekb-muted);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .wavekb-mode-picker button[aria-checked="true"] {
+  color: var(--wavekb-accent-strong);
+  background: var(--wavekb-accent-soft);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--wavekb-heading) 10%, transparent);
+}
+
+body #elliott-kb-inline .wavekb-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+body #elliott-kb-inline .wavekb-theme-option {
+  display: grid;
+  grid-template-columns: 1.65rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+  min-height: 3.45rem;
+  padding: 0.5rem;
+  color: var(--wavekb-text);
+  border: 1px solid var(--wavekb-line);
+  border-radius: 11px;
+  background: var(--wavekb-surface-raised);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .wavekb-theme-option[aria-checked="true"] {
+  border-color: var(--wavekb-accent);
+  background: var(--wavekb-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--wavekb-accent);
+}
+
+body #elliott-kb-inline .wavekb-theme-swatch {
+  width: 1.65rem;
+  aspect-ratio: 1;
+  border-radius: 9px;
+}
+
+body #elliott-kb-inline .wavekb-theme-swatch[data-swatch="sakura"] { background: linear-gradient(135deg, #f7dbe7, #a6426d); }
+body #elliott-kb-inline .wavekb-theme-swatch[data-swatch="aurora"] { background: linear-gradient(135deg, #bfeee8, #187f7a); }
+body #elliott-kb-inline .wavekb-theme-swatch[data-swatch="star"] { background: linear-gradient(135deg, #ded7f7, #6959aa); }
+body #elliott-kb-inline .wavekb-theme-swatch[data-swatch="ink"] { background: linear-gradient(135deg, #d9dee1, #455560); }
+
+body #elliott-kb-inline .wavekb-theme-option strong,
+body #elliott-kb-inline .wavekb-theme-option small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body #elliott-kb-inline .wavekb-theme-option strong { font-size: 0.76rem; }
+body #elliott-kb-inline .wavekb-theme-option small { color: var(--wavekb-muted); font-size: 0.62rem; }
+
+body #elliott-kb-inline .wavekb-custom-color {
+  margin-block-start: 0.75rem;
+  padding-block-start: 0.75rem;
+  border-block-start: 1px solid var(--wavekb-line);
+}
+
+body #elliott-kb-inline .wavekb-custom-color > div {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  gap: 0.45rem;
+}
+
+body #elliott-kb-inline .wavekb-custom-color input[type="color"] {
+  width: 2.4rem;
+  min-height: 2.2rem;
+  padding: 0.15rem;
+  border: 1px solid var(--wavekb-line);
+  border-radius: 9px;
+  background: var(--wavekb-surface-raised);
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .wavekb-custom-color button {
+  color: var(--wavekb-on-accent);
+  border: 1px solid var(--wavekb-accent);
+  border-radius: 9px;
+  background: var(--wavekb-accent);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .wavekb-custom-color small {
+  display: block;
+  margin-block-start: 0.32rem;
+  color: var(--wavekb-muted);
+  font-size: 0.65rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-footer {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 1.8rem;
+  margin-block-start: 0.55rem;
+}
+
+body #elliott-kb-inline .wavekb-appearance-footer span {
+  color: var(--wavekb-muted);
+  font-size: 0.66rem;
+}
+
+body #elliott-kb-inline :is(.wavekb-appearance-toggle, .wavekb-appearance-panel button, .wavekb-appearance-panel input):focus-visible {
+  outline: 2px solid var(--wavekb-accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  body #elliott-kb-inline .wavekb-appearance-toggle:hover,
+  body #elliott-kb-inline .wavekb-theme-option:hover {
+    border-color: color-mix(in srgb, var(--wavekb-accent) 52%, var(--wavekb-line));
+    background: var(--wavekb-accent-soft);
+  }
+}
+
+@media (max-width: 700px) {
+  body #elliott-kb-inline .wavekb-appearance-panel {
+    position: fixed;
+    inset: 0.75rem;
+    width: auto;
+    max-height: calc(100dvh - 1.5rem);
+    overflow: auto;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  body #elliott-kb-inline .wavekb-appearance-panel {
+    background: var(--wavekb-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body #elliott-kb-inline .wavekb-appearance-toggle { transition: none; }
+}
+
+@media (forced-colors: active) {
+  body #elliott-kb-inline :is(.wavekb-current-swatch, .wavekb-theme-swatch) {
+    border-color: CanvasText;
+    background: Canvas;
+  }
+}
+
+/* Keep dark feature surfaces legible under every light, dark and custom theme. */
+html[data-wavekb-theme] body #elliott-kb-inline .member-rewards-page .member-rewards-hero .member-rewards-hero-copy > h1 {
+  color: var(--reward-hero-heading) !important;
+  background: none !important;
+  background-image: none !important;
+  background-clip: border-box !important;
+  -webkit-background-clip: border-box !important;
+  -webkit-text-fill-color: var(--reward-hero-heading) !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .member-rewards-page .member-rewards-hero .member-eyebrow {
+  color: var(--reward-hero-kicker) !important;
+  -webkit-text-fill-color: var(--reward-hero-kicker) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .member-rewards-page .member-rewards-hero .text-muted {
+  color: var(--reward-hero-body) !important;
+  -webkit-text-fill-color: var(--reward-hero-body) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(
+  .member-mission-card,
+  .member-reward-product,
+  .member-leaderboard-row,
+  .member-entry-card,
+  .member-person-card,
+  .member-conversation-card,
+  .member-message-shell,
+  .member-tool-card,
+  .member-profile-stat,
+  .member-public-post-card,
+  .community-post-card,
+  .research-editor-section
+) {
+  color: var(--wavekb-text) !important;
+  border-color: var(--wavekb-line) !important;
+}
+
+/* Local dark surfaces own their contrast; global heading tokens must not leak in. */
+html[data-wavekb-theme] body #elliott-kb-inline .mentor-hero,
+html[data-wavekb-theme] body #elliott-kb-inline .mentor-hero :is(h1, h2, h3, strong) {
+  color: #f8fbff !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .mentor-hero > p:not(.mentor-hero-eyebrow) {
+  color: rgba(244, 248, 255, .78) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline :is(
+  .member-mission-card,
+  .member-reward-product,
+  .member-entry-card,
+  .member-person-card,
+  .member-conversation-card,
+  .member-message-shell,
+  .member-tool-card,
+  .member-profile-stat,
+  .member-public-post-card,
+  .community-post-card,
+  .research-editor-section
+) :is(h1, h2, h3) {
+  color: var(--wavekb-heading) !important;
+  -webkit-text-fill-color: var(--wavekb-heading) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .member-leaderboard-section .member-eyebrow {
+  display: none !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-breadcrumb-list a {
+  color: var(--wavekb-text) !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .kb-breadcrumb-current {
+  color: var(--wavekb-text) !important;
+  border-color: var(--wavekb-line) !important;
+  background: var(--wavekb-surface-raised) !important;
+}
+
+/* Selection must stay readable across custom palettes and must not resemble a broken color card. */
+html[data-wavekb-theme] body #elliott-kb-inline ::selection {
+  color: var(--wavekb-on-accent) !important;
+  background: var(--wavekb-accent) !important;
+  -webkit-text-fill-color: var(--wavekb-on-accent) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .member-rewards-hero ::selection {
+  color: #07111f !important;
+  background: #f4cc67 !important;
+  -webkit-text-fill-color: #07111f !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .member-reward-balance-card {
+  color: #f8fafc !important;
+  border-color: rgba(201, 214, 232, .28) !important;
+  background: rgba(76, 108, 149, .54) !important;
+}
+
+html[data-wavekb-theme] body #elliott-kb-inline .member-reward-balance-card :is(strong, span, p) {
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+}

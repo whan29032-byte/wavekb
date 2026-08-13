@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>WaveKB 好友与聊天桌面预览</title>
+  <link rel="stylesheet" href="../community/messenger-desktop.css?v=wavekb-messenger-desktop-20260812-2">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      min-height: 100vh;
+      overflow: hidden;
+      color: #172033;
+      background:
+        radial-gradient(circle at 22% 14%, rgba(173, 207, 248, .48), transparent 30%),
+        linear-gradient(135deg, #eef4fb 0%, #f8fbff 58%, #e9f0f9 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    }
+    .preview-shell { max-width: 1120px; margin: 0 auto; padding: 48px; }
+    .preview-kicker { color: #4572a8; font-size: 12px; font-weight: 750; letter-spacing: .14em; }
+    .preview-title { max-width: 560px; margin: 12px 0; font-size: 42px; line-height: 1.1; }
+    .preview-copy { max-width: 560px; color: #65738a; font-size: 16px; line-height: 1.8; }
+    #elliott-kb-inline button { font: inherit; }
+    #elliott-kb-inline .member-avatar {
+      display: grid; place-items: center; color: #fff; background: #2d405e; font-weight: 700;
+    }
+    #elliott-kb-inline .member-chat-contact-copy { min-width: 0; }
+    #elliott-kb-inline .member-chat-contact-name { display: flex; align-items: center; gap: 4px; }
+    #elliott-kb-inline .member-chat-unread { position: absolute; right: 8px; bottom: 6px; }
+    #elliott-kb-inline .member-messenger { height: 100%; }
+    #elliott-kb-inline .member-chat-sidebar { height: 100%; }
+  </style>
+</head>
+<body>
+  <main class="preview-shell">
+    <div class="preview-kicker">WAVEKB / EMBEDDED MESSENGER</div>
+    <h1 class="preview-title">像桌面客户端一样，在网页里保持联系。</h1>
+    <p class="preview-copy">好友目录保持窄而紧凑；双击联系人后，聊天窗口独立浮出。面板与窗口都可拖动、缩放、置顶、最小化，不会把知识库变成聊天页面。</p>
+  </main>
+
+  <div id="elliott-kb-inline">
+    <div class="wavekb-messenger-desktop">
+      <section class="wavekb-chat-window" style="left:40px;top:172px;width:960px;height:780px;z-index:12002" aria-label="聊天窗口">
+        <header class="wavekb-chat-windowbar">
+          <div class="wavekb-chat-identity">
+            <div class="member-avatar wavekb-chat-avatar">浪</div>
+            <div class="wavekb-chat-identity-copy"><strong>浪级观察员</strong><span class="wavekb-chat-presence">在线</span></div>
+          </div>
+          <div class="wavekb-chat-window-actions">
+            <button class="wavekb-window-control wavekb-window-pin">已置顶</button>
+            <button class="wavekb-window-control" aria-label="最小化">—</button>
+            <button class="wavekb-window-control" aria-label="最大化">□</button>
+            <button class="wavekb-window-control" aria-label="关闭">×</button>
+          </div>
+        </header>
+        <div class="wavekb-chat-stream">
+          <div class="wavekb-chat-message">
+            <div class="member-avatar wavekb-chat-message-avatar">浪</div>
+            <article class="wavekb-chat-bubble"><p>我把 4 小时图整理好了，浪 4 仍未进入浪 1 价格区。</p><span class="wavekb-chat-message-meta"><time class="wavekb-chat-time">15:28</time></span></article>
+          </div>
+          <div class="wavekb-chat-message is-mine">
+            <article class="wavekb-chat-bubble"><p>收到，我再核验一下回撤比例和内部结构。</p><span class="wavekb-chat-message-meta"><time class="wavekb-chat-time">15:29</time><span class="wavekb-chat-delivery">已发送</span></span></article>
+          </div>
+          <div class="wavekb-chat-message">
+            <div class="member-avatar wavekb-chat-message-avatar">浪</div>
+            <article class="wavekb-chat-bubble"><span class="wavekb-chat-sticker">👍</span><span class="wavekb-chat-message-meta"><time class="wavekb-chat-time">15:30</time></span></article>
+          </div>
+        </div>
+        <p class="wavekb-chat-status"></p>
+        <form class="wavekb-chat-composer">
+          <div class="wavekb-chat-tools"><button class="wavekb-chat-tool" type="button">表情</button><button class="wavekb-chat-tool" type="button">截图</button><span class="wavekb-chat-image-hint">可粘贴或拖拽图片</span></div>
+          <div class="wavekb-chat-input-row"><textarea rows="3" placeholder="输入消息…"></textarea><button class="wavekb-chat-send" type="button">发送</button></div>
+        </form>
+      </section>
+
+      <section class="member-messenger-window is-directory-view wavekb-friend-panel is-pinned" style="right:24px;top:62px;left:auto;z-index:12003" aria-label="好友目录">
+        <header class="member-social-heading member-messenger-heading member-messenger-windowbar">
+          <div class="member-heading-copy"><div class="member-avatar wavekb-friend-owner-avatar">悠</div><span class="wavekb-friend-status-dot"></span><h1>我的好友</h1></div>
+          <div class="member-messenger-window-actions"><button class="member-sound-toggle" title="提示音已开">声</button><button class="member-messenger-pin">固定</button><button class="member-messenger-minimize">—</button><button class="member-messenger-close">×</button></div>
+        </header>
+        <div class="member-messenger is-directory-view">
+          <aside class="member-chat-sidebar">
+            <div class="member-chat-sidebar-top">
+              <input class="member-chat-sidebar-search" type="search" placeholder="搜索好友 / UID">
+              <div class="member-chat-utility-list">
+                <button class="member-chat-utility-row"><span class="member-chat-utility-icon">＋</span><span class="member-chat-utility-label">新朋友</span><span class="member-chat-utility-count">1</span></button>
+                <button class="member-chat-utility-row"><span class="member-chat-utility-icon">•</span><span class="member-chat-utility-label">消息通知</span><span class="member-chat-utility-count">3</span></button>
+              </div>
+              <div class="member-chat-directory-tabs"><button class="is-active">好友</button><button>老师</button></div>
+            </div>
+            <section class="member-chat-section member-recent-conversations is-collapsed">
+              <button class="member-chat-section-title member-chat-collapse-toggle"><strong>最近会话</strong><span>2</span><span class="member-chat-collapse-mark">⌄</span></button>
+            </section>
+            <section class="member-chat-section member-friend-directory-section">
+              <button class="member-chat-section-title member-chat-collapse-toggle"><strong>我的好友 · 3 在线</strong><span class="member-chat-group-count">8</span><span class="member-chat-collapse-mark">⌄</span></button>
+              <div class="member-chat-list">
+                <button class="member-chat-contact is-active"><span class="member-avatar">浪</span><span class="member-chat-contact-copy"><span class="member-chat-contact-name"><strong>浪级观察员</strong></span><span class="member-chat-contact-preview">浪 4 的结构已经整理好了</span></span><time class="member-chat-contact-time">15:30</time><span class="member-chat-unread">2</span></button>
+                <button class="member-chat-contact"><span class="member-avatar">图</span><span class="member-chat-contact-copy"><span class="member-chat-contact-name"><strong>图表笔记</strong></span><span class="member-chat-contact-preview">交易计划与图表复盘</span></span><time class="member-chat-contact-time">昨天</time></button>
+                <button class="member-chat-contact"><span class="member-avatar">市</span><span class="member-chat-contact-copy"><span class="member-chat-contact-name"><strong>市场行者</strong></span><span class="member-chat-contact-preview">下次一起交流</span></span><time class="member-chat-contact-time">周一</time></button>
+                <button class="member-chat-contact"><span class="member-avatar">B</span><span class="member-chat-contact-copy"><span class="member-chat-contact-name"><strong>BTC 研究员</strong></span><span class="member-chat-contact-preview">[图片]</span></span><time class="member-chat-contact-time">周一</time></button>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+      <div class="wavekb-messenger-taskbar"></div>
+    </div>
+  </div>
+  <script>
+    document.querySelectorAll('.member-chat-collapse-toggle').forEach(button => button.addEventListener('click', () => {
+      const section = button.closest('.member-chat-section');
+      section.classList.toggle('is-collapsed');
+      const list = section.querySelector('.member-chat-list');
+      if (list) list.hidden = section.classList.contains('is-collapsed');
+    }));
+  </script>
+</body>
+</html>

@@ -1,0 +1,343 @@
+#elliott-kb-inline .workbench-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.34fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+#elliott-kb-inline .workbench-main {
+  min-width: 0;
+}
+
+#elliott-kb-inline .workbench-section-nav {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(8.5rem, 1fr));
+  gap: 0.35rem;
+  margin-block-end: 1rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--card) 88%, var(--background));
+}
+
+#elliott-kb-inline .workbench-section-link {
+  display: grid;
+  min-height: 2.75rem;
+  place-items: center;
+  padding: 0.55rem 1rem;
+  color: var(--muted-foreground);
+  border: 1px solid transparent;
+  border-radius: 0.62rem;
+  font-weight: 720;
+  text-decoration: none;
+  transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+#elliott-kb-inline .workbench-section-link:hover,
+#elliott-kb-inline .workbench-section-link:focus-visible {
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+#elliott-kb-inline .workbench-section-link[aria-current="page"] {
+  color: #fff;
+  border-color: #315f9f;
+  background: #315f9f;
+}
+
+#elliott-kb-inline .workbench-record-center {
+  display: grid;
+  gap: 1rem;
+}
+
+#elliott-kb-inline .workbench-record-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--border);
+  border-radius: 0.95rem;
+  background: var(--card);
+}
+
+#elliott-kb-inline .workbench-record-heading h1,
+#elliott-kb-inline .workbench-record-heading p {
+  margin-block: 0.2rem;
+}
+
+#elliott-kb-inline .workbench-record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+#elliott-kb-inline .workbench-record-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--card) 88%, var(--background));
+}
+
+#elliott-kb-inline .workbench-record-filter {
+  display: grid;
+  min-height: 2.75rem;
+  place-items: center;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted-foreground);
+  border: 1px solid transparent;
+  border-radius: 0.62rem;
+  font-weight: 680;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+#elliott-kb-inline .workbench-record-filter:hover,
+#elliott-kb-inline .workbench-record-filter:focus-visible {
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+#elliott-kb-inline .workbench-record-filter[aria-current="page"] {
+  color: var(--foreground);
+  border-color: color-mix(in srgb, #315f9f 52%, var(--border));
+  background: color-mix(in srgb, #315f9f 12%, var(--card));
+}
+
+#elliott-kb-inline .workbench-record-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+#elliott-kb-inline .workbench-record-list > .community-notice {
+  grid-column: 1 / -1;
+}
+
+#elliott-kb-inline .workbench-record-card {
+  display: grid;
+  align-content: start;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: var(--card);
+}
+
+#elliott-kb-inline .workbench-record-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+#elliott-kb-inline .workbench-record-kind {
+  padding: 0.2rem 0.55rem;
+  color: #315f9f;
+  border-radius: 999px;
+  background: color-mix(in srgb, #315f9f 12%, var(--card));
+  font-size: 0.75rem;
+  font-weight: 740;
+}
+
+#elliott-kb-inline .workbench-record-title {
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 760;
+  text-decoration: none;
+}
+
+#elliott-kb-inline .workbench-record-title:hover,
+#elliott-kb-inline .workbench-record-title:focus-visible {
+  color: #315f9f;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+#elliott-kb-inline .workbench-record-card p {
+  margin: 0;
+  line-height: 1.65;
+}
+
+#elliott-kb-inline .workbench-stepper {
+  display: grid;
+  grid-template-columns: repeat(11, minmax(3.25rem, 1fr));
+  gap: 0.35rem;
+  overflow-x: auto;
+  margin-block-end: 1rem;
+  padding-block-end: 0.5rem;
+}
+
+#elliott-kb-inline .workbench-step {
+  display: grid;
+  justify-items: center;
+  gap: 0.18rem;
+  min-width: 3.25rem;
+  padding: 0.45rem 0.3rem;
+  color: var(--muted-foreground);
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  text-decoration: none;
+}
+
+#elliott-kb-inline .workbench-step[aria-current="step"] {
+  color: var(--foreground);
+  border-color: color-mix(in srgb, #9a762f 55%, var(--border));
+  background: color-mix(in srgb, var(--card) 90%, #f2e5c8 10%);
+}
+
+#elliott-kb-inline .workbench-step-number {
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+#elliott-kb-inline .workbench-step-title {
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+#elliott-kb-inline .workbench-form-card,
+#elliott-kb-inline .workbench-results {
+  padding: clamp(1rem, 3vw, 1.4rem);
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--card);
+}
+
+#elliott-kb-inline .workbench-form-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+#elliott-kb-inline .workbench-form-card h1,
+#elliott-kb-inline .workbench-form-card p,
+#elliott-kb-inline .workbench-results h2,
+#elliott-kb-inline .workbench-results p {
+  margin-block: 0.2rem;
+}
+
+#elliott-kb-inline .workbench-form-card select,
+#elliott-kb-inline .workbench-form-card input,
+#elliott-kb-inline .workbench-form-card textarea {
+  width: 100%;
+  padding: 0.72rem 0.8rem;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--card);
+  font: inherit;
+}
+
+#elliott-kb-inline .workbench-form-card input[type="checkbox"] {
+  width: 1.1rem;
+  min-height: 1.1rem;
+  margin: .35rem 0;
+  accent-color: #315f9f;
+}
+
+#elliott-kb-inline .workbench-results {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 0.7rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 92%, #f3ead5 8%), var(--card));
+}
+
+#elliott-kb-inline .workbench-result-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block-end: 0.55rem;
+  border-block-end: 1px solid var(--border);
+}
+
+#elliott-kb-inline .workbench-disclaimer {
+  padding: 0.7rem;
+  border-inline-start: 3px solid #9a762f;
+}
+
+#elliott-kb-inline .workbench-ai-action {
+  display: grid;
+  gap: .65rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+#elliott-kb-inline .workbench-ai-action p {
+  margin: 0;
+}
+
+#elliott-kb-inline .workbench-violations {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+  color: #9b2c2c;
+}
+
+#elliott-kb-inline .workbench-nav-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-block-start: 0.75rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--border);
+}
+
+@media (max-width: 900px) {
+  #elliott-kb-inline .workbench-shell {
+    grid-template-columns: 1fr;
+  }
+
+  #elliott-kb-inline .workbench-results {
+    position: static;
+  }
+
+  #elliott-kb-inline .workbench-record-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  #elliott-kb-inline .workbench-record-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  #elliott-kb-inline .workbench-section-nav,
+  #elliott-kb-inline .workbench-record-filters {
+    width: 100%;
+  }
+
+  #elliott-kb-inline .workbench-record-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #elliott-kb-inline .workbench-record-list {
+    grid-template-columns: 1fr;
+  }
+
+  #elliott-kb-inline .workbench-record-actions > .btn {
+    flex: 1 1 100%;
+  }
+
+  #elliott-kb-inline .workbench-stepper {
+    grid-template-columns: repeat(11, 3.4rem);
+  }
+
+  #elliott-kb-inline .workbench-form-card,
+  #elliott-kb-inline .workbench-results {
+    padding: 0.85rem;
+  }
+}

@@ -1,0 +1,16 @@
+[
+  {"id": "front-matter", "pdf_start": 1, "pdf_end": 29, "book_start": null, "book_end": null},
+  {"id": "chapter-01", "pdf_start": 30, "pdf_end": 79, "book_start": 3, "book_end": 52},
+  {"id": "chapter-02", "pdf_start": 80, "pdf_end": 125, "book_start": 53, "book_end": 98},
+  {"id": "chapter-03", "pdf_start": 126, "pdf_end": 167, "book_start": 99, "book_end": 140},
+  {"id": "chapter-04", "pdf_start": 168, "pdf_end": 195, "book_start": 141, "book_end": 168},
+  {"id": "chapter-05", "pdf_start": 196, "pdf_end": 211, "book_start": 169, "book_end": 184},
+  {"id": "chapter-06", "pdf_start": 212, "pdf_end": 231, "book_start": 185, "book_end": 204},
+  {"id": "chapter-07", "pdf_start": 232, "pdf_end": 251, "book_start": 205, "book_end": 224},
+  {"id": "chapter-08", "pdf_start": 252, "pdf_end": 268, "book_start": 225, "book_end": 241},
+  {"id": "appendix", "pdf_start": 269, "pdf_end": 308, "book_start": 242, "book_end": 281},
+  {"id": "glossary", "pdf_start": 309, "pdf_end": 313, "book_start": 282, "book_end": 286},
+  {"id": "publisher-postscript", "pdf_start": 314, "pdf_end": 320, "book_start": 287, "book_end": 293},
+  {"id": "blank-final-page", "pdf_start": 321, "pdf_end": 321, "book_start": null, "book_end": null}
+]
+

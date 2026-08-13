@@ -1,0 +1,15 @@
+{
+  "name": "elliott-wave-ai-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "node --experimental-strip-types src/typecheck.ts",
+    "dev": "node --watch src/server.ts",
+    "start": "node src/server.ts"
+  }
+}

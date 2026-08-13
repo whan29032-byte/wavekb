@@ -1,0 +1,431 @@
+{
+  "title": "艾略特波浪理论全书知识结构",
+  "unit_count": 117,
+  "roots": [
+    {
+      "id": "rules",
+      "title": "01 强制规则与失效边界",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "rules-第一章",
+          "title": "第一章",
+          "unit_ids": [
+            "ewp-condition-free-market-data"
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "foundations",
+      "title": "02 基础结构与浪级",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "foundations-第一章",
+          "title": "第一章",
+          "unit_ids": [
+            "ewp-definition-function-vs-mode",
+            "ewp-definition-repeating-form",
+            "ewp-definition-wave-degree",
+            "ewp-structure-fractal-cycle",
+            "ewp-structure-motive-corrective"
+          ],
+          "children": []
+        },
+        {
+          "id": "foundations-第三章",
+          "title": "第三章",
+          "unit_ids": [
+            "ewp-definition-fibonacci-sequence",
+            "ewp-definition-golden-ratio",
+            "ewp-definition-golden-section",
+            "ewp-definition-logarithmic-spiral",
+            "ewp-structure-fibonacci-wave-counts",
+            "ewp-theory-nonlinear-market-development"
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "motive",
+      "title": "03 驱动浪",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "motive-第一章",
+          "title": "第一章",
+          "unit_ids": [
+            "ewp-guide-diagonal",
+            "ewp-guide-extension",
+            "ewp-guide-truncation",
+            "ewp-rule-diagonal",
+            "ewp-rule-impulse-core"
+          ],
+          "children": []
+        },
+        {
+          "id": "motive-第二章",
+          "title": "第二章",
+          "unit_ids": [
+            "ewp-personality-wave-1",
+            "ewp-personality-wave-2",
+            "ewp-personality-wave-3",
+            "ewp-personality-wave-4",
+            "ewp-personality-wave-5"
+          ],
+          "children": []
+        },
+        {
+          "id": "motive-第六章",
+          "title": "第六章",
+          "unit_ids": [
+            "ewp-guide-commodity-fifth-extension"
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "corrective",
+      "title": "04 调整浪",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "corrective-第一章",
+          "title": "第一章",
+          "unit_ids": [
+            "ewp-guide-combination",
+            "ewp-guide-flat",
+            "ewp-guide-triangle",
+            "ewp-rule-combination",
+            "ewp-rule-correction-not-five",
+            "ewp-rule-flat",
+            "ewp-rule-triangle",
+            "ewp-rule-zigzag"
+          ],
+          "children": []
+        },
+        {
+          "id": "corrective-第二章",
+          "title": "第二章",
+          "unit_ids": [
+            "ewp-guide-alternation",
+            "ewp-guide-correction-depth",
+            "ewp-guide-zigzag",
+            "ewp-personality-wave-a",
+            "ewp-personality-wave-b",
+            "ewp-personality-wave-c",
+            "ewp-personality-wave-e"
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "methods",
+      "title": "05 分析方法、比例与时间",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "methods-前置内容",
+          "title": "前置内容",
+          "unit_ids": [
+            "ewp-front-market-context",
+            "ewp-method-chart-practice"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-原出版者后记",
+          "title": "原出版者后记",
+          "unit_ids": [
+            "ewp-method-stable-view-flexible-count"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-第一章",
+          "title": "第一章",
+          "unit_ids": [
+            "ewp-method-orthodox-endpoint",
+            "ewp-method-wave-count-density"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-第七章",
+          "title": "第七章",
+          "unit_ids": [
+            "ewp-method-classical-pattern-mapping",
+            "ewp-method-dow-confirmation",
+            "ewp-method-indicators-assist-count"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-第三章",
+          "title": "第三章",
+          "unit_ids": [
+            "ewp-theory-ratios-over-numbers"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-第二章",
+          "title": "第二章",
+          "unit_ids": [
+            "ewp-guide-throw-over",
+            "ewp-guide-wave-equality",
+            "ewp-method-channeling",
+            "ewp-method-multiple-counts",
+            "ewp-method-objective-invalidation",
+            "ewp-method-ratios-support-structure",
+            "ewp-method-right-look",
+            "ewp-method-scale",
+            "ewp-method-theory-vs-trading",
+            "ewp-method-wait-unclear"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-第八章",
+          "title": "第八章",
+          "unit_ids": [
+            "ewp-guide-time-subordinate",
+            "ewp-method-count-first-never-blind-scenario",
+            "ewp-method-long-forecast-tentative"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-第六章",
+          "title": "第六章",
+          "unit_ids": [
+            "ewp-method-index-before-stock"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-第四章",
+          "title": "第四章",
+          "unit_ids": [
+            "ewp-guide-corrective-ratios",
+            "ewp-guide-motive-ratios",
+            "ewp-guide-retracement-ratios",
+            "ewp-method-fibonacci-time",
+            "ewp-method-ratio-analysis",
+            "ewp-method-ratio-orthodox-endpoints",
+            "ewp-method-target-confluence"
+          ],
+          "children": []
+        },
+        {
+          "id": "methods-附录",
+          "title": "附录",
+          "unit_ids": [
+            "ewp-method-alternative-count-scorecard",
+            "ewp-method-forecast-as-background",
+            "ewp-method-momentum-as-degree-confirmation",
+            "ewp-method-nominal-vs-real"
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "psychology",
+      "title": "06 波浪个性、情绪与确认",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "psychology-第七章",
+          "title": "第七章",
+          "unit_ids": [
+            "ewp-theory-news-reaction"
+          ],
+          "children": []
+        },
+        {
+          "id": "psychology-第二章",
+          "title": "第二章",
+          "unit_ids": [
+            "ewp-guide-volume-personality"
+          ],
+          "children": []
+        },
+        {
+          "id": "psychology-附录",
+          "title": "附录",
+          "unit_ids": [
+            "ewp-guide-fifth-wave-psychology"
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "markets",
+      "title": "07 市场适用与历史案例",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "markets-前置内容",
+          "title": "前置内容",
+          "unit_ids": [
+            "ewp-case-elliott-1935-forecast"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-原出版者后记",
+          "title": "原出版者后记",
+          "unit_ids": [
+            "ewp-case-time-and-equality-revision"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-第七章",
+          "title": "第七章",
+          "unit_ids": [
+            "ewp-case-decade-pattern",
+            "ewp-case-kondratieff",
+            "ewp-guide-economic-correlation-instability",
+            "ewp-guide-fixed-cycle-limit"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-第三章",
+          "title": "第三章",
+          "unit_ids": [
+            "ewp-case-fibonacci-history",
+            "ewp-case-golden-rectangle",
+            "ewp-case-long-market-spirals"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-第五章",
+          "title": "第五章",
+          "unit_ids": [
+            "ewp-case-millennium-wave",
+            "ewp-case-supercycle-1789",
+            "ewp-case-supercycle-1932",
+            "ewp-guide-scale-invariance-long-short",
+            "ewp-theory-probability-and-degree",
+            "ewp-theory-social-pattern-endogenous"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-第八章",
+          "title": "第八章",
+          "unit_ids": [
+            "ewp-case-1978-alternative-counts",
+            "ewp-error-bearish-count-out-of-context"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-第六章",
+          "title": "第六章",
+          "unit_ids": [
+            "ewp-case-commodity-ratios",
+            "ewp-case-gold-1970s",
+            "ewp-case-gold-price-control",
+            "ewp-case-individual-stocks",
+            "ewp-guide-commodity-differences",
+            "ewp-guide-gold-cross-confirmation",
+            "ewp-guide-stock-market-alignment"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-第四章",
+          "title": "第四章",
+          "unit_ids": [
+            "ewp-case-benner-cycle",
+            "ewp-case-historical-ratio-forecasts"
+          ],
+          "children": []
+        },
+        {
+          "id": "markets-附录",
+          "title": "附录",
+          "unit_ids": [
+            "ewp-case-rare-double-three",
+            "ewp-guide-direction-price-time-order",
+            "ewp-guide-fifth-wave-selectivity",
+            "ewp-guide-pattern-completion-confidence"
+          ],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "boundaries",
+      "title": "08 术语、来源与理论边界",
+      "unit_ids": [],
+      "children": [
+        {
+          "id": "boundaries-原出版者后记",
+          "title": "原出版者后记",
+          "unit_ids": [
+            "ewp-case-postscript-context",
+            "ewp-case-publisher-success-claim"
+          ],
+          "children": []
+        },
+        {
+          "id": "boundaries-第一章",
+          "title": "第一章",
+          "unit_ids": [
+            "ewp-error-preserving-preconception"
+          ],
+          "children": []
+        },
+        {
+          "id": "boundaries-第七章",
+          "title": "第七章",
+          "unit_ids": [
+            "ewp-case-random-walk-critique",
+            "ewp-theory-exogenous-forces-unproven"
+          ],
+          "children": []
+        },
+        {
+          "id": "boundaries-第三章",
+          "title": "第三章",
+          "unit_ids": [
+            "ewp-theory-phi-natural-order"
+          ],
+          "children": []
+        },
+        {
+          "id": "boundaries-第八章",
+          "title": "第八章",
+          "unit_ids": [
+            "ewp-theory-natural-law-ideology"
+          ],
+          "children": []
+        },
+        {
+          "id": "boundaries-词汇表",
+          "title": "词汇表",
+          "unit_ids": [
+            "ewp-glossary-282",
+            "ewp-glossary-283",
+            "ewp-glossary-284",
+            "ewp-glossary-285",
+            "ewp-glossary-286"
+          ],
+          "children": []
+        }
+      ]
+    }
+  ]
+}

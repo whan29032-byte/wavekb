@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WaveKB 社交与个人空间本地预览</title>
+  <!-- Cache lineage: wavekb-admin-audit-20260810-1 -->
+  <link rel="stylesheet" href="../community/community.css?v=wavekb-profile-nameplates-20260804-5">
+  <link rel="stylesheet" href="../community/research-studio.css?v=wavekb-profile-nameplates-20260804-5">
+  <link rel="stylesheet" href="../community/taste-polish.css?v=wavekb-compact-friends-20260803-4">
+  <link rel="stylesheet" href="../community/user-ai.css?v=wavekb-ai-center-20260803-1">
+  <link rel="stylesheet" href="../workbench/workbench.css?v=wavekb-workbench-records-20260803-1">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --foreground: #17263a;
+      --muted-foreground: #68778b;
+      --border: #d7e0eb;
+      --card: #ffffff;
+      --kb-surface: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--foreground);
+      background: #edf2f7;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .preview-shell {
+      width: min(1480px, calc(100% - 32px));
+      margin: 24px auto 64px;
+    }
+
+    .preview-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 20px;
+      padding: 22px 24px;
+      border: 1px solid #d7e0eb;
+      border-radius: 20px;
+      background: #ffffff;
+    }
+
+    .preview-header h1 { margin: 4px 0 0; font-size: clamp(1.55rem, 3vw, 2.4rem); }
+    .preview-header p { margin: 0; color: #68778b; }
+    .preview-kicker { color: #2d62a9 !important; font-size: .78rem; font-weight: 760; letter-spacing: .08em; }
+    .preview-nav { display: flex; flex-wrap: wrap; gap: 8px; }
+    .preview-nav a {
+      padding: 9px 13px;
+      color: #294a74;
+      border: 1px solid #d5e0ed;
+      border-radius: 10px;
+      background: #f7f9fc;
+      font-size: .84rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .preview-block {
+      margin-top: 18px;
+      padding: 22px;
+      border: 1px solid #d7e0eb;
+      border-radius: 22px;
+      background: #ffffff;
+    }
+
+    .preview-block-head { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+    .preview-block-head h2 { margin: 0; font-size: 1.2rem; }
+    .preview-block-head p { margin: 3px 0 0; color: #68778b; font-size: .86rem; }
+    .preview-label { color: #7890ad; font-size: .72rem; font-weight: 760; letter-spacing: .08em; }
+
+    .preview-cover {
+      --member-cover-image: none;
+      color: #eef4fb;
+      background: #0d1826;
+    }
+
+    #elliott-kb-inline .preview-cover .member-profile-bio,
+    #elliott-kb-inline .preview-cover .text-muted { color: #b6c3d2; }
+
+    #elliott-kb-inline .preview-cover .member-balance-pill {
+      color: #f3cf75;
+      border-color: #6c5726;
+      background: #171b1f;
+    }
+
+    .preview-avatar {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      place-items: center;
+      color: #dce8f6;
+      background: #26374d;
+      font-size: 2rem;
+      font-weight: 800;
+    }
+
+    .preview-avatar.small { font-size: .9rem; }
+    .preview-content-grid { display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 18px; }
+    .preview-messenger-stage { padding: clamp(12px, 3vw, 34px); border-radius: 20px; background: rgb(7 17 29 / 66%); }
+    .preview-messenger-window { overflow: hidden; border: 1px solid #9fb3ca; border-radius: 20px; background: #f8fafc; box-shadow: 0 26px 70px rgb(5 16 31 / 28%); }
+    .preview-messenger-titlebar { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #dbe3ed; background: #fff; }
+    .preview-messenger-titlebar h3 { margin: 0; font-size: 1rem; }
+    .preview-messenger-titlebar a { display: grid; width: 34px; height: 34px; color: inherit; border: 1px solid #d6e0eb; border-radius: 9px; background: transparent; place-items: center; font-size: 1.2rem; text-decoration: none; }
+    #friends:target { position: fixed; inset: 0; z-index: 9999; display: grid; max-width: none; margin: 0; padding: clamp(10px, 2.8vw, 34px); overflow: auto; border: 0; border-radius: 0; background: rgb(5 13 24 / 72%); backdrop-filter: blur(14px); place-items: center; }
+    #friends:target > .preview-block-head { display: none; }
+    #friends:target > .preview-messenger-stage { width: min(1160px, 100%); padding: 0; background: transparent; }
+    .preview-directory-tools { display: grid; gap: 6px; margin: 10px 0; }
+    .preview-directory-row { display: grid; grid-template-columns: 32px 1fr auto; gap: 9px; align-items: center; padding: 8px; border-radius: 11px; }
+    .preview-directory-row span:first-child { display: grid; width: 32px; height: 32px; color: #fff; border-radius: 9px; background: #4f86ca; place-items: center; font-weight: 800; }
+    .preview-directory-row b { display: grid; min-width: 18px; height: 18px; padding: 0 5px; color: #fff; border-radius: 999px; background: #ef4d58; place-items: center; font-size: .64rem; }
+    .preview-directory-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 11px; background: #e8eef5; }
+    .preview-directory-tabs span { padding: 7px; border-radius: 8px; text-align: center; font-size: .76rem; font-weight: 720; }
+    .preview-directory-tabs .active { color: #245f9f; background: #fff; box-shadow: 0 3px 9px rgb(29 61 99 / 10%); }
+    .preview-group-title { display: flex; justify-content: space-between; padding: 10px 7px 5px; color: #68778b; font-size: .72rem; font-weight: 750; }
+    .preview-contact { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border-radius: 12px; }
+    .preview-contact.active { background: #e8f0fb; }
+    .preview-contact .member-avatar { position: relative; width: 42px; height: 42px; }
+    .preview-contact.online .member-avatar::after { position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; content: ""; border: 2px solid #fff; border-radius: 50%; background: #2bbf75; }
+    .preview-contact-copy { min-width: 0; }
+    .preview-contact-copy strong, .preview-contact-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preview-contact-copy span { color: #758499; font-size: .72rem; }
+    .preview-contact time { color: #7c899a; font-size: .65rem; }
+
+    .preview-friend-list,
+    .preview-chat-pane {
+      min-width: 0;
+      border: 1px solid #dbe3ed;
+      border-radius: 18px;
+      background: #f8fafc;
+    }
+
+    .preview-friend-list { padding: 12px; }
+    .preview-search { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 10px; }
+    .preview-search input {
+      min-width: 0;
+      min-height: 42px;
+      padding: 0 12px;
+      border: 1px solid #cfd9e5;
+      border-radius: 11px;
+      background: #ffffff;
+      font: inherit;
+    }
+    .preview-search button,
+    .preview-chat-send {
+      padding: 0 15px;
+      color: #ffffff;
+      border: 0;
+      border-radius: 11px;
+      background: #2d62a9;
+      font: inherit;
+      font-weight: 730;
+    }
+
+    .preview-chat-pane { display: grid; grid-template-rows: auto 1fr auto; min-height: 480px; overflow: hidden; }
+    .preview-chat-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #dbe3ed; background: #ffffff; }
+    .preview-chat-head .member-avatar { width: 42px; height: 42px; }
+    .preview-chat-stream { display: grid; align-content: end; gap: 12px; padding: 20px; }
+    .preview-message { max-width: min(78%, 420px); padding: 11px 13px; border: 1px solid #d8e2ee; border-radius: 14px; background: #ffffff; }
+    .preview-message.mine { justify-self: end; color: #ffffff; border-color: #2d62a9; background: #2d62a9; }
+    .preview-message.sticker { padding: 4px; border: 0; background: transparent; font-size: 3.1rem; }
+    .preview-composer { position: relative; padding: 12px; border-top: 1px solid #dbe3ed; background: #ffffff; }
+    .preview-compose-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; }
+    .preview-compose-row input { min-width: 0; padding: 0 12px; border: 1px solid #cfd9e5; border-radius: 11px; font: inherit; }
+    .preview-emoji-button { min-height: 42px; padding: 0 12px; border: 1px solid #cfd9e5; border-radius: 11px; background: #ffffff; font-size: 1.1rem; }
+    #elliott-kb-inline .preview-stickers { position: static; display: grid; width: auto; max-height: none; margin-bottom: 9px; }
+
+    .preview-public-page { display: grid; gap: 18px; }
+    .preview-public-cover {
+      background:
+        linear-gradient(105deg, rgb(11 20 32 / 92%), rgb(36 72 112 / 58%)),
+        radial-gradient(circle at 78% 24%, #436f9e, transparent 34rem),
+        #0d1826 !important;
+    }
+
+    .preview-rank-shell { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 18px; }
+    .preview-points-card { padding: 22px; color: #ffffff; border-radius: 18px; background: #173a69; }
+    .preview-points-card strong { display: block; margin: 12px 0 6px; font-size: 3rem; }
+    .preview-points-card p { color: #c9d7ea; }
+
+    @media (prefers-color-scheme: dark) {
+      :root { --foreground: #e7edf5; --muted-foreground: #96a5b8; --border: #2a394b; --card: #101a27; --kb-surface: #101a27; }
+      body { background: #07111d; }
+      .preview-header,
+      .preview-block,
+      .preview-chat-head,
+      .preview-composer { border-color: #29384a; background: #0e1926; }
+      .preview-nav a,
+      .preview-friend-list,
+      .preview-chat-pane { color: #dce7f5; border-color: #29384a; background: #101c2b; }
+      .preview-header p,
+      .preview-block-head p { color: #96a5b8; }
+      .preview-search input,
+      .preview-compose-row input,
+      .preview-emoji-button,
+      .preview-message { color: #e7edf5; border-color: #334559; background: #142233; }
+      .preview-chat-head,
+      .preview-composer { border-color: #29384a; background: #0d1723; }
+      .preview-messenger-window { color: #e7edf5; border-color: #40536a; background: #0d1826; }
+      .preview-messenger-titlebar { color: #e7edf5; border-color: #29384a; background: #101c2b; }
+      .preview-messenger-titlebar a { color: #e7edf5; border-color: #40536a; }
+      .preview-directory-tabs { background: #1c2a3b; }
+      .preview-directory-tabs .active { color: #a9cdf8; background: #24364c; }
+    }
+
+    #friends:target {
+      color: #172033;
+      background: rgb(15 23 42 / 24%);
+      backdrop-filter: blur(3px);
+    }
+    #friends:target > .preview-messenger-stage { width: min(27rem, calc(100vw - 2rem)); }
+    #friends:target .preview-messenger-window {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: min(45rem, calc(100dvh - 3rem));
+      color: #172033;
+      border-color: #d9e0e8;
+      background: #ffffff;
+      box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
+    }
+    #friends:target .preview-messenger-titlebar,
+    #friends:target .preview-friend-list,
+    #friends:target .preview-search input {
+      color: #172033;
+      border-color: #e2e7ed;
+      background: #ffffff;
+    }
+    #friends:target .preview-messenger-titlebar h3 { color: #172033; }
+    #friends:target .preview-directory-tabs { background: #f1f3f6; }
+    #friends:target .preview-directory-tabs .active { color: #155ea8; background: #ffffff; }
+    #friends:target .preview-content-grid { min-height: 0; grid-template-columns: minmax(0, 1fr); }
+    #friends:target .preview-friend-list { overflow: auto; }
+    #friends:target .preview-chat-pane { display: none; }
+
+    @media (max-width: 900px) {
+      .preview-content-grid,
+      .preview-rank-shell { grid-template-columns: 1fr; }
+      .preview-header { align-items: start; flex-direction: column; }
+    }
+
+    @media (max-width: 600px) {
+      .preview-shell { width: min(100% - 18px, 1480px); margin-top: 9px; }
+      .preview-block { padding: 13px; border-radius: 17px; }
+      .preview-chat-pane { min-height: 420px; }
+      #elliott-kb-inline .preview-stickers { width: auto; }
+      .preview-messenger-window .preview-chat-pane { display: none; }
+      #friends:target { padding: 0; place-items: stretch; }
+      #friends:target > .preview-messenger-stage,
+      #friends:target .preview-messenger-window { width: 100%; min-height: 100dvh; border-radius: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="preview-shell" id="elliott-kb-inline">
+    <header class="preview-header">
+      <div>
+        <p class="preview-kicker">LOCAL UI REVIEW</p>
+        <h1>个人空间与好友系统</h1>
+        <p>静态视觉验收页，不连接账号、不写入数据库。</p>
+      </div>
+      <nav class="preview-nav" aria-label="预览区导航">
+        <a href="#profile">个人资料</a>
+        <a href="#workbench">交易工作台</a>
+        <a href="#friends">好友会话</a>
+        <a href="#public-profile">公开主页</a>
+        <a href="#rewards">积分排行</a>
+      </nav>
+    </header>
+
+    <section class="preview-block" id="profile">
+      <header class="preview-block-head">
+        <div><h2>个人资料层级</h2><p>姓名、称号和靓号前置，积分置于头像下方，商城成为独立入口。</p></div>
+        <span class="preview-label">01 PROFILE</span>
+      </header>
+      <section class="member-profile-hero preview-cover">
+        <div class="member-profile-identity">
+          <div class="member-profile-avatar-stack">
+            <div class="member-avatar"><span class="preview-avatar">悠</span></div>
+            <div class="member-balance-pill"><strong>5</strong><span>研究积分</span></div>
+          </div>
+          <div class="member-profile-identity-copy">
+            <div class="member-name-row">
+              <h1><span class="member-display-name is-blackgold">悠子</span></h1>
+              <span class="member-title-chip">知识库管理员</span>
+              <span class="member-uid-nameplate is-premium is-blackgold"><span class="member-liang-icon">靓</span><span class="member-uid-number">33333</span></span>
+            </div>
+            <p class="member-profile-bio">把每一次浪型判断保留成可复查的证据。</p>
+            <a class="member-edit-profile-link" href="#profile">编辑名片</a>
+          </div>
+        </div>
+        <div class="member-primary-actions">
+          <a class="btn btn-ghost member-friends-button" href="#friends">我的好友</a>
+          <a class="btn btn-primary" href="#workbench">交易工作台</a>
+          <button class="btn member-store-button" type="button">积分商城</button>
+        </div>
+      </section>
+      <div class="member-profile-statbar">
+        <div class="member-profile-stat"><strong>12</strong><span>复盘</span></div>
+        <div class="member-profile-stat"><strong>8</strong><span>交易日记</span></div>
+        <div class="member-profile-stat"><strong>5</strong><span>研究草稿</span></div>
+        <div class="member-profile-stat"><strong>5</strong><span>可用积分</span></div>
+      </div>
+    </section>
+
+    <section class="preview-block" id="workbench">
+      <header class="preview-block-head">
+        <div><h2>交易工作台</h2><p>分析流程与私人记录统一管理，个人资料页只保留身份展示。</p></div>
+        <span class="preview-label">02 WORKBENCH</span>
+      </header>
+      <nav class="workbench-section-nav" aria-label="交易工作台区域">
+        <a class="workbench-section-link" href="#workbench">分析流程</a>
+        <a class="workbench-section-link" href="#workbench" aria-current="page">复盘与记录</a>
+        <a class="workbench-section-link" href="#ai-settings">AI 模型</a>
+      </nav>
+      <section class="workbench-record-center">
+        <header class="workbench-record-heading">
+          <div>
+            <p class="member-eyebrow">私人交易档案</p>
+            <h1>复盘、日记与研究草稿</h1>
+            <p class="text-muted">分析、执行与复查统一留在交易工作台，默认仅自己可见。</p>
+          </div>
+          <div class="workbench-record-actions">
+            <a class="btn btn-primary" href="#workbench">新建复盘</a>
+            <a class="btn btn-ghost" href="#workbench">写交易日记</a>
+            <a class="btn btn-ghost" href="#workbench">写研究草稿</a>
+          </div>
+        </header>
+        <nav class="workbench-record-filters" aria-label="工作台记录筛选">
+          <a class="workbench-record-filter" href="#workbench" aria-current="page">全部记录</a>
+          <a class="workbench-record-filter" href="#workbench">复盘</a>
+          <a class="workbench-record-filter" href="#workbench">日记</a>
+          <a class="workbench-record-filter" href="#workbench">草稿</a>
+        </nav>
+        <section class="workbench-record-list">
+          <article class="workbench-record-card">
+            <div class="workbench-record-meta"><span class="workbench-record-kind">复盘</span><time class="text-small text-muted">2026/8/3</time></div>
+            <a class="workbench-record-title" href="#workbench">BTC 4小时浪级复盘</a>
+            <p class="text-small text-muted">核对浪4是否进入浪1价格区，并记录主计数失效后的备选路径。</p>
+          </article>
+          <article class="workbench-record-card">
+            <div class="workbench-record-meta"><span class="workbench-record-kind">交易日记</span><time class="text-small text-muted">2026/8/2</time></div>
+            <a class="workbench-record-title" href="#workbench">黄金日内执行记录</a>
+            <p class="text-small text-muted">记录入场、止损和执行纪律，不使用盈亏替代结构核验。</p>
+          </article>
+        </section>
+      </section>
+    </section>
+
+    <section class="preview-block" id="ai-settings">
+      <header class="preview-block-head">
+        <div><h2>交易工作台 · AI 模型</h2><p>个人接口、模型选择和管理员模型配置统一并入交易工作台。</p></div>
+        <span class="preview-label">03 AI</span>
+      </header>
+      <nav class="workbench-section-nav" aria-label="交易工作台区域">
+        <a class="workbench-section-link" href="#workbench">分析流程</a>
+        <a class="workbench-section-link" href="#workbench">复盘与记录</a>
+        <a class="workbench-section-link" href="#ai-settings" aria-current="page">AI 模型</a>
+      </nav>
+      <form class="user-ai-form" onsubmit="return false">
+        <p class="member-eyebrow">用户自带模型 · BYOK</p>
+        <h2>添加我的 AI 接口</h2>
+        <div class="user-ai-form-grid">
+          <label class="community-field"><span>接口名称</span><input value="我的 DeepSeek"></label>
+          <label class="community-field"><span>API 服务商</span><select><option selected>DeepSeek</option><option>OpenAI 兼容接口</option><option>Claude / Anthropic</option><option>Gemini</option></select></label>
+          <p class="text-small text-muted user-ai-provider-hint">使用 DeepSeek 官方 OpenAI 兼容接口，API Key 由用户自行提供。</p>
+          <label class="community-field community-field-wide"><span>API 地址</span><input value="https://api.deepseek.com"></label>
+          <label class="community-field"><span>模型名称</span><input value="deepseek-v4-flash"></label>
+          <label class="community-field"><span>最大输出长度</span><input value="4096"></label>
+          <label class="community-field community-field-wide"><span>API Key</span><input type="password" value="••••••••••••"></label>
+        </div>
+        <div class="user-ai-security"><strong>模型来自你，知识来自本站</strong><p class="text-small">密钥只在保存时发送到网站后端，不会在网页中回显。</p></div>
+        <button class="btn btn-primary" type="button">保存并加密</button>
+      </form>
+    </section>
+
+    <section class="preview-block" id="friends">
+      <header class="preview-block-head">
+        <div><h2>我的好友</h2><p>点击个人空间的“我的好友”后，在站内弹出联系人、请求与会话窗口。</p></div>
+        <span class="preview-label">02 MESSENGER</span>
+      </header>
+      <div class="preview-messenger-stage">
+        <section class="preview-messenger-window">
+          <header class="preview-messenger-titlebar"><h3>我的好友</h3><a href="#profile" aria-label="关闭">×</a></header>
+          <div class="preview-content-grid">
+          <aside class="preview-friend-list">
+          <form class="preview-search">
+            <input placeholder="搜索好友或 5—6 位 UID" aria-label="搜索好友或 UID">
+            <button type="button">查找</button>
+          </form>
+          <div class="preview-directory-tools">
+            <div class="preview-directory-row"><span>＋</span><strong>新朋友</strong><b>2</b></div>
+            <div class="preview-directory-row"><span>•</span><strong>消息通知</strong><b>3</b></div>
+          </div>
+          <div class="preview-directory-tabs"><span class="active">分组</span><span>好友</span></div>
+          <div class="preview-group-title"><span>特别关心</span><span>1</span></div>
+          <article class="preview-contact online active">
+            <a class="member-avatar-button" href="#public-profile"><span class="member-avatar"><span class="preview-avatar small">浪</span></span></a>
+            <div class="preview-contact-copy"><strong>浪级观察员</strong><span>我把 4 小时图整理好了</span></div><time>22:31</time>
+          </article>
+          <div class="preview-group-title"><span>我的好友 · 1 在线</span><span>2</span></div>
+          <article class="preview-contact online"><a class="member-avatar-button" href="#public-profile"><span class="member-avatar"><span class="preview-avatar small">图</span></span></a><div class="preview-contact-copy"><strong>图表笔记</strong><span>交易计划与图表复盘</span></div></article>
+          <div class="preview-group-title"><span>我的学生</span><span>1</span></div>
+          <article class="preview-contact"><span class="member-avatar"><span class="preview-avatar small">学</span></span><div class="preview-contact-copy"><strong>浪型学员</strong><span>等待老师回复：浪 4 的失效条件</span></div><time>辅导中</time></article>
+        </aside>
+        <section class="preview-chat-pane">
+          <header class="preview-chat-head">
+            <a class="member-chat-profile-link" href="#public-profile"><span class="member-avatar"><span class="preview-avatar small">浪</span></span></a>
+            <div><strong>浪级观察员</strong><div class="text-small text-muted">点击头像查看公开主页</div></div>
+          </header>
+          <div class="preview-chat-stream">
+            <div class="preview-message">我把 4 小时图的备选计数整理好了。</div>
+            <div class="preview-message mine">收到，我先核对浪 4 是否进入浪 1 价格区。</div>
+            <div class="preview-message sticker">📈</div>
+          </div>
+          <div class="preview-composer">
+            <div class="member-sticker-panel preview-stickers" aria-label="表情面板">
+              <section class="member-sticker-section">
+                <strong class="member-sticker-section-title">快捷表情</strong>
+                <div class="member-sticker-grid">
+                  <button class="member-sticker-option" type="button">🌊</button><button class="member-sticker-option" type="button">🤝</button><button class="member-sticker-option" type="button">📈</button><button class="member-sticker-option" type="button">📉</button><button class="member-sticker-option" type="button">🎯</button>
+                </div>
+              </section>
+              <section class="member-sticker-section member-custom-sticker-section">
+                <div class="member-custom-sticker-head">
+                  <div><strong class="member-sticker-section-title">我的表情</strong><span class="text-small text-muted">动态 GIF、WebP 和静态图片</span></div>
+                  <button class="member-sticker-upload-button" type="button">上传表情</button>
+                </div>
+                <div class="member-custom-sticker-grid">
+                  <article class="member-custom-sticker-card"><button class="member-custom-sticker-send" type="button"><img class="member-custom-sticker-thumb" src="../assets/figures-v10/page-070.png" alt="自定义图表表情"></button><button class="member-custom-sticker-remove" type="button">移除</button></article>
+                  <article class="member-custom-sticker-card"><button class="member-custom-sticker-send" type="button"><img class="member-custom-sticker-thumb" src="../assets/figures-v10/page-071.png" alt="自定义波浪表情"></button><button class="member-custom-sticker-remove" type="button">移除</button></article>
+                </div>
+                <p class="text-small text-muted member-sticker-status">已添加 2 个表情</p>
+              </section>
+            </div>
+            <div class="preview-compose-row">
+              <button class="preview-emoji-button" type="button" aria-label="打开表情">😊</button>
+              <input placeholder="输入消息">
+              <button class="preview-chat-send" type="button">发送</button>
+            </div>
+          </div>
+        </section>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="preview-block" id="public-profile">
+      <header class="preview-block-head">
+        <div><h2>UID 公开主页</h2><p>展示公开资料与公开研究，私人复盘、日记和草稿始终隐藏。</p></div>
+        <span class="preview-label">公开资料</span>
+      </header>
+      <div class="preview-public-page member-public-profile-page">
+        <section class="member-public-profile-hero preview-cover">
+          <div class="member-public-profile-cover preview-public-cover" aria-hidden="true"></div>
+          <button class="btn btn-ghost member-public-profile-edit member-public-profile-follow" type="button" aria-pressed="false">关注</button>
+          <div class="member-public-profile-summary">
+            <div class="member-public-profile-identity">
+              <div class="member-avatar member-avatar-frame is-rainbow is-pretty is-premium member-public-profile-avatar"><span class="preview-avatar">浪</span></div>
+              <div class="member-public-profile-copy">
+                <span class="member-title-chip member-public-profile-title">结构研究者</span>
+                <div class="member-name-row">
+                  <h1 class="member-display-name is-rainbow is-pretty">浪级观察员</h1>
+                  <span class="member-uid-nameplate is-premium is-pretty is-rainbow"><span class="member-liang-icon">靓</span><span class="member-uid-number">83921</span></span>
+                </div>
+                <p class="member-public-profile-bio">记录浪级、成立条件与失效边界。</p>
+                <div class="member-public-profile-tags"><span class="member-public-profile-tag">加密资产</span><span class="member-public-profile-tag">股指</span><span class="member-public-profile-tag">4小时</span></div>
+              </div>
+            </div>
+            <div class="member-public-profile-action-stack">
+              <div class="member-public-profile-actions">
+                <button class="btn btn-primary" type="button">添加好友</button>
+              </div>
+              <p class="member-public-profile-status">成为好友后，这里会自动显示“发起会话”。</p>
+            </div>
+          </div>
+        </section>
+        <section class="member-public-profile-overview" aria-label="公开资料摘要">
+          <div class="member-public-profile-metric"><strong>12</strong><span>公开内容</span></div>
+          <div class="member-public-profile-metric"><strong>2</strong><span>参与板块</span></div>
+          <div class="member-public-profile-metric"><strong>3</strong><span>关注市场</span></div>
+        </section>
+        <section class="member-public-profile-content">
+          <header class="member-public-content-heading"><h2>公开研究</h2><p class="text-muted">仅展示已经发布的观点、思路与案例。</p></header>
+          <div class="member-public-post-grid">
+            <article class="member-public-post-card">
+              <div class="member-public-post-meta"><span class="member-public-post-board">案例提交</span><time>2026/08/03</time></div>
+              <a class="member-public-post-title" href="#public-profile">BTC 日线三锯齿备选路径</a>
+              <p class="text-muted">主计数、备选计数与失效价格已经分开记录。</p>
+            </article>
+            <article class="member-public-post-card">
+              <div class="member-public-post-meta"><span class="member-public-post-board">思路分享</span><time>2026/08/02</time></div>
+              <a class="member-public-post-title" href="#public-profile">如何核验延长浪内部结构</a>
+              <p class="text-muted">先检查硬规则，再用比例与通道对备选计数排序。</p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="preview-block" id="rewards">
+      <header class="preview-block-head">
+        <div><h2>积分商城与排行榜</h2><p>排行榜从商城进入，排名用户可直接打开公开主页。</p></div>
+        <span class="preview-label">04 REWARDS</span>
+      </header>
+      <div class="preview-rank-shell">
+        <section class="member-leaderboard-section">
+          <div class="member-leaderboard-list">
+            <a class="member-leaderboard-row is-top-1" href="#public-profile"><strong class="member-leaderboard-rank">1</strong><span class="member-leaderboard-identity"><span class="member-avatar"><span class="preview-avatar small">浪</span></span><span class="member-leaderboard-copy"><span class="member-leaderboard-name"><strong>浪级观察员</strong><span class="member-uid-nameplate is-premium is-rainbow"><span class="member-liang-icon">靓</span><span class="member-uid-number">83921</span></span></span><span class="text-small text-muted">结构研究者</span></span></span><span class="member-leaderboard-points"><strong>2,480</strong><span class="text-small text-muted">累计积分</span></span></a>
+            <a class="member-leaderboard-row is-top-2" href="#public-profile"><strong class="member-leaderboard-rank">2</strong><span class="member-leaderboard-identity"><span class="member-avatar"><span class="preview-avatar small">悠</span></span><span class="member-leaderboard-copy"><span class="member-leaderboard-name"><strong>悠子</strong><span class="member-uid-nameplate is-premium is-blackgold"><span class="member-liang-icon">靓</span><span class="member-uid-number">33333</span></span></span><span class="text-small text-muted">知识库管理员</span></span></span><span class="member-leaderboard-points"><strong>1,960</strong><span class="text-small text-muted">累计积分</span></span></a>
+            <a class="member-leaderboard-row is-top-3" href="#public-profile"><strong class="member-leaderboard-rank">3</strong><span class="member-leaderboard-identity"><span class="member-avatar"><span class="preview-avatar small">图</span></span><span class="member-leaderboard-copy"><span class="member-leaderboard-name"><strong>图表笔记</strong></span><span class="text-small text-muted">交易复盘者</span></span></span><span class="member-leaderboard-points"><strong>1,420</strong><span class="text-small text-muted">累计积分</span></span></a>
+          </div>
+        </section>
+        <aside class="preview-points-card">
+          <span>我的可用积分</span>
+          <strong>5</strong>
+          <p>通过签到、完成复盘和发布研究内容获得积分。</p>
+          <button class="btn" type="button">浏览商城权益</button>
+        </aside>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

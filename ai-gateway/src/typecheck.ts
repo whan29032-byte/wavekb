@@ -1,0 +1,15 @@
+await Promise.all([
+  import("./config.ts"),
+  import("./server.ts"),
+  import("./routes/gateway-api.ts"),
+  import("./admin/user-administration.ts"),
+  import("./directory/external-directory.ts"),
+  import("./secrets/crypto.ts").catch(() => undefined),
+  import("./secrets/user-connection.ts").catch(() => undefined),
+  import("./security/provider-url.ts").catch(() => undefined),
+  import("./providers/registry.ts").catch(() => undefined),
+  import("./knowledge/retrieve.ts").catch(() => undefined),
+  import("./pipeline/rule-gate.ts").catch(() => undefined),
+  import("./jobs/worker.ts").catch(() => undefined),
+  import("./reviews/workflow.ts").catch(() => undefined),
+]);

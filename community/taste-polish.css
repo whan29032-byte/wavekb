@@ -1,0 +1,3144 @@
+/*
+ * WaveKB visual polish
+ * Visual-only layer: preserves the existing information architecture and layout.
+ */
+
+body:has(#elliott-kb-inline) {
+  background:
+    radial-gradient(circle at 10% -10%, rgb(37 99 235 / 8%), transparent 32rem),
+    #f3f6fa;
+  color: #122033;
+}
+
+/* BEDRA identity layer: keep animated color on text only, never on layout. */
+body #elliott-kb-inline :is(.member-display-name, .member-uid-nameplate, .member-profile-preview-signature, .member-avatar-frame).is-blackgold {
+  --bedra-flow: repeating-linear-gradient(90deg, #f4dfa4 0, #d7a146 2rem, #fff1b8 4rem, #8d5c21 6rem, #fff1b8 8rem, #d7a146 10rem, #f4dfa4 12rem);
+  --bedra-box: linear-gradient(145deg, #0a0907, #3a2b12 52%, #ffd56f);
+}
+body #elliott-kb-inline :is(.member-display-name, .member-uid-nameplate, .member-profile-preview-signature, .member-avatar-frame).is-rainbow {
+  --bedra-flow: repeating-linear-gradient(90deg, #41d9b5 0, #6aa7ff 2rem, #d66bff 4rem, #f3ba57 6rem, #d66bff 8rem, #6aa7ff 10rem, #41d9b5 12rem);
+  --bedra-box: linear-gradient(145deg, #171b35, #392a80 52%, #d66bff);
+}
+body #elliott-kb-inline :is(.member-display-name, .member-uid-nameplate, .member-profile-preview-signature, .member-avatar-frame).is-newyear {
+  --bedra-flow: repeating-linear-gradient(90deg, #f3f0ff 0, #fff 2rem, #8f9cff 4rem, #d6d3ff 6rem, #8f9cff 8rem, #fff 10rem, #f3f0ff 12rem);
+  --bedra-box: linear-gradient(145deg, #272068, #100e48 58%, #09072b);
+}
+body #elliott-kb-inline :is(.member-display-name, .member-uid-nameplate, .member-profile-preview-signature, .member-avatar-frame).is-platinum {
+  --bedra-flow: repeating-linear-gradient(90deg, #fff 0, #b7cdf5 2rem, #e8f1ff 4rem, #7f9ecf 6rem, #e8f1ff 8rem, #b7cdf5 10rem, #fff 12rem);
+  --bedra-box: linear-gradient(145deg, #fff, #cbdcff 48%, #6c85b3);
+}
+body #elliott-kb-inline :is(.member-display-name, .member-uid-nameplate, .member-profile-preview-signature, .member-avatar-frame).is-purplegold {
+  --bedra-flow: repeating-linear-gradient(90deg, #e8b5ff 0, #9d61ff 2rem, #f3ba57 4rem, #ffe8a3 6rem, #f3ba57 8rem, #9d61ff 10rem, #e8b5ff 12rem);
+  --bedra-box: linear-gradient(145deg, #e8b5ff, #6f35b8 48%, #f3ba57);
+}
+
+body #elliott-kb-inline :is(.member-display-name, .member-profile-preview-signature):is(.is-blackgold, .is-rainbow, .is-newyear, .is-platinum, .is-purplegold),
+body #elliott-kb-inline .member-uid-nameplate.is-premium .member-uid-number {
+  color: transparent;
+  background-image: var(--bedra-flow);
+  background-position: 0 50%;
+  background-size: 12rem 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: none;
+  text-shadow: none;
+  animation: bedra-unified-flow 6.8s linear infinite;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-premium .member-liang-icon {
+  display: inline-grid;
+  width: 1.28rem;
+  height: 1.34rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: transparent;
+  border: 1px solid color-mix(in srgb, #fff 46%, transparent);
+  border-radius: 3px;
+  background-image: var(--bedra-flow), var(--bedra-box);
+  background-position: 0 50%, center;
+  background-size: 12rem 100%, 100% 100%;
+  background-clip: text, padding-box;
+  -webkit-background-clip: text, padding-box;
+  -webkit-text-fill-color: transparent;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 16%),
+    inset 0 -3px 5px rgb(0 0 0 / 24%);
+  clip-path: polygon(12% 0, 88% 0, 100% 12%, 100% 88%, 88% 100%, 12% 100%, 0 88%, 0 12%);
+  font-family: "Songti SC", "STSong", "SimSun", serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  animation: bedra-icon-flow 6.8s linear infinite;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-newyear {
+  color: #fff;
+  border-color: rgb(186 190 255 / 44%);
+  background: linear-gradient(180deg, #272068, #100e48 58%, #09072b);
+  box-shadow: inset 0 1px rgb(255 255 255 / 18%), 0 6px 18px rgb(96 82 214 / 22%);
+}
+
+body #elliott-kb-inline .member-avatar-frame.is-premium {
+  border: 3px solid transparent;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    var(--bedra-flow) border-box;
+  background-position: 0 0, 0 50%;
+  background-size: 100% 100%, 12rem 100%;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--taste-accent, #d7a146) 24%, transparent),
+    0 10px 28px rgb(7 17 29 / 18%);
+  animation: bedra-avatar-frame 6.8s linear infinite;
+}
+
+@keyframes bedra-unified-flow { to { background-position: 12rem 50%; } }
+@keyframes bedra-icon-flow { to { background-position: 12rem 50%, center; } }
+@keyframes bedra-avatar-frame { to { background-position: 0 0, 12rem 50%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  body #elliott-kb-inline .member-display-name,
+  body #elliott-kb-inline .member-profile-preview-signature,
+  body #elliott-kb-inline .member-uid-nameplate,
+  body #elliott-kb-inline .member-uid-nameplate *,
+  body #elliott-kb-inline .member-avatar-frame {
+    animation: none !important;
+  }
+}
+
+/* Social profile and messenger refinement. Local preview build 2026-08-03. */
+body #elliott-kb-inline .member-profile-hero {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  min-height: 19rem;
+  padding: clamp(1.35rem, 3vw, 2.4rem);
+}
+
+body #elliott-kb-inline .member-profile-identity {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 1.15rem 1.35rem;
+  align-items: start;
+}
+
+body #elliott-kb-inline .member-profile-avatar-stack {
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: 0.75rem;
+}
+
+body #elliott-kb-inline .member-profile-avatar-stack .member-avatar {
+  width: 7.25rem;
+  height: 7.25rem;
+}
+
+body #elliott-kb-inline .member-profile-avatar-stack .member-balance-pill {
+  width: 7.25rem;
+  min-height: 2.15rem;
+  margin: 0;
+  padding-inline: 0.58rem;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+body #elliott-kb-inline .member-profile-avatar-stack .member-balance-pill span {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip-path: none;
+  font-size: 0.62rem;
+  letter-spacing: -0.02em;
+}
+
+body #elliott-kb-inline .member-profile-identity-copy {
+  display: grid;
+  align-content: start;
+  gap: 0.7rem;
+  min-width: 0;
+  padding-block-start: 0.1rem;
+}
+
+body #elliott-kb-inline .member-profile-identity-copy .member-name-row {
+  align-items: center;
+  gap: 0.55rem;
+}
+
+body #elliott-kb-inline .member-profile-identity-copy h1 {
+  margin: 0;
+  font-size: clamp(1.55rem, 2.4vw, 2.2rem);
+  line-height: 1.05;
+  letter-spacing: -0.045em;
+}
+
+body #elliott-kb-inline .member-profile-bio {
+  max-width: 38rem;
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+body #elliott-kb-inline .member-primary-actions {
+  grid-template-columns: minmax(9rem, 1fr);
+  align-self: start;
+  width: min(14rem, 100%);
+}
+
+body #elliott-kb-inline .member-primary-actions .btn,
+body #elliott-kb-inline .member-primary-actions .btn:first-child {
+  grid-column: auto;
+  min-height: 3rem;
+}
+
+body #elliott-kb-inline .member-friends-button {
+  border-color: color-mix(in srgb, #5f94d9 55%, var(--border));
+  background: color-mix(in srgb, #5f94d9 10%, var(--card));
+}
+
+body #elliott-kb-inline .member-store-button {
+  border-color: color-mix(in srgb, #d6ae58 55%, var(--border));
+  background: color-mix(in srgb, #d6ae58 12%, var(--card));
+}
+
+body #elliott-kb-inline .member-tool-dock {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+  padding: 0.45rem;
+}
+
+body #elliott-kb-inline .member-tool-link {
+  min-height: 3.2rem;
+  padding: 0.72rem 0.85rem;
+  border: 1px solid transparent;
+}
+
+body #elliott-kb-inline .member-tool-link:hover,
+body #elliott-kb-inline .member-tool-link:focus-visible {
+  border-color: #d5e0ed;
+}
+
+body #elliott-kb-inline .member-ai-control-link {
+  color: #eaf2ff;
+  border-color: #355b8d;
+  background: #173a69;
+}
+
+body #elliott-kb-inline .member-ai-control-link .member-tool-label,
+body #elliott-kb-inline .member-ai-control-link .member-tool-arrow {
+  color: inherit;
+}
+
+body #elliott-kb-inline .member-ai-control-link:hover,
+body #elliott-kb-inline .member-ai-control-link:focus-visible {
+  border-color: #6d99d4;
+  background: #1d477e;
+}
+
+body #elliott-kb-inline .member-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(4, minmax(5.6rem, auto));
+  gap: 0.2rem;
+  width: max-content;
+  max-width: 100%;
+  margin-block: 0.5rem 1rem;
+  padding: 0.28rem;
+}
+
+body #elliott-kb-inline .member-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.45rem;
+  padding: 0.45rem 0.85rem;
+  color: #5a687a;
+  font-size: 0.82rem;
+  font-weight: 690;
+  white-space: nowrap;
+}
+
+body #elliott-kb-inline .member-friend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem;
+}
+
+body #elliott-kb-inline .member-friend-profile-link {
+  min-width: 0;
+  color: inherit;
+  border-radius: 12px;
+  text-decoration: none;
+}
+
+body #elliott-kb-inline .member-friend-profile-link:focus-visible,
+body #elliott-kb-inline .member-chat-profile-link:focus-visible {
+  outline: 3px solid rgb(79 134 211 / 22%);
+  outline-offset: 2px;
+}
+
+body #elliott-kb-inline .member-friend-chat-button {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.65rem;
+  color: #235995;
+  border: 0;
+  border-radius: 10px;
+  background: #e8f0fb;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .member-chat-profile-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+body #elliott-kb-inline .member-message-input-wrap {
+  position: relative;
+}
+
+body #elliott-kb-inline .member-message-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding-block-start: 0.45rem;
+}
+
+body #elliott-kb-inline .member-sticker-toggle {
+  min-height: 2rem;
+  padding: 0.28rem 0.62rem;
+  color: #314158;
+  border: 1px solid #d6dee8;
+  border-radius: 10px;
+  background: var(--card);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 720;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .member-sticker-panel {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-end: calc(100% + 0.55rem);
+  z-index: 4;
+  display: grid;
+  width: min(26rem, calc(100vw - 4rem));
+  max-height: min(31rem, 66dvh);
+  gap: 0.7rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+  border: 1px solid #d7e0eb;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 18px 44px rgb(15 23 42 / 16%);
+}
+
+body #elliott-kb-inline .member-sticker-panel[hidden] {
+  display: none;
+}
+
+body #elliott-kb-inline .member-sticker-section {
+  display: grid;
+  gap: 0.45rem;
+}
+
+body #elliott-kb-inline .member-sticker-section + .member-sticker-section {
+  padding-block-start: 0.7rem;
+  border-block-start: 1px solid var(--border);
+}
+
+body #elliott-kb-inline .member-sticker-section-title {
+  color: var(--foreground);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+body #elliott-kb-inline .member-sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 2.65rem);
+  gap: 0.25rem;
+}
+
+body #elliott-kb-inline .member-sticker-option {
+  display: grid;
+  width: 2.65rem;
+  height: 2.65rem;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 1.45rem;
+  cursor: pointer;
+  place-items: center;
+}
+
+body #elliott-kb-inline .member-sticker-option:hover,
+body #elliott-kb-inline .member-sticker-option:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+body #elliott-kb-inline .member-custom-sticker-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+body #elliott-kb-inline .member-custom-sticker-head > div {
+  display: grid;
+  gap: 0.08rem;
+}
+
+body #elliott-kb-inline .member-sticker-upload-button,
+body #elliott-kb-inline .member-custom-sticker-remove {
+  min-height: 2rem;
+  padding: 0.3rem 0.62rem;
+  color: #235995;
+  border: 1px solid #c9d7e8;
+  border-radius: 9px;
+  background: #eef4fc;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 740;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .member-sticker-upload-button:disabled,
+body #elliott-kb-inline .member-custom-sticker-remove:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+body #elliott-kb-inline .member-custom-sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+body #elliott-kb-inline .member-custom-sticker-card {
+  position: relative;
+  min-width: 0;
+}
+
+body #elliott-kb-inline .member-custom-sticker-send {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0.28rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--card) 94%, var(--accent));
+  cursor: pointer;
+  place-items: center;
+}
+
+body #elliott-kb-inline .member-custom-sticker-send:hover,
+body #elliott-kb-inline .member-custom-sticker-send:focus-visible {
+  border-color: #7ba3d7;
+  outline: 3px solid rgb(79 134 211 / 16%);
+}
+
+body #elliott-kb-inline .member-custom-sticker-thumb,
+body #elliott-kb-inline .member-message-sticker-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+body #elliott-kb-inline .member-custom-sticker-remove {
+  position: absolute;
+  inset-block-start: 0.22rem;
+  inset-inline-end: 0.22rem;
+  min-height: 1.6rem;
+  padding: 0.16rem 0.38rem;
+  color: #92413e;
+  border-color: rgb(146 65 62 / 22%);
+  background: rgb(255 246 245 / 92%);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+body #elliott-kb-inline .member-custom-sticker-card:hover .member-custom-sticker-remove,
+body #elliott-kb-inline .member-custom-sticker-remove:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+body #elliott-kb-inline .member-sticker-status {
+  min-height: 1.15rem;
+  margin: 0;
+}
+
+body #elliott-kb-inline .member-message-bubble:has(.member-message-sticker) {
+  min-width: 5.25rem;
+}
+
+body #elliott-kb-inline .member-message-sticker {
+  padding-block: 0.15rem;
+  font-size: 3rem;
+  line-height: 1;
+}
+
+body #elliott-kb-inline .member-message-custom-sticker {
+  display: grid;
+  width: clamp(5.5rem, 16vw, 9rem);
+  height: clamp(5.5rem, 16vw, 9rem);
+  place-items: center;
+}
+
+body #elliott-kb-inline .member-public-profile-page {
+  display: grid;
+  gap: 1.15rem;
+}
+
+body #elliott-kb-inline .member-public-profile-hero {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: var(--taste-shadow-md);
+}
+
+body #elliott-kb-inline .member-public-profile-cover {
+  min-height: clamp(7.75rem, 17vw, 11rem);
+  background:
+    var(--public-cover-overlay, linear-gradient(110deg, color-mix(in srgb, var(--taste-accent, #285f9f) 72%, #07111d), color-mix(in srgb, var(--taste-accent, #285f9f) 34%, transparent))),
+    var(--member-cover-image, none),
+    var(--public-cover-fallback, linear-gradient(135deg, #183451, #0c1724));
+  background-position: center;
+  background-size: cover;
+}
+
+body #elliott-kb-inline .member-public-profile-hero.cover-wave-blue {
+  --public-cover-overlay: linear-gradient(120deg, rgb(7 27 40 / 92%), rgb(17 76 111 / 54%));
+  --public-cover-fallback: repeating-linear-gradient(110deg, #123a55 0 2.4rem, #174c6c 2.45rem 2.52rem);
+}
+
+body #elliott-kb-inline .member-public-profile-hero.cover-paper {
+  --public-cover-overlay: linear-gradient(100deg, rgb(255 255 255 / 78%), rgb(240 234 222 / 38%));
+  --public-cover-fallback: linear-gradient(135deg, #f3eee4, #d9cfbf);
+}
+
+body #elliott-kb-inline .member-public-profile-hero.cover-midnight {
+  --public-cover-overlay: radial-gradient(circle at 78% 20%, rgb(130 100 255 / 34%), transparent 34%), linear-gradient(120deg, rgb(17 15 31 / 90%), rgb(45 35 72 / 58%));
+  --public-cover-fallback: linear-gradient(135deg, #171329, #2f2548);
+}
+
+body #elliott-kb-inline .member-public-profile-summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: clamp(1rem, 3vw, 2rem);
+  align-items: end;
+  padding: 0 clamp(1.1rem, 3vw, 1.7rem) 1.35rem;
+}
+
+body #elliott-kb-inline .member-public-profile-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem;
+  align-items: end;
+  min-width: 0;
+}
+
+body #elliott-kb-inline .member-public-profile-avatar {
+  width: clamp(6.25rem, 10vw, 7.75rem);
+  height: clamp(6.25rem, 10vw, 7.75rem);
+  margin-top: -3.5rem;
+  overflow: hidden;
+  border: 4px solid var(--card);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--card) 76%, var(--taste-accent, #285f9f));
+  box-shadow: 0 14px 34px rgb(7 17 29 / 18%);
+}
+
+body #elliott-kb-inline .member-public-profile-copy {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding-top: 0.95rem;
+}
+
+body #elliott-kb-inline .member-public-profile-title {
+  justify-self: start;
+  margin-bottom: -0.12rem;
+}
+
+body #elliott-kb-inline .member-public-profile-copy h1,
+body #elliott-kb-inline .member-public-profile-bio,
+body #elliott-kb-inline .member-public-profile-status {
+  margin: 0;
+}
+
+body #elliott-kb-inline .member-public-profile-copy h1 {
+  font-size: clamp(1.5rem, 2.5vw, 2.05rem);
+  letter-spacing: -0.04em;
+}
+
+body #elliott-kb-inline .member-public-profile-bio {
+  max-width: 44rem;
+  color: var(--muted-foreground);
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+body #elliott-kb-inline .member-public-profile-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+body #elliott-kb-inline .member-public-profile-tag {
+  padding: 0.24rem 0.58rem;
+  color: var(--muted-foreground);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: color-mix(in srgb, var(--card) 88%, var(--taste-accent, #285f9f));
+}
+
+body #elliott-kb-inline .member-public-profile-action-stack {
+  display: grid;
+  gap: 0.55rem;
+  justify-items: end;
+  min-width: min(19rem, 34vw);
+  padding-top: 1rem;
+}
+
+body #elliott-kb-inline .member-public-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+body #elliott-kb-inline .member-public-profile-actions .btn {
+  min-height: 2.7rem;
+  padding-inline: 1rem;
+  border-radius: 12px;
+}
+
+body #elliott-kb-inline .member-public-profile-edit {
+  position: absolute;
+  inset-block-start: 1rem;
+  inset-inline-start: 1rem;
+  z-index: 2;
+  border-color: rgb(255 255 255 / 36%);
+  background: rgb(8 18 30 / 54%);
+  color: #f3f7fc;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  backdrop-filter: blur(12px);
+  font-size: 0.78rem;
+  font-weight: 720;
+}
+
+body #elliott-kb-inline .member-public-profile-follow[aria-pressed="true"] {
+  color: #fff;
+  border-color: rgb(255 255 255 / 48%);
+  background: rgb(39 102 170 / 76%);
+}
+
+body #elliott-kb-inline .member-public-profile-follow:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+body #elliott-kb-inline .member-public-profile-status {
+  max-width: 24rem;
+  color: var(--muted-foreground);
+  font-size: 0.76rem;
+  text-align: end;
+}
+
+body #elliott-kb-inline .member-public-profile-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 0.2rem 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card) 94%, var(--taste-accent, #285f9f));
+}
+
+body #elliott-kb-inline .member-public-profile-metric {
+  display: flex;
+  gap: 0.65rem;
+  align-items: baseline;
+  justify-content: center;
+  min-width: 0;
+  padding: 0.95rem 1rem;
+}
+
+body #elliott-kb-inline .member-public-profile-metric + .member-public-profile-metric {
+  border-inline-start: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+}
+
+body #elliott-kb-inline .member-public-profile-metric strong {
+  font-size: 1.45rem;
+  font-variant-numeric: tabular-nums;
+}
+
+body #elliott-kb-inline .member-public-profile-metric span {
+  color: var(--muted-foreground);
+  font-size: 0.74rem;
+}
+
+body #elliott-kb-inline .member-public-profile-content {
+  padding-top: 0.25rem;
+}
+
+body #elliott-kb-inline .member-public-content-heading {
+  margin-block-end: 0.95rem;
+}
+
+body #elliott-kb-inline .member-public-content-heading h2,
+body #elliott-kb-inline .member-public-content-heading p {
+  margin: 0;
+}
+
+body #elliott-kb-inline .member-public-content-heading h2 {
+  font-size: clamp(1.3rem, 2.4vw, 1.7rem);
+  letter-spacing: -0.025em;
+}
+
+body #elliott-kb-inline .member-public-content-heading p {
+  margin-top: 0.25rem;
+  font-size: 0.82rem;
+}
+
+body #elliott-kb-inline .member-public-post-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+body #elliott-kb-inline .member-public-post-card {
+  display: grid;
+  gap: 0.55rem;
+  min-height: 10.25rem;
+  padding: 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: 0 8px 24px rgb(19 42 69 / 6%);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+body #elliott-kb-inline .member-public-post-card:hover {
+  border-color: color-mix(in srgb, var(--taste-accent, #285f9f) 42%, var(--border));
+  box-shadow: 0 12px 30px rgb(19 42 69 / 10%);
+  transform: translateY(-2px);
+}
+
+body #elliott-kb-inline .member-public-post-card p {
+  margin: 0;
+}
+
+body #elliott-kb-inline .member-public-post-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+body #elliott-kb-inline .member-public-post-board {
+  color: var(--taste-accent, #235995);
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+body #elliott-kb-inline .member-public-post-title {
+  color: var(--foreground);
+  font-size: 1.08rem;
+  font-weight: 760;
+  line-height: 1.45;
+  text-decoration: none;
+}
+
+body #elliott-kb-inline .member-public-post-title:hover,
+body #elliott-kb-inline .member-public-post-title:focus-visible {
+  color: var(--taste-accent, #235995);
+}
+
+body #elliott-kb-inline .member-leaderboard-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+body #elliott-kb-inline .member-leaderboard-row {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 4.4rem;
+  padding: 0.62rem 0.8rem;
+  color: var(--foreground);
+  border-radius: 14px;
+  text-decoration: none;
+}
+
+body #elliott-kb-inline .member-leaderboard-row:hover,
+body #elliott-kb-inline .member-leaderboard-row:focus-visible {
+  background: color-mix(in srgb, var(--accent) 72%, var(--card));
+  outline: none;
+}
+
+body #elliott-kb-inline .member-leaderboard-rank {
+  color: var(--muted-foreground);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+body #elliott-kb-inline .member-leaderboard-row.is-top-1 .member-leaderboard-rank,
+body #elliott-kb-inline .member-leaderboard-row.is-top-2 .member-leaderboard-rank,
+body #elliott-kb-inline .member-leaderboard-row.is-top-3 .member-leaderboard-rank {
+  color: #b17e1e;
+}
+
+body #elliott-kb-inline .member-leaderboard-identity,
+body #elliott-kb-inline .member-leaderboard-name,
+body #elliott-kb-inline .member-leaderboard-copy,
+body #elliott-kb-inline .member-leaderboard-points {
+  display: flex;
+  align-items: center;
+}
+
+body #elliott-kb-inline .member-leaderboard-identity {
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+body #elliott-kb-inline .member-leaderboard-identity .member-avatar {
+  width: 2.8rem;
+  height: 2.8rem;
+}
+
+body #elliott-kb-inline .member-leaderboard-copy,
+body #elliott-kb-inline .member-leaderboard-points {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+}
+
+body #elliott-kb-inline .member-leaderboard-name {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+body #elliott-kb-inline .member-leaderboard-points {
+  align-items: flex-end;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  body #elliott-kb-inline .member-tab {
+    color: #aebed1;
+  }
+
+  body #elliott-kb-inline .member-store-button,
+  body #elliott-kb-inline .member-sticker-toggle,
+  body #elliott-kb-inline .member-sticker-panel,
+  body #elliott-kb-inline .member-custom-sticker-send,
+  body #elliott-kb-inline .member-public-post-card {
+    border-color: #334154;
+    background: #111a25;
+  }
+
+  body #elliott-kb-inline .member-sticker-upload-button {
+    color: #d8e7fb;
+    border-color: #36557d;
+    background: #19385e;
+  }
+
+  body #elliott-kb-inline .member-custom-sticker-remove {
+    color: #ffd3cf;
+    border-color: #74403e;
+    background: rgb(70 31 31 / 94%);
+  }
+
+  body #elliott-kb-inline .member-tool-link:hover,
+  body #elliott-kb-inline .member-tool-link:focus-visible,
+  body #elliott-kb-inline .member-leaderboard-row:hover,
+  body #elliott-kb-inline .member-leaderboard-row:focus-visible {
+    color: #dce9fb;
+    border-color: #35485e;
+    background: #17263a;
+  }
+
+  body #elliott-kb-inline .member-friend-chat-button {
+    color: #d8e7fb;
+    background: #1b3659;
+  }
+
+  body #elliott-kb-inline .member-public-profile-hero {
+    color: #e7edf5;
+    border-color: #334154;
+    background: var(--card);
+  }
+
+  body #elliott-kb-inline .member-public-post-board {
+    color: #9ec5fb;
+  }
+}
+
+@media (max-width: 760px) {
+  body #elliott-kb-inline .member-profile-hero {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  body #elliott-kb-inline .member-profile-identity {
+    grid-template-columns: 5.75rem minmax(0, 1fr);
+  }
+
+  body #elliott-kb-inline .member-profile-avatar-stack .member-avatar {
+    width: 5.25rem;
+    height: 5.25rem;
+  }
+
+  body #elliott-kb-inline .member-profile-avatar-stack .member-balance-pill {
+    width: 5.25rem;
+    padding-inline: 0.4rem;
+  }
+
+  body #elliott-kb-inline .member-primary-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  body #elliott-kb-inline .member-tool-dock,
+  body #elliott-kb-inline .member-public-post-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body #elliott-kb-inline .member-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  body #elliott-kb-inline .member-tab {
+    min-width: 0;
+    padding-inline: 0.4rem;
+  }
+
+  body #elliott-kb-inline .member-public-profile-cover {
+    min-height: 7rem;
+  }
+
+  body #elliott-kb-inline .member-public-profile-summary {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+    padding-inline: 0.9rem;
+  }
+
+  body #elliott-kb-inline .member-public-profile-identity {
+    grid-template-columns: 5.75rem minmax(0, 1fr);
+    gap: 0.8rem;
+  }
+
+  body #elliott-kb-inline .member-public-profile-avatar {
+    width: 5.75rem;
+    height: 5.75rem;
+    margin-top: -2.5rem;
+    border-radius: 15px;
+  }
+
+  body #elliott-kb-inline .member-public-profile-copy {
+    padding-top: 0.65rem;
+  }
+
+  body #elliott-kb-inline .member-public-profile-action-stack {
+    justify-items: stretch;
+    min-width: 0;
+    padding-top: 0;
+  }
+
+  body #elliott-kb-inline .member-public-profile-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body #elliott-kb-inline .member-public-profile-actions .btn {
+    justify-content: center;
+    min-width: 0;
+    padding-inline: 0.65rem;
+  }
+
+  body #elliott-kb-inline .member-public-profile-status {
+    text-align: start;
+  }
+
+  body #elliott-kb-inline .member-public-profile-metric {
+    display: grid;
+    gap: 0.05rem;
+    justify-items: center;
+    padding-inline: 0.45rem;
+  }
+
+  body #elliott-kb-inline .member-public-profile-metric strong {
+    font-size: 1.18rem;
+  }
+
+  body #elliott-kb-inline .member-leaderboard-row {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  body #elliott-kb-inline .member-leaderboard-points {
+    grid-column: 2;
+    align-items: flex-start;
+  }
+
+  body #elliott-kb-inline .member-sticker-panel {
+    inset-inline-start: -0.2rem;
+    width: min(24rem, calc(100vw - 2.2rem));
+    max-height: 58dvh;
+  }
+
+  body #elliott-kb-inline .member-custom-sticker-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  body #elliott-kb-inline .member-custom-sticker-remove {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+body #elliott-kb-inline {
+  --foreground: #122033;
+  --muted-foreground: #64748b;
+  --border: #d8e0ea;
+  --accent: #edf4ff;
+  --accent-foreground: #173f7a;
+  --card: #ffffff;
+  --kb-surface: #ffffff;
+  --taste-panel-soft: #f6f8fb;
+  --taste-line-strong: #c6d1df;
+  --taste-accent: #173f7a;
+  --taste-accent-strong: #0d2e5d;
+  --taste-shadow-sm: 0 1px 2px rgb(15 23 42 / 4%), 0 8px 24px rgb(15 23 42 / 5%);
+  --taste-shadow-md: 0 2px 4px rgb(15 23 42 / 4%), 0 18px 48px rgb(15 23 42 / 8%);
+  overflow: hidden;
+  border-color: #dfe6ef;
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: var(--taste-shadow-md);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body #elliott-kb-inline .kb-tree-pane {
+  border-inline-end-color: #e2e8f0;
+  background:
+    linear-gradient(180deg, rgb(237 244 255 / 65%), transparent 16rem);
+}
+
+body #elliott-kb-inline .kb-content-pane {
+  min-height: min(82vh, 58rem);
+}
+
+body #elliott-kb-inline .kb-site-header {
+  min-height: 3.45rem;
+  border-block-end-color: #e2e8f0;
+}
+
+body #elliott-kb-inline .kb-site-header > strong {
+  color: #0f1e32;
+  font-size: 1.08rem;
+  font-weight: 760;
+  letter-spacing: -0.025em;
+}
+
+body #elliott-kb-inline #elliott-kb-breadcrumb:empty {
+  display: none;
+}
+
+body #elliott-kb-inline #elliott-kb-breadcrumb {
+  margin-block: 1.15rem 1.55rem;
+}
+
+body #elliott-kb-inline .kb-breadcrumb-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 680;
+  letter-spacing: 0.025em;
+  list-style: none;
+}
+
+body #elliott-kb-inline .kb-breadcrumb-list > li {
+  display: inline-flex;
+  gap: 0.32rem;
+  align-items: center;
+}
+
+body #elliott-kb-inline .kb-breadcrumb-list a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.85rem;
+  padding-inline: 0.15rem;
+  color: #64748b;
+  text-decoration: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease;
+}
+
+body #elliott-kb-inline .kb-breadcrumb-current {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.85rem;
+  padding-inline: 0.62rem;
+  color: #334155;
+  border: 1px solid #dbe3ed;
+  border-radius: 999px;
+  background: #f8fafc;
+  font-weight: 760;
+}
+
+body #elliott-kb-inline .kb-breadcrumb-separator {
+  width: 0.9rem;
+  height: 0.9rem;
+  color: #94a3b8;
+  stroke-width: 2;
+}
+
+body #elliott-kb-inline .kb-breadcrumb-list a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  body #elliott-kb-inline .kb-breadcrumb-list a:hover {
+    color: #173f7a;
+    background: transparent;
+  }
+}
+
+body #elliott-kb-inline .kb-home-nav {
+  border-block-end-color: #e2e8f0;
+}
+
+body #elliott-kb-inline .btn,
+body #elliott-kb-inline .kb-search-result,
+body #elliott-kb-inline .member-tab {
+  border-color: #d6dee8;
+  border-radius: 13px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 2%);
+}
+
+body #elliott-kb-inline .btn-primary {
+  color: #ffffff;
+  border-color: var(--taste-accent);
+  background: var(--taste-accent);
+  box-shadow: 0 8px 18px rgb(23 63 122 / 16%);
+}
+
+body #elliott-kb-inline .kb-home-button {
+  min-height: 3rem;
+  padding-inline: 0.95rem;
+  color: #314158;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+body #elliott-kb-inline .kb-home-button[aria-current="page"],
+body #elliott-kb-inline .kb-tree-item > .btn[aria-pressed="true"] {
+  color: var(--taste-accent);
+  border-color: #c6d8f2;
+  background: #eaf2ff;
+  box-shadow: inset 3px 0 0 var(--taste-accent);
+}
+
+body #elliott-kb-inline .kb-theory-button {
+  border-color: #dbe3ed;
+  background: rgb(255 255 255 / 72%);
+}
+
+body #elliott-kb-inline .kb-problem-eyebrow,
+body #elliott-kb-inline .community-empty-eyebrow {
+  color: var(--taste-accent);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+body #elliott-kb-inline h1,
+body #elliott-kb-inline h2,
+body #elliott-kb-inline h3 {
+  color: #0f1e32;
+  letter-spacing: -0.032em;
+  text-wrap: balance;
+}
+
+body #elliott-kb-inline p,
+body #elliott-kb-inline li {
+  text-wrap: pretty;
+}
+
+body #elliott-kb-inline a {
+  text-underline-offset: 0.2em;
+}
+
+/* Homepage: identical composition, stronger hierarchy and atmosphere. */
+body #elliott-kb-inline .kb-site-home-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-color: #d4dfed;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 88% 10%, rgb(45 109 202 / 15%), transparent 23rem),
+    linear-gradient(135deg, #f8fbff 0%, #eef4fc 54%, #f9fbfe 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 85%);
+}
+
+body #elliott-kb-inline .kb-site-home-hero::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(23 63 122 / 4%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(23 63 122 / 4%) 1px, transparent 1px);
+  background-size: 38px 38px;
+  -webkit-mask-image: linear-gradient(90deg, transparent 40%, #000);
+  mask-image: linear-gradient(90deg, transparent 40%, #000);
+}
+
+body #elliott-kb-inline .kb-site-home-hero h1 {
+  color: #0b1c32;
+  font-weight: 780;
+  letter-spacing: -0.062em;
+  text-wrap: balance;
+}
+
+body #elliott-kb-inline .kb-site-home-hero > p {
+  color: #53647b;
+  font-size: clamp(1rem, 1.4vw, 1.12rem);
+  line-height: 1.75;
+}
+
+body #elliott-kb-inline .kb-community-directory {
+  border-block-color: #e2e8f0;
+}
+
+body #elliott-kb-inline .kb-directory-group {
+  padding: 1.1rem;
+  border: 1px solid #e0e7f0;
+  border-radius: 18px;
+  background: #f8fafc;
+}
+
+body #elliott-kb-inline .kb-directory-group + .kb-directory-group {
+  margin-block-start: 1rem;
+  padding-block-start: 1.1rem;
+  border-block-start-color: #e0e7f0;
+}
+
+body #elliott-kb-inline .kb-directory-card {
+  border-color: #dce4ee;
+  border-radius: 15px;
+  background: #ffffff;
+  box-shadow: var(--taste-shadow-sm);
+}
+
+body #elliott-kb-inline .kb-directory-avatar {
+  overflow: hidden;
+  border-color: #d5dfeb;
+  border-radius: 14px;
+  background: #edf3fb;
+}
+
+body #elliott-kb-inline .kb-directory-badge {
+  color: var(--taste-accent);
+  letter-spacing: 0.06em;
+}
+
+body #elliott-kb-inline .kb-directory-arrow {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 10px;
+  background: #f1f5f9;
+}
+
+/* Knowledge surfaces and image sources. */
+body #elliott-kb-inline .kb-problem-navigator,
+body #elliott-kb-inline .community-empty-state,
+body #elliott-kb-inline .community-notice {
+  border-color: #d9e3ef;
+  border-radius: 18px;
+  background: #f7faff;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 80%);
+}
+
+body #elliott-kb-inline .kb-source-card {
+  border-color: #d9e1eb;
+  border-radius: 16px;
+  box-shadow: var(--taste-shadow-sm);
+}
+
+/* Community feed and composer. */
+body #elliott-kb-inline .community-heading-row {
+  align-items: end;
+  margin-block-end: 1.5rem;
+  padding-block: 0.35rem 1.15rem;
+  border-block-end: 1px solid #e5eaf1;
+}
+
+body #elliott-kb-inline .community-heading-row h1,
+body #elliott-kb-inline .member-feed-heading h1 {
+  margin: 0;
+  font-size: clamp(2rem, 4.6vw, 3.55rem);
+  line-height: 1.04;
+  letter-spacing: -0.055em;
+}
+
+body #elliott-kb-inline .community-heading-row p,
+body #elliott-kb-inline .member-feed-heading p {
+  max-width: 46rem;
+  margin-block: 0.55rem 0;
+  line-height: 1.7;
+}
+
+body #elliott-kb-inline .member-feed-heading {
+  margin-block-end: 1.5rem;
+  padding-block: 0.35rem 1.15rem;
+  border-block-end: 1px solid #e5eaf1;
+}
+
+body #elliott-kb-inline .community-post-list {
+  gap: 0.9rem;
+}
+
+body #elliott-kb-inline .community-post-card {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(1rem, 2vw, 1.35rem);
+  border-color: #dce4ee;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: var(--taste-shadow-sm);
+}
+
+body #elliott-kb-inline .community-post-card::before {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 3px;
+  content: "";
+  background: var(--taste-accent);
+  opacity: 0.72;
+}
+
+body #elliott-kb-inline .community-author-avatar {
+  box-shadow: 0 0 0 3px #edf3fb;
+}
+
+body #elliott-kb-inline .community-image-link,
+body #elliott-kb-inline .community-external-card {
+  border-color: #d8e1ec;
+  border-radius: 15px;
+  background: #f1f5f9;
+}
+
+body #elliott-kb-inline .community-form,
+body #elliott-kb-inline .research-composer {
+  max-width: 68rem;
+}
+
+body #elliott-kb-inline .research-editor-section,
+body #elliott-kb-inline .research-live-preview,
+body #elliott-kb-inline .member-social-shell,
+body #elliott-kb-inline .member-message-shell {
+  border-color: #d9e2ed;
+  border-radius: 20px;
+  background: #f8fafc;
+  box-shadow: none;
+}
+
+body #elliott-kb-inline .research-editor-section {
+  border-inline-start: 3px solid #b9ccea;
+}
+
+body #elliott-kb-inline .research-live-preview {
+  border-color: #bfd0e8;
+  background: #ffffff;
+  box-shadow: var(--taste-shadow-sm);
+}
+
+body #elliott-kb-inline .community-field {
+  gap: 0.42rem;
+  color: var(--foreground);
+  font-size: 0.92rem;
+  font-weight: 680;
+}
+
+body #elliott-kb-inline .community-field input,
+body #elliott-kb-inline .community-field select,
+body #elliott-kb-inline .community-field textarea,
+body #elliott-kb-inline .research-editor-section input,
+body #elliott-kb-inline .research-editor-section select,
+body #elliott-kb-inline .research-editor-section textarea,
+body #elliott-kb-inline .member-uid-search input,
+body #elliott-kb-inline .member-message-composer textarea {
+  min-height: 3rem;
+  padding: 0.76rem 0.86rem;
+  color: #17263b;
+  border: 1px solid #cfd9e5;
+  border-radius: 13px;
+  outline: none;
+  background: #ffffff;
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 3%);
+  font: inherit;
+  font-weight: 430;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+body #elliott-kb-inline .community-field textarea,
+body #elliott-kb-inline .research-editor-section textarea,
+body #elliott-kb-inline .member-message-composer textarea {
+  line-height: 1.65;
+  resize: vertical;
+}
+
+body #elliott-kb-inline .community-field input::placeholder,
+body #elliott-kb-inline .community-field textarea::placeholder,
+body #elliott-kb-inline .research-editor-section input::placeholder,
+body #elliott-kb-inline .research-editor-section textarea::placeholder {
+  color: #94a3b8;
+}
+
+body #elliott-kb-inline .community-field input:focus-visible,
+body #elliott-kb-inline .community-field select:focus-visible,
+body #elliott-kb-inline .community-field textarea:focus-visible,
+body #elliott-kb-inline .research-editor-section input:focus-visible,
+body #elliott-kb-inline .research-editor-section select:focus-visible,
+body #elliott-kb-inline .research-editor-section textarea:focus-visible,
+body #elliott-kb-inline .member-uid-search input:focus-visible,
+body #elliott-kb-inline .member-message-composer textarea:focus-visible {
+  border-color: #2d62a9;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgb(45 98 169 / 14%);
+}
+
+/* Personal space. */
+body #elliott-kb-inline .member-profile-hero {
+  position: relative;
+  border-color: #d5dfeb;
+  border-radius: 22px;
+  box-shadow: var(--taste-shadow-md);
+}
+
+body #elliott-kb-inline .member-profile-hero::after {
+  background:
+    linear-gradient(90deg, rgb(255 255 255 / 94%) 0%, rgb(255 255 255 / 80%) 46%, rgb(255 255 255 / 50%) 100%);
+}
+
+body #elliott-kb-inline .member-avatar {
+  border: 3px solid rgb(255 255 255 / 88%);
+  box-shadow: 0 8px 24px rgb(15 23 42 / 15%);
+}
+
+body #elliott-kb-inline .member-title-chip {
+  color: #705315;
+  border-color: #d8bd7b;
+  background: #fff8e7;
+}
+
+body #elliott-kb-inline .member-uid-nameplate {
+  min-height: 1.75rem;
+  padding-inline: 0.55rem;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 72%);
+  backdrop-filter: blur(6px);
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-blackgold,
+body #elliott-kb-inline .community-uid-badge.is-pretty {
+  position: relative;
+  gap: 0.38rem;
+  overflow: hidden;
+  color: #ffe6a3;
+  border-color: #b98a31;
+  background:
+    linear-gradient(115deg, rgb(255 235 164 / 10%), transparent 34%),
+    linear-gradient(135deg, #2b2316 0%, #0b1017 48%, #322614 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 244 205 / 20%),
+    inset 0 0 0 1px rgb(84 58 18 / 50%),
+    0 6px 18px rgb(59 40 10 / 16%);
+  backdrop-filter: blur(8px);
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-blackgold::after,
+body #elliott-kb-inline .community-uid-badge.is-pretty::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 -45%;
+  width: 34%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(255 241 188 / 22%), transparent);
+  transform: skewX(-18deg);
+}
+
+body #elliott-kb-inline .member-uid-nameplate:is(.is-platinum, .is-purplegold, .is-rainbow) {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 28%),
+    0 6px 18px rgb(34 46 68 / 12%);
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-platinum {
+  color: #273a49;
+  border-color: #9fb3c1;
+  background:
+    linear-gradient(115deg, rgb(255 255 255 / 44%), transparent 36%),
+    linear-gradient(135deg, #edf3f7, #b9c9d4 48%, #f8fbfd);
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-purplegold {
+  color: #fff2bd;
+  border-color: #9e70c8;
+  background:
+    linear-gradient(115deg, rgb(255 241 184 / 14%), transparent 36%),
+    linear-gradient(135deg, #3a2255, #6d3b88 48%, #8a6624);
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-rainbow {
+  color: #fff;
+  border-color: rgb(110 131 212 / 72%);
+  background: linear-gradient(105deg, #ad4e70, #a66e2e, #2e7e6c, #386fa4, #7350a0, #ad4e70);
+  background-size: 260% 100%;
+  text-shadow: 0 1px 5px rgb(19 24 38 / 38%);
+  animation: member-nameplate-spectrum 10s linear infinite;
+}
+
+body #elliott-kb-inline .member-uid-nameplate:is(.is-platinum, .is-purplegold)::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 -45%;
+  width: 34%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 34%), transparent);
+  transform: skewX(-18deg);
+  animation: member-nameplate-glint 7.2s cubic-bezier(0.2, 0.75, 0.2, 1) infinite;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-blackgold::after,
+body #elliott-kb-inline .community-uid-badge.is-pretty::after {
+  animation: member-nameplate-glint 7.2s cubic-bezier(0.2, 0.75, 0.2, 1) infinite;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-pretty .member-uid-number,
+body #elliott-kb-inline .community-uid-badge.is-pretty .community-uid-number {
+  color: #ffe6a3;
+  font-variant-numeric: tabular-nums;
+  font-weight: 820;
+  letter-spacing: 0.055em;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 45%);
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-pretty .member-liang-icon,
+body #elliott-kb-inline .community-uid-badge.is-pretty .member-liang-icon {
+  width: 1.18rem;
+  height: 1.18rem;
+  color: #2e210b;
+  border-color: #f2d27e;
+  background: linear-gradient(145deg, #fff1b2, #c99536);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 55%);
+}
+
+body #elliott-kb-inline .member-display-name.is-blackgold {
+  --member-name-fallback: #8a6118;
+  --member-name-gradient: linear-gradient(100deg, #5c3b06 0%, #a87517 24%, #fff0a6 45%, #b17e1e 60%, #5c3b06 100%);
+  --member-name-filter: drop-shadow(0 1px 0 rgb(255 255 255 / 35%));
+}
+
+body #elliott-kb-inline .member-display-name.is-platinum {
+  --member-name-fallback: #405769;
+  --member-name-gradient: linear-gradient(100deg, #263747 0%, #7891a3 25%, #f6fbff 47%, #687f91 63%, #263747 100%);
+  --member-name-filter: drop-shadow(0 1px 0 rgb(255 255 255 / 45%));
+}
+
+body #elliott-kb-inline .member-display-name.is-purplegold {
+  --member-name-fallback: #704492;
+  --member-name-gradient: linear-gradient(100deg, #563080 0%, #9b5fc2 27%, #d39a37 45%, #fff0b0 54%, #7850a4 72%, #563080 100%);
+  --member-name-filter: drop-shadow(0 1px 0 rgb(255 255 255 / 28%));
+}
+
+body #elliott-kb-inline .member-display-name.is-rainbow {
+  --member-name-fallback: #5b497d;
+  --member-name-gradient: linear-gradient(100deg, #ae4868, #ae7828, #2f826d, #3974a8, #7253a3, #ae4868);
+  --member-name-filter: drop-shadow(0 1px 0 rgb(255 255 255 / 22%));
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  body #elliott-kb-inline .member-display-name:not(.is-classic) {
+    color: var(--member-name-fallback);
+    background-image: var(--member-name-gradient);
+    background-position: 100% 50%;
+    background-size: 240% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: var(--member-name-filter);
+  }
+
+  body #elliott-kb-inline .member-display-name:is(.is-blackgold, .is-platinum, .is-purplegold) {
+    animation: member-name-glint 7.2s cubic-bezier(0.2, 0.75, 0.2, 1) infinite;
+  }
+
+  body #elliott-kb-inline .member-display-name.is-rainbow {
+    animation: member-name-spectrum 9s linear infinite;
+  }
+}
+
+@keyframes member-name-glint {
+  0%,
+  58%,
+  100% {
+    background-position: 100% 50%;
+  }
+
+  78% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes member-name-spectrum {
+  from {
+    background-position: 100% 50%;
+  }
+
+  to {
+    background-position: -140% 50%;
+  }
+}
+
+@keyframes member-nameplate-glint {
+  0%,
+  58%,
+  100% {
+    inset-inline-start: -45%;
+  }
+
+  78% {
+    inset-inline-start: 125%;
+  }
+}
+
+@keyframes member-nameplate-spectrum {
+  from {
+    background-position: 100% 50%;
+  }
+
+  to {
+    background-position: -160% 50%;
+  }
+}
+
+body #elliott-kb-inline .member-primary-actions {
+  align-self: end;
+}
+
+body #elliott-kb-inline .member-primary-actions .btn {
+  min-height: 3rem;
+}
+
+body #elliott-kb-inline .member-tool-dock {
+  gap: 0.75rem;
+}
+
+body #elliott-kb-inline .member-tool-card {
+  border-color: #d9e2ed;
+  border-radius: 17px;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 98%), rgb(244 248 253 / 96%));
+  box-shadow: var(--taste-shadow-sm);
+}
+
+body #elliott-kb-inline .member-tool-label {
+  color: #17263a;
+}
+
+body #elliott-kb-inline .member-tool-arrow {
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body #elliott-kb-inline .member-review-fields,
+body #elliott-kb-inline .member-publish-panel,
+body #elliott-kb-inline .member-entry-card,
+body #elliott-kb-inline .member-person-card,
+body #elliott-kb-inline .member-conversation-card {
+  border-color: #d9e2ed;
+  border-radius: 17px;
+  background: #ffffff;
+  box-shadow: var(--taste-shadow-sm);
+}
+
+body #elliott-kb-inline .member-tabs {
+  padding: 0.3rem;
+  border: 1px solid #dce4ee;
+  border-radius: 14px;
+  background: #f1f5f9;
+}
+
+body #elliott-kb-inline .member-tab {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+body #elliott-kb-inline .member-tab[aria-current="page"],
+body #elliott-kb-inline .member-tab[aria-selected="true"] {
+  color: var(--taste-accent);
+  border-color: #d5e0ed;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 7%);
+}
+
+body #elliott-kb-inline .member-message-stream {
+  border: 1px solid #e0e7ef;
+  background: #f3f6fa;
+}
+
+body #elliott-kb-inline .member-message-bubble {
+  border: 1px solid #dde5ee;
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgb(15 23 42 / 6%);
+}
+
+body #elliott-kb-inline .member-message-bubble.is-mine {
+  color: #ffffff;
+  border-color: var(--taste-accent);
+  background: var(--taste-accent);
+}
+
+body #elliott-kb-inline .member-conversation-card.member-chat-contact {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body #elliott-kb-inline .member-chat-contact:hover,
+body #elliott-kb-inline .member-chat-contact:focus-visible,
+body #elliott-kb-inline .member-chat-contact.is-active {
+  background: #e8f0fb;
+  box-shadow: none;
+}
+
+body #elliott-kb-inline :where(
+  .btn,
+  .kb-search-result,
+  .kb-directory-card,
+  .community-post-card,
+  .member-person-card,
+  .member-conversation-card,
+  .member-entry-card,
+  .member-tool-card
+) {
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body #elliott-kb-inline :where(
+  .btn,
+  .kb-search-result,
+  .kb-directory-card,
+  .community-post-card,
+  .member-person-card,
+  .member-conversation-card,
+  .member-entry-card,
+  .member-tool-card,
+  input,
+  select,
+  textarea,
+  a
+):focus-visible {
+  outline: 2px solid #2d62a9;
+  outline-offset: 3px;
+}
+
+body #elliott-kb-inline :where(
+  .btn,
+  .kb-search-result,
+  .kb-directory-card,
+  .member-person-card,
+  .member-conversation-card,
+  .member-entry-card,
+  .member-tool-card
+):active {
+  transform: scale(0.98);
+}
+
+.community-auth-dialog {
+  border-color: #d7e0eb;
+  border-radius: 20px;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
+}
+
+.community-auth-dialog .community-auth-eyebrow {
+  color: #173f7a;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.community-auth-dialog .community-auth-input {
+  border-color: #cfd9e5;
+  border-radius: 13px;
+  background: #f8fafc;
+}
+
+.community-auth-dialog .community-auth-primary {
+  color: #ffffff;
+  border-color: #173f7a;
+  border-radius: 13px;
+  background: #173f7a;
+  box-shadow: 0 8px 18px rgb(23 63 122 / 16%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  body #elliott-kb-inline .btn:hover,
+  body #elliott-kb-inline .kb-search-result:hover {
+    color: var(--taste-accent);
+    border-color: #b8cae2;
+    background: #eef5ff;
+  }
+
+  body #elliott-kb-inline .btn-primary:hover {
+    color: #ffffff;
+    border-color: var(--taste-accent-strong);
+    background: var(--taste-accent-strong);
+    box-shadow: 0 10px 24px rgb(13 46 93 / 20%);
+  }
+
+  body #elliott-kb-inline .kb-home-button:hover {
+    color: var(--taste-accent);
+    border-color: transparent;
+    background: rgb(231 240 253 / 72%);
+  }
+
+  body #elliott-kb-inline .kb-directory-card:hover,
+  body #elliott-kb-inline .community-post-card:hover,
+  body #elliott-kb-inline .member-person-card:hover,
+  body #elliott-kb-inline .member-conversation-card:hover,
+  body #elliott-kb-inline .member-entry-card:hover,
+  body #elliott-kb-inline .member-tool-card:hover {
+    border-color: #b9cce4;
+    box-shadow: 0 12px 30px rgb(15 23 42 / 9%);
+    transform: translateY(-2px);
+  }
+
+  body #elliott-kb-inline .member-tool-card:hover .member-tool-arrow {
+    transform: translate(2px, -2px);
+  }
+
+  .community-auth-dialog .community-auth-primary:hover {
+    border-color: #0d2e5d;
+    background: #0d2e5d;
+    box-shadow: 0 10px 24px rgb(13 46 93 / 22%);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body:has(#elliott-kb-inline) {
+    background:
+      radial-gradient(circle at 10% -10%, rgb(50 105 180 / 14%), transparent 32rem),
+      #0b111a;
+    color: #e7edf5;
+  }
+
+  body #elliott-kb-inline {
+    --foreground: #e7edf5;
+    --muted-foreground: #9ba9ba;
+    --border: #2d3948;
+    --accent: #142744;
+    --accent-foreground: #a9c9f8;
+    --card: #101822;
+    --kb-surface: #131d29;
+    --taste-panel-soft: #131d29;
+    --taste-line-strong: #3a495c;
+    --taste-accent: #5f91d7;
+    --taste-accent-strong: #78a6e4;
+    --taste-shadow-sm: 0 10px 24px rgb(0 0 0 / 14%);
+    --taste-shadow-md: 0 18px 48px rgb(0 0 0 / 24%);
+    border-color: #263241;
+    background: #101822;
+  }
+
+  body #elliott-kb-inline .kb-tree-pane {
+    border-inline-end-color: #293646;
+    background:
+      linear-gradient(180deg, rgb(24 48 79 / 44%), transparent 16rem);
+  }
+
+  body #elliott-kb-inline .kb-site-header,
+  body #elliott-kb-inline .kb-home-nav,
+  body #elliott-kb-inline .community-heading-row {
+    border-color: #293646;
+  }
+
+  body #elliott-kb-inline .kb-site-header > strong,
+  body #elliott-kb-inline h1,
+  body #elliott-kb-inline h2,
+  body #elliott-kb-inline h3 {
+    color: #f1f5f9;
+  }
+
+  body #elliott-kb-inline .kb-home-button {
+    color: #c0cad7;
+  }
+
+  body #elliott-kb-inline .kb-home-button[aria-current="page"],
+  body #elliott-kb-inline .kb-tree-item > .btn[aria-pressed="true"] {
+    color: #c7dcfb;
+    border-color: #36557d;
+    background: #172b47;
+    box-shadow: inset 3px 0 0 #78a6e4;
+  }
+
+  body #elliott-kb-inline .kb-theory-button,
+  body #elliott-kb-inline .kb-directory-card,
+  body #elliott-kb-inline .community-post-card,
+  body #elliott-kb-inline .research-live-preview,
+  body #elliott-kb-inline .member-review-fields,
+  body #elliott-kb-inline .member-publish-panel,
+  body #elliott-kb-inline .member-entry-card,
+  body #elliott-kb-inline .member-person-card,
+  body #elliott-kb-inline .member-conversation-card,
+  body #elliott-kb-inline .member-message-bubble {
+    color: #e5ebf3;
+    border-color: #2d3a4a;
+    background: #131d29;
+  }
+
+  body #elliott-kb-inline .kb-site-home-hero {
+    border-color: #304156;
+    background:
+      radial-gradient(circle at 88% 10%, rgb(80 137 217 / 20%), transparent 23rem),
+      linear-gradient(135deg, #111d2b 0%, #132237 54%, #101a28 100%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+  }
+
+  body #elliott-kb-inline .kb-site-home-hero h1 {
+    color: #f3f7fc;
+  }
+
+  body #elliott-kb-inline .kb-site-home-hero > p {
+    color: #aebccd;
+  }
+
+  body #elliott-kb-inline .kb-directory-group,
+  body #elliott-kb-inline .kb-problem-navigator,
+  body #elliott-kb-inline .community-empty-state,
+  body #elliott-kb-inline .community-notice,
+  body #elliott-kb-inline .research-editor-section,
+  body #elliott-kb-inline .member-social-shell,
+  body #elliott-kb-inline .member-message-shell,
+  body #elliott-kb-inline .member-message-stream {
+    border-color: #2b394a;
+    background: #111b27;
+  }
+
+  body #elliott-kb-inline .community-field input,
+  body #elliott-kb-inline .community-field select,
+  body #elliott-kb-inline .community-field textarea,
+  body #elliott-kb-inline .research-editor-section input,
+  body #elliott-kb-inline .research-editor-section select,
+  body #elliott-kb-inline .research-editor-section textarea,
+  body #elliott-kb-inline .member-uid-search input,
+  body #elliott-kb-inline .member-message-composer textarea {
+    color: #e7edf5;
+    border-color: #354355;
+    background: #0f1823;
+  }
+
+  body #elliott-kb-inline .community-field input:focus-visible,
+  body #elliott-kb-inline .community-field select:focus-visible,
+  body #elliott-kb-inline .community-field textarea:focus-visible,
+  body #elliott-kb-inline .research-editor-section input:focus-visible,
+  body #elliott-kb-inline .research-editor-section select:focus-visible,
+  body #elliott-kb-inline .research-editor-section textarea:focus-visible,
+  body #elliott-kb-inline .member-uid-search input:focus-visible,
+  body #elliott-kb-inline .member-message-composer textarea:focus-visible {
+    color: #eef4fb;
+    border-color: #5f91d7;
+    background: #0f1823;
+    box-shadow: 0 0 0 3px rgb(95 145 215 / 18%);
+  }
+
+  body #elliott-kb-inline .member-messenger,
+  body #elliott-kb-inline .member-chat-pane,
+  body #elliott-kb-inline .member-chat-sidebar,
+  body #elliott-kb-inline .member-chat-sidebar-top,
+  body #elliott-kb-inline .member-chat-header,
+  body #elliott-kb-inline .member-messenger .member-message-composer {
+    border-color: #2b394a;
+    background: #111b27;
+  }
+
+  body #elliott-kb-inline .member-conversation-card.member-chat-contact {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  body #elliott-kb-inline .member-chat-contact:hover,
+  body #elliott-kb-inline .member-chat-contact:focus-visible,
+  body #elliott-kb-inline .member-chat-contact.is-active {
+    background: #172b47;
+    box-shadow: none;
+  }
+
+  body #elliott-kb-inline .member-profile-hero::after {
+    background:
+      linear-gradient(90deg, rgb(10 18 28 / 92%) 0%, rgb(10 18 28 / 76%) 48%, rgb(10 18 28 / 42%) 100%);
+  }
+
+  body #elliott-kb-inline .member-title-chip {
+    color: #ead69f;
+    border-color: #6d5c31;
+    background: #2d291c;
+  }
+
+  body #elliott-kb-inline .member-uid-nameplate {
+    background: rgb(9 16 25 / 60%);
+  }
+
+  body #elliott-kb-inline .member-uid-nameplate.is-blackgold,
+  body #elliott-kb-inline .community-uid-badge.is-pretty {
+    color: #ffe6a3;
+    border-color: #8f6a28;
+    background:
+      linear-gradient(115deg, rgb(255 235 164 / 8%), transparent 34%),
+      linear-gradient(135deg, #2a2113 0%, #080d13 48%, #2e2312 100%);
+  }
+
+  body #elliott-kb-inline .member-uid-nameplate.is-platinum {
+    color: #eaf3f8;
+    border-color: #6f8798;
+    background:
+      linear-gradient(115deg, rgb(255 255 255 / 12%), transparent 36%),
+      linear-gradient(135deg, #1b2833, #405463 48%, #24333e);
+  }
+
+  body #elliott-kb-inline .member-uid-nameplate.is-purplegold {
+    color: #ffe9a2;
+    border-color: #7e55a2;
+    background:
+      linear-gradient(115deg, rgb(255 235 163 / 9%), transparent 36%),
+      linear-gradient(135deg, #28183e, #59326f 48%, #6c4f20);
+  }
+
+  body #elliott-kb-inline .member-uid-nameplate.is-rainbow {
+    color: #fff;
+    border-color: #6e7fc3;
+    background: linear-gradient(105deg, #843952, #8a5d25, #286654, #305c85, #5f4182, #843952);
+    background-size: 260% 100%;
+  }
+
+  body #elliott-kb-inline .member-display-name.is-blackgold {
+    --member-name-fallback: #efc762;
+    --member-name-gradient: linear-gradient(100deg, #9c701d, #edc45d, #fff7ce, #c58b20, #8a6219);
+    --member-name-filter: drop-shadow(0 0 7px rgb(213 165 61 / 22%));
+  }
+
+  body #elliott-kb-inline .member-display-name.is-platinum {
+    --member-name-fallback: #bdccd7;
+    --member-name-gradient: linear-gradient(100deg, #8297a7, #dce8ef, #ffffff, #a7bbc8, #718594);
+    --member-name-filter: drop-shadow(0 0 7px rgb(190 220 238 / 16%));
+  }
+
+  body #elliott-kb-inline .member-display-name.is-purplegold {
+    --member-name-fallback: #c69ee4;
+    --member-name-gradient: linear-gradient(100deg, #9d6ccc, #d09fe9, #e3b957, #fff0ad, #aa76ce);
+    --member-name-filter: drop-shadow(0 0 8px rgb(164 105 210 / 20%));
+  }
+
+  body #elliott-kb-inline .member-display-name.is-rainbow {
+    --member-name-fallback: #b8a4e0;
+    --member-name-gradient: linear-gradient(100deg, #e17898, #dcad55, #65b7a0, #70a6dc, #ad8bd2, #e17898);
+    --member-name-filter: drop-shadow(0 0 7px rgb(122 156 220 / 16%));
+  }
+
+  body #elliott-kb-inline .member-tool-card {
+    border-color: #2d3c4e;
+    background: linear-gradient(145deg, #131e2b, #0f1823);
+    box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+  }
+
+  body #elliott-kb-inline .member-tool-label {
+    color: #e7edf5;
+  }
+
+  .community-auth-dialog {
+    border-color: #334154;
+    background: #111a25;
+  }
+
+  .community-auth-dialog .community-auth-eyebrow {
+    color: #a9c9f8;
+  }
+
+  .community-auth-dialog .community-auth-input {
+    color: #e7edf5;
+    border-color: #354355;
+    background: #0f1823;
+  }
+}
+
+@media (max-width: 700px) {
+  body:has(#elliott-kb-inline) {
+    padding: 0.55rem;
+  }
+
+  body #elliott-kb-inline {
+    padding: 0.75rem;
+    border-radius: 17px;
+  }
+
+  body #elliott-kb-inline .kb-site-home-hero {
+    border-radius: 18px;
+  }
+
+  body #elliott-kb-inline .kb-site-home-hero h1 {
+    font-size: clamp(2rem, 10vw, 3rem);
+  }
+
+  body #elliott-kb-inline .kb-directory-group,
+  body #elliott-kb-inline .research-editor-section,
+  body #elliott-kb-inline .research-live-preview,
+  body #elliott-kb-inline .member-social-shell,
+  body #elliott-kb-inline .member-message-shell {
+    padding: 1rem;
+    border-radius: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body #elliott-kb-inline :where(
+    .btn,
+    .kb-search-result,
+    .kb-directory-card,
+    .community-post-card,
+    .member-person-card,
+    .member-conversation-card,
+    .member-entry-card,
+    .member-tool-card,
+    input,
+    select,
+    textarea
+  ) {
+    transition: none;
+  }
+
+  body #elliott-kb-inline :where(
+    .btn,
+    .kb-search-result,
+    .kb-directory-card,
+    .member-person-card,
+    .member-conversation-card,
+    .member-entry-card,
+    .member-tool-card
+  ):active {
+    transform: none;
+  }
+
+  body #elliott-kb-inline .member-display-name,
+  body #elliott-kb-inline .member-uid-nameplate,
+  body #elliott-kb-inline .member-uid-nameplate::after {
+    animation: none !important;
+  }
+
+  body #elliott-kb-inline .member-display-name {
+    background-position: 50% 50%;
+  }
+}
+
+@media (forced-colors: active) {
+  body #elliott-kb-inline .member-display-name {
+    color: CanvasText !important;
+    background: none !important;
+    -webkit-text-fill-color: CanvasText !important;
+    filter: none !important;
+  }
+
+  body #elliott-kb-inline .member-uid-nameplate {
+    color: CanvasText !important;
+    border-color: CanvasText !important;
+    background: Canvas !important;
+  }
+}
+
+/* Final BEDRA overrides must follow the theme-specific light/dark rules above. */
+body #elliott-kb-inline :is(.member-display-name, .member-profile-preview-signature):is(.is-blackgold, .is-rainbow, .is-newyear, .is-platinum, .is-purplegold),
+body #elliott-kb-inline .member-uid-nameplate.is-premium .member-uid-number {
+  color: transparent;
+  background-image: var(--bedra-flow);
+  background-position: 0 50%;
+  background-size: 12rem 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: none;
+  text-shadow: none;
+  animation: bedra-unified-flow 6.8s linear infinite;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-premium .member-liang-icon {
+  display: inline-grid;
+  width: 1.28rem;
+  height: 1.34rem;
+  flex: 0 0 auto;
+  place-items: center;
+  color: transparent;
+  border: 1px solid color-mix(in srgb, #fff 46%, transparent);
+  border-radius: 3px;
+  background-image: var(--bedra-flow), var(--bedra-box);
+  background-position: 0 50%, center;
+  background-size: 12rem 100%, 100% 100%;
+  background-clip: text, padding-box;
+  -webkit-background-clip: text, padding-box;
+  -webkit-text-fill-color: transparent;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 16%),
+    inset 0 -3px 5px rgb(0 0 0 / 24%);
+  clip-path: polygon(12% 0, 88% 0, 100% 12%, 100% 88%, 88% 100%, 12% 100%, 0 88%, 0 12%);
+  font-family: "Songti SC", "STSong", "SimSun", serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  animation: bedra-icon-flow 6.8s linear infinite;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-premium::before,
+body #elliott-kb-inline .community-uid-badge.is-pretty::before {
+  content: "";
+  position: absolute;
+  inset: -0.32rem auto auto -0.16rem;
+  z-index: 2;
+  width: 1.58rem;
+  height: 0.78rem;
+  background: url("./blackgold-motive-wave.svg?v=1") center / contain no-repeat;
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 64%));
+  pointer-events: none;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-premium,
+body #elliott-kb-inline .community-uid-badge.is-pretty {
+  position: relative;
+  overflow: visible;
+  margin-block-start: 0.28rem;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-blackgold {
+  min-height: 1.78rem;
+  padding-inline: 0.34rem 0.72rem;
+  border-radius: 999px;
+  gap: 0.4rem;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-premium::after,
+body #elliott-kb-inline .community-uid-badge.is-pretty::after {
+  content: none;
+  display: none;
+  inset: auto;
+  animation: none;
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-blackgold .member-liang-icon {
+  border-color: color-mix(in srgb, #f4d57e 76%, transparent);
+  background-image:
+    linear-gradient(105deg, #fff1b4 0%, #c89435 42%, #ffe291 68%, #9a641e 100%),
+    linear-gradient(180deg, #332716 0%, #17130d 100%);
+  background-size: 220% 100%, 100% 100%;
+  box-shadow:
+    inset 0 1px 0 rgb(255 249 219 / 44%),
+    inset 0 -3px 5px rgb(0 0 0 / 34%);
+}
+
+body #elliott-kb-inline .member-uid-nameplate.is-newyear {
+  color: #fff;
+  border-color: rgb(186 190 255 / 44%);
+  background: linear-gradient(180deg, #272068, #100e48 58%, #09072b);
+  box-shadow: inset 0 1px rgb(255 255 255 / 18%), 0 6px 18px rgb(96 82 214 / 22%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body #elliott-kb-inline .member-display-name,
+  body #elliott-kb-inline .member-profile-preview-signature,
+  body #elliott-kb-inline .member-uid-nameplate,
+  body #elliott-kb-inline .member-uid-nameplate * {
+    animation: none !important;
+  }
+}
+
+/* Final hierarchy overrides: keep identity and primary actions aligned to the top. */
+body #elliott-kb-inline .member-primary-actions {
+  align-self: start;
+}
+
+body #elliott-kb-inline .member-profile-statbar {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+  body #elliott-kb-inline .member-profile-statbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Compact in-page friend window. It stays above the current site instead of becoming a page. */
+body #elliott-kb-inline .member-messenger-overlay {
+  padding: clamp(1rem, 3vw, 2.5rem);
+  background: rgb(15 23 42 / 24%);
+  backdrop-filter: blur(3px);
+}
+
+body #elliott-kb-inline .member-messenger-window {
+  --foreground: #172033;
+  --muted-foreground: #6b7280;
+  --border: #dde3ea;
+  --card: #ffffff;
+  --kb-surface: #ffffff;
+  width: min(27rem, calc(100vw - 2rem));
+  height: min(45rem, calc(100dvh - 3rem));
+  min-height: min(34rem, calc(100dvh - 3rem));
+  color: #172033;
+  color-scheme: light;
+  border-color: #d9e0e8;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
+}
+
+body #elliott-kb-inline .member-messenger-windowbar,
+body #elliott-kb-inline .member-messenger-window .member-messenger,
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar,
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar-top,
+body #elliott-kb-inline .member-messenger-window .member-chat-pane,
+body #elliott-kb-inline .member-messenger-window .member-chat-header,
+body #elliott-kb-inline .member-messenger-window .member-message-composer {
+  color: #172033;
+  border-color: #e2e7ed;
+  background: #ffffff;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-messenger {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar {
+  border-inline-end: 0;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-messenger.has-conversation .member-chat-sidebar,
+body #elliott-kb-inline .member-messenger-window .member-messenger:not(.has-conversation) .member-chat-pane {
+  display: none;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-back {
+  display: inline-flex;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-sound-toggle,
+body #elliott-kb-inline .member-messenger-window input,
+body #elliott-kb-inline .member-messenger-window textarea {
+  color: #172033;
+  border-color: #d9e0e8;
+  background: #ffffff;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+body #elliott-kb-inline .member-messenger-window :where(.member-message-bubble, .member-message-bubble p, .member-message-bubble time) {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-contact:hover,
+body #elliott-kb-inline .member-messenger-window .member-chat-contact:focus-visible,
+body #elliott-kb-inline .member-messenger-window .member-chat-contact.is-active {
+  color: #172033;
+  background: #edf5ff;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-directory-tabs {
+  background: #f1f3f6;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-directory-tabs button.is-active {
+  color: #155ea8;
+  background: #ffffff;
+}
+
+@media (max-width: 560px) {
+  body #elliott-kb-inline .member-messenger-overlay {
+    padding: 0;
+  }
+
+  body #elliott-kb-inline .member-messenger-window {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+/* 2026-08 messenger pass: compact QQ-like directory, expanding only for a conversation. */
+body #elliott-kb-inline .member-messenger-window {
+  width: min(27rem, calc(100vw - 2rem));
+  height: min(42rem, calc(100dvh - 3rem));
+  min-height: min(32rem, calc(100dvh - 3rem));
+  transition: width 220ms cubic-bezier(.2, .8, .2, 1);
+}
+
+body #elliott-kb-inline .member-messenger-window.has-conversation {
+  width: min(58rem, calc(100vw - 2rem));
+}
+
+body #elliott-kb-inline .member-messenger-window .member-messenger {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+body #elliott-kb-inline .member-messenger-window.has-conversation .member-messenger {
+  grid-template-columns: minmax(16.5rem, 18rem) minmax(0, 1fr);
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar {
+  display: block;
+  min-width: 0;
+  overflow: auto;
+  border-inline-end: 1px solid #e2e7ed;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-pane,
+body #elliott-kb-inline .member-messenger-window .member-messenger:not(.has-conversation) .member-chat-pane {
+  display: none;
+  min-width: 0;
+}
+
+body #elliott-kb-inline .member-messenger-window.has-conversation .member-chat-pane {
+  display: flex;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-section {
+  padding: .45rem .75rem .7rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-directory-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+body #elliott-kb-inline .member-messenger-window :where(.member-chat-contact, .member-chat-utility-row) {
+  min-height: 3.25rem;
+  border-radius: .8rem;
+}
+
+body #elliott-kb-inline .member-mentor-payment-notifications {
+  display: grid;
+  gap: .65rem;
+  margin-top: .65rem;
+  padding: .7rem;
+  border: 1px solid #d8e0ea;
+  border-radius: .9rem;
+  background: #f7f9fc;
+}
+
+body #elliott-kb-inline .member-mentor-payment-notifications[hidden] { display: none; }
+
+body #elliott-kb-inline .member-mentor-payment-notice,
+body #elliott-kb-inline .member-mentor-payment-copy,
+body #elliott-kb-inline .member-mentor-payment-actions {
+  display: grid;
+  gap: .4rem;
+}
+
+body #elliott-kb-inline .member-mentor-payment-notice {
+  padding: .75rem;
+  border: 1px solid #d7e1ee;
+  border-radius: .75rem;
+  background: #fff;
+}
+
+body #elliott-kb-inline .member-mentor-payment-copy span,
+body #elliott-kb-inline .member-mentor-payment-copy small { color: #64748b; }
+
+body #elliott-kb-inline .member-mentor-payment-actions {
+  grid-template-columns: auto 1fr;
+}
+
+body #elliott-kb-inline .member-mentor-payment-actions .btn { min-height: 2.55rem; }
+
+body #elliott-kb-inline :where(.member-tv-account, .community-tv-editor) {
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--card) 96%, #edf4ff);
+}
+
+body #elliott-kb-inline .member-tv-account {
+  padding: .75rem .9rem;
+}
+
+body #elliott-kb-inline .member-tv-account summary {
+  cursor: pointer;
+  font-weight: 760;
+}
+
+body #elliott-kb-inline .community-tv-editor { padding: 1rem; }
+
+body #elliott-kb-inline .community-tv-widget {
+  min-height: 28rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: #10141c;
+}
+
+body #elliott-kb-inline .community-tv-widget:empty { display: none; }
+
+body #elliott-kb-inline .community-tv-card {
+  display: grid;
+  gap: .9rem;
+  margin-block: 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--card);
+}
+
+body #elliott-kb-inline .community-tv-card-copy > * { margin: .2rem 0; }
+
+@media (max-width: 760px) {
+  body #elliott-kb-inline .member-messenger-window,
+  body #elliott-kb-inline .member-messenger-window.has-conversation {
+    width: min(27rem, 100%);
+    height: 100dvh;
+    min-height: 100dvh;
+    border-radius: 0;
+  }
+
+  body #elliott-kb-inline .member-messenger-window .member-messenger {
+    grid-template-columns: 1fr;
+  }
+
+  body #elliott-kb-inline .member-messenger-window .member-messenger.has-conversation .member-chat-sidebar {
+    display: none;
+  }
+
+  body #elliott-kb-inline .member-messenger-window .member-messenger:not(.has-conversation) .member-chat-pane {
+    display: none;
+  }
+}
+
+/* Messenger desktop app: a compact, non-blocking window above the current page. */
+body #elliott-kb-inline .member-messenger-overlay {
+  inset: auto 1.25rem 1.25rem auto;
+  display: block;
+  width: auto;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+body #elliott-kb-inline .member-messenger-window,
+body #elliott-kb-inline .member-messenger-window.has-conversation {
+  pointer-events: auto;
+}
+
+body #elliott-kb-inline .member-messenger-window {
+  width: min(24.5rem, calc(100vw - 2.5rem));
+  height: min(39rem, calc(100dvh - 5rem));
+  min-height: min(31rem, calc(100dvh - 5rem));
+  border: 1px solid #d8dee8;
+  border-radius: 18px;
+  box-shadow: 0 22px 60px rgb(15 23 42 / 22%), 0 3px 12px rgb(15 23 42 / 10%);
+  transform-origin: right bottom;
+  animation: member-messenger-enter 180ms cubic-bezier(.2, .8, .2, 1) both;
+}
+
+body #elliott-kb-inline .member-messenger-window.has-conversation {
+  width: min(50rem, calc(100vw - 2.5rem));
+}
+
+body #elliott-kb-inline .member-messenger-windowbar {
+  min-height: 3.5rem;
+  padding: .65rem .75rem .65rem 1rem;
+}
+
+body #elliott-kb-inline .member-messenger-windowbar h1 {
+  font-size: 1rem;
+  font-weight: 760;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-sound-toggle {
+  min-height: 2rem;
+  padding: .35rem .55rem;
+  border-radius: 8px;
+  font-size: .7rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-messenger.has-conversation {
+  grid-template-columns: 16rem minmax(0, 1fr);
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar-top {
+  padding: .7rem .7rem .5rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar-search {
+  min-height: 2.5rem;
+}
+
+body #elliott-kb-inline .member-messenger-window :where(.member-chat-contact, .member-chat-utility-row) {
+  min-height: 3rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-section {
+  padding: .35rem .6rem .55rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-pane,
+body #elliott-kb-inline .member-messenger-window .member-message-stream {
+  min-height: 0;
+}
+
+@keyframes member-messenger-enter {
+  from { opacity: 0; transform: translateY(.75rem) scale(.975); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 880px) {
+  body #elliott-kb-inline .member-messenger-window,
+  body #elliott-kb-inline .member-messenger-window.has-conversation {
+    width: min(27rem, calc(100vw - 2rem));
+  }
+
+  body #elliott-kb-inline .member-messenger-window .member-messenger,
+  body #elliott-kb-inline .member-messenger-window .member-messenger.has-conversation {
+    grid-template-columns: 1fr;
+  }
+
+  body #elliott-kb-inline .member-messenger-window .member-messenger.has-conversation .member-chat-sidebar {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  body #elliott-kb-inline .member-messenger-overlay {
+    inset: 0;
+    width: 100%;
+  }
+
+  body #elliott-kb-inline .member-messenger-window,
+  body #elliott-kb-inline .member-messenger-window.has-conversation {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body #elliott-kb-inline .member-messenger-window { animation: none; }
+}
+
+/* Messenger layout repair: one add-friend entry and a full-width conversation pane. */
+body #elliott-kb-inline .member-messenger-window.has-conversation .member-messenger,
+body #elliott-kb-inline .member-messenger-window .member-messenger.has-conversation {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body #elliott-kb-inline .member-messenger-window.has-conversation .member-chat-pane {
+  width: 100%;
+  min-width: 0;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-stream {
+  width: 100%;
+  padding: 1rem 1.15rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-composer {
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  padding: .75rem 1rem .9rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-composer textarea {
+  min-height: 4.5rem;
+  max-height: 9rem;
+  resize: none;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-bubble {
+  max-width: min(38rem, 78%);
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-time {
+  display: block;
+  margin-top: .2rem;
+  color: #8b96a6;
+  font-size: .625rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-bubble.is-mine .member-message-time {
+  color: rgb(255 255 255 / 68%);
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar-titlebar {
+  min-height: 1.8rem;
+}
+
+@media (max-width: 560px) {
+  body #elliott-kb-inline .member-messenger-window .member-message-bubble {
+    max-width: 86%;
+  }
+}
+
+/* Messenger interaction finish: compact directory, functional notifications and quiet metadata. */
+body #elliott-kb-inline .member-messenger-window:not(.has-conversation) {
+  height: min(36rem, calc(100dvh - 5rem));
+  min-height: min(29rem, calc(100dvh - 5rem));
+}
+
+body #elliott-kb-inline .member-messenger-window.has-conversation {
+  height: min(39rem, calc(100dvh - 5rem));
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-sidebar-top {
+  display: grid;
+  gap: .45rem;
+  padding: .62rem .7rem .55rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-utility-list {
+  gap: .1rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-utility-row {
+  min-height: 2.7rem;
+  padding: .32rem .5rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-utility-row.is-active {
+  color: #155ea8;
+  background: #eaf3ff;
+}
+
+body #elliott-kb-inline .member-chat-notification-center {
+  display: grid;
+  gap: .55rem;
+  padding: .7rem;
+}
+
+body #elliott-kb-inline .member-chat-notification-center[hidden] {
+  display: none !important;
+}
+
+body #elliott-kb-inline .member-chat-sidebar.show-notifications :where(
+  .member-friend-directory-section,
+  .member-mentor-directory-section,
+  .member-chat-directory-tabs,
+  .member-add-friend-panel
+) {
+  display: none !important;
+}
+
+body #elliott-kb-inline .member-chat-notification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .15rem .15rem .55rem;
+  border-bottom: 1px solid #e5eaf0;
+}
+
+body #elliott-kb-inline .member-chat-notification-heading {
+  display: grid;
+  gap: .1rem;
+}
+
+body #elliott-kb-inline .member-chat-notification-heading span {
+  color: #7b8797;
+  font-size: .65rem;
+}
+
+body #elliott-kb-inline .member-chat-notification-close {
+  display: grid;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  color: #516071;
+  border: 1px solid #dce3ea;
+  border-radius: .55rem;
+  background: #fff;
+  place-items: center;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .member-chat-notification-list {
+  display: grid;
+  gap: .4rem;
+}
+
+body #elliott-kb-inline .member-chat-notification-item {
+  display: flex;
+  width: 100%;
+  min-height: 3.4rem;
+  gap: .55rem;
+  align-items: center;
+  padding: .55rem;
+  color: #172033;
+  border: 0;
+  border-radius: .75rem;
+  background: #f5f8fc;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .member-chat-notification-item:hover,
+body #elliott-kb-inline .member-chat-notification-item:focus-visible {
+  background: #eaf3ff;
+  outline: 2px solid #b9d5f5;
+  outline-offset: 1px;
+}
+
+body #elliott-kb-inline .member-chat-payment-alert {
+  display: grid;
+  align-items: start;
+}
+
+body #elliott-kb-inline .member-chat-payment-alert span,
+body #elliott-kb-inline .member-chat-notification-empty {
+  color: #728094;
+  font-size: .7rem;
+}
+
+body #elliott-kb-inline .member-chat-notification-empty {
+  margin: 1.25rem auto;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-sticker-toggle {
+  min-width: 3.4rem;
+  min-height: 2.15rem;
+  padding: .35rem .72rem;
+  color: #173f7a !important;
+  border-color: #cbd8e7;
+  background: #f7faff;
+  -webkit-text-fill-color: #173f7a !important;
+  font-family: inherit;
+  font-size: .78rem !important;
+  font-weight: 700;
+  line-height: 1;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-sticker-toggle.is-active {
+  color: #fff !important;
+  border-color: #356fb9;
+  background: #356fb9;
+  -webkit-text-fill-color: #fff !important;
+}
+
+body #elliott-kb-inline .member-sticker-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+
+body #elliott-kb-inline .member-sticker-panel-close {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: #536174;
+  border: 1px solid #d8e0e9;
+  border-radius: .5rem;
+  background: #fff;
+  place-items: center;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-bubble {
+  padding: .62rem .78rem;
+  font-size: .875rem;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-time,
+body #elliott-kb-inline .member-messenger-window .member-message-bubble time.member-message-time {
+  margin: .15rem 0 0 !important;
+  color: #8b96a6 !important;
+  -webkit-text-fill-color: currentColor !important;
+  font-size: .5rem !important;
+  font-weight: 500 !important;
+  line-height: 1.1 !important;
+  letter-spacing: .01em;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-message-bubble.is-mine .member-message-time {
+  color: rgb(255 255 255 / 64%) !important;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-chat-refresh {
+  display: none !important;
+}
+
+@media (max-width: 560px) {
+  body #elliott-kb-inline .member-messenger-window:not(.has-conversation),
+  body #elliott-kb-inline .member-messenger-window.has-conversation {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
+}
+
+/* Messenger density repair: the directory follows its content; search is progressive disclosure. */
+body #elliott-kb-inline .member-messenger-window:not(.has-conversation) {
+  grid-template-rows: auto auto minmax(0, auto);
+  height: auto;
+  min-height: 0;
+  max-height: min(34rem, calc(100dvh - 2.5rem));
+}
+
+body #elliott-kb-inline .member-messenger-window:not(.has-conversation) .member-messenger {
+  height: auto;
+  min-height: 0;
+  max-height: min(29.5rem, calc(100dvh - 6.5rem));
+}
+
+body #elliott-kb-inline .member-messenger-window:not(.has-conversation) .member-chat-sidebar {
+  max-height: min(29.5rem, calc(100dvh - 6.5rem));
+  overscroll-behavior: contain;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-add-friend-panel[hidden] {
+  display: none !important;
+}
+
+body #elliott-kb-inline .member-pending-sticker-preview {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  gap: .55rem;
+  align-items: center;
+  margin: .45rem .1rem 0;
+  padding: .38rem .45rem .38rem .55rem;
+  color: #536174;
+  border: 1px solid #d7e1ec;
+  border-radius: .75rem;
+  background: #f4f8fd;
+  font-size: .7rem;
+}
+
+body #elliott-kb-inline .member-pending-sticker-preview[hidden] {
+  display: none !important;
+}
+
+body #elliott-kb-inline .member-pending-sticker-glyph {
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+body #elliott-kb-inline .member-pending-sticker-image {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: .45rem;
+  object-fit: contain;
+}
+
+body #elliott-kb-inline .member-pending-sticker-remove {
+  display: grid;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  color: #64748b;
+  border: 0;
+  border-radius: .45rem;
+  background: #e5edf7;
+  place-items: center;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  body #elliott-kb-inline .member-messenger-overlay {
+    padding: .5rem;
+    place-items: end center;
+  }
+
+  body #elliott-kb-inline .member-messenger-window:not(.has-conversation) {
+    width: min(24.5rem, 100%);
+    height: auto;
+    min-height: 0;
+    max-height: calc(100dvh - 1rem);
+    border: 1px solid #d8dee8;
+    border-radius: 18px;
+    box-shadow: 0 18px 55px rgb(15 23 42 / 24%);
+  }
+
+  body #elliott-kb-inline .member-messenger-window:not(.has-conversation) .member-messenger,
+  body #elliott-kb-inline .member-messenger-window:not(.has-conversation) .member-chat-sidebar {
+    height: auto;
+    min-height: 0;
+    max-height: calc(100dvh - 5rem);
+  }
+}
+
+/* Friend directory v6: one compact column, with requests scoped to 新朋友. */
+body #elliott-kb-inline .member-messenger-window.is-directory-view {
+  grid-template-rows: auto auto minmax(0, auto) !important;
+  width: min(24.5rem, calc(100vw - 2.5rem)) !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: min(38rem, calc(100dvh - 2.5rem));
+  align-content: start;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-messenger.is-directory-view {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: min(33.5rem, calc(100dvh - 6.5rem));
+  overflow: hidden;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-sidebar,
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-sidebar-top {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-sidebar {
+  max-height: min(33.5rem, calc(100dvh - 6.5rem));
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-inline-end: 0;
+  overscroll-behavior: contain;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-pane {
+  display: none !important;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-new-friend-requests {
+  width: 100%;
+  margin: .2rem 0 0;
+  padding: .65rem 0 0;
+  border-top: 1px solid #d8e2ee;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-new-friend-requests .member-chat-section-title {
+  padding-inline: 0;
+}
+
+body #elliott-kb-inline .member-messenger-window .member-new-friend-requests .member-chat-request-list {
+  padding: 0;
+}
+
+@media (max-width: 560px) {
+  body #elliott-kb-inline .member-messenger-window.is-directory-view {
+    width: min(24.5rem, calc(100vw - 1rem)) !important;
+    max-height: calc(100dvh - 1rem);
+    border: 1px solid #d8dee8;
+    border-radius: 18px;
+    box-shadow: 0 18px 55px rgb(15 23 42 / 24%);
+  }
+}
+
+/* Friend directory v8: recent threads collapse; the full friend roster stays visible. */
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-collapse-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  width: 100%;
+  min-height: 2.35rem;
+  gap: .45rem;
+  align-items: center;
+  padding: .45rem .75rem;
+  color: #172033;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-collapse-toggle:hover,
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-collapse-toggle:focus-visible {
+  background: #f2f6fb;
+  outline: none;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-collapse-mark {
+  color: #7b8797;
+  font-size: .8rem;
+  transition: transform 160ms ease;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-recent-conversations:not(.is-collapsed) .member-chat-collapse-mark {
+  transform: rotate(180deg);
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-recent-conversations .member-chat-list[hidden] {
+  display: none !important;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-chat-sidebar {
+  height: fit-content !important;
+  min-height: 0 !important;
+}
+
+body #elliott-kb-inline .member-messenger-window.is-directory-view .member-friend-directory-section {
+  flex: none;
+}
