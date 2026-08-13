@@ -11,14 +11,14 @@ export function PostCard({ post }: { post: CommunityPost }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>{BOARDS[post.board].title}</span>
         <span aria-hidden>/</span>
-        <span>{author}</span>
+        {post.profiles?.public_uid ? <Link href={`/member/${post.profiles.public_uid}`} className="hover:text-foreground hover:underline">{author}</Link> : <span>{author}</span>}
         <time dateTime={post.created_at}>{dateFormatter.format(new Date(post.created_at))}</time>
         {post.post_images.length > 0 ? (
           <span className="ml-auto inline-flex items-center gap-1"><ImageSquare aria-hidden size={15} />{post.post_images.length}</span>
         ) : null}
       </div>
       <h2 className="text-lg font-semibold tracking-tight md:text-xl">
-        <Link href={`/community/post/${post.id}`} className="outline-none after:absolute focus-visible:underline group-hover:text-primary">
+        <Link href={`/community/post/${post.id}`} className="outline-none focus-visible:underline group-hover:text-primary">
           {post.title}
         </Link>
       </h2>

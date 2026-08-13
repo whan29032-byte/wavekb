@@ -25,7 +25,8 @@ export default async function PostPage({ params }: PageProps) {
       <article className="grid gap-8 rounded-xl border bg-surface p-5 md:p-9">
         <header className="grid gap-3">
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>{BOARDS[post.board].title}</span><span aria-hidden>/</span><span>{author}</span>
+            <span>{BOARDS[post.board].title}</span><span aria-hidden>/</span>
+            {post.profiles?.public_uid ? <Link href={`/member/${post.profiles.public_uid}`} className="hover:text-foreground hover:underline">{author}</Link> : <span>{author}</span>}
             <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString("zh-CN")}</time>
           </div>
           <h1 className="text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-4xl">{post.title}</h1>

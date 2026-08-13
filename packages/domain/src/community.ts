@@ -34,6 +34,21 @@ export type PublicProfile = {
   role: string;
 };
 
+export type MemberProfile = PublicProfile & {
+  bio: string;
+  display_title: string;
+  nameplate_style: "classic" | "blackgold" | "platinum" | "purplegold" | "rainbow";
+  cover_url: string | null;
+  cover_style: "chart-dark" | "wave-blue" | "paper" | "midnight";
+};
+
+export type FriendshipConnection = {
+  friendship_id: string;
+  status: "pending" | "accepted" | "declined";
+  direction: "incoming" | "outgoing";
+  other_id: string;
+};
+
 export type PostImage = {
   id: string;
   storage_path: string;

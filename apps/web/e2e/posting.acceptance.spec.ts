@@ -35,6 +35,13 @@ test.describe("authenticated posting acceptance", () => {
       await page.reload();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
 
+      const authorProfileLink = page.locator('article header a[href^="/member/"]');
+      await expect(authorProfileLink).toHaveCount(1);
+      await authorProfileLink.click();
+      await expect(page).toHaveURL(/\/member\/\d{5,6}$/);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await page.goBack();
+
       await page.getByRole("link", { name: "编辑帖子" }).click();
       await page.getByLabel("正文").fill("这篇验收帖子已经完成编辑，用于确认作者修改链路和详情页刷新。 ");
       await page.getByRole("button", { name: "移除现有图片 1" }).click();

@@ -40,6 +40,20 @@ export async function listPosts(board: BoardSlug, limit = 20): Promise<Community
   return attachProfiles(client, (result.data ?? []) as unknown as PostRow[]);
 }
 
+export async function listPostsByAuthor(authorId: string, limit = 16): Promise<CommunityPost[]> {
+  if (!publicSupabaseConfig().configured) return [];
+  const client = await createClient();
+  const result = await client
+    .from("posts")
+    .select(POST_SELECT)
+    .eq("author_id", authorId)
+    .eq("status", "published")
+    .order("created_at", { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 40));
+  if (result.error) throw result.error;
+  return attachProfiles(client, (result.data ?? []) as unknown as PostRow[]);
+}
+
 export async function getPost(id: string): Promise<CommunityPost | null> {
   if (!publicSupabaseConfig().configured) return null;
   const client = await createClient();

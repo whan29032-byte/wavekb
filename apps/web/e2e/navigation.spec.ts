@@ -12,6 +12,12 @@ test("unknown community boards return a real not-found page", async ({ page }) =
   expect(response?.status()).toBe(404);
 });
 
+test("member profiles preserve the destination through login", async ({ page }) => {
+  await page.goto("/member/12345");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmember%2F12345/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("登录 WaveKB");
+});
+
 test("knowledge search opens a fully migrated article", async ({ page }) => {
   await page.goto("/knowledge");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("规则、指南与原书证据");

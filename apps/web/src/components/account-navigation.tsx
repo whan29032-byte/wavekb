@@ -11,18 +11,30 @@ import { createClient } from "@/lib/supabase/client";
 export function AccountNavigation() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
+  const [publicUid, setPublicUid] = useState<number | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
+    async function applyUser(nextUser: User | null) {
+      if (!active) return;
+      setUser(nextUser);
+      if (!nextUser) {
+        setPublicUid(null);
+        return;
+      }
+      const client = createClient();
+      const result = await client.from("profiles").select("public_uid").eq("id", nextUser.id).maybeSingle();
+      if (active) setPublicUid(typeof result.data?.public_uid === "number" ? result.data.public_uid : null);
+    }
     try {
       const client = createClient();
       void client.auth.getUser().then(({ data }) => {
-        if (active) setUser(data.user);
+        void applyUser(data.user);
       });
       const { data } = client.auth.onAuthStateChange((_event, session) => {
-        if (active) setUser(session?.user ?? null);
+        queueMicrotask(() => void applyUser(session?.user ?? null));
       });
       return () => {
         active = false;
@@ -60,9 +72,12 @@ export function AccountNavigation() {
   }
 
   return (
-    <span className="relative">
+    <span className="relative flex items-center gap-1">
+      {publicUid ? (
+        <Button asChild variant="ghost" size="small"><Link href={`/member/${publicUid}`}><UserCircle aria-hidden size={18} /><span className="hidden md:inline">个人空间</span></Link></Button>
+      ) : null}
       <Button type="button" variant="ghost" size="small" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}>
-        <SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}
+        <SignOut aria-hidden size={18} /><span className="hidden md:inline">{pending ? "正在退出" : "退出登录"}</span><span className="sr-only md:hidden">{pending ? "正在退出" : "退出登录"}</span>
       </Button>
       {error ? <span id="sign-out-error" role="alert" className="sr-only">{error}</span> : null}
     </span>
