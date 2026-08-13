@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL?.replace(/\/$/, "");
 const localBaseUrl = "http://127.0.0.1:3100";
+const acceptanceClientIp = process.env.E2E_POSTING_CLIENT_IP;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -11,6 +12,7 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL: externalBaseUrl || localBaseUrl,
+    extraHTTPHeaders: acceptanceClientIp ? { "x-forwarded-for": acceptanceClientIp } : undefined,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

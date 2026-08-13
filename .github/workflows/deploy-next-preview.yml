@@ -212,6 +212,14 @@ jobs:
         if: steps.posting-acceptance.outputs.enabled == 'true'
         run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
 
+      - name: Isolate the acceptance login rate-limit bucket
+        if: steps.posting-acceptance.outputs.enabled == 'true'
+        run: |
+          sequence=$((GITHUB_RUN_ID + GITHUB_RUN_ATTEMPT))
+          third_octet=$((sequence / 253 % 254 + 1))
+          fourth_octet=$((sequence % 254 + 1))
+          echo "E2E_POSTING_CLIENT_IP=198.18.${third_octet}.${fourth_octet}" >> "$GITHUB_ENV"
+
       - name: Run real posting lifecycle through an SSH tunnel
         if: steps.posting-acceptance.outputs.enabled == 'true'
         env:
