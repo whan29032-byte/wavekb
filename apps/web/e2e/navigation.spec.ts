@@ -35,6 +35,8 @@ test("friends and messages remain private", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Fmentor%2Fmanage/);
   await page.goto("/tutoring/not-a-thread");
   await expect(page).toHaveURL(/\/login\?next=%2Ftutoring%2Fnot-a-thread/);
+  await page.goto("/rewards");
+  await expect(page).toHaveURL(/\/login\?next=%2Frewards/);
 });
 
 test("mentor catalog is public and degrades safely without preview credentials", async ({ page }) => {

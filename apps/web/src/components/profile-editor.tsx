@@ -8,7 +8,7 @@ import { splitProfileTags, validateMemberProfile, validateProfileImage } from "@
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import type { NameplateEntitlement } from "@/lib/member/server-repository";
 import { createClient } from "@/lib/supabase/client";
-import { legacySiteUrl, publicSupabaseConfig } from "@/lib/env";
+import { publicSupabaseConfig } from "@/lib/env";
 import { cropAvatarFile, profileImagePathFromPublicUrl } from "@/lib/member/profile-images";
 
 type ProfileErrors = Partial<Record<"displayName" | "bio" | "markets" | "timeframes" | "coverStyle" | "avatar" | "cover" | "form", string>>;
@@ -214,7 +214,7 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
       </div>
 
       <section className="grid gap-4 rounded-xl border bg-surface p-5 md:p-6" aria-labelledby="profile-nameplate-title">
-        <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><h2 id="profile-nameplate-title" className="text-xl font-semibold">身份铭牌</h2><p className="mt-1 text-sm text-muted-foreground">佩戴后同步更新昵称、头像框、好友列表和私聊。</p></div><Button asChild variant="secondary"><a href={`${legacySiteUrl()}/#space=rewards`}>前往积分商城</a></Button></header>
+        <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><h2 id="profile-nameplate-title" className="text-xl font-semibold">身份铭牌</h2><p className="mt-1 text-sm text-muted-foreground">佩戴后同步更新昵称、头像框、好友列表和私聊。</p></div><Button asChild variant="secondary"><Link href="/rewards">前往积分商城</Link></Button></header>
         {nameplates.length ? <div className="grid gap-3 sm:grid-cols-2">{nameplates.map((item) => <article key={item.id} className="flex items-center justify-between gap-4 rounded-xl bg-muted p-4"><div className="min-w-0"><strong className="block truncate text-sm">{item.product_name}</strong><span className="text-xs text-muted-foreground">有效至 {new Date(item.expires_at).toLocaleDateString("zh-CN")}</span></div><Button type="button" variant={item.equipped ? "secondary" : "primary"} size="small" disabled={item.equipped || equipping !== null} onClick={() => equipNameplate(item)}>{item.equipped ? "当前佩戴" : equipping === item.id ? "正在切换" : "佩戴"}</Button></article>)}</div> : <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">目前没有可佩戴的身份铭牌，可以前往积分商城兑换。</div>}
       </section>
 

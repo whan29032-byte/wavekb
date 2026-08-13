@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMentorPrice, parseExternalReference, remainingMentorQuota, splitEntryTags, splitProfileTags, validateMemberProfile, validateMentorQuestion, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
+import { canRedeemReward, formatMentorPrice, formatRewardPoints, parseExternalReference, remainingMentorQuota, rewardActionLabel, splitEntryTags, splitProfileTags, validateMemberProfile, validateMentorQuestion, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
 
 describe("community post validation", () => {
   it("accepts a complete public post", () => {
@@ -89,5 +89,19 @@ describe("mentor tutoring domain rules", () => {
   it("validates a concrete tutoring question", () => {
     expect(validateMentorQuestion("  这段三浪的失效位应该放在哪里？  ")).toMatchObject({ ok: true, value: "这段三浪的失效位应该放在哪里？" });
     expect(validateMentorQuestion("太短")).toMatchObject({ ok: false });
+  });
+});
+
+describe("reward center domain rules", () => {
+  it("formats point balances and known ledger actions", () => {
+    expect(formatRewardPoints(12340)).toBe("12,340 积分");
+    expect(rewardActionLabel("review_saved")).toBe("完成复盘");
+    expect(rewardActionLabel("future_action")).toBe("积分变动");
+  });
+
+  it("blocks sold out and unaffordable products", () => {
+    expect(canRedeemReward({ price_points: 100, stock: 0 }, 1000)).toMatchObject({ ok: false, reason: "sold_out" });
+    expect(canRedeemReward({ price_points: 100, stock: -1 }, 99)).toMatchObject({ ok: false, reason: "insufficient" });
+    expect(canRedeemReward({ price_points: 100, stock: 2 }, 100)).toMatchObject({ ok: true });
   });
 });

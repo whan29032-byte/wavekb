@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Notebook, SignOut, UserCircle } from "@phosphor-icons/react";
+import { Coins, Notebook, SignOut, UserCircle } from "@phosphor-icons/react";
 import type { User } from "@supabase/supabase-js";
 import { Button } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
@@ -73,6 +73,7 @@ export function AccountNavigation() {
 
   return (
     <span className="relative flex items-center gap-1">
+      <Button asChild variant="ghost" size="small"><Link href="/rewards"><Coins aria-hidden size={18} /><span className="hidden xl:inline">积分</span></Link></Button>
       <Button asChild variant="ghost" size="small"><Link href="/workbench"><Notebook aria-hidden size={18} /><span className="hidden lg:inline">工作台</span></Link></Button>
       {publicUid ? (
         <Button asChild variant="ghost" size="small"><Link href={`/member/${publicUid}`}><UserCircle aria-hidden size={18} /><span className="hidden md:inline">个人空间</span></Link></Button>

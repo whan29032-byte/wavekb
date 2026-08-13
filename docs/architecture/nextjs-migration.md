@@ -53,6 +53,7 @@ supabase                数据库迁移和 Edge Functions
 /tutoring                      学员权益与历史会话
 /tutoring/[id]                 双方消息与服务端周额度
 /mentor/manage                 导师方案、收款核对与学员管理
+/rewards                       积分钱包、签到、商城、排行与账本
 ```
 
 现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
@@ -64,6 +65,8 @@ supabase                数据库迁移和 Edge Functions
 交易工作台继续读取现有 `private_entries` 和私有 `private-entry-images` 存储桶。服务端只按当前 owner 查询并签发短期图片地址；保存失败会清理本次上传，移除记录沿用可恢复的软删除。公开发布先创建独立草稿并写入 `post_sources`，只复制标题、正文和显式新增的公开图片，`review_data` 与私密图片不会进入社区帖子。
 
 导师目录继续读取现有导师、方案、订单、权益、会话和消息表。付款按 `create_manual_mentor_order` 创建价格快照，再由 `submit_mentor_payment_claim` 提交声明；只有导师本人通过 `review_mentor_payment_claim` 确认实际到账后，数据库才创建权益和专属会话。学员问题由 `send_mentor_message` 在服务端核验参与者、有效期和自然周额度，导师回复不消耗学员额度。导师管理 RPC 只返回当前导师本人名下的付款声明和学员，不因管理员身份扩大读取范围。
+
+积分中心通过 `get_my_reward_center` 读取当前钱包、任务账本、商品和有效铭牌，并通过登录后可见的 `list_reward_leaderboard` 读取排行。签到、兑换和佩戴分别交给 `reward_daily_checkin`、`redeem_reward_product` 与 `equip_my_nameplate`；余额扣减、库存锁定、重复任务防护和限时所有权都在数据库事务与 RLS 内完成，浏览器只显示服务器结果。
 
 ## UI 约束
 

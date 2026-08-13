@@ -333,6 +333,64 @@ export type MentorPaymentClaim = {
   submitted_at: string;
 };
 
+export type RewardProduct = {
+  id: string;
+  name: string;
+  summary: string;
+  description: string;
+  image_url: string | null;
+  category: "identity" | "digital" | "service" | "physical";
+  product_type: "digital" | "nameplate" | "title" | "service" | "physical";
+  price_points: number;
+  stock: number;
+  metadata: Record<string, unknown>;
+  active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type NameplateEntitlement = {
+  id: string;
+  product_id: string;
+  product_name: string;
+  style: MemberProfile["nameplate_style"];
+  starts_at: string;
+  expires_at: string;
+  equipped: boolean;
+  source: "redeemed" | "admin_grant";
+};
+
+export type RewardLedgerEntry = {
+  id: number;
+  action_key: string;
+  points: number;
+  balance_after: number;
+  note: string;
+  created_at: string;
+};
+
+export type RewardCenter = {
+  wallet: { balance: number; lifetime_earned: number };
+  checked_today: boolean;
+  streak: number;
+  products: RewardProduct[];
+  nameplates: NameplateEntitlement[];
+  ledger: RewardLedgerEntry[];
+};
+
+export type RewardLeaderboardEntry = {
+  rank_no: number;
+  user_id: string;
+  public_uid: number;
+  display_name: string;
+  avatar_url: string | null;
+  display_title: string;
+  nameplate_style: MemberProfile["nameplate_style"];
+  balance: number;
+  lifetime_earned: number;
+};
+
 export type PostInput = {
   board: string;
   title: string;
@@ -518,6 +576,27 @@ export function validateMentorQuestion(rawValue: string): { ok: boolean; value: 
   if (value.length < 5) return { ok: false, value, message: "问题至少需要 5 个字符。" };
   if (value.length > 5000) return { ok: false, value, message: "单次提问不能超过 5000 个字符。" };
   return { ok: true, value };
+}
+
+export function formatRewardPoints(value: number): string {
+  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(Math.max(0, Number(value || 0)))} 积分`;
+}
+
+export function rewardActionLabel(action: string): string {
+  return ({
+    daily_checkin: "每日签到",
+    review_saved: "完成复盘",
+    post_published: "发布研究内容",
+    product_redeemed: "商城兑换",
+    redemption_refund: "兑换退款",
+    admin_adjustment: "人工调整",
+  } as Record<string, string>)[action] || "积分变动";
+}
+
+export function canRedeemReward(product: Pick<RewardProduct, "price_points" | "stock">, balance: number): { ok: boolean; reason: "available" | "sold_out" | "insufficient" } {
+  if (Number(product.stock) === 0) return { ok: false, reason: "sold_out" };
+  if (Number(balance || 0) < Number(product.price_points || 0)) return { ok: false, reason: "insufficient" };
+  return { ok: true, reason: "available" };
 }
 
 export function plainTextExcerpt(value: string, limit = 140): string {
