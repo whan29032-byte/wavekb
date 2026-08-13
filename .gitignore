@@ -3,9 +3,16 @@
 .env.*
 !.env.example
 node_modules/
+.next/
+.storybook-static/
+storybook-static/
+playwright-report/
+test-results/
+.turbo/
 .pnpm-store/
 coverage/
 *.log
+*.tsbuildinfo
 *.zip
 *.tar
 *.tar.gz
@@ -18,4 +25,3 @@ user-data/
 *.sqlite
 *.sqlite3
 *.dump
-

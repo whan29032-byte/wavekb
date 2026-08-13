@@ -1,0 +1,13 @@
+import { expect, test } from "@playwright/test";
+
+test("home exposes the knowledge and community paths", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚");
+  await expect(page.getByRole("link", { name: "进入社区" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+});
+
+test("unknown community boards return a real not-found page", async ({ page }) => {
+  const response = await page.goto("/community/not-a-board");
+  expect(response?.status()).toBe(404);
+});

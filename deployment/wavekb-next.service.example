@@ -1,0 +1,24 @@
+[Unit]
+Description=WaveKB Next.js application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wavekb
+Group=wavekb
+WorkingDirectory=/srv/wavekb-next/current
+EnvironmentFile=/etc/wavekb/next.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node apps/web/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/wavekb-next
+
+[Install]
+WantedBy=multi-user.target
