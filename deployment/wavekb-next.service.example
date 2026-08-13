@@ -1,15 +1,13 @@
 [Unit]
-Description=WaveKB Next.js application
+Description=WaveKB Next.js preview
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=wavekb
-Group=wavekb
-WorkingDirectory=/srv/wavekb-next/current
-EnvironmentFile=/etc/wavekb/next.env
-Environment=NODE_ENV=production
+User=DEPLOY_USER
+WorkingDirectory=/srv/wavekb-next-preview/current
+EnvironmentFile=/etc/wavekb/next-preview.env
 ExecStart=/usr/bin/node apps/web/server.js
 Restart=on-failure
 RestartSec=5
@@ -18,7 +16,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/srv/wavekb-next
+ReadWritePaths=/srv/wavekb-next-preview
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

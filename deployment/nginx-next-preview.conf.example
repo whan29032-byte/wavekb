@@ -7,13 +7,16 @@ server {
     listen 443 ssl http2;
     server_name next-preview.wavekb.com;
 
-    # Reuse the production TLS and access-control policy here.
+    # Configure a dedicated certificate before exposing this host publicly.
+    client_max_body_size 20m;
+
     location / {
         proxy_pass http://wavekb_next_preview;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

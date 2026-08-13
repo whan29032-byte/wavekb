@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { gatewayRequestOrigin } from "@/lib/auth/gateway-origin";
 import { createClient } from "@/lib/supabase/server";
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -23,6 +24,9 @@ export async function POST(request: NextRequest) {
   const validIdentifier = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier) || /^[1-9]\d{4,5}$/.test(identifier);
   if (!validIdentifier || !password || password.length > 1024) return json({ error: "请填写有效账号和密码。" }, 400);
 
+  const requestOrigin = gatewayRequestOrigin(request.headers, request.nextUrl.origin);
+  if (!requestOrigin) return json({ error: "请求来源无效，请刷新页面后重试。" }, 403);
+
   const gatewayOrigin = (process.env.AUTH_GATEWAY_INTERNAL_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
   let upstream: Response;
   try {
@@ -30,7 +34,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        origin: request.headers.get("origin") || request.nextUrl.origin,
+        origin: requestOrigin,
         "x-forwarded-for": request.headers.get("x-forwarded-for") || "127.0.0.1",
       },
       body: JSON.stringify({ identifier, password }),
