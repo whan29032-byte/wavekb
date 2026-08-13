@@ -13,6 +13,7 @@ test.describe("authenticated posting acceptance", () => {
     await page.getByLabel("密码").fill(password || "");
     await page.getByRole("button", { name: "登录" }).click();
     await expect(page).toHaveURL(/\/community\/idea_sharing\/new/, { timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "发布到「观点分享」" })).toBeVisible({ timeout: 15_000 });
     const accountMenu = page.locator('summary[aria-label="账户菜单"]');
     const signOutButton = page.getByRole("button", { name: "退出登录" });
     await expect.poll(async () => await signOutButton.isVisible() || await accountMenu.isVisible(), { timeout: 15_000 }).toBe(true);
