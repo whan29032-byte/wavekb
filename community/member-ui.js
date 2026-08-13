@@ -3293,7 +3293,7 @@
         const nameplates = Array.isArray(center && center.nameplates) ? center.nameplates : [];
         const ledger = Array.isArray(center && center.ledger) ? center.ledger : [];
         const page = element("div", "member-rewards-page");
-        const hero = element("section", "member-rewards-hero");
+        const hero = element("section", "member-rewards-hero is-dark-surface");
         const heroCopy = element("div", "member-rewards-hero-copy");
         heroCopy.append(
           element("p", "member-eyebrow", "积分权益"),

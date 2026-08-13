@@ -127,7 +127,7 @@ test("all entry documents pin explicit cache-busted asset versions", async () =>
     read("previews/social-experience-preview.html"),
     read("admin/index.html")
   ]);
-  for (const html of [main, preview]) assert.match(html, /wavekb-ui-system-20260812-2/);
+  for (const html of [main, preview]) assert.match(html, /wavekb-theme-readability-20260813-1/);
   assert.match(socialPreview, /wavekb-admin-audit-20260810-1/);
   assert.match(admin, /admin-audit-20260810-3/);
 });

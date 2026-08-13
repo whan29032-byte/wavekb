@@ -50,6 +50,6 @@ test("admin and frontend documents use the audited cache versions", async () => 
     read("elliott-wave-preview.html"),
     read("admin/index.html")
   ]);
-  for (const html of [main, preview]) assert.match(html, /wavekb-ui-system-20260812-2/);
+  for (const html of [main, preview]) assert.match(html, /wavekb-theme-readability-20260813-1/);
   assert.match(admin, /admin-audit-20260810-3/);
 });

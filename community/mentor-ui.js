@@ -463,7 +463,7 @@
         ]);
         if (sequence !== renderSequence) return;
         const fragment = doc.createDocumentFragment();
-        const hero = el("section", "mentor-hero");
+        const hero = el("section", "mentor-hero is-dark-surface");
         hero.append(
           el("p", "mentor-hero-eyebrow", "结构化一对一辅导"),
           el("h1", "", "把卡住你的那一浪，交给老师一起拆解。"),

@@ -54,12 +54,16 @@ test("appearance CSS covers presets, explicit modes, mobile, and reduced prefere
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.match(css, /prefers-reduced-transparency: reduce/);
   assert.match(css, /@media \(max-width: 700px\)/);
+  assert.match(css, /data-wavekb-theme\]\[data-wavekb-mode="dark"\]/);
+  assert.match(css, /prefers-color-scheme: dark/);
+  assert.match(css, /\.mentor-dialog[\s\S]*?var\(--wavekb-surface\) !important/);
+  assert.doesNotMatch(css, /--wavekb-(?:page|surface|text|heading|muted):\s*light-dark\(/);
 });
 
 test("both local site documents load the appearance layer with fresh cache markers", async () => {
   const documents = await Promise.all([read("index.html"), read("elliott-wave-preview.html")]);
   for (const html of documents) {
-    assert.match(html, /community\/appearance\.css\?v=wavekb-ui-system-20260812-2/);
+    assert.match(html, /community\/appearance\.css\?v=wavekb-theme-readability-20260813-1/);
     assert.match(html, /community\/appearance-core\.js\?v=wavekb-appearance-20260803-3/);
     assert.match(html, /community\/appearance-ui\.js\?v=wavekb-appearance-20260803-3/);
   }

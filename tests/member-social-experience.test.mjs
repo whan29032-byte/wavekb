@@ -259,9 +259,9 @@ test("friends use a compact desktop directory with independent chat windows", as
   ]);
   for (const html of [indexHtml, previewHtml]) {
     assert.match(html, /memberUI\.dispose\(\{preserveMessenger: true\}\)/);
-    assert.match(html, /wavekb-ui-system-20260812-2/);
+    assert.match(html, /wavekb-theme-readability-20260813-1/);
     assert.match(html, /community\/messenger-desktop\.css\?v=wavekb-friends-repo-20260813-1/);
-    assert.match(html, /community\/member-ui\.js\?v=wavekb-friends-repo-20260813-1/);
+    assert.match(html, /community\/member-ui\.js\?v=wavekb-theme-readability-20260813-1/);
   }
   assert.match(preview, /preview-messenger-window/);
   assert.match(preview, /#friends:target\s*\{/);
@@ -308,7 +308,7 @@ test("the local preview uses the current UI-system cache marker", async () => {
     read("index.html"), read("elliott-wave-preview.html")
   ]);
   for (const html of [main, preview]) {
-    assert.match(html, /wavekb-ui-system-20260812-2/);
+    assert.match(html, /wavekb-theme-readability-20260813-1/);
   }
 });
 

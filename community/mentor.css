@@ -168,6 +168,10 @@
   color: var(--muted-foreground);
 }
 
+#elliott-kb-inline .mentor-card-copy h2 {
+  color: var(--foreground);
+}
+
 #elliott-kb-inline .mentor-tags {
   display: flex;
   gap: .4rem;
