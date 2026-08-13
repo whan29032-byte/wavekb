@@ -11,6 +11,8 @@ describe("auth form helpers", () => {
   it("only accepts same-site return paths", () => {
     expect(safeReturnPath("/friends")).toBe("/friends");
     expect(safeReturnPath("//attacker.example/path")).toBe("/community/idea_sharing");
+    expect(safeReturnPath("/\\attacker.example/path")).toBe("/community/idea_sharing");
+    expect(safeReturnPath("/friends?tab=pending#requests")).toBe("/friends?tab=pending#requests");
     expect(safeReturnPath("https://attacker.example")).toBe("/community/idea_sharing");
   });
 

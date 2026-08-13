@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BoardSlug, CommunityPost, ExternalKind } from "@wavekb/domain";
 import type { TradingViewPackage } from "@/lib/workbench/tradingview";
+import { mapWithConcurrency } from "../uploads";
 
 type CreatePostInput = {
   userId: string;
@@ -103,21 +104,27 @@ export async function createPost(
       if (!gateway.linkSource) throw new Error("私人记录发布链路尚未安装。");
       await gateway.linkSource({ post_id: postId, private_entry_id: input.privateEntryId, owner_id: input.userId });
     }
-    const imageRows: Record<string, unknown>[] = [];
-    for (const [sortOrder, file] of input.files.entries()) {
+    const imageRows = input.files.map((file, sortOrder) => {
       const extension = imageExtension(file.type);
       if (!extension) throw new Error("不支持的图片格式。");
       const path = `${input.userId}/${postId}/${gateway.makeId()}.${extension}`;
       uploadedPaths.push(path);
-      await gateway.uploadImage(path, file);
-      imageRows.push({
+      return {
         post_id: postId,
         owner_id: input.userId,
         storage_path: path,
         sort_order: sortOrder,
-      });
-    }
-    await gateway.insertImages(imageRows);
+        file,
+      };
+    });
+    await mapWithConcurrency(imageRows, 3, (row) => gateway.uploadImage(String(row.storage_path), row.file));
+    const persistedImageRows = imageRows.map((row) => ({
+      post_id: row.post_id,
+      owner_id: row.owner_id,
+      storage_path: row.storage_path,
+      sort_order: row.sort_order,
+    }));
+    await gateway.insertImages(persistedImageRows);
     await gateway.publish(postId);
     return postId;
   } catch (error) {
@@ -133,22 +140,24 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
   const kept = post.post_images.filter((image) => keptIds.has(image.id));
   const removed = post.post_images.filter((image) => !keptIds.has(image.id));
   const uploadedPaths: string[] = [];
-  let postUpdated = false;
 
   try {
-    for (const file of input.files) {
+    const uploads = input.files.map((file) => {
       const extension = imageExtension(file.type);
       if (!extension) throw new Error("不支持的图片格式。");
       const path = `${input.userId}/${post.id}/${crypto.randomUUID()}.${extension}`;
+      uploadedPaths.push(path);
+      return { file, path };
+    });
+    await mapWithConcurrency(uploads, 3, async ({ file, path }) => {
       const upload = await client.storage.from("post-images").upload(path, file, {
         upsert: false,
         contentType: file.type,
       });
       if (upload.error) throw upload.error;
-      uploadedPaths.push(path);
-    }
+    });
 
-    const result = await client.rpc("update_my_post_v2", {
+    const result = await client.rpc("update_my_post_v3", {
       p_post_id: post.id,
       p_title: input.title,
       p_body: input.body,
@@ -158,13 +167,11 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
       ],
       p_external_url: input.externalUrl || null,
       p_external_kind: input.externalKind,
+      p_chart_package: input.chartPackage ?? null,
     });
     if (result.error) throw result.error;
-    postUpdated = true;
-    const chart = await client.from("posts").update({ chart_package: input.chartPackage ?? null }).eq("id", post.id).eq("author_id", input.userId);
-    if (chart.error) throw chart.error;
   } catch (error) {
-    if (!postUpdated && uploadedPaths.length) await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
+    if (uploadedPaths.length) await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
     throw error;
   }
 

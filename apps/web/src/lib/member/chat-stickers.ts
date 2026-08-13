@@ -52,8 +52,8 @@ export async function uploadChatSticker(client: SupabaseClient, userId: string, 
 }
 
 export async function deleteChatSticker(client: SupabaseClient, sticker: ChatSticker) {
-  const file = await client.storage.from("chat-stickers").remove([sticker.storage_path]);
-  if (file.error) throw file.error;
   const row = await client.from("chat_stickers").delete().eq("id", sticker.id).eq("owner_id", sticker.owner_id);
   if (row.error) throw row.error;
+  // Message bodies reference this immutable object path. Removing the library row
+  // must not turn already-sent messages into broken images.
 }

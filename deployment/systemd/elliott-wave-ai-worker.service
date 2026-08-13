@@ -1,6 +1,6 @@
 [Unit]
-Description=Elliott Wave secure website gateway
-After=network-online.target
+Description=Elliott Wave AI job worker
+After=network-online.target elliott-wave-gateway.service
 Wants=network-online.target
 
 [Service]
@@ -8,9 +8,9 @@ Type=simple
 DynamicUser=yes
 WorkingDirectory=/opt/elliott-wave-gateway/current
 EnvironmentFile=/etc/elliott-wave/gateway.env
-ExecStart=/usr/bin/node src/server.ts
+ExecStart=/usr/bin/node src/worker-main.ts
 Restart=on-failure
-RestartSec=3s
+RestartSec=5s
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
@@ -24,7 +24,6 @@ ProtectClock=yes
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
-# Node.js V8 JIT needs executable memory; MemoryDenyWriteExecute would crash it.
 SystemCallArchitectures=native
 CapabilityBoundingSet=
 UMask=0077

@@ -1,9 +1,3 @@
-export type ModelRoute = { models: string[]; maxCost: number };
-
-export function selectNextModel(route: ModelRoute, attempted: Set<string>): string | null {
-  return route.models.find((model) => !attempted.has(model)) ?? null;
-}
-
 export function classifyProviderError(error: unknown): "auth" | "retryable" | "fatal" {
   const code = (error as { code?: string })?.code;
   const status = (error as { status?: number })?.status;

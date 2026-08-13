@@ -125,10 +125,11 @@ Deno.serve(async request => {
     );
     const insertedEvents = await eventResult.json().catch(() => []);
     if (!eventResult.ok) throw new Error("payment_event_store_failed");
-    if (!insertedEvents.length) return json({received: true, duplicate: true});
+    const duplicate = !insertedEvents.length;
 
     const paid = event.type !== "checkout.session.expired";
-    await rest(`mentor_orders?id=eq.${encodeURIComponent(order.id)}`, {
+    const orderFilter = paid ? "" : "&status=neq.paid";
+    await rest(`mentor_orders?id=eq.${encodeURIComponent(order.id)}${orderFilter}`, {
       method: "PATCH",
       headers: {prefer: "return=minimal"},
       body: JSON.stringify({
@@ -139,7 +140,7 @@ Deno.serve(async request => {
         updated_at: new Date().toISOString()
       })
     });
-    return json({received: true});
+    return json({received: true, duplicate});
   } catch (error) {
     return json({error: String(error?.message || error)}, 500);
   }

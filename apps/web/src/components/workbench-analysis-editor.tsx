@@ -65,7 +65,11 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   }, [actorId, initialAnalysis]);
 
   useEffect(() => {
-    if (!analysisId) localStorage.setItem(`wavekb:next:analysis:${actorId}`, JSON.stringify(draft));
+    if (analysisId) return;
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(`wavekb:next:analysis:${actorId}`, JSON.stringify(draft));
+    }, 300);
+    return () => window.clearTimeout(timer);
   }, [actorId, analysisId, draft]);
 
   function patchDraft(value: Partial<WorkbenchAnalysisDraft>) {

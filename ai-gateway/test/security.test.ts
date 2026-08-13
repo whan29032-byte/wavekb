@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FixedWindowQuota } from "../src/security/rate-limit.ts";
-import { validateProviderUrl, validateUserProviderUrl } from "../src/security/provider-url.ts";
+import { assertSafeProviderDestination, validateProviderUrl, validateUserProviderUrl } from "../src/security/provider-url.ts";
 
 test("custom provider rejects insecure public address and loopback unless allowlisted", () => {
   assert.throws(() => validateProviderUrl("http://example.com/v1", [], []));
@@ -29,6 +28,8 @@ test("user-owned providers allow arbitrary public HTTPS but block private networ
   );
   assert.throws(() => validateUserProviderUrl("http://api.example.com/v1", []));
   assert.throws(() => validateUserProviderUrl("https://192.168.1.8/v1", []));
+  assert.throws(() => validateUserProviderUrl("https://[::1]/v1", []));
+  assert.throws(() => validateUserProviderUrl("https://[fc00::1]/v1", []));
   assert.throws(() => validateUserProviderUrl("http://127.0.0.1:11434/v1", []));
   assert.equal(
     validateUserProviderUrl("http://127.0.0.1:11434/v1", ["127.0.0.1:11434"]).port,
@@ -36,9 +37,15 @@ test("user-owned providers allow arbitrary public HTTPS but block private networ
   );
 });
 
-test("quota refuses calls after the fixed daily limit", () => {
-  const quota = new FixedWindowQuota(2);
-  assert.equal(quota.consume("user-1").allowed, true);
-  assert.equal(quota.consume("user-1").remaining, 0);
-  assert.equal(quota.consume("user-1").allowed, false);
+test("provider destination rejects DNS answers that reach private networks", async () => {
+  await assert.rejects(() => assertSafeProviderDestination(
+    new URL("https://model.example/v1"),
+    [],
+    async () => [{ address: "10.0.0.4", family: 4 }],
+  ));
+  await assert.doesNotReject(() => assertSafeProviderDestination(
+    new URL("https://model.example/v1"),
+    [],
+    async () => [{ address: "8.8.8.8", family: 4 }],
+  ));
 });

@@ -1,54 +1,29 @@
 # 艾略特波浪理论知识库（WaveKB）
 
-这是 2026-08-13 整合后的项目源码。它以当前本地完整网站为基础，并纳入尚未上线的新版好友与聊天窗口代码。
+这是 WaveKB 的生产 monorepo。当前主站使用 Next.js App Router、React、TypeScript、Tailwind CSS v4、共享 UI 包、Supabase、Storybook、Playwright 与 pnpm；旧静态实现只保留为可恢复回滚资产。
 
 ## 包含内容
 
-- `index.html`、`elliott-wave-preview.html`：网站入口与知识库应用。
+- `apps/web/`：当前生产 Next.js 应用。
+- `packages/domain`、`packages/ui`、`packages/knowledge`：领域规则、共享组件与知识数据。
 - `assets/`：第 10/11 版原书关联图示与知识页面资源。
-- `community/`：账号、会员空间、发帖、好友、聊天、导师、积分商城、主题与 AI 前端。
-- `admin/`：独立后台管理页面。
-- `workbench/`：波浪分析、评分、规则与最大回撤工具。
+- `community/`、`admin/`、`workbench/`：冻结的旧静态回滚实现，不再新增功能。
 - `supabase/`：按顺序执行的数据库迁移与 Edge Functions。
 - `ai-gateway/`：UID 登录、管理接口与 AI 模型网关后端。
 - `deployment/`：Nginx、systemd 与生产环境变量示例。
 - `tests/`：网站前端和后端测试。
 - `previews/`：新版好友/聊天等界面预览。
 
-## 好友系统版本
-
-本仓库的好友与聊天功能采用当前本地最新版本，核心文件为：
-
-- `community/member-ui.js`
-- `community/messenger-desktop.css`
-- `community/member-repository.js`
-- `community/image-attachments.js`
-- `supabase/migrations/202607310001_social_graph.sql`
-- `supabase/migrations/202607310003_social_graph_hardening.sql`
-
-该版本包含悬浮好友面板、独立聊天窗口、位置持久化、图片粘贴/拖放、表情与通知等实现。它可能领先于当前线上 `wavekb.com` 版本。
-
 ## 本地预览
 
-在仓库根目录启动任意静态文件服务器，然后打开 `index.html`。例如使用 Python：
+安装依赖并启动 Next.js：
 
 ```bash
-python3 -m http.server 8877
-```
-
-打开 `http://127.0.0.1:8877/index.html`。
-
-## Next.js 迁移应用
-
-新的全栈前端位于 `apps/web`，由根目录的 pnpm workspace 管理。它当前作为旁路应用开发和验收，不会替换上述静态入口，也不会复制生产数据。
-
-```bash
-cp apps/web/.env.example apps/web/.env.local
 pnpm install
 pnpm dev
 ```
 
-架构边界、路由兼容和灰度切流方案见 [docs/architecture/nextjs-migration.md](docs/architecture/nextjs-migration.md)。
+当前依赖方向和发布门禁见 [docs/architecture/current-stack.md](docs/architecture/current-stack.md)，迁移过程记录见 [docs/architecture/nextjs-migration.md](docs/architecture/nextjs-migration.md)。
 
 ## 数据库
 
@@ -68,9 +43,9 @@ cp ai-gateway/.env.example ai-gateway/.env
 
 ## 发布边界
 
-- 静态站点发布：根目录 HTML、`assets/`、`community/`、`admin/`、`workbench/`。
-- 后端单独发布：`ai-gateway/`。
-- 数据库变更：`supabase/migrations/`。
+- 主站发布：`apps/web/` 的 Next.js standalone 构建。
+- 后端发布：`ai-gateway/` 网关与 AI Worker。
+- 数据库变更：`supabase/migrations/`，在应用切换前执行。
 - 不包含：生产数据库、用户上传内容、用户账户资料、服务器密钥、API Key、历史部署包或缓存。
 
 详细步骤见 [DEPLOYMENT.md](DEPLOYMENT.md)。

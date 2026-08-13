@@ -72,7 +72,8 @@ export async function listPostComments(postId: string): Promise<PostComment[]> {
     .select("id,post_id,author_id,parent_id,body,status,created_at,updated_at")
     .eq("post_id", postId)
     .eq("status", "visible")
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .limit(200);
   if (result.error) throw result.error;
   const rows = (result.data ?? []) as Omit<PostComment, "profiles">[];
   const authorIds = [...new Set(rows.map((comment) => comment.author_id))];
@@ -82,8 +83,4 @@ export async function listPostComments(postId: string): Promise<PostComment[]> {
   if (profilesResult.error) throw profilesResult.error;
   const profileById = new Map(((profilesResult.data ?? []) as PublicProfile[]).map((profile) => [profile.id, profile]));
   return rows.map((comment) => ({ ...comment, profiles: profileById.get(comment.author_id) ?? null }));
-}
-
-export function postImageUrl(client: SupabaseClient, storagePath: string): string {
-  return client.storage.from("post-images").getPublicUrl(storagePath).data.publicUrl;
 }

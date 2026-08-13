@@ -27,6 +27,7 @@ export class GeminiProvider implements ModelProvider {
         },
       },
       request.timeoutMs,
+      this.config.allowedLocalHosts,
     );
     const candidate = payload.candidates?.[0];
     const text = (candidate?.content?.parts ?? [])

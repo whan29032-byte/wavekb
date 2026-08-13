@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PrivateEntry, PrivateEntryKind, PrivateEntryReviewData } from "@wavekb/domain";
+import { mapWithConcurrency } from "../uploads";
 
 type SavePrivateEntryInput = {
   id?: string;
@@ -27,6 +28,7 @@ type WorkbenchGateway = {
   deleteImageRows(ids: string[]): Promise<void>;
   removeFiles(paths: string[]): Promise<void>;
   removeEntry(id: string): Promise<void>;
+  saveAtomically?(value: Record<string, unknown>, images: Record<string, unknown>[]): Promise<void>;
 };
 
 function unwrap(result: { error: unknown }) {
@@ -54,6 +56,21 @@ function defaultGateway(client: SupabaseClient): WorkbenchGateway {
     async removeEntry(id) {
       unwrap(await client.from("private_entries").delete().eq("id", id));
     },
+    async saveAtomically(value, images) {
+      unwrap(await client.rpc("save_private_entry_v2", {
+        p_entry_id: value.id,
+        p_kind: value.kind,
+        p_title: value.title,
+        p_body: value.body,
+        p_instrument: value.instrument,
+        p_market: value.market,
+        p_timeframe: value.timeframe,
+        p_tags: value.tags,
+        p_knowledge_ids: value.knowledge_ids,
+        p_review_data: value.review_data,
+        p_images: images,
+      }));
+    },
   };
 }
 
@@ -80,11 +97,10 @@ export async function savePrivateEntry(
   const removed = existing?.private_entry_images.filter((image) => !keptIds.has(image.id)) ?? [];
 
   try {
-    for (const [index, file] of input.files.entries()) {
+    const uploads = input.files.map((file, index) => {
       const extension = imageExtension(file.type);
       if (!extension) throw new Error("图片只支持 JPG、PNG 或 WebP。");
       const path = `${input.ownerId}/${entryId}/${gateway.makeId()}.${extension}`;
-      await gateway.upload(path, file);
       uploadedPaths.push(path);
       imageRows.push({
         entry_id: entryId,
@@ -92,8 +108,10 @@ export async function savePrivateEntry(
         storage_path: path,
         sort_order: kept.length + index,
       });
-    }
-    await gateway.upsertEntry({
+      return { path, file };
+    });
+    await mapWithConcurrency(uploads, 3, ({ path, file }) => gateway.upload(path, file));
+    const entryValue = {
       id: entryId,
       owner_id: input.ownerId,
       kind: input.kind,
@@ -105,8 +123,17 @@ export async function savePrivateEntry(
       tags: input.tags,
       knowledge_ids: input.knowledgeIds,
       review_data: input.reviewData,
-    });
-    await gateway.insertImages(imageRows);
+    };
+    const allImages = [
+      ...kept.map((image, sortOrder) => ({ storage_path: image.storage_path, sort_order: sortOrder })),
+      ...imageRows,
+    ];
+    if (gateway.saveAtomically) await gateway.saveAtomically(entryValue, allImages);
+    else {
+      await gateway.upsertEntry(entryValue);
+      await gateway.deleteImageRows(removed.map((image) => image.id));
+      await gateway.insertImages(imageRows);
+    }
   } catch (error) {
     await gateway.removeFiles(uploadedPaths).catch(() => undefined);
     if (!existing) await gateway.removeEntry(entryId).catch(() => undefined);
@@ -116,7 +143,6 @@ export async function savePrivateEntry(
   let cleanupPending = false;
   if (removed.length) {
     try {
-      await gateway.deleteImageRows(removed.map((image) => image.id));
       await gateway.removeFiles(removed.map((image) => image.storage_path));
     } catch {
       cleanupPending = true;

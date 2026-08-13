@@ -21,7 +21,8 @@ export async function requireCurrentUser(returnPath: string) {
 export async function requireActiveMember(returnPath: string) {
   const user = await requireCurrentUser(returnPath);
   const supabase = await createClient();
-  const profile = await supabase.from("profiles").select("public_uid").eq("id", user.id).maybeSingle();
+  const profile = await supabase.from("profiles").select("public_uid,account_status").eq("id", user.id).maybeSingle();
+  if (profile.data?.account_status === "banned") redirect("/account-restricted");
   if (profile.error || profile.data?.public_uid == null) {
     redirect(`/activate-uid?next=${encodeURIComponent(returnPath)}`);
   }

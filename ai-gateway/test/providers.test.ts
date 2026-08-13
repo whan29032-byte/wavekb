@@ -79,3 +79,22 @@ test("Anthropic and Gemini adapters normalize provider-specific responses", asyn
   assert.equal((await gemini.invoke(request)).text, "gemini");
   await geminiMock.close();
 });
+
+test("provider adapters never follow redirects", async () => {
+  const server = createServer((_request, response) => {
+    response.statusCode = 302;
+    response.setHeader("location", "http://127.0.0.1/private");
+    response.end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing address");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const provider = new OpenAICompatibleProvider({
+    baseUrl,
+    apiKey: "test-key",
+    allowedLocalHosts: [new URL(baseUrl).host],
+  });
+  await assert.rejects(() => provider.invoke(request), /redirects are not allowed/);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});

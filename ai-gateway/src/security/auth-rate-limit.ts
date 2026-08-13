@@ -12,6 +12,7 @@ export class AuthRateLimiter {
   private readonly buckets = new Map<string, Bucket>();
   private readonly secret: Buffer;
   private readonly now: () => number;
+  private operations = 0;
 
   constructor(
     secret: Buffer,
@@ -35,6 +36,12 @@ export class AuthRateLimiter {
   ): RateLimitResult {
     const key = `${action}:${subjectHash}`;
     const currentTime = this.now();
+    this.operations += 1;
+    if (this.operations % 256 === 0) {
+      for (const [bucketKey, value] of this.buckets) {
+        if (value.resetAt <= currentTime) this.buckets.delete(bucketKey);
+      }
+    }
     const existing = this.buckets.get(key);
     const bucket = !existing || existing.resetAt <= currentTime
       ? { count: 0, resetAt: currentTime + windowMs }

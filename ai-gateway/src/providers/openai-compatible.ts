@@ -22,6 +22,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           : {}),
       },
       request.timeoutMs,
+      this.config.allowedLocalHosts,
     );
     const text = payload.choices?.[0]?.message?.content ?? "";
     let structured: unknown;

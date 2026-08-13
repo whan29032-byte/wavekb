@@ -112,9 +112,12 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
 
   useEffect(() => {
     if (!draftLoaded || entry) return;
-    const draft = { title, body, instrument, market, timeframe, tags, pattern, position, direction, savedAt: new Date().toISOString() };
-    if (title.trim() || body.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
-    else localStorage.removeItem(draftKey);
+    const timer = window.setTimeout(() => {
+      const draft = { title, body, instrument, market, timeframe, tags, pattern, position, direction, savedAt: new Date().toISOString() };
+      if (title.trim() || body.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
+      else localStorage.removeItem(draftKey);
+    }, 300);
+    return () => window.clearTimeout(timer);
   }, [body, direction, draftKey, draftLoaded, entry, instrument, market, pattern, position, tags, timeframe, title]);
 
   function addImages(files: File[]) {

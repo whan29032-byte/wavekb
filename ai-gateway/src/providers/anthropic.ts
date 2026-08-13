@@ -19,6 +19,7 @@ export class AnthropicProvider implements ModelProvider {
         temperature: request.temperature,
       },
       request.timeoutMs,
+      this.config.allowedLocalHosts,
     );
     const text = (payload.content ?? [])
       .filter((item: any) => item.type === "text")

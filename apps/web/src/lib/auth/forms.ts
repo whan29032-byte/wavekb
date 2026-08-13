@@ -9,7 +9,16 @@ export type RegistrationInput = {
 export type AuthFieldErrors = Partial<Record<keyof RegistrationInput, string>>;
 
 export function safeReturnPath(value: string | null | undefined, fallback = "/community/idea_sharing") {
-  return value?.startsWith("/") && !value.startsWith("//") ? value : fallback;
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return fallback;
+  try {
+    const base = new URL("https://wavekb.invalid");
+    const destination = new URL(value, base);
+    return destination.origin === base.origin && destination.pathname.startsWith("/")
+      ? `${destination.pathname}${destination.search}${destination.hash}`
+      : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function validateRegistrationIdentity(input: RegistrationInput): AuthFieldErrors {

@@ -92,20 +92,36 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   const [draggingImage, setDraggingImage] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const previousNewestId = useRef(initialMessages.at(-1)?.id ?? 0);
+  const refreshing = useRef(false);
 
   async function refresh(markRead = true) {
+    if (refreshing.current) return;
+    refreshing.current = true;
     const client = createClient();
-    const result = await client.rpc("list_conversation_messages", { p_conversation: conversation.conversation_id });
-    if (result.error) throw result.error;
-    const rows = (result.data ?? []) as DirectMessage[];
-    setMessages(rows);
-    const newest = rows.at(-1);
-    if (newest && newest.id !== previousNewestId.current && newest.sender_id !== actorId && previousNewestId.current) {
-      playMessageTone(560);
-    }
-    previousNewestId.current = newest?.id ?? previousNewestId.current;
-    if (markRead && newest && document.visibilityState === "visible") {
-      await client.rpc("mark_conversation_read_v1", { p_conversation: conversation.conversation_id, p_through_id: newest.id });
+    try {
+      const afterId = previousNewestId.current;
+      let result = afterId > 0
+        ? await client.rpc("list_conversation_messages_after", { p_conversation: conversation.conversation_id, p_after_id: afterId })
+        : await client.rpc("list_conversation_messages", { p_conversation: conversation.conversation_id });
+      if (result.error && afterId > 0) {
+        result = await client.rpc("list_conversation_messages", { p_conversation: conversation.conversation_id });
+      }
+      if (result.error) throw result.error;
+      const rows = (result.data ?? []) as DirectMessage[];
+      if (!rows.length) return;
+      if (afterId > 0 && rows.every((row) => row.id > afterId)) {
+        setMessages((current) => [...current, ...rows.filter((row) => !current.some((item) => item.id === row.id))]);
+      } else {
+        setMessages(rows);
+      }
+      const newest = rows.at(-1);
+      if (newest && newest.id !== afterId && newest.sender_id !== actorId && afterId) playMessageTone(560);
+      previousNewestId.current = newest?.id ?? afterId;
+      if (markRead && newest && newest.sender_id !== actorId && document.visibilityState === "visible") {
+        await client.rpc("mark_conversation_read_v1", { p_conversation: conversation.conversation_id, p_through_id: newest.id });
+      }
+    } finally {
+      refreshing.current = false;
     }
   }
 
@@ -125,9 +141,9 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.conversation_id]);
 
-  async function send(value: string) {
+  async function send(value: string, allowCurrentUpload = false) {
     const normalized = value.trim();
-    if (!normalized || normalized.length > 4000 || pending) return;
+    if (!normalized || normalized.length > 4000 || (pending && !allowCurrentUpload)) return;
     setPending(true);
     setError("");
     try {
@@ -156,8 +172,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
     try {
       const sticker = await uploadChatSticker(createClient(), actorId, file);
       setCustomStickers((current) => [sticker, ...current]);
-      setPending(false);
-      await send(customStickerToken(sticker));
+      await send(customStickerToken(sticker), true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "图片上传失败，请稍后重试。");
       setPending(false);

@@ -1,4 +1,4 @@
-name: Deploy Next.js preview
+name: Deploy WaveKB production stack
 
 on:
   push:
@@ -48,6 +48,23 @@ jobs:
           pnpm typecheck
           pnpm --filter @wavekb/web lint
 
+      - name: Apply production database migrations
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -Eeuo pipefail
+          if [ -n "$SUPABASE_DB_URL" ]; then
+            for migration in supabase/migrations/202608140*.sql; do
+              psql "$SUPABASE_DB_URL" -X --set ON_ERROR_STOP=1 --file "$migration"
+            done
+          fi
+          schema_version=$(curl --fail --silent --show-error \
+            -H "apikey: $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
+            -H 'content-type: application/json' \
+            -d '{}' \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/wavekb_schema_version")
+          test "$schema_version" = '"202608140005"'
+
       - name: Build the standalone application
         env:
           DEPLOYMENT_VERSION: ${{ github.sha }}
@@ -55,6 +72,14 @@ jobs:
 
       - name: Package the standalone application
         run: tar -C apps/web/.next/standalone -czf wavekb-next-preview.tar.gz .
+
+      - name: Package the gateway and AI worker
+        run: |
+          set -Eeuo pipefail
+          tar -czf wavekb-gateway.tar.gz \
+            ai-gateway/package.json \
+            ai-gateway/tsconfig.json \
+            ai-gateway/src
 
       - name: Configure pinned SSH access
         env:
@@ -86,6 +111,86 @@ jobs:
           scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
             wavekb-next-preview.tar.gz \
             "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-next-preview-${RELEASE_ID}.tar.gz"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            wavekb-gateway.tar.gz \
+            deployment/systemd/elliott-wave-gateway.service \
+            deployment/systemd/elliott-wave-ai-worker.service \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:"
+
+      - name: Activate the gateway and AI worker with rollback
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}$ ]]
+
+          application_root=/opt/elliott-wave-gateway
+          releases_root="${application_root}/releases"
+          release_dir="${releases_root}/${RELEASE_ID}"
+          current_link="${application_root}/current"
+          upload_archive="$HOME/wavekb-gateway.tar.gz"
+          gateway_unit="$HOME/elliott-wave-gateway.service"
+          worker_unit="$HOME/elliott-wave-ai-worker.service"
+          rollback_marker="$HOME/wavekb-gateway-rollback-${RELEASE_ID}"
+          previous_release=$(readlink -f "$current_link" 2>/dev/null || true)
+
+          sudo test -s /etc/elliott-wave/gateway.env
+          sudo install -d -m 0755 "$releases_root"
+          if [ -z "$previous_release" ] && sudo test -f "$application_root/src/server.ts"; then
+            previous_release="${releases_root}/bootstrap"
+            sudo install -d -m 0755 "$previous_release"
+            sudo cp -a "$application_root/src" "$application_root/package.json" "$previous_release/"
+            if sudo test -f "$application_root/tsconfig.json"; then
+              sudo cp -a "$application_root/tsconfig.json" "$previous_release/"
+            fi
+          fi
+          printf '%s\n' "$previous_release" > "$rollback_marker"
+
+          rollback() {
+            status=$?
+            trap - ERR
+            if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
+              sudo ln -sfn "$previous_release" "${current_link}.rollback"
+              sudo mv -Tf "${current_link}.rollback" "$current_link"
+              sudo systemctl restart elliott-wave-gateway.service || true
+              if [ -f "$previous_release/src/worker-main.ts" ]; then
+                sudo systemctl restart elliott-wave-ai-worker.service || true
+              else
+                sudo systemctl stop elliott-wave-ai-worker.service || true
+              fi
+            else
+              sudo systemctl stop elliott-wave-ai-worker.service elliott-wave-gateway.service || true
+            fi
+            exit "$status"
+          }
+          trap rollback ERR
+
+          sudo rm -rf -- "$release_dir"
+          sudo install -d -m 0755 "$release_dir"
+          sudo tar -xzf "$upload_archive" -C "$release_dir" --strip-components=1 --no-same-owner
+          sudo test -f "$release_dir/src/server.ts"
+          sudo test -f "$release_dir/src/worker-main.ts"
+          sudo install -m 0644 "$gateway_unit" /etc/systemd/system/elliott-wave-gateway.service
+          sudo install -m 0644 "$worker_unit" /etc/systemd/system/elliott-wave-ai-worker.service
+          sudo ln -sfn "$release_dir" "${current_link}.new"
+          sudo mv -Tf "${current_link}.new" "$current_link"
+          sudo systemctl daemon-reload
+          sudo systemctl enable elliott-wave-gateway.service elliott-wave-ai-worker.service
+          sudo systemctl restart elliott-wave-gateway.service
+          curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+            --retry-connrefused http://127.0.0.1:8787/health | grep -F '"ok":true' > /dev/null
+          sudo systemctl restart elliott-wave-ai-worker.service
+          sudo systemctl is-active --quiet elliott-wave-ai-worker.service
+
+          trap - ERR
+          rm -f -- "$upload_archive" "$gateway_unit" "$worker_unit"
+          REMOTE
 
       - name: Activate the preview release with rollback
         env:
@@ -198,25 +303,19 @@ jobs:
           done < <(find "$releases_root" -mindepth 1 -maxdepth 1 -type d -mtime +14 -print)
           REMOTE
 
-      - name: Detect real posting acceptance credentials
-        id: posting-acceptance
+      - name: Require real posting acceptance credentials
         env:
           E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
           E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
         run: |
-          if [ -n "$E2E_POSTING_IDENTIFIER" ] && [ -n "$E2E_POSTING_PASSWORD" ]; then
-            echo 'enabled=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'enabled=false' >> "$GITHUB_OUTPUT"
-            echo 'Real posting acceptance is waiting for E2E_POSTING_IDENTIFIER and E2E_POSTING_PASSWORD.'
-          fi
+          set -Eeuo pipefail
+          test -n "$E2E_POSTING_IDENTIFIER"
+          test -n "$E2E_POSTING_PASSWORD"
 
       - name: Install Chromium for real posting acceptance
-        if: steps.posting-acceptance.outputs.enabled == 'true'
         run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
 
       - name: Isolate the acceptance login rate-limit bucket
-        if: steps.posting-acceptance.outputs.enabled == 'true'
         run: |
           sequence=$((GITHUB_RUN_ID + GITHUB_RUN_ATTEMPT))
           third_octet=$((sequence / 253 % 254 + 1))
@@ -224,7 +323,6 @@ jobs:
           echo "E2E_POSTING_CLIENT_IP=198.18.${third_octet}.${fourth_octet}" >> "$GITHUB_ENV"
 
       - name: Run real posting lifecycle through an SSH tunnel
-        if: steps.posting-acceptance.outputs.enabled == 'true'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -252,7 +350,7 @@ jobs:
         run: |
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
             "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "rm -f -- \"\$HOME/wavekb-next-preview-rollback-${RELEASE_ID}\""
+            "rm -f -- \"\$HOME/wavekb-next-preview-rollback-${RELEASE_ID}\" \"\$HOME/wavekb-gateway-rollback-${RELEASE_ID}\""
 
       - name: Roll back a release that failed acceptance
         if: failure()
@@ -267,17 +365,37 @@ jobs:
             "RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           marker="$HOME/wavekb-next-preview-rollback-${RELEASE_ID}"
-          test -f "$marker" || exit 0
-          previous_release=$(cat "$marker")
-          current_link=/srv/wavekb-next-preview/current
-          if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
-            sudo ln -sfn "$previous_release" "${current_link}.rollback"
-            sudo mv -Tf "${current_link}.rollback" "$current_link"
-            sudo systemctl restart wavekb-next-preview.service
-            curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-              --retry-connrefused http://127.0.0.1:3100/api/health > /dev/null
+          if [ -f "$marker" ]; then
+            previous_release=$(cat "$marker")
+            current_link=/srv/wavekb-next-preview/current
+            if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
+              sudo ln -sfn "$previous_release" "${current_link}.rollback"
+              sudo mv -Tf "${current_link}.rollback" "$current_link"
+              sudo systemctl restart wavekb-next-preview.service
+              curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+                --retry-connrefused http://127.0.0.1:3100/api/health > /dev/null
+            fi
+            rm -f -- "$marker"
           fi
-          rm -f -- "$marker"
+
+          gateway_marker="$HOME/wavekb-gateway-rollback-${RELEASE_ID}"
+          if [ -f "$gateway_marker" ]; then
+            previous_gateway=$(cat "$gateway_marker")
+            gateway_link=/opt/elliott-wave-gateway/current
+            if [ -n "$previous_gateway" ] && [ -d "$previous_gateway" ]; then
+              sudo ln -sfn "$previous_gateway" "${gateway_link}.rollback"
+              sudo mv -Tf "${gateway_link}.rollback" "$gateway_link"
+              sudo systemctl restart elliott-wave-gateway.service
+              if [ -f "$previous_gateway/src/worker-main.ts" ]; then
+                sudo systemctl restart elliott-wave-ai-worker.service
+              else
+                sudo systemctl stop elliott-wave-ai-worker.service
+              fi
+              curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+                --retry-connrefused http://127.0.0.1:8787/health > /dev/null
+            fi
+            rm -f -- "$gateway_marker"
+          fi
           REMOTE
 
       - name: Print preview service diagnostics

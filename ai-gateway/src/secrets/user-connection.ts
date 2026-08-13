@@ -9,6 +9,8 @@ export type ResolvedUserConnection = {
   ownerId: string;
   modelName: string;
   timeoutMs: number;
+  maxOutputTokens: number;
+  temperature: number;
   provider: ModelProvider;
 };
 
@@ -21,7 +23,7 @@ export class UserConnectionResolver {
 
   async resolve(ownerId: string, connectionId: string): Promise<ResolvedUserConnection> {
     const connections = await this.database.request(
-      `/rest/v1/user_ai_connections?id=eq.${encodeURIComponent(connectionId)}&owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&select=id,owner_id,adapter,base_url,model_name,timeout_ms&limit=1`,
+      `/rest/v1/user_ai_connections?id=eq.${encodeURIComponent(connectionId)}&owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&select=id,owner_id,adapter,base_url,model_name,timeout_ms,max_output_tokens,temperature&limit=1`,
     );
     if (!connections.length) throw new Error("user connection not found");
     const connection = connections[0];
@@ -36,6 +38,8 @@ export class UserConnectionResolver {
       ownerId: connection.owner_id,
       modelName: connection.model_name,
       timeoutMs: Number(connection.timeout_ms),
+      maxOutputTokens: Number(connection.max_output_tokens),
+      temperature: Number(connection.temperature),
       provider: createProvider(connection.adapter as Adapter, {
         baseUrl: connection.base_url,
         apiKey,

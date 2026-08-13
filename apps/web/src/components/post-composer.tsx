@@ -80,9 +80,12 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
 
   useEffect(() => {
     if (!draftLoaded || post) return;
-    const draft = { title, body, externalUrl, mode, structured, chartSource, chartSymbol, chartInterval, chartTheme, savedAt: new Date().toISOString() };
-    if (title.trim() || body.trim() || externalUrl.trim() || mode === "professional" && Object.values(structured).some((value) => value.trim()) || chartSource.trim() || chartSymbol.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
-    else localStorage.removeItem(draftKey);
+    const timer = window.setTimeout(() => {
+      const draft = { title, body, externalUrl, mode, structured, chartSource, chartSymbol, chartInterval, chartTheme, savedAt: new Date().toISOString() };
+      if (title.trim() || body.trim() || externalUrl.trim() || mode === "professional" && Object.values(structured).some((value) => value.trim()) || chartSource.trim() || chartSymbol.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
+      else localStorage.removeItem(draftKey);
+    }, 300);
+    return () => window.clearTimeout(timer);
   }, [body, chartInterval, chartSource, chartSymbol, chartTheme, draftKey, draftLoaded, externalUrl, mode, post, structured, title]);
 
   useEffect(() => () => {

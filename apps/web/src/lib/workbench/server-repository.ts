@@ -15,7 +15,8 @@ export async function listPrivateEntries(ownerId: string, kind?: PrivateEntryKin
   let query = client.from("private_entries").select(ENTRY_SELECT)
     .eq("owner_id", ownerId)
     .is("deleted_at", null)
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })
+    .limit(100);
   if (kind) query = query.eq("kind", kind);
   const result = await query;
   if (result.error) throw result.error;

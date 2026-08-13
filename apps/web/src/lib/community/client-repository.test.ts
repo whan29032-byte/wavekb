@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPost } from "./client-repository";
+import { createPost, updatePost } from "./client-repository";
 
 describe("posting transaction", () => {
   it("publishes only after every image row is saved", async () => {
@@ -76,5 +76,31 @@ describe("posting transaction", () => {
     }, gateway);
     expect(calls).toEqual(["draft", "source", "images", "publish"]);
     expect(gateway.linkSource).toHaveBeenCalledWith({ post_id: "post-id", private_entry_id: "private-entry-id", owner_id: "user-id" });
+  });
+});
+
+describe("post editing transaction", () => {
+  it("sends content, images and chart package through the atomic RPC", async () => {
+    const rpc = vi.fn(async () => ({ error: null }));
+    const client = { rpc, storage: { from: vi.fn() } } as never;
+    await updatePost(client, {
+      id: "11111111-1111-4111-8111-111111111111",
+      author_id: "22222222-2222-4222-8222-222222222222",
+      status: "published",
+      post_images: [],
+    } as never, {
+      userId: "22222222-2222-4222-8222-222222222222",
+      title: "原子更新测试",
+      body: "正文、图片、外链和图表必须在同一个事务内更新。",
+      externalUrl: "",
+      externalKind: null,
+      keptImageIds: [],
+      files: [],
+      chartPackage: { symbol: "BINANCE:BTCUSDT" } as never,
+    });
+    expect(rpc).toHaveBeenCalledWith("update_my_post_v3", expect.objectContaining({
+      p_chart_package: expect.objectContaining({ symbol: "BINANCE:BTCUSDT" }),
+      p_images: [],
+    }));
   });
 });
