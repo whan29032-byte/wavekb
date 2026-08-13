@@ -4,6 +4,7 @@ const identifier = process.env.E2E_POSTING_IDENTIFIER;
 const password = process.env.E2E_POSTING_PASSWORD;
 
 test.describe("authenticated posting acceptance", () => {
+  test.describe.configure({ retries: 0 });
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
   test("complete posting lifecycle with an image and external reference", async ({ page }) => {
@@ -17,7 +18,7 @@ test.describe("authenticated posting acceptance", () => {
     const loginResult = await loginResponse.json().catch(() => ({})) as { error?: string; ok?: boolean };
     expect(loginResponse.ok(), `Login failed (${loginResponse.status()}): ${loginResult.error || "unknown response"}`).toBe(true);
     await expect(page).toHaveURL(/\/community\/idea_sharing\/new/, { timeout: 15_000 });
-    const composerHeading = page.getByRole("heading", { name: "发布到「观点分享」" });
+    const composerHeading = page.getByRole("heading", { name: "发布到「思路分享」" });
     try {
       await expect(composerHeading).toBeVisible({ timeout: 15_000 });
     } catch (error) {
