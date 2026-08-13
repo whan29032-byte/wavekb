@@ -89,7 +89,16 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByRole("button", { name: "保存修改" }).click();
       await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
       const postArticle = page.locator("main > article");
-      await expect(postArticle).toContainText("这篇验收帖子已经完成编辑", { timeout: 20_000 });
+      try {
+        await expect(postArticle).toContainText("这篇验收帖子已经完成编辑", { timeout: 20_000 });
+      } catch (error) {
+        console.log("Edited destination diagnostic", JSON.stringify({
+          url: page.url(),
+          title: await page.title().catch(() => ""),
+          main: (await page.locator("main").innerText().catch(() => "")).slice(0, 2_000),
+        }));
+        throw error;
+      }
       console.log("Edited post diagnostic", JSON.stringify({
         article: (await postArticle.innerText().catch(() => "")).slice(0, 2_000),
       }));

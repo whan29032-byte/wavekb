@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { ImageSquare, Trash, UploadSimple } from "@phosphor-icons/react";
 import { MAX_IMAGES, validateImages, validatePost, type BoardSlug, type CommunityPost, type PrivateEntry } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
@@ -30,7 +29,6 @@ function friendlyError(error: unknown): string {
 }
 
 export function PostComposer({ board, userId, post, source }: { board: BoardSlug; userId: string; post?: CommunityPost; source?: PrivateEntry }) {
-  const router = useRouter();
   const draftKey = `wavekb:next:composer:${userId}:${board}:${post?.id || "new"}`;
   const restoredPost = post ? parseStructuredPost(post.body) : null;
   const [title, setTitle] = useState(post?.title || source?.title || "");
@@ -184,8 +182,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
         });
       }
       localStorage.removeItem(draftKey);
-      router.push(`/community/post/${postId}`);
-      router.refresh();
+      window.location.assign(new URL(`/community/post/${postId}`, window.location.origin));
     } catch (error) {
       setErrors({ form: friendlyError(error) });
       setPending(false);
