@@ -177,8 +177,12 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl enable wavekb-next-preview.service
           sudo systemctl restart wavekb-next-preview.service
-          curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-            http://127.0.0.1:3100/api/health | grep -F '"ok":true' > /dev/null
+          if ! curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+            --retry-connrefused http://127.0.0.1:3100/api/health | grep -F '"ok":true' > /dev/null; then
+            sudo systemctl --no-pager --full status wavekb-next-preview.service || true
+            sudo journalctl --no-pager -u wavekb-next-preview.service -n 80 || true
+            false
+          fi
 
           trap - ERR
           rm -f -- "$upload_archive"
