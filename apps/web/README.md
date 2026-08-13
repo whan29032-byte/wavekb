@@ -23,4 +23,6 @@ pnpm storybook:build
 pnpm test:e2e
 ```
 
+旧 HTML 中的知识数据发生变化后，先执行 `pnpm knowledge:extract`，再提交更新后的 `packages/knowledge/src/knowledge.json`。
+
 认证发帖验收默认跳过。只有在隔离的预发布或最终验收环境中配置 `E2E_POSTING_IDENTIFIER` 和 `E2E_POSTING_PASSWORD` 才会创建测试帖子。

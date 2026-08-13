@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { BookOpenText, ChatsCircle, UserCircle } from "@phosphor-icons/react/dist/ssr";
-import { legacySiteUrl } from "@/lib/env";
 
 export function SiteHeader() {
   return (
@@ -11,9 +10,9 @@ export function SiteHeader() {
           <span>WaveKB</span>
         </Link>
         <nav aria-label="主导航" className="ml-auto flex items-center gap-1 text-sm font-medium">
-          <a href={`${legacySiteUrl()}/#page=introduction`} className="hidden items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground md:flex">
+          <Link href="/knowledge" className="hidden items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground md:flex">
             <BookOpenText aria-hidden size={18} weight="duotone" />知识库
-          </a>
+          </Link>
           <Link href="/community/idea_sharing" className="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
             <ChatsCircle aria-hidden size={18} weight="duotone" />社区
           </Link>

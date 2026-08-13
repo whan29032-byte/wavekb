@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ArrowRight, BookOpenText, ChatsCircle } from "@phosphor-icons/react/dist/ssr";
 import { BOARD_SLUGS, BOARDS } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
-import { legacySiteUrl } from "@/lib/env";
 
 export default function HomePage() {
   return (
@@ -18,7 +17,7 @@ export default function HomePage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Button asChild size="large"><a href={`${legacySiteUrl()}/#page=introduction`}>打开知识库</a></Button>
+            <Button asChild size="large"><Link href="/knowledge">打开知识库</Link></Button>
             <Button asChild size="large" variant="secondary"><Link href="/community/idea_sharing">进入社区</Link></Button>
           </div>
         </div>

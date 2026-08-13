@@ -10,6 +10,7 @@
 apps/web                Next.js App Router 全栈应用
 ai-gateway              现有 UID 登录、管理与 AI 网关
 packages/domain         板块、帖子、验证与领域类型
+packages/knowledge      从旧 HTML 抽出的 161 个知识条目
 packages/ui             定制 shadcn/ui 基础组件
 community               仍在线的旧社区实现
 assets                  原书图片与知识库资源
@@ -33,12 +34,16 @@ supabase                数据库迁移和 Edge Functions
 ```text
 /                              新应用入口
 /login                         邮箱或 UID 登录
+/knowledge                     可搜索的知识库入口
+/knowledge/[id]                规则、图示与原书来源
 /community/[board]             板块列表
 /community/[board]/new         登录后发布
 /community/post/[id]           帖子详情
 ```
 
 现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
+
+知识数据由 `pnpm knowledge:extract` 从当前 `index.html` 的 `elliott-kb-data` 生成。提取脚本校验唯一 ID，并移除构建机绝对路径。Next 在构建期预生成全部 161 个详情页，原书图片仍由现有静态资源目录提供。
 
 ## UI 约束
 
