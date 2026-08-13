@@ -86,8 +86,12 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByLabel("外部引用（可选）").fill("https://x.com/wavekb/status/1");
       await page.getByRole("button", { name: "保存修改" }).click();
       await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
-      await expect(page.getByText("这篇验收帖子已经完成编辑")).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByText("【核心观点】", { exact: false })).toBeVisible();
+      const postArticle = page.locator("main > article");
+      await expect(postArticle).toContainText("这篇验收帖子已经完成编辑", { timeout: 20_000 });
+      console.log("Edited post diagnostic", JSON.stringify({
+        article: (await postArticle.innerText().catch(() => "")).slice(0, 2_000),
+      }));
+      await expect(postArticle).toContainText("【核心观点】", { timeout: 20_000 });
       await expect(page.getByRole("heading", { name: "TradingView 图表" })).toBeVisible();
       await expect(page.getByTitle("BINANCE:BTCUSDT TradingView 图表")).toHaveAttribute("src", /tradingview\.com/);
       await expect(page.getByRole("region", { name: /帖子图片/ })).toHaveCount(0);

@@ -262,6 +262,10 @@ jobs:
             status=$?
             trap - ERR
             if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
+              previous_version=$(basename "$previous_release")
+              if [[ "$previous_version" =~ ^[0-9a-f]{40}$ ]]; then
+                sudo sed -i "s/^DEPLOYMENT_VERSION=.*/DEPLOYMENT_VERSION=${previous_version}/" /etc/wavekb/next-preview.env
+              fi
               sudo ln -sfn "$previous_release" "${current_link}.rollback"
               sudo mv -Tf "${current_link}.rollback" "$current_link"
               sudo systemctl restart wavekb-next-preview.service || true
@@ -278,8 +282,10 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl enable wavekb-next-preview.service
           sudo systemctl restart wavekb-next-preview.service
-          if ! curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-            --retry-connrefused http://127.0.0.1:3100/api/health | grep -F '"ok":true' > /dev/null; then
+          if ! health_payload=$(curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+            --retry-connrefused http://127.0.0.1:3100/api/health) \
+            || ! grep -F '"ok":true' <<< "$health_payload" > /dev/null \
+            || ! grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$health_payload" > /dev/null; then
             sudo systemctl --no-pager --full status wavekb-next-preview.service || true
             sudo journalctl --no-pager -u wavekb-next-preview.service -n 80 || true
             false
@@ -362,11 +368,15 @@ jobs:
             previous_release=$(cat "$marker")
             current_link=/srv/wavekb-next-preview/current
             if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
+              previous_version=$(basename "$previous_release")
+              [[ "$previous_version" =~ ^[0-9a-f]{40}$ ]]
+              sudo sed -i "s/^DEPLOYMENT_VERSION=.*/DEPLOYMENT_VERSION=${previous_version}/" /etc/wavekb/next-preview.env
               sudo ln -sfn "$previous_release" "${current_link}.rollback"
               sudo mv -Tf "${current_link}.rollback" "$current_link"
               sudo systemctl restart wavekb-next-preview.service
-              curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-                --retry-connrefused http://127.0.0.1:3100/api/health > /dev/null
+              health_payload=$(curl --fail --silent --show-error --retry 12 --retry-delay 2 \
+                --retry-connrefused http://127.0.0.1:3100/api/health)
+              grep -F "\"deployment\":\"${previous_version}\"" <<< "$health_payload" > /dev/null
             fi
             rm -f -- "$marker"
           fi
