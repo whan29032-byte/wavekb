@@ -63,7 +63,7 @@ jobs:
             -H 'content-type: application/json' \
             -d '{}' \
             "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/wavekb_schema_version")
-          test "$schema_version" = '"202608140005"'
+          test "$schema_version" = '"202608140006"'
 
       - name: Build the standalone application
         env:
