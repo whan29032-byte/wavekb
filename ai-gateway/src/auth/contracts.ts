@@ -38,6 +38,7 @@ export type AuthErrorCode =
   | "uid_refresh_exhausted"
   | "uid_unavailable"
   | "uid_already_assigned"
+  | "account_banned"
   | "rate_limited"
   | "service_unavailable";
 

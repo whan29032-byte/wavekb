@@ -1,5 +1,20 @@
 # 部署说明
 
+## GitHub Actions 自动部署
+
+`.github/workflows/deploy-production.yml` 会在拉取请求中运行全部测试，并在
+`main` 更新后自动备份、同步静态站点和网关、重启网关，再验证公网健康状态。
+生产环境只允许 `main` 部署，仓库需要以下 Actions Secrets：
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_KNOWN_HOSTS`
+
+服务器备份保存在 `/var/backups/elliott-wave/actions/`，失败时自动回滚，成功
+备份保留 14 天。数据库迁移会同步到 `/opt/elliott-wave-migrations/` 供审计，
+但不会由网站发布任务自动执行；生产数据库仍须按下一节的增量流程更新。
+
 ## 1. 上线前备份
 
 先备份服务器当前静态目录、Nginx 配置和数据库。不要用本仓库覆盖生产数据库；迁移必须增量执行。
@@ -50,4 +65,3 @@
 9. 管理后台用户、积分、商品、导师、推荐链接和操作日志。
 
 确认以上功能后再清理旧缓存，并保留可回滚的服务器备份。
-

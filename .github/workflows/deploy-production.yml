@@ -1,0 +1,109 @@
+name: Test and deploy production
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install gateway development dependencies
+        working-directory: ai-gateway
+        run: pnpm install --frozen-lockfile
+
+      - name: Run browser and schema tests
+        run: node --test tests/*.test.mjs
+
+      - name: Run gateway tests
+        working-directory: ai-gateway
+        run: pnpm test
+
+      - name: Run strict TypeScript checks
+        working-directory: ai-gateway
+        run: pnpm typecheck
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@v4
+
+      - name: Configure pinned production SSH host
+        env:
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/known_hosts ~/.ssh/deploy_key
+
+      - name: Upload release candidate
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          remote_release="wavekb-release-${RELEASE_ID}"
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "rm -rf -- \"\$HOME/${remote_release}\" && mkdir -p \"\$HOME/${remote_release}\""
+          rsync -az --delete -e "ssh -i $HOME/.ssh/deploy_key" \
+            index.html elliott-wave-preview.html elliott-wave-knowledge-tree.html \
+            assets community admin workbench ai-gateway supabase deployment \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_release}/"
+
+      - name: Activate release with backup and rollback
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          remote_release="wavekb-release-${RELEASE_ID}"
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash \"\$HOME/${remote_release}/deployment/scripts/deploy-release.sh\" \"\$HOME/${remote_release}\" \"${RELEASE_ID}\""
+
+      - name: Verify public site
+        run: |
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 \
+            https://wavekb.com/ > /dev/null
+          curl --fail --silent --show-error --retry 6 --retry-delay 5 \
+            https://wavekb.com/community/community-repository.js > /dev/null
+
+      - name: Remove uploaded release candidate
+        if: always()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "rm -rf -- \"\$HOME/wavekb-release-${RELEASE_ID}\"" || true

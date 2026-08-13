@@ -113,7 +113,7 @@ test("other user profiles expose follow and friendship-aware primary actions", a
     read("community/member-repository.js"),
     read("community/taste-polish.css"),
     read("previews/social-experience-preview.html"),
-    read("supabase/migrations/202608030007_profile_follows.sql")
+    read("supabase/migrations/202608030009_profile_follows.sql")
   ]);
   assert.match(member, /isFollowing \? "已关注" : "关注"/);
   assert.match(member, /connection && connection\.status === "accepted"[\s\S]*?button\("发起会话"/);
