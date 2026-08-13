@@ -51,4 +51,30 @@ describe("posting transaction", () => {
     expect(gateway.removePost).toHaveBeenCalledWith("post-id");
     expect(gateway.publish).not.toHaveBeenCalled();
   });
+
+  it("links a private source before publishing its public snapshot", async () => {
+    const calls: string[] = [];
+    const gateway = {
+      makeId: vi.fn().mockReturnValue("post-id"),
+      insertDraft: vi.fn(async () => { calls.push("draft"); }),
+      linkSource: vi.fn(async () => { calls.push("source"); }),
+      uploadImage: vi.fn(async () => undefined),
+      insertImages: vi.fn(async () => { calls.push("images"); }),
+      publish: vi.fn(async () => { calls.push("publish"); }),
+      removeFiles: vi.fn(async () => undefined),
+      removePost: vi.fn(async () => undefined),
+    };
+    await createPost({} as never, {
+      userId: "user-id",
+      board: "public_viewpoint",
+      title: "私人复盘的公开副本",
+      body: "只复制允许公开的标题和正文，不包含私人核验数据。",
+      externalUrl: "",
+      externalKind: null,
+      files: [],
+      privateEntryId: "private-entry-id",
+    }, gateway);
+    expect(calls).toEqual(["draft", "source", "images", "publish"]);
+    expect(gateway.linkSource).toHaveBeenCalledWith({ post_id: "post-id", private_entry_id: "private-entry-id", owner_id: "user-id" });
+  });
 });

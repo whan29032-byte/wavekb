@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ImageSquare, Trash, UploadSimple } from "@phosphor-icons/react";
-import { MAX_IMAGES, validateImages, validatePost, type BoardSlug, type CommunityPost } from "@wavekb/domain";
+import { MAX_IMAGES, validateImages, validatePost, type BoardSlug, type CommunityPost, type PrivateEntry } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { createPost, updatePost } from "@/lib/community/client-repository";
 import { createClient } from "@/lib/supabase/client";
@@ -23,11 +23,11 @@ function friendlyError(error: unknown): string {
   return "发布没有完成。草稿仍在本机，请稍后重试。";
 }
 
-export function PostComposer({ board, userId, post }: { board: BoardSlug; userId: string; post?: CommunityPost }) {
+export function PostComposer({ board, userId, post, source }: { board: BoardSlug; userId: string; post?: CommunityPost; source?: PrivateEntry }) {
   const router = useRouter();
   const draftKey = `wavekb:next:composer:${userId}:${board}:${post?.id || "new"}`;
-  const [title, setTitle] = useState(post?.title || "");
-  const [body, setBody] = useState(post?.body || "");
+  const [title, setTitle] = useState(post?.title || source?.title || "");
+  const [body, setBody] = useState(post?.body || source?.body || "");
   const [externalUrl, setExternalUrl] = useState(post?.external_url || "");
   const [existingImages, setExistingImages] = useState(() => [...(post?.post_images || [])].sort((a, b) => a.sort_order - b.sort_order));
   const [images, setImages] = useState<SelectedImage[]>([]);
@@ -131,6 +131,7 @@ export function PostComposer({ board, userId, post }: { board: BoardSlug; userId
           externalUrl: validation.value.externalUrl,
           externalKind: validation.value.externalKind,
           files: images.map((image) => image.file),
+          privateEntryId: source?.id,
         });
       if (post) {
         await updatePost(client, post, {
@@ -154,6 +155,7 @@ export function PostComposer({ board, userId, post }: { board: BoardSlug; userId
 
   return (
     <form className="grid gap-7 rounded-xl border bg-surface p-5 md:p-8" onSubmit={submit} onPaste={handlePaste}>
+      {source ? <div className="rounded-lg border border-primary/25 bg-primary/8 p-3 text-sm leading-6"><strong>正在整理私人记录的公开副本。</strong><span className="text-muted-foreground"> 只有标题、正文和本页新增的公开图片会进入帖子，复盘核验字段与私密图片不会公开。</span></div> : null}
       <Field>
         <Label htmlFor="post-title">标题</Label>
         <Input id="post-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={5} maxLength={120} required aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? "post-title-error" : "post-title-help"} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseExternalReference, splitProfileTags, validateMemberProfile, validatePost, validateProfileImage } from "./community";
+import { parseExternalReference, splitEntryTags, splitProfileTags, validateMemberProfile, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
 
 describe("community post validation", () => {
   it("accepts a complete public post", () => {
@@ -46,5 +46,31 @@ describe("member profile validation", () => {
 
   it("rejects unsafe profile images", () => {
     expect(validateProfileImage({ type: "image/svg+xml", size: 200 }, "头像")).toBe("头像只支持 JPG、PNG 或 WebP。");
+  });
+});
+
+describe("private workbench record validation", () => {
+  it("normalizes a complete private record", () => {
+    const result = validatePrivateEntry({
+      kind: "review",
+      title: "  BTC 主升段复盘  ",
+      body: "保留可以复查的判断。",
+      instrument: "BTCUSDT",
+      market: "加密",
+      timeframe: "4小时",
+      tags: splitEntryTags("主升、纪律，主升"),
+      knowledgeIds: ["unit-rule-impulse"],
+      reviewData: { editor_mode: "professional", execution_score: 4 },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.value.title).toBe("BTC 主升段复盘");
+    expect(result.value.tags).toEqual(["主升", "纪律"]);
+  });
+
+  it("rejects an invalid record kind and empty title", () => {
+    const result = validatePrivateEntry({ kind: "public", title: "", body: "", instrument: "", market: "", timeframe: "", tags: [], knowledgeIds: [], reviewData: {} });
+    expect(result.ok).toBe(false);
+    expect(result.fields.kind).toBeTruthy();
+    expect(result.fields.title).toBeTruthy();
   });
 });

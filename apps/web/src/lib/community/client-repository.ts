@@ -9,11 +9,13 @@ type CreatePostInput = {
   externalUrl: string;
   externalKind: ExternalKind;
   files: File[];
+  privateEntryId?: string;
 };
 
 type PublishingGateway = {
   makeId(): string;
   insertDraft(value: Record<string, unknown>): Promise<void>;
+  linkSource?(value: Record<string, unknown>): Promise<void>;
   uploadImage(path: string, file: File): Promise<void>;
   insertImages(rows: Record<string, unknown>[]): Promise<void>;
   publish(id: string): Promise<void>;
@@ -40,6 +42,9 @@ function defaultGateway(client: SupabaseClient): PublishingGateway {
     makeId: () => crypto.randomUUID(),
     async insertDraft(value) {
       unwrap(await client.from("posts").insert(value));
+    },
+    async linkSource(value) {
+      unwrap(await client.from("post_sources").insert(value));
     },
     async uploadImage(path, file) {
       unwrap(await client.storage.from("post-images").upload(path, file, {
@@ -91,6 +96,10 @@ export async function createPost(
   });
 
   try {
+    if (input.privateEntryId) {
+      if (!gateway.linkSource) throw new Error("私人记录发布链路尚未安装。");
+      await gateway.linkSource({ post_id: postId, private_entry_id: input.privateEntryId, owner_id: input.userId });
+    }
     const imageRows: Record<string, unknown>[] = [];
     for (const [sortOrder, file] of input.files.entries()) {
       const extension = imageExtension(file.type);

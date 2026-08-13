@@ -25,6 +25,10 @@ test("friends and messages remain private", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Ffriends/);
   await page.goto("/messages");
   await expect(page).toHaveURL(/\/login\?next=%2Fmessages/);
+  await page.goto("/workbench");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench/);
+  await page.goto("/workbench/entries/new");
+  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fentries%2Fnew/);
 });
 
 test("knowledge search opens a fully migrated article", async ({ page }) => {

@@ -3,10 +3,11 @@ import { BOARDS, isBoardSlug } from "@wavekb/domain";
 import { PostComposer } from "@/components/post-composer";
 import { publicSupabaseConfig } from "@/lib/env";
 import { requireCurrentUser } from "@/lib/auth/dal";
+import { getPrivateEntry } from "@/lib/workbench/server-repository";
 
-type PageProps = { params: Promise<{ board: string }> };
+type PageProps = { params: Promise<{ board: string }>; searchParams: Promise<{ source?: string }> };
 
-export default async function NewPostPage({ params }: PageProps) {
+export default async function NewPostPage({ params, searchParams }: PageProps) {
   const { board } = await params;
   if (!isBoardSlug(board)) notFound();
   if (!publicSupabaseConfig().configured) {
@@ -17,7 +18,11 @@ export default async function NewPostPage({ params }: PageProps) {
       </main>
     );
   }
-  const user = await requireCurrentUser(`/community/${board}/new`);
+  const { source: sourceId } = await searchParams;
+  const returnPath = `/community/${board}/new${sourceId ? `?source=${encodeURIComponent(sourceId)}` : ""}`;
+  const user = await requireCurrentUser(returnPath);
+  const source = sourceId ? await getPrivateEntry(sourceId, user.id) : null;
+  if (sourceId && !source) notFound();
 
   return (
     <main className="mx-auto grid max-w-4xl gap-7 px-4 py-10 md:px-6 md:py-14">
@@ -25,7 +30,7 @@ export default async function NewPostPage({ params }: PageProps) {
         <h1 className="text-3xl font-semibold tracking-[-0.035em]">发布到「{BOARDS[board].title}」</h1>
         <p className="max-w-[65ch] text-sm leading-6 text-muted-foreground">先写清判断，再补充规则依据、图片和可选的外部引用。</p>
       </header>
-      <PostComposer board={board} userId={user.id} />
+      <PostComposer board={board} userId={user.id} source={source ?? undefined} />
     </main>
   );
 }

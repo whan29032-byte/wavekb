@@ -6,6 +6,7 @@ const preview: Preview = {
     a11y: { test: "error" },
     backgrounds: { default: "app" },
     layout: "centered",
+    nextjs: { appDirectory: true },
   },
 };
 

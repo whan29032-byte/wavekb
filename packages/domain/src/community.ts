@@ -130,6 +130,79 @@ export type CommunityPost = {
   profiles: PublicProfile | null;
 };
 
+export type PrivateEntryKind = "review" | "journal" | "draft";
+
+export type PrivateEntryReviewData = {
+  editor_mode?: "simple" | "professional";
+  outcome?: "" | "win" | "loss" | "breakeven" | "cancelled";
+  count_result?: "" | "correct" | "alternate" | "invalid";
+  rule_compliance?: "" | "yes" | "no" | "unclear";
+  execution_score?: number | null;
+  lesson?: string;
+  pattern?: string;
+  position?: string;
+  direction?: string;
+  tradingview?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
+
+export type PrivateEntryImage = {
+  id: string;
+  entry_id: string;
+  owner_id: string;
+  storage_path: string;
+  sort_order: number;
+  created_at: string;
+  signed_url?: string;
+};
+
+export type PrivateEntry = {
+  id: string;
+  owner_id: string;
+  kind: PrivateEntryKind;
+  title: string;
+  body: string;
+  instrument: string;
+  market: string;
+  timeframe: string;
+  tags: string[];
+  knowledge_ids: string[];
+  workbench_analysis_id: string | null;
+  review_data: PrivateEntryReviewData;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  private_entry_images: PrivateEntryImage[];
+};
+
+export type PrivateEntryInput = {
+  kind: string;
+  title: string;
+  body: string;
+  instrument: string;
+  market: string;
+  timeframe: string;
+  tags: string[];
+  knowledgeIds: string[];
+  reviewData: PrivateEntryReviewData;
+};
+
+export type PrivateEntryValidation = {
+  ok: boolean;
+  fields: Partial<Record<"kind" | "title" | "body" | "instrument" | "market" | "timeframe" | "tags" | "knowledgeIds", string>>;
+  value: {
+    kind: PrivateEntryKind | null;
+    title: string;
+    body: string;
+    instrument: string;
+    market: string;
+    timeframe: string;
+    tags: string[];
+    knowledgeIds: string[];
+    reviewData: PrivateEntryReviewData;
+  };
+};
+
 export type PostInput = {
   board: string;
   title: string;
@@ -156,6 +229,7 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 export const PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const COVER_STYLES = new Set<EditableMemberProfile["cover_style"]>(["chart-dark", "wave-blue", "paper", "midnight"]);
+export const PRIVATE_ENTRY_KINDS = new Set<PrivateEntryKind>(["review", "journal", "draft"]);
 
 export function isBoardSlug(value: string): value is BoardSlug {
   return Object.prototype.hasOwnProperty.call(BOARDS, value);
@@ -255,6 +329,45 @@ export function validateProfileImage(file: Pick<File, "type" | "size">, label = 
   if (!IMAGE_TYPES.has(file.type)) return `${label}只支持 JPG、PNG 或 WebP。`;
   if (file.size < 1 || file.size > PROFILE_IMAGE_MAX_BYTES) return `${label}不能超过 5 MiB。`;
   return null;
+}
+
+export function splitEntryTags(value: string): string[] {
+  return [...new Set(String(value ?? "").split(/[、,，]/).map((item) => item.trim()).filter(Boolean))];
+}
+
+export function validatePrivateEntry(input: PrivateEntryInput): PrivateEntryValidation {
+  const fields: PrivateEntryValidation["fields"] = {};
+  const kind = PRIVATE_ENTRY_KINDS.has(input.kind as PrivateEntryKind) ? input.kind as PrivateEntryKind : null;
+  const title = String(input.title ?? "").trim();
+  const body = String(input.body ?? "").trim();
+  const instrument = String(input.instrument ?? "").trim();
+  const market = String(input.market ?? "").trim();
+  const timeframe = String(input.timeframe ?? "").trim();
+  const tags = [...new Set(input.tags.map((item) => String(item).trim()).filter(Boolean))];
+  const knowledgeIds = [...new Set(input.knowledgeIds.map((item) => String(item).trim()).filter(Boolean))];
+  if (!kind) fields.kind = "请选择记录类型。";
+  if (title.length < 1 || title.length > 120) fields.title = "标题需要 1-120 个字符。";
+  if (body.length > 50_000) fields.body = "正文不能超过 50000 个字符。";
+  if (instrument.length > 80) fields.instrument = "品种不能超过 80 个字符。";
+  if (market.length > 80) fields.market = "市场分类不能超过 80 个字符。";
+  if (timeframe.length > 40) fields.timeframe = "周期不能超过 40 个字符。";
+  if (tags.length > 20) fields.tags = "最多填写 20 个标签。";
+  if (knowledgeIds.length > 40) fields.knowledgeIds = "最多关联 40 条知识。";
+  return {
+    ok: Object.keys(fields).length === 0,
+    fields,
+    value: {
+      kind,
+      title,
+      body,
+      instrument,
+      market,
+      timeframe,
+      tags: tags.slice(0, 20),
+      knowledgeIds: knowledgeIds.slice(0, 40),
+      reviewData: { ...(input.reviewData ?? {}) },
+    },
+  };
 }
 
 export function plainTextExcerpt(value: string, limit = 140): string {
