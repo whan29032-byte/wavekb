@@ -41,6 +41,10 @@ test("friends and messages remain private", async ({ page }) => {
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fusers/);
   await page.goto("/admin/rewards");
   await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Frewards/);
+  await page.goto("/admin/directory");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fdirectory/);
+  await page.goto("/admin/mentors");
+  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fmentors/);
 });
 
 test("admin API rejects anonymous requests before contacting the gateway", async ({ request }) => {

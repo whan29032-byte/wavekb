@@ -41,6 +41,20 @@ export type AdminAuditEntry = {
   created_at: string;
 };
 
+export type AdminDirectoryResource = {
+  id: string;
+  platform: "x" | "discord";
+  name: string;
+  description: string;
+  url: string;
+  avatar_url: string | null;
+  active: boolean;
+  sort_order: number;
+  verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 async function adminGatewayRequest<T>(path: string): Promise<T> {
   const actor = await requireAdminActor("/admin/users");
   if (!actor) throw new Error("admin_required");
@@ -85,4 +99,9 @@ export async function listAdminUsers(input: { query?: string; status?: string; r
 export async function listAdminAudit(): Promise<AdminAuditEntry[]> {
   const value = await adminGatewayRequest<{ entries?: AdminAuditEntry[] }>("moderation-audit?limit=100&page=1");
   return Array.isArray(value.entries) ? value.entries : [];
+}
+
+export async function listAdminDirectory(): Promise<AdminDirectoryResource[]> {
+  const value = await adminGatewayRequest<{ resources?: AdminDirectoryResource[] }>("directory");
+  return (Array.isArray(value.resources) ? value.resources : []).map((item) => ({ ...item, sort_order: Number(item.sort_order || 0) }));
 }

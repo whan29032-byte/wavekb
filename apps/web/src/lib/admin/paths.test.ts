@@ -6,6 +6,7 @@ describe("admin proxy path allowlist", () => {
     expect(isAllowedAdminPath("users", "GET")).toBe(true);
     expect(isAllowedAdminPath("users/summary", "GET")).toBe(true);
     expect(isAllowedAdminPath("moderation-audit", "GET")).toBe(true);
+    expect(isAllowedAdminPath("directory", "GET")).toBe(true);
     expect(isAllowedAdminPath("users/abc", "GET")).toBe(false);
     expect(isAllowedAdminPath("../health", "GET")).toBe(false);
   });
@@ -16,6 +17,10 @@ describe("admin proxy path allowlist", () => {
     expect(isAllowedAdminPath(`users/${userId}/uid`, "POST")).toBe(true);
     expect(isAllowedAdminPath(`users/${userId}/delete`, "POST")).toBe(false);
     expect(isAllowedAdminPath("users/not-a-uuid/status", "POST")).toBe(false);
+    expect(isAllowedAdminPath("directory", "POST")).toBe(true);
+    expect(isAllowedAdminPath(`directory/${userId}`, "POST")).toBe(true);
+    expect(isAllowedAdminPath(`directory/${userId}/delete`, "POST")).toBe(true);
+    expect(isAllowedAdminPath("directory/not-a-uuid/delete", "POST")).toBe(false);
   });
 
   it("caps mutation payloads before proxying them", () => {

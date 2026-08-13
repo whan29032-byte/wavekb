@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { Coins, ListMagnifyingGlass, ShieldCheck, Users } from "@phosphor-icons/react/dist/ssr";
+import { Coins, GraduationCap, ListMagnifyingGlass, ShieldCheck, Storefront, Users } from "@phosphor-icons/react/dist/ssr";
 
 const items = [
   { href: "/admin/users", label: "用户管理", copy: "账户、权限与 UID", icon: Users },
   { href: "/admin/rewards", label: "积分商城", copy: "商品、钱包与兑换", icon: Coins },
+  { href: "/admin/directory", label: "首页推荐", copy: "X 与 Discord 目录", icon: Storefront },
+  { href: "/admin/mentors", label: "导师与订单", copy: "方案、收款与权益", icon: GraduationCap },
   { href: "/admin/audit", label: "操作日志", copy: "治理审计记录", icon: ListMagnifyingGlass },
 ] as const;
 
