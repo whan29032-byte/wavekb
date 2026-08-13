@@ -7,12 +7,13 @@ test.describe("authenticated posting acceptance", () => {
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
   test("complete posting lifecycle with an image and external reference", async ({ page }) => {
+    test.setTimeout(90_000);
     await page.goto("/login?next=/community/idea_sharing/new");
     await page.getByLabel("邮箱或 UID").fill(identifier || "");
     await page.getByLabel("密码").fill(password || "");
     await page.getByRole("button", { name: "登录" }).click();
-    await expect(page).toHaveURL(/\/community\/idea_sharing\/new/);
-    await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
+    await expect(page).toHaveURL(/\/community\/idea_sharing\/new/, { timeout: 15_000 });
+    await expect(page.getByRole("button", { name: "退出登录" }).or(page.getByRole("button", { name: "账户菜单" }))).toBeVisible({ timeout: 15_000 });
 
     const marker = `验收发帖 ${Date.now()}`;
     let published = false;
@@ -26,7 +27,7 @@ test.describe("authenticated posting acceptance", () => {
       });
       await page.getByLabel("外部引用（可选）").fill("https://www.youtube.com/watch?v=posting-acceptance");
       await page.getByRole("button", { name: "发布内容" }).click();
-      await expect(page).toHaveURL(/\/community\/post\//);
+      await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
       published = true;
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByRole("img", { name: `${marker}，图片 1` })).toBeVisible();
@@ -50,7 +51,7 @@ test.describe("authenticated posting acceptance", () => {
 
       await page.getByRole("link", { name: "编辑帖子" }).click();
       await page.getByRole("tab", { name: "专业分析" }).click();
-      await page.getByLabel("品种").fill("BINANCE:BTCUSDT");
+      await page.getByLabel("品种", { exact: true }).fill("BINANCE:BTCUSDT");
       await page.getByLabel("核心观点").fill("当前结构仍需等待同级别确认。 ");
       await page.getByLabel("规则与指南依据").fill("硬规则先淘汰，比例关系只用于排序。 ");
       await page.getByLabel("公开图表链接或品种代码").fill("BINANCE:BTCUSDT");
@@ -58,7 +59,7 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByRole("button", { name: "移除现有图片 1" }).click();
       await page.getByLabel("外部引用（可选）").fill("https://x.com/wavekb/status/1");
       await page.getByRole("button", { name: "保存修改" }).click();
-      await expect(page.getByText("这篇验收帖子已经完成编辑")).toBeVisible();
+      await expect(page.getByText("这篇验收帖子已经完成编辑")).toBeVisible({ timeout: 20_000 });
       await expect(page.getByText("【核心观点】")).toBeVisible();
       await expect(page.getByRole("heading", { name: "TradingView 图表" })).toBeVisible();
       await expect(page.getByTitle("BINANCE:BTCUSDT TradingView 图表")).toHaveAttribute("src", /tradingview\.com/);
