@@ -44,6 +44,8 @@ jobs:
             if sudo grep -Eq 'server_name[^;]*wavekb\.com' "$config_file"; then
               found=$((found + 1))
               echo "WaveKB config: ${config_file}"
+              echo "WaveKB config body:"
+              sudo nl -ba "$config_file"
               sudo awk '
                 /^[[:space:]]*(listen|server_name|root|index|location|proxy_pass|include)[[:space:]]/ {
                   line=$0
