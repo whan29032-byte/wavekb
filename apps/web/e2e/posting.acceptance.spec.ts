@@ -78,9 +78,8 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByLabel("发表评论").fill(`${commentMarker}，用于确认评论写入、详情刷新和级联清理。`);
       await page.getByRole("button", { name: "发表评论" }).click();
       const publishedComment = page.getByText(commentMarker, { exact: false });
-      if (!await publishedComment.isVisible().catch(() => false)) {
-        await page.waitForTimeout(1_000);
-      }
+      await page.getByRole("button", { name: "正在发布" }).waitFor({ state: "visible", timeout: 3_000 }).catch(() => undefined);
+      await expect(page.getByRole("button", { name: "发表评论" })).toBeEnabled({ timeout: 30_000 });
       if (!await publishedComment.isVisible().catch(() => false)) {
         const alerts = (await page.getByRole("alert").allTextContents().catch(() => [])).map((value) => value.trim()).filter(Boolean);
         if (alerts.length) throw new Error(`Comment publishing failed: ${alerts.join(" | ")}`);
