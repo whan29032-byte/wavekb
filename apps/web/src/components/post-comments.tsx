@@ -39,22 +39,14 @@ export function PostComments({ postId, comments, actorId, actorProfile, comments
     setPending(true);
     setError("");
     try {
-      await addPostComment(createClient(), {
+      const created = await addPostComment(createClient(), {
         postId,
         userId: actorId,
         parentId,
         body,
       });
-      const timestamp = new Date().toISOString();
       setAdded((current) => [...current, {
-        id: `pending-${crypto.randomUUID()}`,
-        post_id: postId,
-        author_id: actorId,
-        parent_id: parentId,
-        body,
-        status: "visible",
-        created_at: timestamp,
-        updated_at: timestamp,
+        ...created,
         profiles: actorProfile ?? null,
       }]);
       formElement.reset();

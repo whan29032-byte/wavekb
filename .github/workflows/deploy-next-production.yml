@@ -53,17 +53,33 @@ jobs:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           set -Eeuo pipefail
-          if [ -n "$SUPABASE_DB_URL" ]; then
-            for migration in supabase/migrations/202608140*.sql; do
-              psql "$SUPABASE_DB_URL" -X --set ON_ERROR_STOP=1 --file "$migration"
-            done
-          fi
           schema_version=$(curl --fail --silent --show-error \
             -H "apikey: $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
             -H 'content-type: application/json' \
             -d '{}' \
-            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/wavekb_schema_version")
-          test "$schema_version" = '"202608140007"'
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/wavekb_schema_version" | tr -d '"')
+          [[ "$schema_version" =~ ^[0-9]{12}$ ]]
+          latest_migration=$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print | sort | tail -n 1)
+          test -n "$latest_migration"
+          latest_file=$(basename "$latest_migration")
+          latest_version=${latest_file%%_*}
+          [[ "$latest_version" =~ ^[0-9]{12}$ ]]
+          if [ -n "$SUPABASE_DB_URL" ]; then
+            while IFS= read -r migration; do
+              migration_file=$(basename "$migration")
+              migration_version=${migration_file%%_*}
+              [[ "$migration_version" =~ ^[0-9]{12}$ ]]
+              if (( 10#$migration_version > 10#$schema_version )); then
+                psql "$SUPABASE_DB_URL" -X --set ON_ERROR_STOP=1 --single-transaction --file "$migration"
+              fi
+            done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print | sort)
+          fi
+          deployed_version=$(curl --fail --silent --show-error \
+            -H "apikey: $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
+            -H 'content-type: application/json' \
+            -d '{}' \
+            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/wavekb_schema_version" | tr -d '"')
+          test "$deployed_version" = "$latest_version"
 
       - name: Build the standalone application
         env:

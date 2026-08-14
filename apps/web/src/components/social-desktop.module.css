@@ -45,6 +45,10 @@
 .friendSearch { display:grid; grid-template-columns:1fr 2.25rem; margin:.55rem; border:1px solid var(--input); border-radius:.5rem; background:var(--background); }
 .friendSearch input { min-width:0; background:transparent; padding:.5rem .6rem; font-size:.72rem; outline:none; }
 .friendSearch button { display:grid; place-items:center; color:var(--primary); }
+.contactSearch { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:.4rem; margin:.55rem; border:1px solid var(--input); border-radius:.5rem; background:var(--background); padding:0 .55rem; color:var(--muted-foreground); }
+.contactSearch svg { width:1rem; height:1rem; }
+.contactSearch input { min-width:0; background:transparent; padding:.5rem 0; color:var(--foreground); font-size:.72rem; outline:none; }
+.contactSearch:focus-within { border-color:var(--ring); box-shadow:0 0 0 2px color-mix(in srgb,var(--ring) 20%,transparent); }
 .searchResult { grid-template-columns:auto minmax(0,1fr) auto; margin:0 .55rem .55rem; border:1px solid var(--border); border-radius:.5rem; }
 .searchResult>button { display:flex; align-items:center; gap:.2rem; color:var(--primary); font-size:.65rem; }
 .empty { padding:1rem; color:var(--muted-foreground); font-size:.7rem; text-align:center; }
@@ -81,12 +85,12 @@
 .emojiPanel img { max-width:100%; max-height:100%; object-fit:contain; }
 
 @media (max-width:640px) {
-  .friendPanel { width:min(304px,calc(100vw - 16px)); min-width:280px; height:min(520px,calc(100dvh - 76px)); resize:none; }
+  .friendPanel { left:8px!important; right:auto!important; top:72px!important; width:min(304px,calc(100vw - 16px)); min-width:min(280px,calc(100vw - 16px)); height:min(520px,calc(100dvh - 80px)); resize:none; }
   .chatWindow { left:8px!important; right:8px!important; top:72px!important; width:auto!important; min-width:0; height:calc(100dvh - 80px); resize:none; }
   .windowControls button,.composerTools button { size:2.75rem; }
   .panelTabs button { min-height:44px; }
   .friendRow,.requestRow,.conversationRow,.notificationRow,.mentorRow { min-height:56px; }
-  .inputRow textarea,.friendSearch input { font-size:16px; }
+  .inputRow textarea,.friendSearch input,.contactSearch input { font-size:16px; }
   .inputRow>button { size:2.75rem; }
 }
 

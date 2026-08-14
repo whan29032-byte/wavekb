@@ -5,10 +5,11 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Bell, ChatCircleDots, Check, DotsThree, MagnifyingGlass, Minus, PaperPlaneRight, PushPin, PushPinSlash, Smiley, SpeakerHigh, SpeakerSlash, UserPlus, UsersThree, X } from "@phosphor-icons/react";
-import type { ChatSticker, DirectConversation, DirectMessage, FriendshipConnection, MemberProfile, MentorAccess, MentorStudent, PublicProfile } from "@wavekb/domain";
+import { formatMentorPrice, type ChatSticker, type DirectConversation, type DirectMessage, type FriendshipConnection, type MemberProfile, type MentorAccess, type MentorPaymentClaim, type MentorStudent, type PublicProfile } from "@wavekb/domain";
 import { AvatarFrame, IdentityName, Nameplate } from "@/components/nameplate";
 import { publicChatStickerUrl } from "@/lib/env";
 import { customStickerToken, uploadChatSticker } from "@/lib/member/chat-stickers";
+import { clampPanelCoordinates } from "@/lib/member/social-panel-state";
 import { createClient } from "@/lib/supabase/client";
 import styles from "./social-desktop.module.css";
 
@@ -63,7 +64,7 @@ function ChatBody({ body }: { body: string }) {
   return <p>{body}</p>;
 }
 
-function FloatingChat({ actorId, chat, sound, onClose, onFocus, onPatch }: { actorId: string; chat: OpenChat; sound: boolean; onClose: () => void; onFocus: () => void; onPatch: (value: Partial<OpenChat>) => void }) {
+function FloatingChat({ actorId, chat, sound, onClose, onFocus, onPatch, onRead }: { actorId: string; chat: OpenChat; sound: boolean; onClose: () => void; onFocus: () => void; onPatch: (value: Partial<OpenChat>) => void; onRead: () => void }) {
   const [messages, setMessages] = useState<DirectMessage[]>([]);
   const [stickers, setStickers] = useState<ChatSticker[]>([]);
   const [body, setBody] = useState("");
@@ -87,7 +88,11 @@ function FloatingChat({ actorId, chat, sound, onClose, onFocus, onPatch }: { act
     if (latest && latest.id > newest.current && newest.current && latest.sender_id !== actorId) tone(560, sound);
     newest.current = latest?.id ?? newest.current;
     setMessages(rows);
-    if (markRead && latest?.sender_id !== actorId) await client.rpc("mark_conversation_read_v1", { p_conversation: chat.conversation_id, p_through_id: latest?.id ?? 0 });
+    if (markRead && latest) {
+      const read = await client.rpc("mark_conversation_read_v1", { p_conversation: chat.conversation_id, p_through_id: latest.id });
+      if (read.error) throw read.error;
+      onRead();
+    }
   }
 
   useEffect(() => {
@@ -164,10 +169,12 @@ export function SocialDesktop() {
   const [conversations, setConversations] = useState<DirectConversation[]>([]);
   const [teachers, setTeachers] = useState<MentorAccess[]>([]);
   const [students, setStudents] = useState<MentorStudent[]>([]);
+  const [paymentClaims, setPaymentClaims] = useState<MentorPaymentClaim[]>([]);
   const [online, setOnline] = useState<Set<string>>(() => new Set());
   const [tab, setTab] = useState<"friends" | "new" | "notifications">("friends");
   const [recentOpen, setRecentOpen] = useState(true);
   const [query, setQuery] = useState("");
+  const [contactQuery, setContactQuery] = useState("");
   const [searchResult, setSearchResult] = useState<MemberProfile | null>(null);
   const [message, setMessage] = useState("");
   const [chats, setChats] = useState<OpenChat[]>([]);
@@ -176,7 +183,11 @@ export function SocialDesktop() {
   const [panel, setPanel] = useState<PanelState>(() => {
     const fallback: PanelState = { x: Math.max(12, typeof window === "undefined" ? 900 : window.innerWidth - 324), y: 82, open: true, minimized: false, pinned: true, edge: "right" };
     if (typeof window === "undefined") return fallback;
-    try { const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as { panel?: Partial<PanelState> } | null; return stored?.panel ? { ...fallback, ...stored.panel } : fallback; } catch { return fallback; }
+    try {
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as { panel?: Partial<PanelState> } | null;
+      const restored = stored?.panel ? { ...fallback, ...stored.panel } : fallback;
+      return { ...restored, ...clampPanelCoordinates(restored, { width: window.innerWidth, height: window.innerHeight }, { width: 304, height: restored.minimized ? 48 : 520 }) };
+    } catch { return fallback; }
   });
   const panelRef = useRef<HTMLElement>(null);
   const drag = useRef<{ id: number; x: number; y: number; left: number; top: number } | null>(null);
@@ -184,9 +195,9 @@ export function SocialDesktop() {
 
   async function load() {
     const client = createClient();
-    const [session, friendships, modern, mentorAccess, mentorStudents] = await Promise.all([client.auth.getSession(), client.rpc("list_my_friendships"), client.rpc("list_my_conversations_v2"), client.rpc("list_my_mentor_access"), client.rpc("list_my_mentor_students")]);
+    const [session, friendships, modern, mentorAccess, mentorStudents, claims] = await Promise.all([client.auth.getSession(), client.rpc("list_my_friendships"), client.rpc("list_my_conversations_v2"), client.rpc("list_my_mentor_access"), client.rpc("list_my_mentor_students"), client.rpc("list_my_mentor_payment_claims")]);
     const user = session.data.session?.user;
-    if (!user) { setActor(null); setConnections([]); setConversations([]); setTeachers([]); setStudents([]); setChats([]); return; }
+    if (!user) { setActor(null); setConnections([]); setConversations([]); setTeachers([]); setStudents([]); setPaymentClaims([]); setChats([]); return; }
     const profile = await client.from("profiles").select("id,public_uid,display_name,avatar_url,role,display_title,nameplate_style").eq("id", user.id).maybeSingle();
     setActor((profile.data as PublicProfile | null) ?? null);
     if (!friendships.error) setConnections((friendships.data ?? []) as FriendshipConnection[]);
@@ -201,6 +212,7 @@ export function SocialDesktop() {
     }
     if (!mentorAccess.error) setTeachers((mentorAccess.data ?? []) as MentorAccess[]);
     if (!mentorStudents.error) setStudents((mentorStudents.data ?? []) as MentorStudent[]);
+    if (!claims.error) setPaymentClaims((claims.data ?? []) as MentorPaymentClaim[]);
   }
 
   useEffect(() => {
@@ -214,6 +226,18 @@ export function SocialDesktop() {
   }, []);
 
   useEffect(() => { if (actor) localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized, pinned: item.pinned })) })); }, [actor, panel, chats]);
+  useEffect(() => {
+    const clampToViewport = () => {
+      const box = panelRef.current?.getBoundingClientRect();
+      setPanel((value) => {
+        const next = clampPanelCoordinates(value, { width: window.innerWidth, height: window.innerHeight }, { width: box?.width || 304, height: box?.height || (value.minimized ? 48 : 520) });
+        return next.x === value.x && next.y === value.y ? value : { ...value, ...next };
+      });
+    };
+    window.addEventListener("resize", clampToViewport);
+    window.addEventListener("orientationchange", clampToViewport);
+    return () => { window.removeEventListener("resize", clampToViewport); window.removeEventListener("orientationchange", clampToViewport); };
+  }, []);
   useEffect(() => {
     if (!actor) return;
     const client = createClient();
@@ -238,22 +262,28 @@ export function SocialDesktop() {
   const friends = connections.filter((item) => item.status === "accepted");
   const requests = connections.filter((item) => item.status === "pending");
   const unread = conversations.reduce((sum, item) => sum + Number(item.unread_count || 0), 0);
+  const contactNeedle = contactQuery.trim().toLocaleLowerCase("zh-CN");
+  const visibleFriends = contactNeedle ? friends.filter((item) => [item.display_name, item.public_uid, item.bio].some((value) => String(value ?? "").toLocaleLowerCase("zh-CN").includes(contactNeedle))) : friends;
+  const unreadConversations = conversations.filter((item) => Number(item.unread_count || 0) > 0);
+  const submittedClaims = paymentClaims.filter((item) => item.status === "submitted");
+  const notificationTotal = unread + submittedClaims.length;
   return <>
-    {!panel.open ? <button type="button" className={styles.launcher} onClick={() => setPanel((value) => ({ ...value, open: true }))} aria-label={`打开好友面板${unread ? `，${unread}条未读` : ""}`}><UsersThree />{unread ? <span>{unread > 99 ? "99+" : unread}</span> : null}</button> : null}
+    {!panel.open ? <button type="button" className={styles.launcher} onClick={() => setPanel((value) => ({ ...value, open: true }))} aria-label={`打开好友面板${notificationTotal ? `，${notificationTotal}条待处理通知` : ""}`}><UsersThree />{notificationTotal ? <span>{notificationTotal > 99 ? "99+" : notificationTotal}</span> : null}</button> : null}
     {panel.open ? <section ref={panelRef} className={styles.friendPanel} aria-label="好友与聊天" data-minimized={panel.minimized || undefined} data-autohidden={autoHidden || undefined} data-edge={panel.edge} style={{ left: panel.x, top: panel.y }} onMouseEnter={() => setAutoHidden(false)} onMouseLeave={() => { if (!panel.pinned && !drag.current) setAutoHidden(true); }}>
       <header className={styles.panelTitle} onPointerDown={panelPointerDown} onPointerMove={panelPointerMove} onPointerUp={panelPointerUp}>
         <AvatarFrame profile={actor} size="small" /><div className={styles.titleCopy}><IdentityName profile={actor} as="strong" /><span>{online.has(actor.id) ? "在线" : "已连接"}</span></div>
         <div className={styles.windowControls}><button type="button" onClick={() => { const next = !sound; setSound(next); localStorage.setItem(SOUND_KEY, next ? "on" : "off"); }} aria-label={sound ? "关闭提示音" : "开启提示音"}>{sound ? <SpeakerHigh /> : <SpeakerSlash />}</button><button type="button" onClick={() => setPanel((value) => ({ ...value, pinned: !value.pinned }))} aria-label={panel.pinned ? "取消固定" : "固定"}>{panel.pinned ? <PushPin /> : <PushPinSlash />}</button><button type="button" onClick={() => setPanel((value) => ({ ...value, minimized: !value.minimized }))} aria-label="最小化"><Minus /></button><button type="button" onClick={() => setPanel((value) => ({ ...value, open: false }))} aria-label="关闭"><X /></button></div>
       </header>
-      {!panel.minimized ? <><nav className={styles.panelTabs} aria-label="好友面板"><button type="button" data-active={tab === "friends" || undefined} onClick={() => setTab("friends")}><UsersThree />好友</button><button type="button" data-active={tab === "new" || undefined} onClick={() => setTab("new")}><UserPlus />新朋友{requests.length ? <b>{requests.length}</b> : null}</button><button type="button" data-active={tab === "notifications" || undefined} onClick={() => setTab("notifications")}><Bell />消息{unread ? <b>{unread}</b> : null}</button></nav>
+      {!panel.minimized ? <><nav className={styles.panelTabs} aria-label="好友面板"><button type="button" data-active={tab === "friends" || undefined} onClick={() => setTab("friends")}><UsersThree />好友</button><button type="button" data-active={tab === "new" || undefined} onClick={() => setTab("new")}><UserPlus />新朋友{requests.length ? <b>{requests.length}</b> : null}</button><button type="button" data-active={tab === "notifications" || undefined} onClick={() => setTab("notifications")}><Bell />消息{notificationTotal ? <b>{notificationTotal}</b> : null}</button></nav>
       <div className={styles.panelBody}>{tab === "friends" ? <>
+        <label className={styles.contactSearch}><MagnifyingGlass aria-hidden /><span className="sr-only">搜索好友或 UID</span><input type="search" value={contactQuery} onChange={(event) => setContactQuery(event.target.value.slice(0, 80))} placeholder="搜索好友或 UID" aria-label="搜索好友或 UID" /></label>
         <div className={styles.groupHeading}><span>我的好友</span><span>{friends.filter((item) => online.has(item.other_id)).length}/{friends.length}</span></div>
-        <div className={styles.rows}>{friends.length ? friends.map((item) => <div key={item.friendship_id} className={styles.friendRow} onDoubleClick={() => void chatWith(item)}><span className={styles.presence} data-online={online.has(item.other_id) || undefined} /><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><AvatarFrame profile={{ display_name: item.display_name || "好友", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /></Link><div><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><IdentityName profile={{ display_name: item.display_name || `UID ${item.public_uid || ""}`, nameplate_style: item.nameplate_style }} as="strong" /></Link><span>{item.bio || (online.has(item.other_id) ? "在线" : "离线")}</span></div><button type="button" onClick={() => void chatWith(item)} aria-label={`与${item.display_name || "好友"}聊天`}><ChatCircleDots /></button></div>) : <p className={styles.empty}>还没有好友。</p>}</div>
+        <div className={styles.rows}>{visibleFriends.length ? visibleFriends.map((item) => <div key={item.friendship_id} className={styles.friendRow} onDoubleClick={() => void chatWith(item)}><span className={styles.presence} data-online={online.has(item.other_id) || undefined} /><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><AvatarFrame profile={{ display_name: item.display_name || "好友", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /></Link><div><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><IdentityName profile={{ display_name: item.display_name || `UID ${item.public_uid || ""}`, nameplate_style: item.nameplate_style }} as="strong" /></Link><span>{item.bio || (online.has(item.other_id) ? "在线" : "离线")}</span></div><button type="button" onClick={() => void chatWith(item)} aria-label={`与${item.display_name || "好友"}聊天`}><ChatCircleDots /></button></div>) : <p className={styles.empty}>{friends.length ? "没有匹配的好友。" : "还没有好友。"}</p>}</div>
         {teachers.length ? <><div className={styles.groupHeading}><span>我的老师</span><span>{teachers.length}</span></div><div className={styles.rows}>{teachers.map((item) => <Link key={item.thread_id} href={`/tutoring/${item.thread_id}`} className={styles.mentorRow}><AvatarFrame profile={{ display_name: item.mentor_name, avatar_url: item.mentor_avatar_url, nameplate_style: "classic" }} size="small" /><span><strong>{item.mentor_name}</strong><small>{item.status === "active" ? "辅导进行中" : "辅导权益已结束"}</small></span><ChatCircleDots /></Link>)}</div></> : null}
         {students.length ? <><div className={styles.groupHeading}><span>我的学生</span><span>{students.length}</span></div><div className={styles.rows}>{students.map((item) => <Link key={item.thread_id} href={`/tutoring/${item.thread_id}`} className={styles.mentorRow}><AvatarFrame profile={{ display_name: item.display_name, avatar_url: item.avatar_url, nameplate_style: item.nameplate_style }} size="small" /><span><IdentityName profile={item} as="strong" /><small>{item.last_message || "打开辅导会话"}</small></span><ChatCircleDots /></Link>)}</div></> : null}
         <button className={styles.recentHeading} type="button" aria-expanded={recentOpen} onClick={() => setRecentOpen((value) => !value)}><span>最近会话</span><span>{conversations.length}</span></button>{recentOpen ? <div className={styles.rows}>{conversations.map((item) => <button type="button" className={styles.conversationRow} key={item.conversation_id} onClick={() => openChat(item)}><AvatarFrame profile={item} size="small" /><span><strong>{item.display_name}</strong><small>{item.last_message || "还没有消息"}</small></span><time>{formatTime(item.last_message_at)}</time>{Number(item.unread_count || 0) ? <b>{item.unread_count}</b> : null}</button>)}</div> : null}
-      </> : tab === "new" ? <><form className={styles.friendSearch} onSubmit={search}><input aria-label="搜索好友 UID" inputMode="numeric" placeholder="输入 5–6 位 UID" value={query} onChange={(event) => setQuery(event.target.value.replace(/\D/g, "").slice(0,6))} /><button type="submit" aria-label="搜索"><MagnifyingGlass /></button></form>{searchResult && searchResult.id !== actor.id ? <div className={styles.searchResult}><AvatarFrame profile={searchResult} size="small" /><span><IdentityName profile={searchResult} as="strong" /><Nameplate uid={searchResult.public_uid} style={searchResult.nameplate_style} compact /></span><button type="button" onClick={() => void request(searchResult)}><UserPlus />添加</button></div> : null}<div className={styles.rows}>{requests.length ? requests.map((item) => <div key={item.friendship_id} className={styles.requestRow}><AvatarFrame profile={{ display_name: item.display_name || "用户", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /><span><strong>{item.display_name}</strong><small>{item.direction === "incoming" ? "请求添加你为好友" : "等待对方接受"}</small></span>{item.direction === "incoming" ? <div><button type="button" onClick={() => void respond(item,true)} aria-label="接受"><Check /></button><button type="button" onClick={() => void respond(item,false)} aria-label="拒绝"><X /></button></div> : null}</div>) : <p className={styles.empty}>没有待处理请求。</p>}</div></> : <div className={styles.rows}>{conversations.filter((item) => Number(item.unread_count || 0) > 0).length ? conversations.filter((item) => Number(item.unread_count || 0) > 0).map((item) => <button type="button" className={styles.notificationRow} key={item.conversation_id} onClick={() => openChat(item)}><Bell /><span><strong>{item.display_name} 发来新消息</strong><small>{item.last_message}</small></span><b>{item.unread_count}</b></button>) : <p className={styles.empty}>暂无新消息通知。</p>}</div>}{message ? <p className={styles.error} role="status">{message}</p> : null}</div></> : null}
+      </> : tab === "new" ? <><form className={styles.friendSearch} onSubmit={search}><input aria-label="搜索好友 UID" inputMode="numeric" placeholder="输入 5–6 位 UID" value={query} onChange={(event) => setQuery(event.target.value.replace(/\D/g, "").slice(0,6))} /><button type="submit" aria-label="搜索"><MagnifyingGlass /></button></form>{searchResult && searchResult.id !== actor.id ? <div className={styles.searchResult}><AvatarFrame profile={searchResult} size="small" /><span><IdentityName profile={searchResult} as="strong" /><Nameplate uid={searchResult.public_uid} style={searchResult.nameplate_style} compact /></span><button type="button" onClick={() => void request(searchResult)}><UserPlus />添加</button></div> : null}<div className={styles.rows}>{requests.length ? requests.map((item) => <div key={item.friendship_id} className={styles.requestRow}><AvatarFrame profile={{ display_name: item.display_name || "用户", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /><span><strong>{item.display_name}</strong><small>{item.direction === "incoming" ? "请求添加你为好友" : "等待对方接受"}</small></span>{item.direction === "incoming" ? <div><button type="button" onClick={() => void respond(item,true)} aria-label="接受"><Check /></button><button type="button" onClick={() => void respond(item,false)} aria-label="拒绝"><X /></button></div> : null}</div>) : <p className={styles.empty}>没有待处理请求。</p>}</div></> : <div className={styles.rows}>{unreadConversations.map((item) => <button type="button" className={styles.notificationRow} key={item.conversation_id} onClick={() => openChat(item)}><Bell /><span><strong>{item.display_name} 发来新消息</strong><small>{item.last_message}</small></span><b>{item.unread_count}</b></button>)}{submittedClaims.map((claim) => <Link href="/mentor/manage" className={styles.notificationRow} key={claim.claim_id}><Bell /><span><strong>{claim.display_name || "用户"} 已提交付款确认</strong><small>{claim.offer_name || "辅导服务"} · {formatMentorPrice(claim.amount_cents, claim.currency)}</small></span><b>待核对</b></Link>)}{notificationTotal ? null : <p className={styles.empty}>暂无新消息通知。</p>}</div>}{message ? <p className={styles.error} role="status">{message}</p> : null}</div></> : null}
     </section> : null}
-    {chats.map((chat) => <FloatingChat key={chat.conversation_id} actorId={actor.id} chat={chat} sound={sound} onClose={() => setChats((current) => current.filter((item) => item.conversation_id !== chat.conversation_id))} onFocus={() => { z.current += 1; setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, z: z.current } : item)); }} onPatch={(value) => setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, ...value } : item))} />)}
+    {chats.map((chat) => <FloatingChat key={chat.conversation_id} actorId={actor.id} chat={chat} sound={sound} onClose={() => setChats((current) => current.filter((item) => item.conversation_id !== chat.conversation_id))} onFocus={() => { z.current += 1; setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, z: z.current } : item)); }} onPatch={(value) => setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, ...value } : item))} onRead={() => { setConversations((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); }} />)}
   </>;
 }

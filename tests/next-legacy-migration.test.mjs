@@ -39,7 +39,9 @@ test("root-mounted messenger preserves real-data friend and independent chat sta
     read("apps/web/src/components/member-profile-actions.tsx"),
   ]);
   assert.match(layout, /<SocialDesktop/);
-  for (const contract of ["list_my_friendships", "list_my_conversations_v2", "list_my_mentor_access", "list_my_mentor_students", "respond_friend_request", "send_direct_message", "wavekb-member-presence"]) assert.match(desktop, new RegExp(contract));
+  for (const contract of ["list_my_friendships", "list_my_conversations_v2", "list_my_mentor_access", "list_my_mentor_students", "list_my_mentor_payment_claims", "respond_friend_request", "send_direct_message", "mark_conversation_read_v1", "wavekb-member-presence"]) assert.match(desktop, new RegExp(contract));
+  assert.match(desktop, /搜索好友或 UID/);
+  assert.match(desktop, /clampPanelCoordinates/);
   assert.match(desktop, /paste/);
   assert.match(desktop, /drop/);
   assert.match(desktop, /staged/);
@@ -47,6 +49,29 @@ test("root-mounted messenger preserves real-data friend and independent chat sta
   assert.match(css, /resize:both/);
   assert.match(css, /data-autohidden/);
   assert.match(profileActions, /wavekb:open-chat/);
+});
+
+test("public member profiles are anonymous-readable while social actions still require login", async () => {
+  const [page, repository, actions] = await Promise.all([
+    read("apps/web/src/app/member/[uid]/page.tsx"),
+    read("apps/web/src/lib/member/server-repository.ts"),
+    read("apps/web/src/components/member-profile-actions.tsx"),
+  ]);
+  assert.match(page, /getOptionalActiveMember/);
+  assert.doesNotMatch(page, /requireActiveMember/);
+  assert.match(repository, /\.eq\("account_status", "active"\)/);
+  assert.doesNotMatch(repository.slice(repository.indexOf("getMemberProfileByUid"), repository.indexOf("getMyProfile")), /search_profile_by_uid/);
+  assert.match(actions, /login\?next=/);
+});
+
+test("production deployment applies every migration newer than the live schema", async () => {
+  const workflow = await read(".github/workflows/deploy-next-production.yml");
+  const migrationStep = workflow.slice(workflow.indexOf("Apply production database migrations"), workflow.indexOf("Build the standalone application"));
+  assert.match(migrationStep, /find supabase\/migrations/);
+  assert.match(migrationStep, /migration_version > 10#\$schema_version/);
+  assert.match(migrationStep, /--single-transaction/);
+  assert.match(migrationStep, /test "\$deployed_version" = "\$latest_version"/);
+  assert.doesNotMatch(migrationStep, /202608140\*\.sql/);
 });
 
 test("unified nameplates and semantic theme tokens cover migrated Next surfaces", async () => {

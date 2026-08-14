@@ -8,7 +8,7 @@ import { Button } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 
 type Props = {
-  actorId: string;
+  actorId: string | null;
   profileId: string;
   initialFollowing: boolean;
   initialConnection: FriendshipConnection | null;
@@ -27,6 +27,17 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
   const [connection, setConnection] = useState(initialConnection);
   const [pending, setPending] = useState<"follow" | "friend" | null>(null);
   const [message, setMessage] = useState("");
+
+  if (!actorId) {
+    const returnPath = `/member/${profile.public_uid ?? ""}`;
+    const loginHref = `/login?next=${encodeURIComponent(returnPath)}`;
+    return (
+      <div className="flex flex-wrap gap-3">
+        <Button asChild variant="secondary"><Link href={loginHref}>关注</Link></Button>
+        <Button asChild><Link href={loginHref}><UserPlus aria-hidden size={18} />添加好友</Link></Button>
+      </div>
+    );
+  }
 
   if (actorId === profileId) {
     return (

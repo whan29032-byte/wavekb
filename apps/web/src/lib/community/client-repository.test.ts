@@ -106,16 +106,17 @@ describe("post editing transaction", () => {
 });
 
 describe("comment publishing", () => {
-  it("resolves after the database accepts the comment without requiring a returned row", async () => {
+  it("uses one real UUID for persistence and immediate reply/delete actions", async () => {
     const insert = vi.fn(async () => ({ error: null }));
     const client = { from: vi.fn(() => ({ insert })) } as never;
 
-    await addPostComment(client, {
+    const comment = await addPostComment(client, {
       postId: "11111111-1111-4111-8111-111111111111",
       userId: "22222222-2222-4222-8222-222222222222",
       body: "  评论已经写入数据库。  ",
     });
 
-    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ body: "评论已经写入数据库。", status: "visible" }));
+    expect(comment.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ id: comment.id, body: "评论已经写入数据库。", status: "visible" }));
   });
 });

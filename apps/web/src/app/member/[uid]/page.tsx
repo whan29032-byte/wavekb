@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { MemberProfileActions } from "@/components/member-profile-actions";
 import { PostCard } from "@/components/post-card";
-import { requireActiveMember } from "@/lib/auth/dal";
+import { getOptionalActiveMember } from "@/lib/auth/dal";
 import { listPostsByAuthor } from "@/lib/community/server-repository";
 import { getMemberProfileByUid, getMemberSocialState, getMyPersonalSpaceSummary } from "@/lib/member/server-repository";
 import { AvatarFrame, IdentityName, IdentityTitle, Nameplate } from "@/components/nameplate";
@@ -24,16 +24,18 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function MemberProfilePage({ params }: PageProps) {
   const { uid } = await params;
   if (!/^\d{5,6}$/.test(uid)) notFound();
-  const actor = await requireActiveMember(`/member/${uid}`);
-  const profile = await getMemberProfileByUid(Number(uid));
+  const [actor, profile] = await Promise.all([
+    getOptionalActiveMember(),
+    getMemberProfileByUid(Number(uid)),
+  ]);
   if (!profile) notFound();
   const [posts, social] = await Promise.all([
     listPostsByAuthor(profile.id),
-    getMemberSocialState(actor.id, profile.id),
+    actor ? getMemberSocialState(actor.id, profile.id) : Promise.resolve({ following: false, connection: null }),
   ]);
   const boardCount = new Set(posts.map((post) => post.board)).size;
-  const isSelf = actor.id === profile.id;
-  const personal = isSelf ? await getMyPersonalSpaceSummary(actor.id) : null;
+  const isSelf = actor?.id === profile.id;
+  const personal = isSelf && actor ? await getMyPersonalSpaceSummary(actor.id) : null;
 
   return (
     <main className="mx-auto grid max-w-5xl gap-6 px-4 py-10 md:px-6 md:py-14">
@@ -54,7 +56,7 @@ export default async function MemberProfilePage({ params }: PageProps) {
               <p className="identity-effect max-w-[62ch] text-sm leading-6 text-muted-foreground" data-nameplate={profile.nameplate_style}>{profile.bio || "这位研究者还没有填写个人签名。"}</p>
             </div>
           </div>
-          <MemberProfileActions actorId={actor.id} profileId={profile.id} initialFollowing={social.following} initialConnection={social.connection} profile={profile} />
+          <MemberProfileActions actorId={actor?.id ?? null} profileId={profile.id} initialFollowing={social.following} initialConnection={social.connection} profile={profile} />
         </div>
       </section>
 

@@ -210,7 +210,10 @@ export async function addPostComment(client: SupabaseClient, input: {
 }) {
   const body = input.body.trim();
   if (!body || body.length > 2000) throw new Error("评论需要 1 到 2000 个字符。");
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
   const result = await client.from("post_comments").insert({
+    id,
     post_id: input.postId,
     author_id: input.userId,
     parent_id: input.parentId ?? null,
@@ -218,6 +221,16 @@ export async function addPostComment(client: SupabaseClient, input: {
     status: "visible",
   });
   if (result.error) throw result.error;
+  return {
+    id,
+    post_id: input.postId,
+    author_id: input.userId,
+    parent_id: input.parentId ?? null,
+    body,
+    status: "visible" as const,
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
 }
 
 export async function deletePostComment(client: SupabaseClient, commentId: string, userId: string) {

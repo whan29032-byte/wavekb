@@ -28,3 +28,12 @@ export async function requireActiveMember(returnPath: string) {
   }
   return { ...user, publicUid: Number(profile.data.public_uid) };
 }
+
+export async function getOptionalActiveMember() {
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const supabase = await createClient();
+  const profile = await supabase.from("profiles").select("public_uid,account_status").eq("id", user.id).maybeSingle();
+  if (profile.error || profile.data?.account_status !== "active" || profile.data.public_uid == null) return null;
+  return { ...user, publicUid: Number(profile.data.public_uid) };
+}
