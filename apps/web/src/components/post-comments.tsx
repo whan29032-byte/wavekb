@@ -56,7 +56,7 @@ export function PostComments({ postId, comments, actorId, commentsEnabled, activ
       formElement.reset();
       setReplyTo(null);
       setPending(false);
-      router.refresh();
+      window.setTimeout(() => router.refresh(), 250);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "评论发布失败，请重试。");
       setPending(false);

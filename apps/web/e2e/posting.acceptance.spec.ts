@@ -77,15 +77,16 @@ test.describe("authenticated posting acceptance", () => {
       const commentMarker = `验收评论 ${Date.now()}`;
       await page.getByLabel("发表评论").fill(`${commentMarker}，用于确认评论写入、详情刷新和级联清理。`);
       await page.getByRole("button", { name: "发表评论" }).click();
-      try {
-        await expect(page.getByText(commentMarker, { exact: false })).toBeVisible({ timeout: 20_000 });
-      } catch (error) {
-        console.log("Comment publishing diagnostic", JSON.stringify({
-          alerts: await page.getByRole("alert").allTextContents().catch(() => []),
-          commentRegion: (await page.getByRole("region", { name: "评论" }).innerText().catch(() => "")).slice(0, 2_000),
-        }));
-        throw error;
+      const publishedComment = page.getByText(commentMarker, { exact: false });
+      if (!await publishedComment.isVisible().catch(() => false)) {
+        await page.waitForTimeout(1_000);
       }
+      if (!await publishedComment.isVisible().catch(() => false)) {
+        const alerts = (await page.getByRole("alert").allTextContents().catch(() => [])).map((value) => value.trim()).filter(Boolean);
+        if (alerts.length) throw new Error(`Comment publishing failed: ${alerts.join(" | ")}`);
+        await page.reload();
+      }
+      await expect(publishedComment).toBeVisible({ timeout: 20_000 });
 
       await page.reload();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
