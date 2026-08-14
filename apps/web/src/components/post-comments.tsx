@@ -30,16 +30,29 @@ export function PostComments({ postId, comments, actorId, commentsEnabled, activ
     if (!actorId) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
+    const body = String(form.get("body") ?? "").trim();
+    const parentId = replyTo?.parent_id ? replyTo.parent_id : replyTo?.id ?? null;
     setPending(true);
     setError("");
     try {
-      const inserted = await addPostComment(createClient(), {
+      await addPostComment(createClient(), {
         postId,
         userId: actorId,
-        parentId: replyTo?.parent_id ? replyTo.parent_id : replyTo?.id,
-        body: String(form.get("body") ?? ""),
+        parentId,
+        body,
       });
-      setAdded((current) => [...current, { ...inserted, profiles: null } as PostComment]);
+      const timestamp = new Date().toISOString();
+      setAdded((current) => [...current, {
+        id: `pending-${crypto.randomUUID()}`,
+        post_id: postId,
+        author_id: actorId,
+        parent_id: parentId,
+        body,
+        status: "visible",
+        created_at: timestamp,
+        updated_at: timestamp,
+        profiles: null,
+      }]);
       formElement.reset();
       setReplyTo(null);
       setPending(false);

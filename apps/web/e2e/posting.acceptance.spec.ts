@@ -77,7 +77,15 @@ test.describe("authenticated posting acceptance", () => {
       const commentMarker = `验收评论 ${Date.now()}`;
       await page.getByLabel("发表评论").fill(`${commentMarker}，用于确认评论写入、详情刷新和级联清理。`);
       await page.getByRole("button", { name: "发表评论" }).click();
-      await expect(page.getByText(commentMarker, { exact: false })).toBeVisible({ timeout: 20_000 });
+      try {
+        await expect(page.getByText(commentMarker, { exact: false })).toBeVisible({ timeout: 20_000 });
+      } catch (error) {
+        console.log("Comment publishing diagnostic", JSON.stringify({
+          alerts: await page.getByRole("alert").allTextContents().catch(() => []),
+          commentRegion: (await page.getByRole("region", { name: "评论" }).innerText().catch(() => "")).slice(0, 2_000),
+        }));
+        throw error;
+      }
 
       await page.reload();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
