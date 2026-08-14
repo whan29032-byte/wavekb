@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { addPostComment, createPost, updatePost } from "./client-repository";
+import { addPostComment, createPost, deletePost, updatePost } from "./client-repository";
 
 describe("posting transaction", () => {
   it("publishes only after every image row is saved", async () => {
@@ -102,6 +102,32 @@ describe("post editing transaction", () => {
       p_chart_package: expect.objectContaining({ symbol: "BINANCE:BTCUSDT" }),
       p_images: [],
     }));
+  });
+});
+
+describe("post deletion transaction", () => {
+  it("deletes the database row before best-effort image cleanup", async () => {
+    const maybeSingle = vi.fn(async () => ({ data: { id: "post-id" }, error: null }));
+    const select = vi.fn(() => ({ maybeSingle }));
+    const secondEq = vi.fn(() => ({ select }));
+    const firstEq = vi.fn(() => ({ eq: secondEq }));
+    const remove = vi.fn(async () => ({ error: { message: "temporary storage failure" } }));
+    const client = {
+      from: vi.fn(() => ({ delete: vi.fn(() => ({ eq: firstEq })) })),
+      storage: { from: vi.fn(() => ({ remove })) },
+    } as never;
+
+    const result = await deletePost(client, {
+      id: "post-id",
+      author_id: "user-id",
+      status: "published",
+      post_images: [{ storage_path: "user-id/post-id/image.png" }],
+    } as never, "user-id");
+
+    expect(result).toEqual({ cleanupPending: true });
+    expect(firstEq).toHaveBeenCalledWith("id", "post-id");
+    expect(secondEq).toHaveBeenCalledWith("author_id", "user-id");
+    expect(remove).toHaveBeenCalledWith(["user-id/post-id/image.png"]);
   });
 });
 

@@ -189,17 +189,26 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
 
 export async function deletePost(client: SupabaseClient, post: CommunityPost, userId: string) {
   if (post.author_id !== userId || post.status === "hidden") throw new Error("你不能删除这篇帖子。");
-  if (post.status === "published") {
-    const unpublish = await client.from("posts").update({ status: "draft" }).eq("id", post.id);
-    if (unpublish.error) throw unpublish.error;
+  let deleteError: unknown = null;
+  let deleted = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const result = await client.from("posts").delete()
+      .eq("id", post.id)
+      .eq("author_id", userId)
+      .select("id")
+      .maybeSingle();
+    deleteError = result.error;
+    deleted = result.data?.id === post.id;
+    if (!deleteError && deleted) break;
+    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
   }
+  if (deleteError) throw deleteError;
+  if (!deleted) throw new Error("帖子未被删除，请刷新后重试。");
+
   const paths = post.post_images.map((image) => image.storage_path);
-  if (paths.length) {
-    const files = await client.storage.from("post-images").remove(paths);
-    if (files.error) throw files.error;
-  }
-  const row = await client.from("posts").delete().eq("id", post.id);
-  if (row.error) throw row.error;
+  if (!paths.length) return { cleanupPending: false };
+  const files = await client.storage.from("post-images").remove(paths);
+  return { cleanupPending: Boolean(files.error) };
 }
 
 export async function addPostComment(client: SupabaseClient, input: {
