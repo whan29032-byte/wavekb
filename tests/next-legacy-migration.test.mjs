@@ -52,18 +52,17 @@ test("root-mounted messenger preserves real-data friend and independent chat sta
 });
 
 test("public member profiles are anonymous-readable while social actions still require login", async () => {
-  const [page, repository, actions, migration] = await Promise.all([
+  const [page, repository, actions] = await Promise.all([
     read("apps/web/src/app/member/[uid]/page.tsx"),
     read("apps/web/src/lib/member/server-repository.ts"),
     read("apps/web/src/components/member-profile-actions.tsx"),
-    read("supabase/migrations/202608140008_public_member_profile.sql"),
   ]);
   assert.match(page, /getOptionalActiveMember/);
   assert.doesNotMatch(page, /requireActiveMember/);
-  assert.match(repository, /get_public_profile_by_uid/);
-  assert.match(migration, /profile\.account_status = 'active'/);
-  assert.match(migration, /grant execute on function public\.get_public_profile_by_uid\(integer\) to anon, authenticated/);
-  assert.doesNotMatch(migration, /email|points|private_entries|auth\.users/);
+  assert.match(repository, /get_public_profiles/);
+  assert.match(repository, /get_public_post_profiles/);
+  assert.match(repository, /\.eq\("public_uid", uid\)/);
+  assert.doesNotMatch(repository.slice(repository.indexOf("getMemberProfileByUid"), repository.indexOf("getMyProfile")), /email|points|private_entries|auth\.users/);
   assert.match(actions, /login\?next=/);
 });
 

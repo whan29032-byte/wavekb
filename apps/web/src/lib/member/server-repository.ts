@@ -20,10 +20,29 @@ export type NameplateEntitlement = {
 
 export async function getMemberProfileByUid(uid: number): Promise<MemberProfile | null> {
   const client = await createClient();
-  const result = await client.rpc("get_public_profile_by_uid", { p_uid: uid });
-  if (result.error) throw result.error;
-  const value = Array.isArray(result.data) ? result.data[0] : result.data;
-  return (value as MemberProfile | null) ?? null;
+  const full = await client.rpc("search_profile_by_uid", { p_uid: uid });
+  if (!full.error) {
+    const value = Array.isArray(full.data) ? full.data[0] : full.data;
+    return (value as MemberProfile | null) ?? null;
+  }
+
+  const basic = await client.rpc("get_public_profiles", { p_ids: null })
+    .eq("public_uid", uid)
+    .maybeSingle();
+  if (basic.error) throw basic.error;
+  if (!basic.data) return null;
+  const publicProfile = basic.data as Pick<MemberProfile, "id" | "public_uid" | "display_name" | "avatar_url" | "bio" | "markets" | "timeframes" | "created_at">;
+  const identity = await client.rpc("get_public_post_profiles", { p_ids: [publicProfile.id] }).maybeSingle();
+  if (identity.error) throw identity.error;
+  const publicIdentity = identity.data as Pick<MemberProfile, "role" | "display_title" | "nameplate_style"> | null;
+  return {
+    ...publicProfile,
+    role: publicIdentity?.role ?? "member",
+    display_title: publicIdentity?.display_title ?? "",
+    nameplate_style: publicIdentity?.nameplate_style ?? "classic",
+    cover_url: null,
+    cover_style: "chart-dark",
+  } as MemberProfile;
 }
 
 export async function getMyProfile(userId: string): Promise<EditableMemberProfile | null> {
