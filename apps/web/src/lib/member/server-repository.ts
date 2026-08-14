@@ -20,13 +20,10 @@ export type NameplateEntitlement = {
 
 export async function getMemberProfileByUid(uid: number): Promise<MemberProfile | null> {
   const client = await createClient();
-  const result = await client.from("profiles")
-    .select("id,public_uid,display_name,avatar_url,bio,markets,timeframes,role,display_title,nameplate_style,cover_url,cover_style,created_at")
-    .eq("public_uid", uid)
-    .eq("account_status", "active")
-    .maybeSingle();
+  const result = await client.rpc("get_public_profile_by_uid", { p_uid: uid });
   if (result.error) throw result.error;
-  return (result.data as MemberProfile | null) ?? null;
+  const value = Array.isArray(result.data) ? result.data[0] : result.data;
+  return (value as MemberProfile | null) ?? null;
 }
 
 export async function getMyProfile(userId: string): Promise<EditableMemberProfile | null> {
