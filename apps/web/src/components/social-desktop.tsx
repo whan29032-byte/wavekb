@@ -13,7 +13,7 @@ import { createClient } from "@/lib/supabase/client";
 import styles from "./social-desktop.module.css";
 
 type PanelState = { x: number; y: number; open: boolean; minimized: boolean; pinned: boolean; edge: "left" | "right" | "top" | "bottom" };
-type OpenChat = DirectConversation & { z: number; minimized?: boolean; maximized?: boolean };
+type OpenChat = DirectConversation & { z: number; minimized?: boolean; maximized?: boolean; pinned?: boolean };
 const STORAGE_KEY = "wavekb:social-desktop:v2";
 const SOUND_KEY = "wavekb:social-sound:v1";
 const emoji = ["🌊", "📈", "📉", "🎯", "🔥", "🤔", "🤝", "✅", "💎", "😂"];
@@ -106,7 +106,10 @@ function FloatingChat({ actorId, chat, sound, onClose, onFocus, onPatch }: { act
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [messages]);
   useEffect(() => {
     if (!emojiOpen) return;
-    const close = (event: MouseEvent) => { if (!windowRef.current?.contains(event.target as Node)) setEmojiOpen(false); };
+    const close = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest("[data-emoji-panel],[data-emoji-toggle]")) setEmojiOpen(false);
+    };
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
   }, [emojiOpen]);
@@ -137,17 +140,18 @@ function FloatingChat({ actorId, chat, sound, onClose, onFocus, onPatch }: { act
   function paste(event: ClipboardEvent<HTMLTextAreaElement>) { const file = imageFromTransfer(event.clipboardData); if (file) { event.preventDefault(); void stageImage(file); } }
   function drop(event: DragEvent<HTMLFormElement>) { const file = imageFromTransfer(event.dataTransfer); setDragging(false); if (file) { event.preventDefault(); void stageImage(file); } }
 
-  const style = chat.maximized ? { inset: "4.5rem .75rem .75rem .75rem", zIndex: chat.z } : { left: position.x, top: position.y, zIndex: chat.z };
+  const windowZ = chat.pinned ? 100 : Math.min(chat.z, 89);
+  const style = chat.maximized ? { inset: "4.5rem .75rem .75rem .75rem", zIndex: windowZ } : { left: position.x, top: position.y, zIndex: windowZ };
   return <section ref={windowRef} className={styles.chatWindow} data-minimized={chat.minimized || undefined} data-maximized={chat.maximized || undefined} style={style} onPointerDown={onFocus} aria-label={`与${chat.display_name}聊天`}>
     <header className={styles.windowTitle} onDoubleClick={() => onPatch({ maximized: !chat.maximized, minimized: false })} onPointerDown={(event) => { if ((event.target as HTMLElement).closest("button,a")) return; const element = windowRef.current; if (!element || chat.maximized) return; element.setPointerCapture(event.pointerId); const box = element.getBoundingClientRect(); drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, left: box.left, top: box.top }; }} onPointerMove={(event) => { const state = drag.current; const element = windowRef.current; if (!state || !element || state.id !== event.pointerId) return; const next = { x: Math.max(0, Math.min(window.innerWidth - 220, state.left + event.clientX - state.x)), y: Math.max(64, Math.min(window.innerHeight - 42, state.top + event.clientY - state.y)) }; element.style.left = `${next.x}px`; element.style.top = `${next.y}px`; }} onPointerUp={(event) => { const element = windowRef.current; if (drag.current && element) { const box = element.getBoundingClientRect(); setPosition({ x: box.left, y: box.top }); } drag.current = null; event.currentTarget.releasePointerCapture?.(event.pointerId); }}>
       <AvatarFrame profile={{ display_name: chat.display_name, avatar_url: chat.avatar_url, nameplate_style: chat.nameplate_style }} size="small" />
       <div className={styles.titleCopy}><IdentityName profile={chat} as="strong" /><Nameplate uid={chat.public_uid} style={chat.nameplate_style} compact /></div>
-      <div className={styles.windowControls}><button type="button" onClick={() => onPatch({ minimized: !chat.minimized })} aria-label="最小化"><Minus /></button><button type="button" onClick={() => onPatch({ maximized: !chat.maximized, minimized: false })} aria-label={chat.maximized ? "还原" : "最大化"}><DotsThree /></button><button type="button" onClick={onClose} aria-label="关闭"><X /></button></div>
+      <div className={styles.windowControls}><button type="button" onClick={() => onPatch({ pinned: !chat.pinned })} aria-label={chat.pinned ? "取消置顶" : "置顶"}>{chat.pinned ? <PushPinSlash /> : <PushPin />}</button><button type="button" onClick={() => onPatch({ minimized: !chat.minimized })} aria-label="最小化"><Minus /></button><button type="button" onClick={() => onPatch({ maximized: !chat.maximized, minimized: false })} aria-label={chat.maximized ? "还原" : "最大化"}><DotsThree /></button><button type="button" onClick={onClose} aria-label="关闭"><X /></button></div>
     </header>
     {!chat.minimized ? <><div className={styles.messages} aria-live="polite">{messages.length ? messages.map((message) => { const mine = message.sender_id === actorId; return <article key={message.id} data-mine={mine || undefined} className={styles.message}><div><ChatBody body={message.body} /></div><time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time></article>; }) : <p className={styles.empty}>发送第一条消息吧。</p>}<div ref={end} /></div>
       <form className={styles.composer} data-dragging={dragging || undefined} onSubmit={send} onDragOver={(event) => { if (imageFromTransfer(event.dataTransfer)) { event.preventDefault(); setDragging(true); } }} onDragLeave={() => setDragging(false)} onDrop={drop}>
-        <div className={styles.composerTools}><button type="button" aria-expanded={emojiOpen} aria-label="表情" onClick={() => setEmojiOpen((value) => !value)}><Smiley /></button>{staged ? <span>待发送：{staged.label}<button type="button" onClick={() => setStaged(null)} aria-label="移除待发送图片"><X /></button></span> : <small>可粘贴或拖入图片</small>}</div>
-        {emojiOpen ? <div className={styles.emojiPanel} role="dialog" aria-label="表情"><div>{emoji.map((item) => <button key={item} type="button" onClick={() => { setBody((value) => `${value}${item}`); setEmojiOpen(false); }}>{item}</button>)}</div>{stickers.length ? <div>{stickers.map((item) => <button key={item.id} type="button" onClick={() => { setStaged(item); setEmojiOpen(false); }}><img src={publicChatStickerUrl(item.storage_path)} alt={item.label} /></button>)}</div> : null}</div> : null}
+        <div className={styles.composerTools}><button type="button" data-emoji-toggle aria-expanded={emojiOpen} aria-label="表情" onClick={() => setEmojiOpen((value) => !value)}><Smiley /></button>{staged ? <span>待发送：{staged.label}<button type="button" onClick={() => setStaged(null)} aria-label="移除待发送图片"><X /></button></span> : <small>可粘贴或拖入图片</small>}</div>
+        {emojiOpen ? <div className={styles.emojiPanel} data-emoji-panel role="dialog" aria-label="表情"><div>{emoji.map((item) => <button key={item} type="button" onClick={() => { setBody((value) => `${value}${item}`); setEmojiOpen(false); }}>{item}</button>)}</div>{stickers.length ? <div>{stickers.map((item) => <button key={item.id} type="button" onClick={() => { setStaged(item); setEmojiOpen(false); }}><img src={publicChatStickerUrl(item.storage_path)} alt={item.label} /></button>)}</div> : null}</div> : null}
         <div className={styles.inputRow}><textarea value={body} disabled={Boolean(staged)} maxLength={4000} rows={2} placeholder={dragging ? "松开以加入待发送区" : "输入消息；支持复制、粘贴和截图"} onChange={(event) => setBody(event.target.value)} onPaste={paste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><button type="submit" disabled={pending || (!staged && !body.trim())} aria-label="发送"><PaperPlaneRight /></button></div>
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
       </form></> : null}
@@ -190,8 +194,8 @@ export function SocialDesktop() {
       const rows = ((modern.data ?? []) as DirectConversation[]).map((item) => ({ ...item, unread_count: Number(item.unread_count || 0) }));
       setConversations(rows);
       try {
-        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as { userId?: string; chats?: Array<{ conversation_id: string; minimized?: boolean; maximized?: boolean }> } | null;
-        const restored = (stored?.userId === user.id ? stored.chats ?? [] : []).flatMap((saved, index) => { const value = rows.find((item) => item.conversation_id === saved.conversation_id); return value ? [{ ...value, minimized: saved.minimized, maximized: saved.maximized, z: 51 + index }] : []; });
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as { userId?: string; chats?: Array<{ conversation_id: string; minimized?: boolean; maximized?: boolean; pinned?: boolean }> } | null;
+        const restored = (stored?.userId === user.id ? stored.chats ?? [] : []).flatMap((saved, index) => { const value = rows.find((item) => item.conversation_id === saved.conversation_id); return value ? [{ ...value, minimized: saved.minimized, maximized: saved.maximized, pinned: saved.pinned, z: 51 + index }] : []; });
         if (restored.length) setChats((current) => current.length ? current : restored);
       } catch { /* Ignore malformed local window state. */ }
     }
@@ -209,7 +213,7 @@ export function SocialDesktop() {
     return () => { window.clearTimeout(initial); auth.data.subscription.unsubscribe(); window.clearInterval(timer); window.removeEventListener("wavekb:open-chat", customOpen); };
   }, []);
 
-  useEffect(() => { if (actor) localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized })) })); }, [actor, panel, chats]);
+  useEffect(() => { if (actor) localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized, pinned: item.pinned })) })); }, [actor, panel, chats]);
   useEffect(() => {
     if (!actor) return;
     const client = createClient();

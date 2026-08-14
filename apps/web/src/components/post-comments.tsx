@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import type { PostComment } from "@wavekb/domain";
 import { IdentityName, Nameplate } from "@/components/nameplate";
@@ -15,24 +16,34 @@ export function PostComments({ postId, comments, actorId, commentsEnabled, activ
   commentsEnabled: boolean;
   activeMember: boolean;
 }) {
+  const router = useRouter();
+  const [added, setAdded] = useState<PostComment[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [replyTo, setReplyTo] = useState<PostComment | null>(null);
 
+  const persistedIds = new Set(comments.map((comment) => comment.id));
+  const items = [...comments, ...added.filter((comment) => !persistedIds.has(comment.id))];
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!actorId) return;
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     setPending(true);
     setError("");
     try {
-      await addPostComment(createClient(), {
+      const inserted = await addPostComment(createClient(), {
         postId,
         userId: actorId,
         parentId: replyTo?.parent_id ? replyTo.parent_id : replyTo?.id,
         body: String(form.get("body") ?? ""),
       });
-      window.location.reload();
+      setAdded((current) => [...current, { ...inserted, profiles: null } as PostComment]);
+      formElement.reset();
+      setReplyTo(null);
+      setPending(false);
+      router.refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "评论发布失败，请重试。");
       setPending(false);
@@ -59,11 +70,11 @@ export function PostComments({ postId, comments, actorId, commentsEnabled, activ
           <h2 id="comments-title" className="text-xl font-semibold">评论</h2>
           <p className="text-sm text-muted-foreground">围绕规则、证据、边界和反例展开讨论。</p>
         </div>
-        <span className="text-sm tabular-nums text-muted-foreground">{comments.length} 条</span>
+        <span className="text-sm tabular-nums text-muted-foreground">{items.length} 条</span>
       </div>
-      {comments.length ? (
+      {items.length ? (
         <div className="grid gap-3">
-          {comments.map((comment) => {
+          {items.map((comment) => {
             return (
               <article key={comment.id} className={`grid gap-2 rounded-xl border bg-surface p-4 ${comment.parent_id ? "ml-5 md:ml-10" : ""}`}>
                 <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

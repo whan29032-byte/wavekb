@@ -216,8 +216,9 @@ export async function addPostComment(client: SupabaseClient, input: {
     parent_id: input.parentId ?? null,
     body,
     status: "visible",
-  });
+  }).select("id,post_id,author_id,parent_id,body,status,created_at,updated_at").single();
   if (result.error) throw result.error;
+  return result.data;
 }
 
 export async function deletePostComment(client: SupabaseClient, commentId: string, userId: string) {

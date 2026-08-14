@@ -13,6 +13,8 @@ import { tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tr
 
 type PageProps = { params: Promise<{ id: string }> };
 
+export const dynamic = "force-dynamic";
+
 export default async function PostPage({ params }: PageProps) {
   const { id } = await params;
   const [post, comments] = await Promise.all([getPost(id), listPostComments(id)]);

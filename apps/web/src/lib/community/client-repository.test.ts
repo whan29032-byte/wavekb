@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPost, updatePost } from "./client-repository";
+import { addPostComment, createPost, updatePost } from "./client-repository";
 
 describe("posting transaction", () => {
   it("publishes only after every image row is saved", async () => {
@@ -102,5 +102,34 @@ describe("post editing transaction", () => {
       p_chart_package: expect.objectContaining({ symbol: "BINANCE:BTCUSDT" }),
       p_images: [],
     }));
+  });
+});
+
+describe("comment publishing", () => {
+  it("returns the persisted comment so the UI can update without a reload race", async () => {
+    const row = {
+      id: "33333333-3333-4333-8333-333333333333",
+      post_id: "11111111-1111-4111-8111-111111111111",
+      author_id: "22222222-2222-4222-8222-222222222222",
+      parent_id: null,
+      body: "评论已经写入数据库。",
+      status: "visible",
+      created_at: "2026-08-14T00:00:00.000Z",
+      updated_at: "2026-08-14T00:00:00.000Z",
+    };
+    const single = vi.fn(async () => ({ data: row, error: null }));
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    const client = { from: vi.fn(() => ({ insert })) } as never;
+
+    const result = await addPostComment(client, {
+      postId: row.post_id,
+      userId: row.author_id,
+      body: `  ${row.body}  `,
+    });
+
+    expect(result).toEqual(row);
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ body: row.body, status: "visible" }));
+    expect(select).toHaveBeenCalledWith("id,post_id,author_id,parent_id,body,status,created_at,updated_at");
   });
 });
