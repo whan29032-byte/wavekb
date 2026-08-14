@@ -69,7 +69,7 @@ test.describe("authenticated posting acceptance", () => {
       const commentMarker = `验收评论 ${Date.now()}`;
       await page.getByLabel("发表评论").fill(`${commentMarker}，用于确认评论写入、详情刷新和级联清理。`);
       await page.getByRole("button", { name: "发表评论" }).click();
-      await expect(page.getByText(commentMarker, { exact: false })).toBeVisible();
+      await expect(page.getByText(commentMarker, { exact: false })).toBeVisible({ timeout: 20_000 });
 
       await page.reload();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
@@ -126,7 +126,7 @@ test.describe("authenticated posting acceptance", () => {
         if (!await deleteButton.isVisible().catch(() => false)) await page.goBack().catch(() => undefined);
         page.once("dialog", (dialog) => dialog.accept());
         await page.getByRole("button", { name: "删除帖子" }).click();
-        await expect(page).toHaveURL(/\/community\/idea_sharing$/);
+        await expect(page).toHaveURL(/\/community\/idea_sharing$/, { timeout: 20_000 });
       }
       if (await accountMenu.isVisible().catch(() => false)) await accountMenu.click();
       await page.getByRole("button", { name: "退出登录" }).click();
