@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useState, useSyncExternalStore, type FormEvent } from "react";
 import type { PostComment, PublicProfile } from "@wavekb/domain";
 import { IdentityName, Nameplate } from "@/components/nameplate";
 import { Button, Field, FieldMessage, Label, Textarea } from "@wavekb/ui";
@@ -17,6 +17,11 @@ export function PostComments({ postId, comments, actorId, actorProfile, comments
   activeMember: boolean;
 }) {
   const [added, setAdded] = useState<PostComment[]>([]);
+  const hydrated = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [replyTo, setReplyTo] = useState<PostComment | null>(null);
@@ -112,7 +117,7 @@ export function PostComments({ postId, comments, actorId, actorProfile, comments
             <Textarea id="commentBody" name="body" required minLength={1} maxLength={2000} placeholder="写下可核验的观点或问题" aria-describedby={error ? "comment-error" : undefined} />
           </Field>
           {error ? <FieldMessage id="comment-error" role="alert">{error}</FieldMessage> : null}
-          <Button className="w-fit" type="submit" disabled={pending}>{pending ? "正在发布" : replyTo ? "发布回复" : "发表评论"}</Button>
+          <Button className="w-fit" type="submit" disabled={!hydrated || pending}>{pending ? "正在发布" : replyTo ? "发布回复" : "发表评论"}</Button>
         </form>
       ) : (
         <p className="text-sm text-muted-foreground"><Link className="font-semibold text-primary hover:underline" href={`/login?next=${encodeURIComponent(`/community/post/${postId}`)}`}>登录并完成 UID 激活</Link> 后可以发表评论。</p>
