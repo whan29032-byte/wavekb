@@ -123,7 +123,7 @@ test("knowledge search opens a fully migrated article", async ({ page }) => {
   await expect(sourceImage).toBeVisible();
   await sourceImage.click();
   await expect(page.getByRole("dialog", { name: /原书来源页/ })).toBeVisible();
-  await page.getByRole("button", { name: "放大" }).click();
+  await page.getByRole("button", { name: "放大", exact: true }).click();
   await expect(page.getByText("125%", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: /原书来源页/ })).toHaveCount(0);
