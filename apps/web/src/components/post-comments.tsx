@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import type { PostComment } from "@wavekb/domain";
+import { IdentityName, Nameplate } from "@/components/nameplate";
 import { Button, Field, FieldMessage, Label, Textarea } from "@wavekb/ui";
 import { addPostComment, deletePostComment } from "@/lib/community/client-repository";
 import { createClient } from "@/lib/supabase/client";
@@ -63,11 +64,10 @@ export function PostComments({ postId, comments, actorId, commentsEnabled, activ
       {comments.length ? (
         <div className="grid gap-3">
           {comments.map((comment) => {
-            const authorName = comment.profiles?.display_name || `UID ${comment.profiles?.public_uid ?? "未设置"}`;
             return (
               <article key={comment.id} className={`grid gap-2 rounded-xl border bg-surface p-4 ${comment.parent_id ? "ml-5 md:ml-10" : ""}`}>
                 <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  {comment.profiles?.public_uid ? <Link href={`/member/${comment.profiles.public_uid}`} className="font-medium text-foreground hover:underline">{authorName}</Link> : <span>{authorName}</span>}
+                  {comment.profiles?.public_uid ? <Link href={`/member/${comment.profiles.public_uid}`} className="inline-flex items-center gap-2 font-medium hover:underline"><IdentityName profile={comment.profiles} /><Nameplate uid={comment.profiles.public_uid} style={comment.profiles.nameplate_style} compact /></Link> : <span>{comment.profiles?.display_name || "UID 未设置"}</span>}
                   <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString("zh-CN")}</time>
                 </header>
                 <p className="whitespace-pre-wrap text-sm leading-6">{comment.body}</p>

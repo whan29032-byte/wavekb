@@ -1,17 +1,17 @@
 import Link from "next/link";
 import { ImageSquare } from "@phosphor-icons/react/dist/ssr";
 import { BOARDS, plainTextExcerpt, type CommunityPost } from "@wavekb/domain";
+import { IdentityName, Nameplate } from "@/components/nameplate";
 
 const dateFormatter = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "short", day: "numeric" });
 
 export function PostCard({ post }: { post: CommunityPost }) {
-  const author = post.profiles?.display_name || `UID ${post.profiles?.public_uid ?? "未设置"}`;
   return (
     <article className="group grid gap-3 rounded-xl border bg-surface p-5 transition-colors hover:border-primary/45 md:p-6">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>{BOARDS[post.board].title}</span>
         <span aria-hidden>/</span>
-        {post.profiles?.public_uid ? <Link href={`/member/${post.profiles.public_uid}`} className="hover:text-foreground hover:underline">{author}</Link> : <span>{author}</span>}
+        {post.profiles?.public_uid ? <Link href={`/member/${post.profiles.public_uid}`} className="inline-flex items-center gap-2 hover:underline"><IdentityName profile={post.profiles} /><Nameplate uid={post.profiles.public_uid} style={post.profiles.nameplate_style} compact /></Link> : <span>{post.profiles?.display_name || "UID 未设置"}</span>}
         <time dateTime={post.created_at}>{dateFormatter.format(new Date(post.created_at))}</time>
         {post.post_images.length > 0 ? (
           <span className="ml-auto inline-flex items-center gap-1"><ImageSquare aria-hidden size={15} />{post.post_images.length}</span>

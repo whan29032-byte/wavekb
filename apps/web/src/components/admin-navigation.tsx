@@ -2,8 +2,8 @@ import Link from "next/link";
 import { Coins, Cpu, GraduationCap, ListMagnifyingGlass, ShieldCheck, Storefront, Users } from "@phosphor-icons/react/dist/ssr";
 
 const items = [
-  { href: "/admin/users", label: "用户管理", copy: "账户、权限与 UID", icon: Users },
-  { href: "/admin/rewards", label: "积分商城", copy: "商品、钱包与兑换", icon: Coins },
+  { href: "/admin/users", label: "用户管理", copy: "账户、UID、权限与积分", icon: Users },
+  { href: "/admin/rewards", label: "积分商城", copy: "商品、权益与兑换", icon: Coins },
   { href: "/admin/directory", label: "首页推荐", copy: "X 与 Discord 目录", icon: Storefront },
   { href: "/admin/mentors", label: "导师与订单", copy: "方案、收款与权益", icon: GraduationCap },
   { href: "/admin/ai", label: "AI 治理", copy: "网关、费用与备用接口", icon: Cpu },

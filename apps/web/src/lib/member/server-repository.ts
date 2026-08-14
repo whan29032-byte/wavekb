@@ -57,6 +57,29 @@ export async function getMemberSocialState(actorId: string, targetId: string): P
   };
 }
 
+export type PersonalSpaceSummary = { points: number; reviews: number; journals: number; drafts: number; analyses: number };
+
+export async function getMyPersonalSpaceSummary(userId: string): Promise<PersonalSpaceSummary> {
+  const client = await createClient();
+  const [entries, analyses, rewards] = await Promise.all([
+    client.from("private_entries").select("kind").eq("owner_id", userId).is("deleted_at", null),
+    client.from("workbench_analyses").select("id", { count: "exact", head: true }).eq("owner_id", userId),
+    client.rpc("get_my_reward_center"),
+  ]);
+  if (entries.error) throw entries.error;
+  if (analyses.error) throw analyses.error;
+  if (rewards.error) throw rewards.error;
+  const rows = (entries.data ?? []) as Array<{ kind: string }>;
+  const center = (rewards.data ?? {}) as { wallet?: { balance?: number } };
+  return {
+    points: Number(center.wallet?.balance || 0),
+    reviews: rows.filter((item) => item.kind === "review").length,
+    journals: rows.filter((item) => item.kind === "journal").length,
+    drafts: rows.filter((item) => item.kind === "draft").length,
+    analyses: Number(analyses.count || 0),
+  };
+}
+
 export async function listFriendships(): Promise<FriendshipConnection[]> {
   const client = await createClient();
   const result = await client.rpc("list_my_friendships");

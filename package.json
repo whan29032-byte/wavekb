@@ -16,6 +16,7 @@
     "test:e2e": "pnpm --filter @wavekb/web test:e2e",
     "storybook": "pnpm --filter @wavekb/web storybook",
     "storybook:build": "pnpm --filter @wavekb/web storybook:build",
-    "knowledge:extract": "node scripts/extract-knowledge.mjs"
+    "knowledge:extract": "node scripts/extract-knowledge.mjs",
+    "knowledge:assets:check": "pnpm --filter @wavekb/web assets:check"
   }
 }

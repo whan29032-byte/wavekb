@@ -26,7 +26,20 @@ export function applyAppearance(settings: AppearanceSettings) {
   root.dataset.wavekbTheme = settings.theme;
   root.dataset.wavekbMode = settings.mode;
   root.style.setProperty("--wavekb-user-accent", settings.customColor);
-  root.style.setProperty("--wavekb-user-on-accent", textOnColor(settings.customColor));
+  root.style.setProperty("--wavekb-user-accent-readable", readableAccent(settings.customColor));
+  root.style.setProperty("--wavekb-user-on-accent", textOnColor(readableAccent(settings.customColor)));
+}
+
+export function readableAccent(hex: string) {
+  const safe = /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : DEFAULT_APPEARANCE.customColor.slice(1);
+  const channels = [safe.slice(0, 2), safe.slice(2, 4), safe.slice(4, 6)].map((value) => Number.parseInt(value, 16));
+  const luminance = (values: number[]) => {
+    const linear = values.map((value) => value / 255).map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  let factor = 1;
+  while (luminance(channels.map((value) => value * factor)) > 0.18 && factor > 0.2) factor -= 0.02;
+  return `#${channels.map((value) => Math.round(value * factor).toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function textOnColor(hex: string) {

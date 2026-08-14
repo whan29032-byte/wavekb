@@ -36,6 +36,14 @@ test.describe("authenticated posting acceptance", () => {
     const accountMenu = page.locator('summary[aria-label="账户菜单"]');
     const signOutButton = page.getByRole("button", { name: "退出登录" });
     await expect.poll(async () => await signOutButton.isVisible() || await accountMenu.isVisible(), { timeout: 15_000 }).toBe(true);
+    const socialPanel = page.getByRole("region", { name: "好友与聊天" });
+    await expect(socialPanel).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel("搜索好友 UID")).toHaveCount(0);
+    await socialPanel.getByRole("button", { name: /新朋友/ }).click();
+    await expect(page.getByLabel("搜索好友 UID")).toBeVisible();
+    await page.goto("/knowledge");
+    await expect(socialPanel).toBeVisible();
+    await page.goto("/community/idea_sharing/new");
 
     const marker = `验收发帖 ${Date.now()}`;
     let published = false;

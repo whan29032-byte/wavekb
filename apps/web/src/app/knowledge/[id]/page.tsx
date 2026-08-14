@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight, Images, SealCheck } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData, type KnowledgeAsset } from "@wavekb/knowledge";
-import { legacySiteUrl } from "@/lib/env";
+import { KnowledgeImageViewer } from "@/components/knowledge-image-viewer";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -21,7 +21,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 function assetUrl(assetPath: string) {
-  return `${legacySiteUrl()}/${assetPath.replace(/^\//, "")}`;
+  const base = (process.env.NEXT_PUBLIC_KNOWLEDGE_ASSET_BASE_URL || "").replace(/\/$/, "");
+  return `${base}/${assetPath.replace(/^\//, "")}`;
 }
 
 function uniqueAssets(assets: KnowledgeAsset[]) {
@@ -33,15 +34,7 @@ function AssetGrid({ assets, title }: { assets: KnowledgeAsset[]; title: string 
   return (
     <section className="grid gap-4" aria-label={title}>
       <h2 className="text-xl font-semibold">{title}</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {assets.map((asset, index) => (
-          <figure key={asset.asset_path} className="overflow-hidden rounded-xl border bg-muted">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={assetUrl(asset.asset_path)} alt={`${title} ${index + 1}`} width={asset.width} height={asset.height} loading="lazy" className="h-auto w-full object-contain" />
-            {asset.pdf_page || asset.book_pages?.length ? <figcaption className="border-t px-3 py-2 text-xs text-muted-foreground">{asset.book_pages?.length ? `书页 ${asset.book_pages.join(", ")}` : ""}{asset.book_pages?.length && asset.pdf_page ? " / " : ""}{asset.pdf_page ? `PDF 页 ${asset.pdf_page}` : ""}</figcaption> : null}
-          </figure>
-        ))}
-      </div>
+      <KnowledgeImageViewer assets={assets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `${title} ${index + 1}`, width: asset.width, height: asset.height, caption: `${asset.book_pages?.length ? `书页 ${asset.book_pages.join(", ")}` : ""}${asset.book_pages?.length && asset.pdf_page ? " / " : ""}${asset.pdf_page ? `PDF 页 ${asset.pdf_page}` : ""}` }))} />
     </section>
   );
 }
@@ -76,7 +69,7 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
         {sourceAssets.length ? (
           <details className="rounded-xl border bg-surface p-5 open:grid open:gap-5">
             <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold"><Images aria-hidden size={20} className="text-primary" />查看原书来源页（{sourceAssets.length}）</summary>
-            <AssetGrid assets={sourceAssets} title="原书来源页" />
+            <div className="pt-1"><KnowledgeImageViewer assets={sourceAssets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `原书来源页 ${index + 1}`, width: asset.width, height: asset.height, caption: `${asset.book_pages?.length ? `书页 ${asset.book_pages.join(", ")}` : ""}${asset.book_pages?.length && asset.pdf_page ? " / " : ""}${asset.pdf_page ? `PDF 页 ${asset.pdf_page}` : ""}` }))} /></div>
           </details>
         ) : null}
       </article>

@@ -5,6 +5,25 @@ test("home exposes the knowledge and community paths", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚");
   await expect(page.getByRole("link", { name: "进入社区" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "X 波浪理论博主推荐" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Discord 波浪理论频道推荐" })).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("appearance changes the full color system and survives reload", async ({ page }) => {
+  await page.goto("/");
+  const before = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--background"));
+  await page.locator('summary[aria-label="网站外观"]').click();
+  await page.getByRole("button", { name: /星夜紫/ }).click();
+  const primary = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--theme-accent").trim());
+  expect(primary).toBe("#6551a8");
+  await page.getByRole("button", { name: "深色" }).click();
+  const after = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--background"));
+  expect(after).not.toBe(before);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-wavekb-theme", "star");
+  await expect(page.locator("html")).toHaveAttribute("data-wavekb-mode", "dark");
 });
 
 test("unknown community boards return a real not-found page", async ({ page }) => {
@@ -98,4 +117,17 @@ test("knowledge search opens a fully migrated article", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("名义价格与定值价格应并行检查");
   await expect(page.getByRole("heading", { name: "强制规则" })).toBeVisible();
   await expect(page.getByText("原书来源", { exact: true })).toBeVisible();
+  const sourceSummary = page.getByText(/查看原书来源页/);
+  await sourceSummary.click();
+  const sourceImage = page.getByRole("button", { name: /放大查看：原书来源页/ }).first();
+  await expect(sourceImage).toBeVisible();
+  await sourceImage.click();
+  await expect(page.getByRole("dialog", { name: /原书来源页/ })).toBeVisible();
+  await page.getByRole("button", { name: "放大" }).click();
+  await expect(page.getByText("125%", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: /原书来源页/ })).toHaveCount(0);
+  const imageResponse = await page.request.get("/assets/source-pages/page-318.png");
+  expect(imageResponse.status()).toBe(200);
+  expect(imageResponse.headers()["content-type"]).toMatch(/^image\/png/);
 });

@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "assets:sync": "node scripts/sync-legacy-assets.mjs",
+    "assets:check": "node scripts/check-knowledge-assets.mjs",
+    "predev": "pnpm assets:sync",
     "dev": "next dev",
+    "prebuild": "pnpm assets:sync && pnpm assets:check",
     "build": "next build && node scripts/prepare-standalone.mjs",
     "start": "node .next/standalone/apps/web/server.js",
     "typecheck": "tsc --noEmit",

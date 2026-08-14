@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { BOARDS } from "@wavekb/domain";
 import { PostOwnerActions } from "@/components/post-owner-actions";
 import { PostComments } from "@/components/post-comments";
+import { IdentityName, Nameplate } from "@/components/nameplate";
 import { getPost, listPostComments } from "@/lib/community/server-repository";
 import { publicPostImageUrl } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth/dal";
@@ -19,7 +20,6 @@ export default async function PostPage({ params }: PageProps) {
   const user = await getCurrentUser();
   const actorProfile = user ? await getMyProfile(user.id).catch(() => null) : null;
   const images = [...post.post_images].sort((a, b) => a.sort_order - b.sort_order);
-  const author = post.profiles?.display_name || `UID ${post.profiles?.public_uid ?? "未设置"}`;
   const chart = post.chart_package?.provider === "tradingview" ? post.chart_package as TradingViewPackage : null;
 
   return (
@@ -31,7 +31,7 @@ export default async function PostPage({ params }: PageProps) {
         <header className="grid gap-3">
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>{BOARDS[post.board].title}</span><span aria-hidden>/</span>
-            {post.profiles?.public_uid ? <Link href={`/member/${post.profiles.public_uid}`} className="hover:text-foreground hover:underline">{author}</Link> : <span>{author}</span>}
+            {post.profiles?.public_uid ? <Link href={`/member/${post.profiles.public_uid}`} className="inline-flex items-center gap-2 hover:underline"><IdentityName profile={post.profiles} /><Nameplate uid={post.profiles.public_uid} style={post.profiles.nameplate_style} compact /></Link> : <span>{post.profiles?.display_name || "UID 未设置"}</span>}
             <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString("zh-CN")}</time>
           </div>
           <h1 className="text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-4xl">{post.title}</h1>

@@ -109,7 +109,8 @@ export function FriendDirectory({ actorId, initialConnections }: { actorId: stri
     try {
       const result = await createClient().rpc("open_direct_conversation", { p_target: item.other_id });
       if (result.error) throw result.error;
-      router.push(`/messages/${result.data}`);
+      window.dispatchEvent(new CustomEvent("wavekb:open-chat", { detail: { conversation: { conversation_id: String(result.data), other_id: item.other_id, public_uid: item.public_uid ?? null, display_name: item.display_name || `UID ${item.public_uid || ""}`, avatar_url: item.avatar_url ?? null, display_title: item.display_title || "", nameplate_style: item.nameplate_style || "classic", last_message: null, last_message_at: null, unread_count: 0 } } }));
+      setPending(false);
     } catch (error) {
       setMessage(messageFor(error));
       setPending(false);

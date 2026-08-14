@@ -32,6 +32,8 @@ export type PublicProfile = {
   display_name: string;
   avatar_url: string | null;
   role: string;
+  display_title?: string;
+  nameplate_style?: "classic" | "blackgold" | "platinum" | "purplegold" | "rainbow" | "newyear" | string;
 };
 
 export type MemberProfile = PublicProfile & {

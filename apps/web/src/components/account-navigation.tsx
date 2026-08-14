@@ -5,13 +5,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Coins, Notebook, SignOut, UserCircle } from "@phosphor-icons/react";
 import type { User } from "@supabase/supabase-js";
+import type { PublicProfile } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
+import { Nameplate } from "@/components/nameplate";
 
 export function AccountNavigation() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [publicUid, setPublicUid] = useState<number | null>(null);
+  const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
@@ -21,12 +23,12 @@ export function AccountNavigation() {
       if (!active) return;
       setUser(nextUser);
       if (!nextUser) {
-        setPublicUid(null);
+        setProfile(null);
         return;
       }
       const client = createClient();
-      const result = await client.from("profiles").select("public_uid").eq("id", nextUser.id).maybeSingle();
-      if (active) setPublicUid(typeof result.data?.public_uid === "number" ? result.data.public_uid : null);
+      const result = await client.from("profiles").select("id,public_uid,display_name,avatar_url,role,display_title,nameplate_style").eq("id", nextUser.id).maybeSingle();
+      if (active) setProfile((result.data as PublicProfile | null) ?? null);
     }
     try {
       const client = createClient();
@@ -78,14 +80,14 @@ export function AccountNavigation() {
         <nav className="absolute right-0 top-12 z-40 grid w-48 gap-1 rounded-xl border bg-surface p-2 shadow-xl" aria-label="账户导航">
           <Link href="/rewards" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><Coins aria-hidden size={18} />积分中心</Link>
           <Link href="/workbench" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><Notebook aria-hidden size={18} />交易工作台</Link>
-          {publicUid ? <Link href={`/member/${publicUid}`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人空间</Link> : null}
+          {profile?.public_uid ? <Link href={`/member/${profile.public_uid}`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人空间 <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link> : null}
           <button type="button" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold text-destructive hover:bg-muted disabled:opacity-55" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}</button>
         </nav>
       </details>
       <span className="hidden items-center gap-1 md:flex">
         <Button asChild variant="ghost" size="small"><Link href="/rewards"><Coins aria-hidden size={18} /><span className="hidden xl:inline">积分</span></Link></Button>
         <Button asChild variant="ghost" size="small"><Link href="/workbench"><Notebook aria-hidden size={18} /><span className="hidden lg:inline">工作台</span></Link></Button>
-        {publicUid ? <Button asChild variant="ghost" size="small"><Link href={`/member/${publicUid}`}><UserCircle aria-hidden size={18} /><span>个人空间</span></Link></Button> : null}
+        {profile?.public_uid ? <Button asChild variant="ghost" size="small"><Link href={`/member/${profile.public_uid}`}><UserCircle aria-hidden size={18} /><Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link></Button> : null}
         <Button type="button" variant="ghost" size="small" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} /><span>{pending ? "正在退出" : "退出登录"}</span></Button>
       </span>
       {error ? <span id="sign-out-error" role="alert" className="sr-only">{error}</span> : null}

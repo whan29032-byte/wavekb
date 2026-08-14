@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "r
 import Link from "next/link";
 import { Check, ImageSquare, UploadSimple } from "@phosphor-icons/react";
 import type { EditableMemberProfile } from "@wavekb/domain";
+import { IdentityName, Nameplate } from "@/components/nameplate";
 import { splitProfileTags, validateMemberProfile, validateProfileImage } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import type { NameplateEntitlement } from "@/lib/member/server-repository";
@@ -192,7 +193,7 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
         <div className="flex items-start gap-4 p-5 md:p-7">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {avatarPreview ? <img src={avatarPreview} alt="头像预览" className="-mt-16 size-24 shrink-0 rounded-xl border-4 border-surface bg-muted object-cover md:size-28" /> : <div className="-mt-16 grid size-24 shrink-0 place-items-center rounded-xl border-4 border-surface bg-muted text-3xl font-semibold md:size-28">{previewInitial}</div>}
-          <div className="grid min-w-0 gap-1"><p className="text-xs font-semibold text-primary">{profile.display_title || "波浪研究者"}</p><h2 className="truncate text-2xl font-semibold">{displayName.trim() || "波浪研究者"}</h2><p className="text-sm text-muted-foreground">UID {profile.public_uid || "未设置"}</p><p className="mt-1 max-w-[62ch] text-sm leading-6 text-muted-foreground">{bio.trim() || "写一句属于你的研究签名。"}</p></div>
+          <div className="grid min-w-0 gap-1"><p className="text-xs font-semibold text-primary">{profile.display_title || "波浪研究者"}</p><IdentityName profile={{ display_name: displayName.trim() || "波浪研究者", nameplate_style: profile.nameplate_style }} as="h2" className="truncate text-2xl font-semibold" /><Nameplate uid={profile.public_uid} style={profile.nameplate_style} /><p className="identity-effect mt-1 max-w-[62ch] text-sm leading-6 text-muted-foreground" data-nameplate={profile.nameplate_style}>{bio.trim() || "写一句属于你的研究签名。"}</p></div>
         </div>
       </section>
 

@@ -21,6 +21,9 @@ tmp/
 backups/
 uploads/
 user-data/
+apps/web/public/assets/source-pages/
+apps/web/public/assets/figures/
+apps/web/public/assets/figures-v10/
 *.db
 *.sqlite
 *.sqlite3

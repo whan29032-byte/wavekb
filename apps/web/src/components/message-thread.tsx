@@ -4,12 +4,13 @@
 
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { ImageSquare, PaperPlaneRight, Trash, UploadSimple } from "@phosphor-icons/react";
+import { ImageSquare, PaperPlaneRight, Trash, X } from "@phosphor-icons/react";
 import type { ChatSticker, DirectConversation, DirectMessage } from "@wavekb/domain";
 import { Button, FieldMessage, Label, Textarea } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { publicChatStickerUrl } from "@/lib/env";
 import { customStickerToken, deleteChatSticker, uploadChatSticker } from "@/lib/member/chat-stickers";
+import { AvatarFrame, IdentityName, Nameplate } from "@/components/nameplate";
 
 const stickers = {
   wave: { glyph: "🌊", label: "波浪" },
@@ -87,6 +88,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   const [messages, setMessages] = useState(initialMessages);
   const [customStickers, setCustomStickers] = useState(initialCustomStickers);
   const [body, setBody] = useState("");
+  const [stagedSticker, setStagedSticker] = useState<ChatSticker | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [draggingImage, setDraggingImage] = useState(false);
@@ -142,7 +144,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   }, [conversation.conversation_id]);
 
   async function send(value: string, allowCurrentUpload = false) {
-    const normalized = value.trim();
+    const normalized = (stagedSticker ? customStickerToken(stagedSticker) : value).trim();
     if (!normalized || normalized.length > 4000 || (pending && !allowCurrentUpload)) return;
     setPending(true);
     setError("");
@@ -151,6 +153,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
       if (result.error) throw result.error;
       playMessageTone(760);
       setBody("");
+      setStagedSticker(null);
       await refresh(false);
       window.requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
     } catch (cause) {
@@ -172,7 +175,8 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
     try {
       const sticker = await uploadChatSticker(createClient(), actorId, file);
       setCustomStickers((current) => [sticker, ...current]);
-      await send(customStickerToken(sticker), true);
+      setStagedSticker(sticker);
+      setPending(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "图片上传失败，请稍后重试。");
       setPending(false);
@@ -225,10 +229,8 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   return (
     <section className="grid min-h-[65dvh] grid-rows-[auto_1fr_auto] overflow-hidden rounded-xl border bg-surface" aria-labelledby="conversation-title">
       <header className="flex items-center gap-3 border-b p-4 md:p-5">
-        {conversation.avatar_url ? (
-          <img src={conversation.avatar_url} alt="" className="size-11 rounded-lg object-cover" />
-        ) : <span className="grid size-11 place-items-center rounded-lg bg-muted font-semibold">{conversation.display_name.slice(0, 1)}</span>}
-        <div className="min-w-0"><h1 id="conversation-title" className="truncate text-lg font-semibold">{conversation.display_name}</h1>{conversation.public_uid ? <Link href={`/member/${conversation.public_uid}`} className="text-xs text-muted-foreground hover:text-primary hover:underline">UID {conversation.public_uid}</Link> : null}</div>
+        <AvatarFrame profile={conversation} size="medium" />
+        <div className="min-w-0"><IdentityName profile={conversation} as="h1" className="truncate text-lg font-semibold" />{conversation.public_uid ? <Link href={`/member/${conversation.public_uid}`} className="mt-1 block hover:underline"><Nameplate uid={conversation.public_uid} style={conversation.nameplate_style} compact /></Link> : null}</div>
       </header>
 
       <div className="grid content-start gap-3 overflow-y-auto p-4 md:p-6" aria-live="polite">
@@ -240,15 +242,15 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
       </div>
 
       <form className={`grid gap-3 border-t p-4 ${draggingImage ? "bg-primary/5 ring-2 ring-inset ring-primary/35" : ""}`} onSubmit={submit} onDragOver={(event) => { if (firstImage(event.dataTransfer)) { event.preventDefault(); setDraggingImage(true); } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={dropImage}>
-        <div className="flex flex-wrap gap-1" aria-label="快捷表情">{Object.entries(stickers).map(([id, sticker]) => <Button key={id} type="button" variant="ghost" size="icon" aria-label={sticker.label} onClick={() => void send(`[[sticker:${id}]]`)} disabled={pending}><span aria-hidden className="text-xl">{sticker.glyph}</span></Button>)}</div>
+        <div className="flex flex-wrap gap-1" aria-label="快捷表情">{Object.entries(stickers).map(([id, sticker]) => <Button key={id} type="button" variant="ghost" size="icon" aria-label={`加入${sticker.label}`} onClick={() => setBody((value) => `${value}${sticker.glyph}`)} disabled={pending}><span aria-hidden className="text-xl">{sticker.glyph}</span></Button>)}</div>
         <div className="grid gap-2">
-          <div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-muted-foreground">我的表情</span><Button asChild type="button" variant="ghost" size="small"><label htmlFor="chat-image" className="cursor-pointer"><UploadSimple aria-hidden size={15} />上传图片</label></Button></div>
-          {customStickers.length ? <div className="flex gap-2 overflow-x-auto pb-1" aria-label="自定义表情">{customStickers.map((sticker) => <div key={sticker.id} className="group relative shrink-0"><button type="button" className="grid size-14 place-items-center overflow-hidden rounded-lg border bg-muted hover:border-primary" aria-label={`发送${sticker.label}`} disabled={pending} onClick={() => void send(customStickerToken(sticker))}><img src={publicChatStickerUrl(sticker.storage_path)} alt="" className="max-h-full max-w-full object-contain" /></button><button type="button" className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-destructive text-destructive-foreground opacity-100 md:opacity-0 md:group-hover:opacity-100" aria-label={`移除${sticker.label}`} disabled={pending} onClick={() => void removeSticker(sticker)}><Trash aria-hidden size={11} /></button></div>)}</div> : <p className="text-xs text-muted-foreground">可上传图片，或直接把截图粘贴、拖入消息框。</p>}
-          <input id="chat-image" type="file" hidden accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void addImage(file); }} />
+          <div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-muted-foreground">我的表情</span><span className="text-xs text-muted-foreground">粘贴或拖入图片即可加入</span></div>
+          {customStickers.length ? <div className="flex gap-2 overflow-x-auto pb-1" aria-label="自定义表情">{customStickers.map((sticker) => <div key={sticker.id} className="group relative shrink-0"><button type="button" className="grid size-14 place-items-center overflow-hidden rounded-lg border bg-muted hover:border-primary" aria-label={`加入待发送区：${sticker.label}`} disabled={pending} onClick={() => setStagedSticker(sticker)}><img src={publicChatStickerUrl(sticker.storage_path)} alt="" className="max-h-full max-w-full object-contain" /></button><button type="button" className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-destructive text-destructive-foreground opacity-100 md:opacity-0 md:group-hover:opacity-100" aria-label={`移除${sticker.label}`} disabled={pending} onClick={() => void removeSticker(sticker)}><Trash aria-hidden size={11} /></button></div>)}</div> : <p className="text-xs text-muted-foreground">直接把截图粘贴或拖入消息框，可保存为自定义表情。</p>}
+          {stagedSticker ? <p className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs">待发送：{stagedSticker.label}<button type="button" className="ml-auto" onClick={() => setStagedSticker(null)} aria-label="移除待发送图片"><X aria-hidden size={15} /></button></p> : null}
         </div>
         <Label htmlFor="direct-message" className="sr-only">消息</Label>
-        <div className="flex items-end gap-2"><Textarea id="direct-message" value={body} onChange={(event) => setBody(event.target.value)} onPaste={pasteImage} onKeyDown={messageKeyDown} maxLength={4000} rows={2} className="min-h-20" placeholder={draggingImage ? "松开即可上传图片" : "输入消息，Enter 发送，Shift + Enter 换行"} /><Button type="submit" size="icon" className="mb-0.5 size-11" disabled={pending || !body.trim()} aria-label="发送消息"><PaperPlaneRight aria-hidden size={20} /></Button></div>
-        {draggingImage ? <p className="flex items-center gap-2 text-xs font-medium text-primary"><ImageSquare aria-hidden size={16} />松开即可上传并发送图片</p> : null}
+        <div className="flex items-end gap-2"><Textarea id="direct-message" value={body} disabled={Boolean(stagedSticker)} onChange={(event) => setBody(event.target.value)} onPaste={pasteImage} onKeyDown={messageKeyDown} maxLength={4000} rows={2} className="min-h-20" placeholder={draggingImage ? "松开即可加入待发送区" : "输入消息，Enter 发送，Shift + Enter 换行"} /><Button type="submit" size="icon" className="mb-0.5 size-11" disabled={pending || (!body.trim() && !stagedSticker)} aria-label="发送消息"><PaperPlaneRight aria-hidden size={20} /></Button></div>
+        {draggingImage ? <p className="flex items-center gap-2 text-xs font-medium text-primary"><ImageSquare aria-hidden size={16} />松开即可加入待发送区</p> : null}
         {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
       </form>
     </section>

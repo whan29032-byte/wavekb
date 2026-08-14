@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ChatCircleDots, UserPlus } from "@phosphor-icons/react";
+import { ChatCircleDots, Coins, Notebook, PencilSimple, UserPlus, UsersThree } from "@phosphor-icons/react";
 import type { FriendshipConnection } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
@@ -13,6 +12,7 @@ type Props = {
   profileId: string;
   initialFollowing: boolean;
   initialConnection: FriendshipConnection | null;
+  profile: { display_name: string; public_uid: number | null; avatar_url: string | null; display_title: string; nameplate_style: string };
 };
 
 function socialError(error: unknown): string {
@@ -22,8 +22,7 @@ function socialError(error: unknown): string {
   return "操作没有完成，请稍后重试。";
 }
 
-export function MemberProfileActions({ actorId, profileId, initialFollowing, initialConnection }: Props) {
-  const router = useRouter();
+export function MemberProfileActions({ actorId, profileId, initialFollowing, initialConnection, profile }: Props) {
   const [following, setFollowing] = useState(initialFollowing);
   const [connection, setConnection] = useState(initialConnection);
   const [pending, setPending] = useState<"follow" | "friend" | null>(null);
@@ -31,10 +30,11 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
 
   if (actorId === profileId) {
     return (
-      <div className="flex flex-wrap items-center gap-3">
-        <Button asChild><Link href="/messages">私聊</Link></Button>
-        <Button asChild variant="secondary"><Link href="/friends">好友</Link></Button>
-        <Button asChild variant="secondary"><Link href="/member/profile">编辑个人资料</Link></Button>
+      <div className="flex max-w-md flex-wrap items-center gap-2">
+        <Button asChild size="small"><Link href="/member/profile"><PencilSimple aria-hidden size={16} />编辑资料</Link></Button>
+        <Button asChild variant="secondary" size="small"><Link href="/friends"><UsersThree aria-hidden size={16} />我的好友</Link></Button>
+        <Button asChild variant="secondary" size="small"><Link href="/workbench"><Notebook aria-hidden size={16} />交易工作台</Link></Button>
+        <Button asChild variant="secondary" size="small"><Link href="/rewards"><Coins aria-hidden size={16} />积分商城</Link></Button>
       </div>
     );
   }
@@ -85,7 +85,8 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
     try {
       const result = await createClient().rpc("open_direct_conversation", { p_target: profileId });
       if (result.error) throw result.error;
-      router.push(`/messages/${result.data}`);
+      window.dispatchEvent(new CustomEvent("wavekb:open-chat", { detail: { conversation: { conversation_id: String(result.data), other_id: profileId, public_uid: profile.public_uid, display_name: profile.display_name, avatar_url: profile.avatar_url, display_title: profile.display_title, nameplate_style: profile.nameplate_style, last_message: null, last_message_at: null, unread_count: 0 } } }));
+      setPending(null);
     } catch (error) {
       setMessage(socialError(error));
       setPending(null);
@@ -105,7 +106,6 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
         ) : (
           <Button type="button" onClick={addFriend} disabled={pending !== null}><UserPlus aria-hidden size={18} />{pending === "friend" ? "正在发送" : "添加好友"}</Button>
         )}
-        <Button asChild variant="ghost"><Link href={`/community/public_viewpoint`}>查看社区观点</Link></Button>
       </div>
       {message ? <p role="status" className="text-sm text-muted-foreground">{message}</p> : null}
     </div>

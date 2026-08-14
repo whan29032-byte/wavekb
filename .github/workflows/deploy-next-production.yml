@@ -1,4 +1,4 @@
-name: Deploy WaveKB production stack
+name: Deploy WaveKB Next.js production
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: wavekb-next-preview
+  group: wavekb-next-production
   cancel-in-progress: false
 
 env:
@@ -99,7 +99,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
 
-      - name: Upload the preview release
+      - name: Upload the production release candidate
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -210,6 +210,13 @@ jobs:
           printf '%s\n' "$previous_release" > "$rollback_marker"
 
           sudo install -d -m 0755 "$releases_root"
+          if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
+            backup_root=/var/backups/wavekb-next-production
+            backup_file="${backup_root}/${RELEASE_ID}-previous.tar.gz"
+            sudo install -d -m 0750 "$backup_root"
+            sudo tar -C "$previous_release" -czf "$backup_file" .
+            sudo test -s "$backup_file"
+          fi
           sudo rm -rf -- "$release_dir"
           sudo install -d -m 0755 "$release_dir"
           sudo tar -xzf "$upload_archive" -C "$release_dir" --no-same-owner
@@ -302,6 +309,11 @@ jobs:
           done < <(find "$releases_root" -mindepth 1 -maxdepth 1 -type d -mtime +14 -print)
           REMOTE
 
+      - name: Verify production knowledge image URLs and MIME types
+        env:
+          KNOWLEDGE_ASSET_CHECK_ORIGIN: https://wavekb.com
+        run: pnpm --filter @wavekb/web assets:check
+
       - name: Require real posting acceptance credentials
         env:
           E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
@@ -391,7 +403,7 @@ jobs:
           fi
           REMOTE
 
-      - name: Print preview service diagnostics
+      - name: Print production service diagnostics
         if: failure()
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
