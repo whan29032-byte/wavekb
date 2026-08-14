@@ -55,7 +55,7 @@ export default async function PostPage({ params }: PageProps) {
         ) : null}
         {user?.id === post.author_id ? <PostOwnerActions post={post} userId={user.id} /> : null}
       </article>
-      <PostComments postId={post.id} comments={comments} actorId={user?.id} activeMember={actorProfile?.public_uid != null} commentsEnabled={post.comments_enabled} />
+      <PostComments postId={post.id} comments={comments} actorId={user?.id} actorProfile={actorProfile} activeMember={actorProfile?.public_uid != null} commentsEnabled={post.comments_enabled} />
     </main>
   );
 }

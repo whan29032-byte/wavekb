@@ -1,22 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import type { PostComment } from "@wavekb/domain";
+import type { PostComment, PublicProfile } from "@wavekb/domain";
 import { IdentityName, Nameplate } from "@/components/nameplate";
 import { Button, Field, FieldMessage, Label, Textarea } from "@wavekb/ui";
 import { addPostComment, deletePostComment } from "@/lib/community/client-repository";
 import { createClient } from "@/lib/supabase/client";
 
-export function PostComments({ postId, comments, actorId, commentsEnabled, activeMember }: {
+export function PostComments({ postId, comments, actorId, actorProfile, commentsEnabled, activeMember }: {
   postId: string;
   comments: PostComment[];
   actorId?: string;
+  actorProfile?: PublicProfile | null;
   commentsEnabled: boolean;
   activeMember: boolean;
 }) {
-  const router = useRouter();
   const [added, setAdded] = useState<PostComment[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -51,12 +50,11 @@ export function PostComments({ postId, comments, actorId, commentsEnabled, activ
         status: "visible",
         created_at: timestamp,
         updated_at: timestamp,
-        profiles: null,
+        profiles: actorProfile ?? null,
       }]);
       formElement.reset();
       setReplyTo(null);
       setPending(false);
-      window.setTimeout(() => router.refresh(), 250);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "评论发布失败，请重试。");
       setPending(false);
