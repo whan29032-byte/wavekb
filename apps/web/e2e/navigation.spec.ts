@@ -31,9 +31,14 @@ test("unknown community boards return a real not-found page", async ({ page }) =
   expect(response?.status()).toBe(404);
 });
 
-test("member profiles preserve the destination through login", async ({ page }) => {
-  await page.goto("/member/12345");
-  await expect(page).toHaveURL(/\/login\?next=%2Fmember%2F12345/);
+test("public member profiles are anonymous-readable and protect social actions", async ({ page }) => {
+  await page.goto("/member/33333");
+  await expect(page).toHaveURL(/\/member\/33333$/);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  const follow = page.getByRole("link", { name: "关注", exact: true });
+  await expect(follow).toHaveAttribute("href", "/login?next=%2Fmember%2F33333");
+  await follow.click();
+  await expect(page).toHaveURL(/\/login\?next=%2Fmember%2F33333/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("登录 WaveKB");
 });
 
