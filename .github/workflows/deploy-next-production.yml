@@ -341,7 +341,8 @@ jobs:
           done
           health_payload=$(curl --fail --silent https://wavekb.com/api/health)
           grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$health_payload" > /dev/null
-          pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts --workers=1
+          # Production data is mutated once. Mobile layout and interaction remain covered by the public-route suite.
+          pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts --project=desktop-chromium --workers=1
 
       - name: Finalize the accepted preview release
         env:
