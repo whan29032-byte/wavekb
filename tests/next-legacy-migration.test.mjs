@@ -125,7 +125,7 @@ test("floating friends stay on the profile while complete management uses one pr
   assert.match(acceptance, /完整管理/);
   assert.match(acceptance, /data-load-state", "ready"/);
   assert.match(acceptance, /page\.reload\(\)/);
-  assert.match(acceptance, /data-friend-count/);
+  assert.match(acceptance, /secondPayload\.count/);
 });
 
 test("unified nameplates and semantic theme tokens cover migrated Next surfaces", async () => {

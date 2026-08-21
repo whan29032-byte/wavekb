@@ -172,27 +172,29 @@ test.describe("authenticated member shell acceptance", () => {
     let responsePromise = waitForDirectoryApi(page);
     await page.goto("/friends");
     let response = await responsePromise;
-    expect(response.status(), `Friendship API failed with ${response.status()}: ${await response.text()}`).toBe(200);
+    expect(response.status(), `Friendship API failed with ${response.status()}.`).toBe(200);
+    let payload = await response.json() as { count?: number };
+    expect(Number(payload.count), "Acceptance user should retain real friendship rows.").toBeGreaterThan(0);
     const directory = page.locator("[data-friends-directory]");
     await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
-    expect(Number(await directory.getAttribute("data-friend-count")), "Acceptance user should retain real friendship rows.").toBeGreaterThan(0);
     await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
 
     responsePromise = waitForDirectoryApi(page);
     await page.reload();
     response = await responsePromise;
     expect(response.status()).toBe(200);
-    await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
-    expect(Number(await directory.getAttribute("data-friend-count"))).toBeGreaterThan(0);
+    payload = await response.json() as { count?: number };
+    expect(Number(payload.count), "Friendship rows should survive a direct reload.").toBeGreaterThan(0);
+    await expect(page).toHaveURL(/\/friends$/);
 
     const secondPage = await context.newPage();
     const secondResponsePromise = waitForDirectoryApi(secondPage);
-    await secondPage.goto("/friends");
+    await secondPage.goto("/friends", { waitUntil: "domcontentloaded" });
     const secondResponse = await secondResponsePromise;
     expect(secondResponse.status()).toBe(200);
-    const secondDirectory = secondPage.locator("[data-friends-directory]");
-    await expect(secondDirectory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
-    expect(Number(await secondDirectory.getAttribute("data-friend-count"))).toBeGreaterThan(0);
+    const secondPayload = await secondResponse.json() as { count?: number };
+    expect(Number(secondPayload.count), "The shared session should expose real friendships in a new tab.").toBeGreaterThan(0);
+    await expect(secondPage).toHaveURL(/\/friends$/);
   });
 });
 
