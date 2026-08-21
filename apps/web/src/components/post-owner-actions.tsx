@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { PencilSimpleLine, Trash } from "@phosphor-icons/react";
 import type { CommunityPost } from "@wavekb/domain";
@@ -8,7 +8,12 @@ import { Button } from "@wavekb/ui";
 import { deletePost } from "@/lib/community/client-repository";
 import { createClient } from "@/lib/supabase/client";
 
+const subscribeToHydration = () => () => undefined;
+const clientHydrationSnapshot = () => true;
+const serverHydrationSnapshot = () => false;
+
 export function PostOwnerActions({ post, userId }: { post: CommunityPost; userId: string }) {
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrationSnapshot, serverHydrationSnapshot);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
@@ -29,7 +34,7 @@ export function PostOwnerActions({ post, userId }: { post: CommunityPost; userId
     <div className="grid gap-2 border-t pt-6">
       <div className="flex flex-wrap gap-3">
         <Button asChild variant="secondary"><Link href={`/community/post/${post.id}/edit`}><PencilSimpleLine aria-hidden size={17} />编辑帖子</Link></Button>
-        <Button type="button" variant="danger" disabled={pending} onClick={remove}><Trash aria-hidden size={17} />{pending ? "正在删除" : "删除帖子"}</Button>
+        <Button type="button" variant="danger" disabled={!hydrated || pending} aria-busy={pending} onClick={remove}><Trash aria-hidden size={17} />{pending ? "正在删除" : "删除帖子"}</Button>
       </div>
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </div>
