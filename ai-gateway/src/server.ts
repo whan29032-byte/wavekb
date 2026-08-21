@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { UserAdministrationApi } from "./admin/user-administration.ts";
 import { AuthApi } from "./auth/auth-api.ts";
@@ -109,9 +110,18 @@ export type GatewayServer = {
 };
 
 function healthPayload(deps: ServerDeps): object {
+  let deployment: string | null = null;
+  try {
+    const candidate = readFileSync("DEPLOYMENT_VERSION", "utf8").trim();
+    if (/^[0-9a-f]{40}$/.test(candidate)) deployment = candidate;
+  } catch {
+    const candidate = String(process.env.DEPLOYMENT_VERSION || "").trim();
+    if (/^[0-9a-f]{40}$/.test(candidate)) deployment = candidate;
+  }
   return {
     ok: true,
     service: "elliott-wave-ai-gateway",
+    deployment,
     time: (deps.now ?? (() => new Date()))().toISOString(),
   };
 }

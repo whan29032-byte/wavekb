@@ -74,6 +74,8 @@ test("production deployment applies every migration newer than the live schema",
   assert.match(migrationStep, /--single-transaction/);
   assert.match(migrationStep, /test "\$deployed_version" = "\$latest_version"/);
   assert.doesNotMatch(migrationStep, /202608140\*\.sql/);
+  assert.match(workflow, /DEPLOYMENT_VERSION/);
+  assert.match(workflow, /gateway_health[\s\S]*?deployment/);
 });
 
 test("unified nameplates and semantic theme tokens cover migrated Next surfaces", async () => {

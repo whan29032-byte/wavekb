@@ -183,6 +183,8 @@ jobs:
           sudo rm -rf -- "$release_dir"
           sudo install -d -m 0755 "$release_dir"
           sudo tar -xzf "$upload_archive" -C "$release_dir" --strip-components=1 --no-same-owner
+          printf '%s\n' "$RELEASE_ID" | sudo tee "$release_dir/DEPLOYMENT_VERSION" > /dev/null
+          sudo chmod 0644 "$release_dir/DEPLOYMENT_VERSION"
           sudo test -f "$release_dir/src/server.ts"
           sudo test -f "$release_dir/src/worker-main.ts"
           sudo install -m 0644 "$gateway_unit" /etc/systemd/system/elliott-wave-gateway.service
@@ -192,8 +194,18 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl enable elliott-wave-gateway.service elliott-wave-ai-worker.service
           sudo systemctl restart elliott-wave-gateway.service
-          curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-            --retry-connrefused http://127.0.0.1:8787/health | grep -F '"ok":true' > /dev/null
+          gateway_health=""
+          for gateway_attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            gateway_health=$(curl --fail --silent --show-error --max-time 5 \
+              http://127.0.0.1:8787/health 2>/dev/null || true)
+            if grep -F '"ok":true' <<< "$gateway_health" > /dev/null \
+              && grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$gateway_health" > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          grep -F '"ok":true' <<< "$gateway_health" > /dev/null
+          grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$gateway_health" > /dev/null
           sudo systemctl restart elliott-wave-ai-worker.service
           sudo systemctl is-active --quiet elliott-wave-ai-worker.service
 

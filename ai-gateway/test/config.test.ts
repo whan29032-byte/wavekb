@@ -23,6 +23,7 @@ test("gateway never exposes server secrets in health response", async () => {
   const server = buildServer({ config, now: () => new Date("2026-07-26T00:00:00Z") });
   const response = await server.inject({ method: "GET", url: "/health" });
   assert.equal(response.statusCode, 200);
+  assert.equal(Object.hasOwn(response.json() as object, "deployment"), true);
   assert.equal(response.body.includes("server-role-key"), false);
   assert.equal(response.body.includes(config.AI_SECRET_MASTER_KEY.toString("base64")), false);
   await server.close();
