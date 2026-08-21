@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Coins, Notebook, SignOut, UserCircle } from "@phosphor-icons/react";
+import { SignOut, UserCircle } from "@phosphor-icons/react";
 import type { User } from "@supabase/supabase-js";
 import type { PublicProfile } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
@@ -67,7 +67,7 @@ export function AccountNavigation() {
 
   if (!user) {
     return (
-      <Link href="/login" className="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
+      <Link href="/login" className="flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
         <UserCircle aria-hidden size={18} weight="duotone" />登录
       </Link>
     );
@@ -76,17 +76,13 @@ export function AccountNavigation() {
   return (
     <span className="relative flex items-center">
       <details className="group relative md:hidden">
-        <summary className="grid size-10 cursor-pointer list-none place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="账户菜单"><UserCircle aria-hidden size={20} /></summary>
+        <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="账户菜单"><UserCircle aria-hidden size={20} /></summary>
         <nav className="absolute right-0 top-12 z-40 grid w-48 gap-1 rounded-xl border bg-surface p-2 shadow-xl" aria-label="账户导航">
-          <Link href="/rewards" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><Coins aria-hidden size={18} />积分中心</Link>
-          <Link href="/workbench" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><Notebook aria-hidden size={18} />交易工作台</Link>
           {profile?.public_uid ? <Link href={`/member/${profile.public_uid}`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人空间 <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link> : null}
           <button type="button" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold text-destructive hover:bg-muted disabled:opacity-55" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}</button>
         </nav>
       </details>
       <span className="hidden items-center gap-1 md:flex">
-        <Button asChild variant="ghost" size="small"><Link href="/rewards"><Coins aria-hidden size={18} /><span className="hidden xl:inline">积分</span></Link></Button>
-        <Button asChild variant="ghost" size="small"><Link href="/workbench"><Notebook aria-hidden size={18} /><span className="hidden lg:inline">工作台</span></Link></Button>
         {profile?.public_uid ? <Button asChild variant="ghost" size="small"><Link href={`/member/${profile.public_uid}`}><UserCircle aria-hidden size={18} /><Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link></Button> : null}
         <Button type="button" variant="ghost" size="small" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} /><span>{pending ? "正在退出" : "退出登录"}</span></Button>
       </span>

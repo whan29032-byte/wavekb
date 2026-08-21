@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChatCircleDots, Coins, Notebook, PencilSimple, UserPlus, UsersThree } from "@phosphor-icons/react";
+import { ChatCircleDots, Notebook, PencilSimple, UserPlus, UsersThree } from "@phosphor-icons/react";
 import type { FriendshipConnection } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
@@ -41,11 +41,10 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
 
   if (actorId === profileId) {
     return (
-      <div className="flex max-w-md flex-wrap items-center gap-2">
-        <Button asChild size="small"><Link href="/member/profile"><PencilSimple aria-hidden size={16} />编辑资料</Link></Button>
-        <Button asChild variant="secondary" size="small"><Link href="/friends"><UsersThree aria-hidden size={16} />我的好友</Link></Button>
-        <Button asChild variant="secondary" size="small"><Link href="/workbench"><Notebook aria-hidden size={16} />交易工作台</Link></Button>
-        <Button asChild variant="secondary" size="small"><Link href="/rewards"><Coins aria-hidden size={16} />积分商城</Link></Button>
+      <div className="grid w-full grid-cols-1 gap-2 min-[28rem]:grid-cols-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+        <Button asChild size="small" className="min-h-11 w-full sm:w-auto"><Link href="/member/profile"><PencilSimple aria-hidden size={16} />编辑资料</Link></Button>
+        <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/friends"><UsersThree aria-hidden size={16} />我的好友</Link></Button>
+        <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/workbench"><Notebook aria-hidden size={16} />交易工作台</Link></Button>
       </div>
     );
   }

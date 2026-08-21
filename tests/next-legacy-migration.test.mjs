@@ -90,3 +90,18 @@ test("user points are managed with users rather than the reward catalog page", a
   assert.match(users, /AdminUserRewards/);
   assert.match(rewards, /用户积分调整已经归入/);
 });
+
+test("site-wide rewards and private workbench use distinct navigation levels", async () => {
+  const [header, account, actions] = await Promise.all([
+    read("apps/web/src/components/site-header.tsx"),
+    read("apps/web/src/components/account-navigation.tsx"),
+    read("apps/web/src/components/member-profile-actions.tsx"),
+  ]);
+  assert.match(header, /href="\/rewards"[\s\S]*?积分商城/);
+  assert.doesNotMatch(header, /href="\/workbench"/);
+  assert.doesNotMatch(account, /href="\/(?:rewards|workbench)"/);
+  const ownActions = actions.slice(actions.indexOf("if (actorId === profileId)"), actions.indexOf("async function toggleFollow"));
+  assert.match(ownActions, /编辑资料[\s\S]*?我的好友[\s\S]*?交易工作台/);
+  assert.doesNotMatch(ownActions, /href="\/rewards"|积分商城/);
+  assert.match(ownActions, /grid-cols-1[\s\S]*?min-\[28rem\]:grid-cols-2[\s\S]*?sm:flex/);
+});

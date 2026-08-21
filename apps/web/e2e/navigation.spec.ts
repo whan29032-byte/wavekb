@@ -4,7 +4,9 @@ test("home exposes the knowledge and community paths", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚");
   await expect(page.getByRole("link", { name: "进入社区" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+  const navigation = page.getByRole("navigation", { name: "主导航" });
+  await expect(navigation).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "积分商城" })).toHaveAttribute("href", "/rewards");
   await expect(page.getByRole("heading", { name: "X 波浪理论博主推荐" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Discord 波浪理论频道推荐" })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
