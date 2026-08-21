@@ -83,6 +83,15 @@ test("production deployment applies every migration newer than the live schema",
   assert.match(workflow, /gateway_health[\s\S]*?deployment/);
 });
 
+test("friendship reader migration advances the production schema marker", async () => {
+  const migration = await read("supabase/migrations/202608210002_friendships_v2.sql");
+  assert.match(migration, /create or replace function public\.list_my_friendships_v2\(\)/);
+  assert.match(migration, /security definer/);
+  assert.match(migration, /auth\.uid\(\) is not null/);
+  assert.match(migration, /select '202608210002'::text/);
+  assert.match(migration, /grant execute on function public\.wavekb_schema_version\(\) to anon, authenticated/);
+});
+
 test("unified nameplates and semantic theme tokens cover migrated Next surfaces", async () => {
   const [plate, css, layout] = await Promise.all([read("apps/web/src/components/nameplate.tsx"), read("apps/web/src/app/globals.css"), read("apps/web/src/app/layout.tsx")]);
   for (const style of ["premium", "blackgold", "platinum", "purplegold", "rainbow", "newyear"]) assert.match(css, new RegExp(`data-nameplate=\\"${style}\\"`));

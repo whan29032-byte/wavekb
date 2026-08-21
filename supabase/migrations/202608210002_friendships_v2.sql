@@ -51,4 +51,17 @@ $$;
 revoke all on function public.list_my_friendships_v2() from public, anon;
 grant execute on function public.list_my_friendships_v2() to authenticated;
 
+create or replace function public.wavekb_schema_version()
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select '202608210002'::text;
+$$;
+
+revoke all on function public.wavekb_schema_version() from public;
+grant execute on function public.wavekb_schema_version() to anon, authenticated;
+
 commit;
