@@ -93,10 +93,12 @@ test("friendship reader migration advances the production schema marker", async 
 });
 
 test("friends navigation bypasses stale prefetch data and keeps private loading behind a protected API", async () => {
-  const [page, directory, route, actions, acceptance] = await Promise.all([
+  const [page, directory, route, loginRoute, accountNavigation, actions, acceptance] = await Promise.all([
     read("apps/web/src/app/friends/page.tsx"),
     read("apps/web/src/components/friend-directory.tsx"),
     read("apps/web/src/app/api/member/friends/route.ts"),
+    read("apps/web/src/app/api/auth/login/route.ts"),
+    read("apps/web/src/components/account-navigation.tsx"),
     read("apps/web/src/components/member-profile-actions.tsx"),
     read("apps/web/e2e/member-shell.acceptance.spec.ts"),
   ]);
@@ -107,6 +109,9 @@ test("friends navigation bypasses stale prefetch data and keeps private loading 
   assert.match(route, /client\.auth\.getUser\(\)/);
   assert.match(route, /loadFriendships\(client\)/);
   assert.match(route, /console\.error\("\[friends\.read\]"/);
+  assert.match(loginRoute, /response\.cookies\.set/);
+  assert.match(loginRoute, /return response/);
+  assert.match(accountNavigation, /client\.auth\.getSession\(\)/);
   assert.match(actions, /href="\/friends" prefetch=\{false\}/);
   assert.match(acceptance, /configure\(\{ retries: 0 \}\)/);
   assert.match(acceptance, /data-load-state", "ready"/);

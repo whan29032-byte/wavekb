@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { FriendshipRpcError, loadFriendships } from "@/lib/member/friendships";
 import { createClient } from "@/lib/supabase/server";
 
@@ -30,7 +31,11 @@ export async function GET() {
   const client = await createClient();
   const auth = await client.auth.getUser();
   if (auth.error || !auth.data.user) {
-    console.error("[friends.read]", diagnostic(auth.error ?? new Error("authenticated user missing")));
+    const cookieNames = (await cookies()).getAll().map(({ name }) => name);
+    console.error("[friends.read]", {
+      ...diagnostic(auth.error ?? new Error("authenticated user missing")),
+      authCookieCount: cookieNames.filter((name) => /^sb-.*-auth-token(?:\.\d+)?$/.test(name)).length,
+    });
     return json({ error: "authentication_required" }, 401);
   }
 

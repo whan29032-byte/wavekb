@@ -52,9 +52,12 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(actions.getByRole("link", { name: "交易工作台" })).toHaveAttribute("href", "/workbench");
     await expect(actions.getByRole("link", { name: "积分商城" })).toHaveCount(0);
 
+    const friendsResponsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/member/friends");
     await actions.getByRole("link", { name: "我的好友" }).click();
     await expect(page).toHaveURL(/\/friends$/);
     await expect(page.getByRole("heading", { level: 1, name: "好友", exact: true })).toBeVisible({ timeout: 10_000 });
+    const friendsResponse = await friendsResponsePromise;
+    expect(friendsResponse.status(), `Friendship API failed with ${friendsResponse.status()}: ${await friendsResponse.text()}`).toBe(200);
     const directory = page.locator("[data-friends-directory]");
     await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
     expect(Number(await directory.getAttribute("data-friend-count")), "Acceptance user should retain real friendship rows.").toBeGreaterThan(0);

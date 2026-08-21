@@ -32,8 +32,8 @@ export function AccountNavigation() {
     }
     try {
       const client = createClient();
-      void client.auth.getUser().then(({ data, error: userError }) => {
-        void applyUser(userError ? null : data.user);
+      void client.auth.getSession().then(({ data }) => {
+        void applyUser(data.session?.user ?? null);
       });
       const { data } = client.auth.onAuthStateChange((_event, session) => {
         queueMicrotask(() => void applyUser(session?.user ?? null));

@@ -1,6 +1,7 @@
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { gatewayRequestOrigin } from "@/lib/auth/gateway-origin";
-import { createClient } from "@/lib/supabase/server";
+import { requirePublicSupabaseConfig } from "@/lib/env";
 
 const ERROR_MESSAGES: Record<string, string> = {
   invalid_request: "请输入有效的邮箱或 5-6 位 UID。",
@@ -57,11 +58,20 @@ export async function POST(request: NextRequest) {
     return json({ error: message }, upstream.status || 503);
   }
 
-  const supabase = await createClient();
+  const response = json({ ok: true, needsUidActivation: payload.session.user?.public_uid == null });
+  const { url, key } = requirePublicSupabaseConfig();
+  const supabase = createServerClient(url, key, {
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+      },
+    },
+  });
   const result = await supabase.auth.setSession({
     access_token: payload.session.access_token,
     refresh_token: payload.session.refresh_token,
   });
   if (result.error) return json({ error: ERROR_MESSAGES.service_unavailable }, 503);
-  return json({ ok: true, needsUidActivation: payload.session.user?.public_uid == null });
+  return response;
 }
