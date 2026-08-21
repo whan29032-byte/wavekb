@@ -65,6 +65,7 @@ jobs:
           latest_version=${latest_file%%_*}
           [[ "$latest_version" =~ ^[0-9]{12}$ ]]
           if [ -n "$SUPABASE_DB_URL" ]; then
+            psql "$SUPABASE_DB_URL" -X --set ON_ERROR_STOP=1 --command 'select 1' > /dev/null
             while IFS= read -r migration; do
               migration_file=$(basename "$migration")
               migration_version=${migration_file%%_*}
