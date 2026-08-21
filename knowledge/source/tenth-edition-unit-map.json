@@ -1,16 +1,16 @@
 {
   "primary_source_id": "ewp-10-zh-2016",
   "supplement_source_id": "ewp-11-zh-2021",
-  "mapping_method": "chapter-constrained semantic alignment",
+  "mapping_method": "explicit source refs plus manually reviewed semantic packets",
   "units": [
     {
       "unit_id": "ewp-method-nominal-vs-real",
       "tenth_pdf_pages": [
         237
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-alternative-count-scorecard",
@@ -19,16 +19,24 @@
         241,
         242
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-rare-double-three",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-pattern-completion-confidence",
@@ -37,18 +45,18 @@
         246,
         250
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-direction-price-time-order",
       "tenth_pdf_pages": [
         249
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-fifth-wave-selectivity",
@@ -57,34 +65,47 @@
         258,
         259
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-momentum-as-degree-confirmation",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-fifth-wave-psychology",
       "tenth_pdf_pages": [
         261
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-forecast-as-background",
       "tenth_pdf_pages": [
         270
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-combination",
@@ -93,9 +114,9 @@
         59,
         60
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-diagonal",
@@ -107,9 +128,9 @@
         47,
         97
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-extension",
@@ -119,9 +140,9 @@
         95,
         96
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-flat",
@@ -130,18 +151,18 @@
         54,
         55
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-triangle",
       "tenth_pdf_pages": [
         57
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-truncation",
@@ -151,9 +172,9 @@
         43,
         95
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-rule-combination",
@@ -162,9 +183,9 @@
         61,
         101
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-rule-correction-not-five",
@@ -173,9 +194,9 @@
         35,
         47
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-rule-diagonal",
@@ -185,9 +206,9 @@
         47,
         97
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-rule-flat",
@@ -198,9 +219,9 @@
         55,
         99
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-rule-impulse-core",
@@ -209,9 +230,9 @@
         38,
         95
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-rule-triangle",
@@ -222,9 +243,9 @@
         59,
         100
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-rule-zigzag",
@@ -233,9 +254,9 @@
         49,
         98
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-structure-motive-corrective",
@@ -244,9 +265,9 @@
         31,
         63
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-definition-repeating-form",
@@ -255,18 +276,18 @@
         33,
         38
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-structure-fractal-cycle",
       "tenth_pdf_pages": [
         29
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-definition-wave-degree",
@@ -274,9 +295,9 @@
         33,
         34
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-definition-function-vs-mode",
@@ -285,41 +306,57 @@
         35,
         63
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-wave-count-density",
       "tenth_pdf_pages": [
         61
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-orthodox-endpoint",
       "tenth_pdf_pages": [
         62
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-error-preserving-preconception",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-condition-free-market-data",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-alternation",
@@ -329,9 +366,9 @@
         72,
         73
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-correction-depth",
@@ -341,16 +378,29 @@
         75,
         76
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-throw-over",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        78,
+        79,
+        80,
+        81,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-volume-personality",
@@ -359,9 +409,9 @@
         84,
         89
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-wave-equality",
@@ -369,18 +419,18 @@
         76,
         77
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-zigzag",
       "tenth_pdf_pages": [
         98
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-channeling",
@@ -388,18 +438,18 @@
         79,
         80
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-multiple-counts",
       "tenth_pdf_pages": [
         105
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-objective-invalidation",
@@ -407,9 +457,9 @@
         102,
         106
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-scale",
@@ -418,9 +468,9 @@
         82,
         83
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-theory-vs-trading",
@@ -429,9 +479,9 @@
         106,
         107
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-wait-unclear",
@@ -440,18 +490,18 @@
         102,
         105
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-right-look",
       "tenth_pdf_pages": [
         78
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-1",
@@ -459,27 +509,27 @@
         87,
         92
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-2",
       "tenth_pdf_pages": [
         87
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-3",
       "tenth_pdf_pages": [
         88
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-4",
@@ -488,18 +538,18 @@
         74,
         75
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-5",
       "tenth_pdf_pages": [
         89
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-a",
@@ -507,70 +557,77 @@
         75,
         89
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-b",
       "tenth_pdf_pages": [
         91
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-c",
       "tenth_pdf_pages": [
         91
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-personality-wave-e",
       "tenth_pdf_pages": [
         92
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-ratios-support-structure",
       "tenth_pdf_pages": [
         92
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-fibonacci-history",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        109,
+        110,
+        111,
+        112,
+        113,
+        114
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-definition-fibonacci-sequence",
       "tenth_pdf_pages": [
         115
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-definition-golden-ratio",
       "tenth_pdf_pages": [
         116
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-definition-golden-section",
@@ -579,16 +636,29 @@
         117,
         125
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-golden-rectangle",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-definition-logarithmic-spiral",
@@ -596,32 +666,45 @@
         125,
         127
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-theory-phi-natural-order",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        133,
+        134,
+        135
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-structure-fibonacci-wave-counts",
       "tenth_pdf_pages": [
         139
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-long-market-spirals",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-theory-ratios-over-numbers",
@@ -629,70 +712,79 @@
         110,
         141
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-theory-nonlinear-market-development",
       "tenth_pdf_pages": [
         142
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-ratio-analysis",
       "tenth_pdf_pages": [
         147
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-retracement-ratios",
       "tenth_pdf_pages": [
         149
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-motive-ratios",
       "tenth_pdf_pages": [
         150
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-corrective-ratios",
       "tenth_pdf_pages": [
         151
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-ratio-orthodox-endpoints",
       "tenth_pdf_pages": [
         159
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-historical-ratio-forecasts",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-method-target-confluence",
@@ -701,9 +793,9 @@
         158,
         159
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-fibonacci-time",
@@ -711,39 +803,54 @@
         161,
         164
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-benner-cycle",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        166,
+        167,
+        168,
+        169
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-theory-social-pattern-endogenous",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        170,
+        171,
+        172,
+        173,
+        174
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-scale-invariance-long-short",
       "tenth_pdf_pages": [
         173
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-millennium-wave",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        175,
+        176,
+        177
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-theory-probability-and-degree",
@@ -751,46 +858,62 @@
         172,
         177
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-supercycle-1789",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        178,
+        179,
+        180
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-case-supercycle-1932",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        181,
+        182,
+        183,
+        184
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-method-index-before-stock",
       "tenth_pdf_pages": [
         186
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-stock-market-alignment",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        185,
+        186,
+        187
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-case-individual-stocks",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        188,
+        189
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-commodity-differences",
@@ -798,64 +921,85 @@
         189,
         190
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-commodity-fifth-extension",
       "tenth_pdf_pages": [
         192
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-commodity-ratios",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-gold-cross-confirmation",
       "tenth_pdf_pages": [
         195
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-gold-price-control",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        196,
+        197,
+        198,
+        199
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-case-gold-1970s",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        196,
+        197,
+        198,
+        199
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-method-dow-confirmation",
       "tenth_pdf_pages": [
         201
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-kondratieff",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        204,
+        205,
+        206
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-fixed-cycle-limit",
@@ -863,32 +1007,37 @@
         206,
         207
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-decade-pattern",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        207,
+        208
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-theory-news-reaction",
       "tenth_pdf_pages": [
         209
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-random-walk-critique",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        212
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-method-classical-pattern-mapping",
@@ -896,18 +1045,18 @@
         212,
         213
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-indicators-assist-count",
       "tenth_pdf_pages": [
         214
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-guide-economic-correlation-instability",
@@ -915,64 +1064,94 @@
         214,
         215
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-theory-exogenous-forces-unproven",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        217
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-method-long-forecast-tentative",
       "tenth_pdf_pages": [
         219
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-error-bearish-count-out-of-context",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-case-1978-alternative-counts",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-guide-time-subordinate",
       "tenth_pdf_pages": [
         224
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-method-count-first-never-blind-scenario",
       "tenth_pdf_pages": [
         227
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-theory-natural-law-ideology",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        228,
+        229,
+        230,
+        231,
+        232
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-front-market-context",
@@ -980,90 +1159,157 @@
         1,
         4
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-elliott-1935-forecast",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-method-chart-practice",
       "tenth_pdf_pages": [
         19
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-glossary-282",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-glossary-283",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-glossary-284",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-glossary-285",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-glossary-286",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-case-postscript-context",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        275,
+        276,
+        277,
+        278,
+        279
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-case-time-and-equality-revision",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        275,
+        276,
+        277,
+        278,
+        279
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     },
     {
       "unit_id": "ewp-method-stable-view-flexible-count",
       "tenth_pdf_pages": [
         278
       ],
-      "migration_action": "replace_source",
+      "migration_action": "primary_source",
       "authority": "primary",
-      "notes": "第10版同章逐页蒸馏语义对齐；重点规则另行逐条人工核验"
+      "notes": "第10版明确Unit来源页；第11版图示仅作补充。"
     },
     {
       "unit_id": "ewp-case-publisher-success-claim",
-      "tenth_pdf_pages": [],
-      "migration_action": "retain_eleventh_supplement",
-      "authority": "supplement",
-      "notes": "辅助案例或术语保留第11版补充来源"
+      "tenth_pdf_pages": [
+        275,
+        276,
+        277,
+        278,
+        279
+      ],
+      "migration_action": "add_primary_ref_keep_supplement",
+      "authority": "mixed",
+      "notes": "第10版人工复核语义分段提供Primary追踪；第11版条目原页继续作为Supplement保留。"
     }
   ]
 }

@@ -6,7 +6,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repositoryRoot = path.resolve(appRoot, "../..");
 const knowledgeFile = path.join(repositoryRoot, "packages/knowledge/src/knowledge.json");
 const knowledge = JSON.parse(fs.readFileSync(knowledgeFile, "utf8"));
-const assetFields = ["primary_figures", "figures", "supplement_figures", "source_images"];
+const assetFields = ["primary_figures", "figures", "supplement_figures", "source_images", "supplement_source_images"];
 const referenced = new Set();
 
 for (const page of knowledge.pages || []) {

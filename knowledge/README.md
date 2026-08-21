@@ -4,21 +4,24 @@
 
 ## 当前规模
 
-- 第10版覆盖：PDF 280/280页已建立唯一覆盖台账；来源SHA-256已固定。
+- 第10版覆盖：PDF 280/280页已建立唯一覆盖台账；117页同时具有明确 Unit source ref 与人工复核语义分段，159页由人工复核语义分段映射，4页确认为不产生独立 Unit 的分隔或归档页。全部280页为 `OK`。原PDF页数与SHA-256均已重新核验。
 - 原书知识：117条可追溯原子单元，其中核心规则、指南与定义已迁移到第10版主来源，第11版内容只保留为明确标注的补充。
 - 知识关系：174条跨单元关系。
 - 问题入口：18条常见问题路线，以及一套统一分析手册。
 - 可点击页面：本地浏览器当前构建161页，并把第10版来源页与第11版图示补充分别折叠展示。
-- 视觉核验：102个代表页已对照原PDF渲染抽检；已知原书PDF第217页图表存在扫描条带，记录为来源文件瑕疵。
+- 视觉核验：第10版全部280个PDF页已按连续页序渲染检查，章节边界与逐页蒸馏一致；旧报告中第217页扫描条带和281至320页引用属于版本页码混用，现已纠正。
 
 ## 主要入口
 
-- `knowledge/browser/elliott-wave-knowledge-tree.html`：可点击知识树。
+- `knowledge/units/all.jsonl`：唯一核心知识正文；Pages、Chapters 与三种入口均引用这里的 Units。
+- `knowledge/pages/`：只保留页面视图配置；核心页面正文由 `scripts/build-knowledge.mjs` 从 Units 生成。
+- `packages/knowledge/src/knowledge.json`：面向应用的构建产物，不是真源。
+- `knowledge/browser/elliott-wave-knowledge-tree.html`：旧展示产物，不是真源。
 - `knowledge/structure/tree.md`：纯文本全书分支树。
 - `knowledge/questions/reasoning-playbook.md`：遇到问题时使用的分析步骤。
 - `knowledge/questions/index.jsonl`：18条问题到规则、指南和方法的机器可读路由。
-- `knowledge/units/all.jsonl`：117条统一格式的原书知识单元。
 - `knowledge/coverage/tenth-edition-pages.jsonl`：第10版280页逐页覆盖账本。
+- `knowledge/images/registry.json`：第10版 Primary 与第11版 Supplement 分离的图像语义注册表。
 - `knowledge/source/supplements.json`：第11版补充来源清单。
 - `knowledge/reports/quality-report.md`：最终质量与边界报告。
 - `knowledge/reports/framework-verification.md`：未完善学习框架的核验结论。

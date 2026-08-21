@@ -11,6 +11,8 @@ test-results/
 .turbo/
 .pnpm-store/
 coverage/
+!knowledge/coverage/
+!knowledge/coverage/*.jsonl
 *.log
 *.tsbuildinfo
 *.zip

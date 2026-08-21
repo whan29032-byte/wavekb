@@ -29,12 +29,18 @@ function uniqueAssets(assets: KnowledgeAsset[]) {
   return [...new Map(assets.map((asset) => [asset.asset_path, asset])).values()];
 }
 
+function assetCaption(asset: KnowledgeAsset) {
+  const source = asset.authority === "primary" ? "第10版 Primary" : asset.authority === "supplement" ? "第11版 Supplement" : "";
+  const location = `${asset.book_pages?.length ? `书页 ${asset.book_pages.join(", ")}` : ""}${asset.book_pages?.length && asset.pdf_page ? " / " : ""}${asset.pdf_page ? `PDF 页 ${asset.pdf_page}` : ""}`;
+  return [source, asset.caption, location].filter(Boolean).join(" · ");
+}
+
 function AssetGrid({ assets, title }: { assets: KnowledgeAsset[]; title: string }) {
   if (!assets.length) return null;
   return (
     <section className="grid gap-4" aria-label={title}>
       <h2 className="text-xl font-semibold">{title}</h2>
-      <KnowledgeImageViewer assets={assets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `${title} ${index + 1}`, width: asset.width, height: asset.height, caption: `${asset.book_pages?.length ? `书页 ${asset.book_pages.join(", ")}` : ""}${asset.book_pages?.length && asset.pdf_page ? " / " : ""}${asset.pdf_page ? `PDF 页 ${asset.pdf_page}` : ""}` }))} />
+      <KnowledgeImageViewer assets={assets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `${title} ${index + 1}`, width: asset.width, height: asset.height, caption: assetCaption(asset) }))} />
     </section>
   );
 }
@@ -42,8 +48,9 @@ function AssetGrid({ assets, title }: { assets: KnowledgeAsset[]; title: string 
 export default async function KnowledgeDetailPage({ params }: PageProps) {
   const page = getKnowledgePage((await params).id);
   if (!page) notFound();
-  const primaryAssets = uniqueAssets([...page.primary_figures, ...page.figures, ...page.supplement_figures]);
-  const sourceAssets = uniqueAssets(page.source_images);
+  const primaryAssets = uniqueAssets(page.primary_figures);
+  const supplementAssets = uniqueAssets(page.supplement_figures);
+  const supplementSourceAssets = uniqueAssets(page.supplement_source_images);
   const related = page.related_page_ids.map(getKnowledgePage).filter((item) => item !== null);
 
   return (
@@ -51,7 +58,7 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
       <article className="grid min-w-0 gap-8">
         <Link href="/knowledge" className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回知识库</Link>
         <header className="grid gap-4 border-b pb-7">
-          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground"><span>{page.kind === "core" ? "核心知识" : "辅助资料"}</span><span aria-hidden>/</span><span className="inline-flex items-center gap-1"><SealCheck aria-hidden size={16} className="text-primary" />{page.status === "verified" ? "已核验" : page.status}</span></div>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground"><span>{page.kind === "core" ? "核心知识" : "辅助资料"}</span><span aria-hidden>/</span><span className="inline-flex items-center gap-1"><SealCheck aria-hidden size={16} className="text-primary" />{page.status === "verified" ? "已核验" : page.status}</span>{page.source_authorities.map((authority) => <span key={authority} className="rounded-full bg-muted px-2 py-1">{authority === "primary" ? "第10版 Primary" : "第11版 Supplement"}</span>)}</div>
           <h1 className="max-w-[24ch] text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-5xl">{page.title}</h1>
         </header>
 
@@ -65,11 +72,12 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
           ))}
         </div>
 
-        <AssetGrid assets={primaryAssets} title="图示" />
-        {sourceAssets.length ? (
+        <AssetGrid assets={primaryAssets} title="第10版核心图示与原页摘录" />
+        <AssetGrid assets={supplementAssets} title="第11版补充图示" />
+        {supplementSourceAssets.length ? (
           <details className="rounded-xl border bg-surface p-5 open:grid open:gap-5">
-            <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold"><Images aria-hidden size={20} className="text-primary" />查看原书来源页（{sourceAssets.length}）</summary>
-            <div className="pt-1"><KnowledgeImageViewer assets={sourceAssets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `原书来源页 ${index + 1}`, width: asset.width, height: asset.height, caption: `${asset.book_pages?.length ? `书页 ${asset.book_pages.join(", ")}` : ""}${asset.book_pages?.length && asset.pdf_page ? " / " : ""}${asset.pdf_page ? `PDF 页 ${asset.pdf_page}` : ""}` }))} /></div>
+            <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold"><Images aria-hidden size={20} className="text-primary" />查看第11版补充来源页（{supplementSourceAssets.length}）</summary>
+            <div className="pt-1"><KnowledgeImageViewer assets={supplementSourceAssets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `第11版补充来源页 ${index + 1}`, width: asset.width, height: asset.height, caption: assetCaption(asset) }))} /></div>
           </details>
         ) : null}
       </article>
@@ -77,7 +85,7 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
       <aside className="grid h-fit gap-5 md:sticky md:top-24">
         <div className="grid gap-2 rounded-xl border bg-surface p-4">
           <h2 className="text-sm font-semibold">条目信息</h2>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs text-muted-foreground"><dt>类型</dt><dd>{page.kind === "core" ? "核心知识" : "辅助资料"}</dd><dt>来源单元</dt><dd>{page.source_unit_ids.length}</dd><dt>相关条目</dt><dd>{related.length}</dd></dl>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs text-muted-foreground"><dt>知识类型</dt><dd>{page.unit_types.join("、") || (page.kind === "core" ? "核心视图" : "辅助资料")}</dd><dt>来源单元</dt><dd>{page.source_unit_ids.length}</dd><dt>相关条目</dt><dd>{related.length}</dd></dl>
         </div>
         {related.length ? <nav className="grid gap-2" aria-label="相关知识"><h2 className="text-sm font-semibold">相关知识</h2>{related.slice(0, 8).map((item) => <Link key={item.id} href={`/knowledge/${item.id}`} className="flex items-start justify-between gap-2 rounded-lg bg-muted p-3 text-sm leading-5 hover:text-primary"><span>{item.title}</span><ArrowRight aria-hidden size={15} className="mt-0.5 shrink-0" /></Link>)}</nav> : null}
       </aside>

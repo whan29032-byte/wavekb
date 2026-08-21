@@ -1,24 +1,30 @@
 {
   "unit_count": 117,
   "primary_unit_count": 81,
-  "supplement_unit_count": 36,
+  "mixed_unit_count": 36,
   "units": [
     {
       "id": "ewp-method-nominal-vs-real",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         237
       ]
     },
     {
       "id": "ewp-method-alternative-count-scorecard",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         240,
         241,
@@ -27,18 +33,33 @@
     },
     {
       "id": "ewp-case-rare-double-three",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246
+      ]
     },
     {
       "id": "ewp-guide-pattern-completion-confidence",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         239,
         246,
@@ -47,20 +68,26 @@
     },
     {
       "id": "ewp-guide-direction-price-time-order",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         249
       ]
     },
     {
       "id": "ewp-guide-fifth-wave-selectivity",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         256,
         258,
@@ -69,38 +96,64 @@
     },
     {
       "id": "ewp-method-momentum-as-degree-confirmation",
-      "type": "confirmation_signal",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "CONFIRMATION",
+      "legacy_type": "confirmation_signal",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261
+      ]
     },
     {
       "id": "ewp-guide-fifth-wave-psychology",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         261
       ]
     },
     {
       "id": "ewp-method-forecast-as-background",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         270
       ]
     },
     {
       "id": "ewp-guide-combination",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         51,
         59,
@@ -109,10 +162,13 @@
     },
     {
       "id": "ewp-guide-diagonal",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         43,
         44,
@@ -124,10 +180,13 @@
     },
     {
       "id": "ewp-guide-extension",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         39,
         40,
@@ -137,10 +196,13 @@
     },
     {
       "id": "ewp-guide-flat",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         53,
         54,
@@ -149,20 +211,26 @@
     },
     {
       "id": "ewp-guide-triangle",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         57
       ]
     },
     {
       "id": "ewp-guide-truncation",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         41,
         42,
@@ -172,10 +240,13 @@
     },
     {
       "id": "ewp-rule-combination",
-      "type": "rule",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "RULE",
+      "legacy_type": "rule",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         60,
         61,
@@ -184,10 +255,13 @@
     },
     {
       "id": "ewp-rule-correction-not-five",
-      "type": "rule",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "RULE",
+      "legacy_type": "rule",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         29,
         35,
@@ -196,10 +270,13 @@
     },
     {
       "id": "ewp-rule-diagonal",
-      "type": "rule",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "RULE",
+      "legacy_type": "rule",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         43,
         46,
@@ -209,10 +286,13 @@
     },
     {
       "id": "ewp-rule-flat",
-      "type": "rule",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "RULE",
+      "legacy_type": "rule",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         52,
         53,
@@ -223,10 +303,13 @@
     },
     {
       "id": "ewp-rule-impulse-core",
-      "type": "rule",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "RULE",
+      "legacy_type": "rule",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         36,
         38,
@@ -235,10 +318,13 @@
     },
     {
       "id": "ewp-rule-triangle",
-      "type": "rule",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "RULE",
+      "legacy_type": "rule",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         56,
         57,
@@ -249,10 +335,13 @@
     },
     {
       "id": "ewp-rule-zigzag",
-      "type": "rule",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "RULE",
+      "legacy_type": "rule",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         48,
         49,
@@ -261,10 +350,13 @@
     },
     {
       "id": "ewp-structure-motive-corrective",
-      "type": "wave_structure",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "wave_structure",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         28,
         31,
@@ -273,10 +365,13 @@
     },
     {
       "id": "ewp-definition-repeating-form",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         27,
         33,
@@ -285,20 +380,26 @@
     },
     {
       "id": "ewp-structure-fractal-cycle",
-      "type": "wave_structure",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "wave_structure",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         29
       ]
     },
     {
       "id": "ewp-definition-wave-degree",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         33,
         34
@@ -306,10 +407,13 @@
     },
     {
       "id": "ewp-definition-function-vs-mode",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         28,
         35,
@@ -318,46 +422,79 @@
     },
     {
       "id": "ewp-method-wave-count-density",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         61
       ]
     },
     {
       "id": "ewp-method-orthodox-endpoint",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         62
       ]
     },
     {
       "id": "ewp-error-preserving-preconception",
-      "type": "common_error",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "common_error",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68
+      ]
     },
     {
       "id": "ewp-condition-free-market-data",
-      "type": "condition",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "condition",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68
+      ]
     },
     {
       "id": "ewp-guide-alternation",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         70,
         71,
@@ -367,10 +504,13 @@
     },
     {
       "id": "ewp-guide-correction-depth",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         73,
         74,
@@ -380,18 +520,38 @@
     },
     {
       "id": "ewp-guide-throw-over",
-      "type": "confirmation_signal",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "CONFIRMATION",
+      "legacy_type": "confirmation_signal",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        78,
+        79,
+        80,
+        81,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93
+      ]
     },
     {
       "id": "ewp-guide-volume-personality",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         83,
         84,
@@ -400,10 +560,13 @@
     },
     {
       "id": "ewp-guide-wave-equality",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         76,
         77
@@ -411,20 +574,26 @@
     },
     {
       "id": "ewp-guide-zigzag",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         98
       ]
     },
     {
       "id": "ewp-method-channeling",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         79,
         80
@@ -432,20 +601,26 @@
     },
     {
       "id": "ewp-method-multiple-counts",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         105
       ]
     },
     {
       "id": "ewp-method-objective-invalidation",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         102,
         106
@@ -453,10 +628,13 @@
     },
     {
       "id": "ewp-method-scale",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         78,
         82,
@@ -465,10 +643,13 @@
     },
     {
       "id": "ewp-method-theory-vs-trading",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         105,
         106,
@@ -477,10 +658,13 @@
     },
     {
       "id": "ewp-method-wait-unclear",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         78,
         102,
@@ -489,20 +673,26 @@
     },
     {
       "id": "ewp-method-right-look",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         78
       ]
     },
     {
       "id": "ewp-personality-wave-1",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         87,
         92
@@ -510,30 +700,39 @@
     },
     {
       "id": "ewp-personality-wave-2",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         87
       ]
     },
     {
       "id": "ewp-personality-wave-3",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         88
       ]
     },
     {
       "id": "ewp-personality-wave-4",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         73,
         74,
@@ -542,20 +741,26 @@
     },
     {
       "id": "ewp-personality-wave-5",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         89
       ]
     },
     {
       "id": "ewp-personality-wave-a",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         75,
         89
@@ -563,78 +768,110 @@
     },
     {
       "id": "ewp-personality-wave-b",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         91
       ]
     },
     {
       "id": "ewp-personality-wave-c",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         91
       ]
     },
     {
       "id": "ewp-personality-wave-e",
-      "type": "wave_personality",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "CHARACTERISTIC",
+      "legacy_type": "wave_personality",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         92
       ]
     },
     {
       "id": "ewp-method-ratios-support-structure",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         92
       ]
     },
     {
       "id": "ewp-case-fibonacci-history",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        109,
+        110,
+        111,
+        112,
+        113,
+        114
+      ]
     },
     {
       "id": "ewp-definition-fibonacci-sequence",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         115
       ]
     },
     {
       "id": "ewp-definition-golden-ratio",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         116
       ]
     },
     {
       "id": "ewp-definition-golden-section",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         116,
         117,
@@ -643,18 +880,38 @@
     },
     {
       "id": "ewp-case-golden-rectangle",
-      "type": "figure_explanation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "DEFINITION",
+      "legacy_type": "figure_explanation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132
+      ]
     },
     {
       "id": "ewp-definition-logarithmic-spiral",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         125,
         127
@@ -662,36 +919,63 @@
     },
     {
       "id": "ewp-theory-phi-natural-order",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        133,
+        134,
+        135
+      ]
     },
     {
       "id": "ewp-structure-fibonacci-wave-counts",
-      "type": "wave_structure",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "DEFINITION",
+      "legacy_type": "wave_structure",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         139
       ]
     },
     {
       "id": "ewp-case-long-market-spirals",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143
+      ]
     },
     {
       "id": "ewp-theory-ratios-over-numbers",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         110,
         141
@@ -699,78 +983,112 @@
     },
     {
       "id": "ewp-theory-nonlinear-market-development",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         142
       ]
     },
     {
       "id": "ewp-method-ratio-analysis",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         147
       ]
     },
     {
       "id": "ewp-guide-retracement-ratios",
-      "type": "price_ratio",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "price_ratio",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         149
       ]
     },
     {
       "id": "ewp-guide-motive-ratios",
-      "type": "price_ratio",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "price_ratio",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         150
       ]
     },
     {
       "id": "ewp-guide-corrective-ratios",
-      "type": "price_ratio",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "price_ratio",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         151
       ]
     },
     {
       "id": "ewp-method-ratio-orthodox-endpoints",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         159
       ]
     },
     {
       "id": "ewp-case-historical-ratio-forecasts",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161
+      ]
     },
     {
       "id": "ewp-method-target-confluence",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         155,
         158,
@@ -779,10 +1097,13 @@
     },
     {
       "id": "ewp-method-fibonacci-time",
-      "type": "time_relationship",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "time_relationship",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         161,
         164
@@ -790,44 +1111,77 @@
     },
     {
       "id": "ewp-case-benner-cycle",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        166,
+        167,
+        168,
+        169
+      ]
     },
     {
       "id": "ewp-theory-social-pattern-endogenous",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        170,
+        171,
+        172,
+        173,
+        174
+      ]
     },
     {
       "id": "ewp-guide-scale-invariance-long-short",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         173
       ]
     },
     {
       "id": "ewp-case-millennium-wave",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        175,
+        176,
+        177
+      ]
     },
     {
       "id": "ewp-theory-probability-and-degree",
-      "type": "definition",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "definition",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         172,
         177
@@ -835,52 +1189,90 @@
     },
     {
       "id": "ewp-case-supercycle-1789",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        178,
+        179,
+        180
+      ]
     },
     {
       "id": "ewp-case-supercycle-1932",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        181,
+        182,
+        183,
+        184
+      ]
     },
     {
       "id": "ewp-method-index-before-stock",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         186
       ]
     },
     {
       "id": "ewp-guide-stock-market-alignment",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        185,
+        186,
+        187
+      ]
     },
     {
       "id": "ewp-case-individual-stocks",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        188,
+        189
+      ]
     },
     {
       "id": "ewp-guide-commodity-differences",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         189,
         190
@@ -888,72 +1280,121 @@
     },
     {
       "id": "ewp-guide-commodity-fifth-extension",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         192
       ]
     },
     {
       "id": "ewp-case-commodity-ratios",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195
+      ]
     },
     {
       "id": "ewp-guide-gold-cross-confirmation",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         195
       ]
     },
     {
       "id": "ewp-case-gold-price-control",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        196,
+        197,
+        198,
+        199
+      ]
     },
     {
       "id": "ewp-case-gold-1970s",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        196,
+        197,
+        198,
+        199
+      ]
     },
     {
       "id": "ewp-method-dow-confirmation",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         201
       ]
     },
     {
       "id": "ewp-case-kondratieff",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        204,
+        205,
+        206
+      ]
     },
     {
       "id": "ewp-guide-fixed-cycle-limit",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         206,
         207
@@ -961,36 +1402,55 @@
     },
     {
       "id": "ewp-case-decade-pattern",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        207,
+        208
+      ]
     },
     {
       "id": "ewp-theory-news-reaction",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         209
       ]
     },
     {
       "id": "ewp-case-random-walk-critique",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        212
+      ]
     },
     {
       "id": "ewp-method-classical-pattern-mapping",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         212,
         213
@@ -998,20 +1458,26 @@
     },
     {
       "id": "ewp-method-indicators-assist-count",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         214
       ]
     },
     {
       "id": "ewp-guide-economic-correlation-instability",
-      "type": "guideline",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "guideline",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         214,
         215
@@ -1019,72 +1485,130 @@
     },
     {
       "id": "ewp-theory-exogenous-forces-unproven",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        217
+      ]
     },
     {
       "id": "ewp-method-long-forecast-tentative",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         219
       ]
     },
     {
       "id": "ewp-error-bearish-count-out-of-context",
-      "type": "common_error",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "common_error",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227
+      ]
     },
     {
       "id": "ewp-case-1978-alternative-counts",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227
+      ]
     },
     {
       "id": "ewp-guide-time-subordinate",
-      "type": "time_relationship",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "GUIDELINE",
+      "legacy_type": "time_relationship",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         224
       ]
     },
     {
       "id": "ewp-method-count-first-never-blind-scenario",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         227
       ]
     },
     {
       "id": "ewp-theory-natural-law-ideology",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "THEORY_BOUNDARY",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        228,
+        229,
+        230,
+        231,
+        232
+      ]
     },
     {
       "id": "ewp-front-market-context",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         1,
         4
@@ -1092,95 +1616,204 @@
     },
     {
       "id": "ewp-case-elliott-1935-forecast",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ]
     },
     {
       "id": "ewp-method-chart-practice",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         19
       ]
     },
     {
       "id": "ewp-glossary-282",
-      "type": "term",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "TERMINOLOGY",
+      "legacy_type": "term",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ]
     },
     {
       "id": "ewp-glossary-283",
-      "type": "term",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "TERMINOLOGY",
+      "legacy_type": "term",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ]
     },
     {
       "id": "ewp-glossary-284",
-      "type": "term",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "TERMINOLOGY",
+      "legacy_type": "term",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ]
     },
     {
       "id": "ewp-glossary-285",
-      "type": "term",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "TERMINOLOGY",
+      "legacy_type": "term",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ]
     },
     {
       "id": "ewp-glossary-286",
-      "type": "term",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "TERMINOLOGY",
+      "legacy_type": "term",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        271,
+        272,
+        273,
+        274
+      ]
     },
     {
       "id": "ewp-case-postscript-context",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        275,
+        276,
+        277,
+        278,
+        279
+      ]
     },
     {
       "id": "ewp-case-time-and-equality-revision",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        275,
+        276,
+        277,
+        278,
+        279
+      ]
     },
     {
       "id": "ewp-method-stable-view-flexible-count",
-      "type": "method",
-      "action": "replace_source",
-      "before_source": "ewp-10-zh-2016",
-      "after_source": "ewp-10-zh-2016",
+      "type": "METHOD",
+      "legacy_type": "method",
+      "action": "primary_source",
+      "canonical_content_source": "ewp-10-zh-2016",
+      "source_authorities": [
+        "primary"
+      ],
       "tenth_pdf_pages": [
         278
       ]
     },
     {
       "id": "ewp-case-publisher-success-claim",
-      "type": "case_observation",
-      "action": "retain_eleventh_supplement",
-      "before_source": "ewp-11-zh-2021",
-      "after_source": "ewp-11-zh-2021",
-      "tenth_pdf_pages": []
+      "type": "HISTORICAL_CASE",
+      "legacy_type": "case_observation",
+      "action": "add_primary_ref_keep_supplement",
+      "canonical_content_source": "ewp-11-zh-2021",
+      "source_authorities": [
+        "supplement",
+        "primary"
+      ],
+      "tenth_pdf_pages": [
+        275,
+        276,
+        277,
+        278,
+        279
+      ]
     }
   ]
 }

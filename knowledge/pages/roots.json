@@ -1,0 +1,18 @@
+{
+  "roots": [
+    {
+      "id": "core-knowledge",
+      "title": "核心知识",
+      "kind": "core",
+      "order": 10,
+      "parent": null
+    },
+    {
+      "id": "candidate-materials",
+      "title": "已核验辅助资料",
+      "kind": "candidate",
+      "order": 20,
+      "parent": null
+    }
+  ]
+}
