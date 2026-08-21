@@ -1,20 +1,29 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BoardSlug, CommunityPost, PostComment, PublicProfile } from "@wavekb/domain";
+import type { BoardSlug, CommunityPost, ExternalReference, PostComment, PublicProfile, ResearchTimelineNode } from "@wavekb/domain";
 import { publicSupabaseConfig } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 
 const POST_SELECT = [
   "id", "board", "title", "body", "author_id", "status", "created_at", "updated_at",
-  "external_url", "external_kind", "chart_package", "post_images(id,storage_path,sort_order)",
+  "external_url", "external_kind", "chart_package", "post_images(id,storage_path,sort_order,caption)",
+  "post_external_references(id,url,kind,sort_order)",
+  "research_timeline_nodes(id,subject_type,post_id,private_entry_id,author_id,kind,body,created_at,research_timeline_images(id,storage_path,sort_order,caption))",
   "comments_enabled",
 ].join(",");
 
-type PostRow = Omit<CommunityPost, "profiles">;
+type TimelineRow = Omit<ResearchTimelineNode, "profiles">;
+type PostRow = Omit<CommunityPost, "profiles" | "external_references" | "timeline_nodes"> & {
+  post_external_references?: ExternalReference[];
+  research_timeline_nodes?: TimelineRow[];
+};
 
 async function attachProfiles(client: SupabaseClient, rows: PostRow[]): Promise<CommunityPost[]> {
-  const authorIds = [...new Set(rows.map((post) => post.author_id).filter(Boolean))];
-  if (!authorIds.length) return rows.map((post) => ({ ...post, profiles: null }));
+  const authorIds = [...new Set(rows.flatMap((post) => [
+    post.author_id,
+    ...(post.research_timeline_nodes ?? []).map((node) => node.author_id),
+  ]).filter(Boolean))];
+  if (!authorIds.length) return [];
 
   const primary = await client.rpc("get_public_post_profiles", { p_ids: authorIds });
   const fallback = primary.error
@@ -24,7 +33,25 @@ async function attachProfiles(client: SupabaseClient, rows: PostRow[]): Promise<
 
   const profiles = (fallback.data ?? []) as PublicProfile[];
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-  return rows.map((post) => ({ ...post, profiles: profileById.get(post.author_id) ?? null }));
+  return rows.map((row) => {
+    const { post_external_references, research_timeline_nodes, ...post } = row;
+    const externalReferences = [...(post_external_references ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+    if (!externalReferences.length && post.external_url && post.external_kind) {
+      externalReferences.push({ url: post.external_url, kind: post.external_kind, sort_order: 0 });
+    }
+    return {
+      ...post,
+      external_references: externalReferences,
+      timeline_nodes: [...(research_timeline_nodes ?? [])]
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+        .map((node) => ({
+          ...node,
+          research_timeline_images: [...(node.research_timeline_images ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+          profiles: profileById.get(node.author_id) ?? null,
+        })),
+      profiles: profileById.get(post.author_id) ?? null,
+    };
+  });
 }
 
 export async function listPosts(board: BoardSlug, limit = 20): Promise<CommunityPost[]> {

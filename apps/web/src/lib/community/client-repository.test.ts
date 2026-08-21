@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addPostComment, createPost, deletePost, updatePost } from "./client-repository";
+import { addPostComment, appendPostTimelineNode, createPost, deletePost, updatePost } from "./client-repository";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -79,6 +79,36 @@ describe("posting transaction", () => {
     expect(calls).toEqual(["draft", "source", "images", "publish"]);
     expect(gateway.linkSource).toHaveBeenCalledWith({ post_id: "post-id", private_entry_id: "private-entry-id", owner_id: "user-id" });
   });
+
+  it("persists every validated media reference before publishing", async () => {
+    const calls: string[] = [];
+    const gateway = {
+      makeId: vi.fn().mockReturnValue("post-id"),
+      insertDraft: vi.fn(async () => { calls.push("draft"); }),
+      uploadImage: vi.fn(async () => undefined),
+      insertImages: vi.fn(async () => { calls.push("images"); }),
+      insertReferences: vi.fn(async () => { calls.push("references"); }),
+      publish: vi.fn(async () => { calls.push("publish"); }),
+      removeFiles: vi.fn(async () => undefined),
+      removePost: vi.fn(async () => undefined),
+    };
+    await createPost({} as never, {
+      userId: "user-id",
+      board: "idea_sharing",
+      title: "多媒体引用保存测试",
+      body: "YouTube 与 X 引用必须在帖子公开以前全部成功保存。",
+      externalReferences: [
+        { url: "https://youtu.be/abcdefgh", kind: "youtube", sort_order: 0 },
+        { url: "https://x.com/wavekb/status/123", kind: "x", sort_order: 1 },
+      ],
+      files: [],
+    }, gateway);
+    expect(calls).toEqual(["draft", "images", "references", "publish"]);
+    expect(gateway.insertReferences).toHaveBeenCalledWith([
+      expect.objectContaining({ post_id: "post-id", kind: "youtube", sort_order: 0 }),
+      expect.objectContaining({ post_id: "post-id", kind: "x", sort_order: 1 }),
+    ]);
+  });
 });
 
 describe("post editing transaction", () => {
@@ -100,9 +130,36 @@ describe("post editing transaction", () => {
       files: [],
       chartPackage: { symbol: "BINANCE:BTCUSDT" } as never,
     });
-    expect(rpc).toHaveBeenCalledWith("update_my_post_v3", expect.objectContaining({
+    expect(rpc).toHaveBeenCalledWith("update_my_post_v4", expect.objectContaining({
       p_chart_package: expect.objectContaining({ symbol: "BINANCE:BTCUSDT" }),
       p_images: [],
+      p_external_references: [],
+    }));
+  });
+});
+
+describe("research timeline transaction", () => {
+  it("stores a new immutable snapshot under the post timeline path", async () => {
+    const upload = vi.fn(async () => ({ error: null }));
+    const remove = vi.fn(async () => ({ error: null }));
+    const rpc = vi.fn(async () => ({ error: null }));
+    const client = { rpc, storage: { from: vi.fn(() => ({ upload, remove })) } } as never;
+    const file = new File(["snapshot"], "update.webp", { type: "image/webp" });
+    const nodeId = await appendPostTimelineNode(client, {
+      postId: "11111111-1111-4111-8111-111111111111",
+      userId: "22222222-2222-4222-8222-222222222222",
+      kind: "confirmed",
+      body: " 第一目标已经到达。 ",
+      files: [file],
+      captions: ["确认后的行情快照"],
+    });
+    expect(nodeId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(upload).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`/timeline/${nodeId}/.+\\.webp$`)), file, expect.objectContaining({ upsert: false }));
+    expect(rpc).toHaveBeenCalledWith("append_research_timeline_node", expect.objectContaining({
+      p_node_id: nodeId,
+      p_kind: "confirmed",
+      p_body: "第一目标已经到达。",
+      p_images: [expect.objectContaining({ caption: "确认后的行情快照" })],
     }));
   });
 });

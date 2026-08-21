@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canRedeemReward, formatMentorPrice, formatRewardPoints, parseExternalReference, remainingMentorQuota, rewardActionLabel, splitEntryTags, splitProfileTags, validateMemberProfile, validateMentorQuestion, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
+import { canRedeemReward, formatMentorPrice, formatRewardPoints, parseExternalReference, parseExternalReferences, remainingMentorQuota, rewardActionLabel, splitEntryTags, splitProfileTags, validateMemberProfile, validateMentorQuestion, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
 
 describe("community post validation", () => {
   it("accepts a complete public post", () => {
@@ -26,6 +26,25 @@ describe("community post validation", () => {
 
   it("rejects unsupported external links", () => {
     expect(parseExternalReference("https://example.com/post")).toMatchObject({ ok: false });
+    expect(parseExternalReference("https://youtube.com/")).toMatchObject({ ok: false });
+    expect(parseExternalReference("https://x.com/wavekb")).toMatchObject({ ok: false });
+    expect(parseExternalReference("https://x.com/wavekb/status/123/extra")).toMatchObject({ ok: false });
+    expect(parseExternalReference("https://youtu.be/abc12345/extra")).toMatchObject({ ok: false });
+    expect(parseExternalReference("https://youtube.com/shorts/abc12345/extra")).toMatchObject({ ok: false });
+  });
+
+  it("normalizes up to five unique YouTube and X media references", () => {
+    const result = parseExternalReferences([
+      "https://youtu.be/abc12345",
+      "https://x.com/wavekb/status/123",
+      "https://youtu.be/abc12345",
+    ]);
+    expect(result).toMatchObject({ ok: true });
+    expect(result.references).toEqual([
+      { url: "https://youtu.be/abc12345", kind: "youtube", sort_order: 0 },
+      { url: "https://x.com/wavekb/status/123", kind: "x", sort_order: 1 },
+    ]);
+    expect(parseExternalReferences(Array.from({ length: 6 }, (_, index) => `https://x.com/wavekb/status/${index + 1}`))).toMatchObject({ ok: false });
   });
 });
 

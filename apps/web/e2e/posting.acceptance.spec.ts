@@ -6,7 +6,7 @@ const password = process.env.E2E_POSTING_PASSWORD;
 test.describe("authenticated posting acceptance", () => {
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
-  test("complete posting lifecycle with an image and external reference", async ({ page }) => {
+  test("complete posting lifecycle with research media and a timeline update", async ({ page }) => {
     test.setTimeout(150_000);
     page.on("console", (message) => {
       if (message.type() === "error" && message.text().includes("wavekb:post-save-failed")) {
@@ -56,7 +56,8 @@ test.describe("authenticated posting acceptance", () => {
         mimeType: "image/png",
         buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
       });
-      await page.getByLabel("外部引用（可选）").fill("https://www.youtube.com/watch?v=posting-acceptance");
+      await page.getByLabel("待发布图片 1 说明").fill("Playwright 研究图表快照");
+      await page.getByLabel("媒体引用 1").fill("https://www.youtube.com/watch?v=posting-acceptance");
       await page.getByRole("button", { name: "发布内容" }).click();
       try {
         await expect(page).toHaveURL(/\/community\/post\//, { timeout: 45_000 });
@@ -72,7 +73,14 @@ test.describe("authenticated posting acceptance", () => {
       published = true;
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByRole("img", { name: `${marker}，图片 1` })).toBeVisible();
-      await expect(page.getByRole("link", { name: "查看引用的 YouTube 视频" })).toHaveAttribute("href", /youtube\.com/);
+      await expect(page.getByText("图 1 · Playwright 研究图表快照")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "媒体与外部引用" })).toBeVisible();
+      await expect(page.getByRole("link", { name: /在 YouTube 打开/ })).toHaveAttribute("href", /youtube\.com/);
+      await page.getByRole("button", { name: `放大查看：${marker}，图片 1` }).click();
+      await expect(page.getByRole("dialog", { name: `${marker}，图片 1` })).toBeVisible();
+      await page.getByRole("button", { name: "放大", exact: true }).click();
+      await expect(page.getByText("125%", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "关闭图片查看器" }).click();
 
       const commentMarker = `验收评论 ${Date.now()}`;
       await page.getByLabel("发表评论").fill(`${commentMarker}，用于确认评论写入、详情刷新和级联清理。`);
@@ -87,9 +95,17 @@ test.describe("authenticated posting acceptance", () => {
       }
       await expect(publishedComment).toBeVisible({ timeout: 20_000 });
 
+      const timelineMarker = `观点验证 ${Date.now()}`;
+      await page.getByLabel("节点类型").selectOption("confirmed");
+      await page.getByLabel("更新内容").fill(`${timelineMarker}，服务器应记录当前时间并保留历史节点。`);
+      await page.getByRole("button", { name: "发布更新" }).click();
+      await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("heading", { name: "判断验证" })).toBeVisible();
+
       await page.reload();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByText(commentMarker, { exact: false })).toBeVisible();
+      await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible();
 
       const authorProfileLink = page.locator("main > article").locator('header a[href^="/member/"]');
       await expect(authorProfileLink).toHaveCount(1);
@@ -106,7 +122,7 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByLabel("公开图表链接或品种代码").fill("BINANCE:BTCUSDT");
       await page.getByLabel("正文").fill("这篇验收帖子已经完成编辑，用于确认作者修改链路和详情页刷新。 ");
       await page.getByRole("button", { name: "移除现有图片 1" }).click();
-      await page.getByLabel("外部引用（可选）").fill("https://x.com/wavekb/status/1");
+      await page.getByLabel("媒体引用 1").fill("https://x.com/wavekb/status/1");
       await page.getByRole("button", { name: "保存修改" }).click();
       await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
       const postArticle = page.locator("main > article");
@@ -123,11 +139,12 @@ test.describe("authenticated posting acceptance", () => {
       console.log("Edited post diagnostic", JSON.stringify({
         article: (await postArticle.innerText().catch(() => "")).slice(0, 2_000),
       }));
-      await expect(postArticle).toContainText("【核心观点】", { timeout: 20_000 });
+      await expect(page.getByRole("heading", { name: "核心观点" })).toBeVisible({ timeout: 20_000 });
       await expect(page.getByRole("heading", { name: "TradingView 图表" })).toBeVisible();
       await expect(page.getByTitle("BINANCE:BTCUSDT TradingView 图表")).toHaveAttribute("src", /tradingview\.com/);
       await expect(page.getByRole("region", { name: /帖子图片/ })).toHaveCount(0);
-      await expect(page.getByRole("link", { name: "查看引用的 X 帖子" })).toHaveAttribute("href", "https://x.com/wavekb/status/1");
+      await expect(page.getByRole("link", { name: /查看原帖/ })).toHaveAttribute("href", "https://x.com/wavekb/status/1");
+      await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible();
     } finally {
       if (!published) {
         await page.goto("/community/idea_sharing").catch(() => undefined);

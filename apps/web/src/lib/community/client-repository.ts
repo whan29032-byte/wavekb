@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BoardSlug, CommunityPost, ExternalKind } from "@wavekb/domain";
+import type { BoardSlug, CommunityPost, ExternalKind, ExternalReference, TimelineNodeKind } from "@wavekb/domain";
 import type { TradingViewPackage } from "@/lib/workbench/tradingview";
 import { mapWithConcurrency } from "../uploads";
 
@@ -8,9 +8,11 @@ type CreatePostInput = {
   board: BoardSlug;
   title: string;
   body: string;
-  externalUrl: string;
-  externalKind: ExternalKind;
+  externalUrl?: string;
+  externalKind?: ExternalKind;
+  externalReferences?: ExternalReference[];
   files: File[];
+  imageCaptions?: string[];
   privateEntryId?: string;
   chartPackage?: TradingViewPackage | null;
 };
@@ -21,6 +23,7 @@ type PublishingGateway = {
   linkSource?(value: Record<string, unknown>): Promise<void>;
   uploadImage(path: string, file: File): Promise<void>;
   insertImages(rows: Record<string, unknown>[]): Promise<void>;
+  insertReferences?(rows: Record<string, unknown>[]): Promise<void>;
   publish(id: string): Promise<void>;
   removeFiles(paths: string[]): Promise<void>;
   removePost(id: string): Promise<void>;
@@ -30,10 +33,13 @@ type UpdatePostInput = {
   userId: string;
   title: string;
   body: string;
-  externalUrl: string;
-  externalKind: ExternalKind;
+  externalUrl?: string;
+  externalKind?: ExternalKind;
+  externalReferences?: ExternalReference[];
   keptImageIds: string[];
+  imageCaptionsById?: Record<string, string>;
   files: File[];
+  newImageCaptions?: string[];
   chartPackage?: TradingViewPackage | null;
 };
 
@@ -58,6 +64,9 @@ function defaultGateway(client: SupabaseClient): PublishingGateway {
     },
     async insertImages(rows) {
       if (rows.length) unwrap(await client.from("post_images").insert(rows));
+    },
+    async insertReferences(rows) {
+      if (rows.length) unwrap(await client.from("post_external_references").insert(rows));
     },
     async publish(id) {
       unwrap(await client.from("posts").update({ status: "published" }).eq("id", id));
@@ -86,14 +95,18 @@ export async function createPost(
   const gateway = injectedGateway ?? defaultGateway(client);
   const postId = gateway.makeId();
   const uploadedPaths: string[] = [];
+  const references = input.externalReferences ?? (input.externalUrl && input.externalKind
+    ? [{ url: input.externalUrl, kind: input.externalKind, sort_order: 0 }]
+    : []);
+  const firstReference = references[0];
 
   await gateway.insertDraft({
     id: postId,
     board: input.board,
     title: input.title,
     body: input.body,
-    external_url: input.externalUrl || null,
-    external_kind: input.externalKind,
+    external_url: firstReference?.url ?? null,
+    external_kind: firstReference?.kind ?? null,
     chart_package: input.chartPackage ?? null,
     author_id: input.userId,
     status: "draft",
@@ -114,6 +127,7 @@ export async function createPost(
         owner_id: input.userId,
         storage_path: path,
         sort_order: sortOrder,
+        caption: String(input.imageCaptions?.[sortOrder] ?? "").trim().slice(0, 240),
         file,
       };
     });
@@ -123,8 +137,19 @@ export async function createPost(
       owner_id: row.owner_id,
       storage_path: row.storage_path,
       sort_order: row.sort_order,
+      caption: row.caption,
     }));
     await gateway.insertImages(persistedImageRows);
+    if (references.length) {
+      if (!gateway.insertReferences) throw new Error("媒体引用保存链路尚未安装。");
+      await gateway.insertReferences(references.map((reference, sortOrder) => ({
+        post_id: postId,
+        owner_id: input.userId,
+        url: reference.url,
+        kind: reference.kind,
+        sort_order: sortOrder,
+      })));
+    }
     await gateway.publish(postId);
     return postId;
   } catch (error) {
@@ -159,16 +184,18 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
 
     let updateError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const result = await client.rpc("update_my_post_v3", {
+      const references = input.externalReferences ?? (input.externalUrl && input.externalKind
+        ? [{ url: input.externalUrl, kind: input.externalKind, sort_order: 0 }]
+        : []);
+      const result = await client.rpc("update_my_post_v4", {
         p_post_id: post.id,
         p_title: input.title,
         p_body: input.body,
         p_images: [
-          ...kept.map((image) => ({ storage_path: image.storage_path })),
-          ...uploadedPaths.map((storagePath) => ({ storage_path: storagePath })),
+          ...kept.map((image) => ({ storage_path: image.storage_path, caption: String(input.imageCaptionsById?.[image.id] ?? image.caption ?? "").trim().slice(0, 240) })),
+          ...uploadedPaths.map((storagePath, index) => ({ storage_path: storagePath, caption: String(input.newImageCaptions?.[index] ?? "").trim().slice(0, 240) })),
         ],
-        p_external_url: input.externalUrl || null,
-        p_external_kind: input.externalKind,
+        p_external_references: references.map(({ url, kind }) => ({ url, kind })),
         p_chart_package: input.chartPackage ?? null,
       });
       updateError = result.error;
@@ -185,6 +212,45 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
   if (!removedPaths.length) return { cleanupPending: false };
   const cleanup = await client.storage.from("post-images").remove(removedPaths);
   return { cleanupPending: Boolean(cleanup.error) };
+}
+
+export async function appendPostTimelineNode(client: SupabaseClient, input: {
+  postId: string;
+  userId: string;
+  kind: TimelineNodeKind;
+  body: string;
+  files: File[];
+  captions?: string[];
+}) {
+  const nodeId = crypto.randomUUID();
+  const uploadedPaths: string[] = [];
+  try {
+    const uploads = input.files.map((file, index) => {
+      const extension = imageExtension(file.type);
+      if (!extension) throw new Error("不支持的图片格式。");
+      const path = `${input.userId}/${input.postId}/timeline/${nodeId}/${crypto.randomUUID()}.${extension}`;
+      uploadedPaths.push(path);
+      return { file, path, caption: String(input.captions?.[index] ?? "").trim().slice(0, 240) };
+    });
+    await mapWithConcurrency(uploads, 3, async ({ file, path }) => {
+      unwrap(await client.storage.from("post-images").upload(path, file, {
+        upsert: false,
+        contentType: file.type,
+      }));
+    });
+    const result = await client.rpc("append_research_timeline_node", {
+      p_post_id: input.postId,
+      p_node_id: nodeId,
+      p_kind: input.kind,
+      p_body: input.body.trim(),
+      p_images: uploads.map(({ path, caption }) => ({ storage_path: path, caption })),
+    });
+    unwrap(result);
+    return nodeId;
+  } catch (error) {
+    if (uploadedPaths.length) await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function deletePost(client: SupabaseClient, post: CommunityPost, userId: string) {

@@ -26,6 +26,21 @@ export const BOARD_SLUGS = Object.keys(BOARDS) as BoardSlug[];
 
 export type ExternalKind = "youtube" | "x" | null;
 
+export type ExternalReference = {
+  id?: string;
+  url: string;
+  kind: Exclude<ExternalKind, null>;
+  sort_order: number;
+};
+
+export const TIMELINE_NODE_KINDS = [
+  "published", "update", "confirmed", "invalidated", "trade_started",
+  "position_added", "position_reduced", "stop_updated", "target_hit",
+  "stop_hit", "trade_closed", "review",
+] as const;
+
+export type TimelineNodeKind = typeof TIMELINE_NODE_KINDS[number];
+
 export type PublicProfile = {
   id: string;
   public_uid: number | null;
@@ -123,6 +138,27 @@ export type PostImage = {
   id: string;
   storage_path: string;
   sort_order: number;
+  caption?: string;
+};
+
+export type ResearchTimelineImage = {
+  id: string;
+  storage_path: string;
+  sort_order: number;
+  caption?: string;
+};
+
+export type ResearchTimelineNode = {
+  id: string;
+  subject_type: "post" | "private_entry";
+  post_id: string | null;
+  private_entry_id: string | null;
+  author_id: string;
+  kind: TimelineNodeKind;
+  body: string;
+  created_at: string;
+  research_timeline_images: ResearchTimelineImage[];
+  profiles: PublicProfile | null;
 };
 
 export type CommunityPost = {
@@ -139,6 +175,8 @@ export type CommunityPost = {
   chart_package: Record<string, unknown> | null;
   comments_enabled: boolean;
   post_images: PostImage[];
+  external_references: ExternalReference[];
+  timeline_nodes: ResearchTimelineNode[];
   profiles: PublicProfile | null;
 };
 
@@ -441,6 +479,7 @@ export type PostInput = {
   title: string;
   body: string;
   externalUrl?: string;
+  externalUrls?: string[];
   imageCount?: number;
   mode?: "simple" | "professional";
 };
@@ -454,10 +493,12 @@ export type PostValidation = {
     body: string;
     externalUrl: string;
     externalKind: ExternalKind;
+    externalReferences: ExternalReference[];
   };
 };
 
 export const MAX_IMAGES = 9;
+export const MAX_EXTERNAL_REFERENCES = 5;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 export const PROFILE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -488,13 +529,41 @@ export function parseExternalReference(rawUrl: string | undefined): {
   }
 
   const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-  if (["youtube.com", "youtu.be", "m.youtube.com"].includes(host)) {
+  const youtubeId = host === "youtu.be"
+    ? parsed.pathname.match(/^\/([^/]+)\/?$/)?.[1]
+    : ["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(host)
+      ? parsed.pathname === "/watch"
+        ? parsed.searchParams.get("v")
+        : parsed.pathname.match(/^\/(?:shorts|embed)\/([^/]+)\/?$/)?.[1]
+      : null;
+  if (youtubeId && /^[A-Za-z0-9_-]{6,64}$/.test(youtubeId)) {
     return { ok: true, url: parsed.toString(), kind: "youtube" };
   }
-  if (["x.com", "twitter.com", "mobile.twitter.com"].includes(host)) {
+  if (["x.com", "twitter.com", "mobile.twitter.com"].includes(host) && /^\/[^/]+\/status\/\d+\/?$/.test(parsed.pathname)) {
     return { ok: true, url: parsed.toString(), kind: "x" };
   }
   return { ok: false, url: "", kind: null, error: "目前只支持引用 YouTube 视频或 X 帖子。" };
+}
+
+export function parseExternalReferences(rawUrls: string[] | undefined): {
+  ok: boolean;
+  references: ExternalReference[];
+  error?: string;
+} {
+  const values = (rawUrls ?? []).map((value) => String(value ?? "").trim()).filter(Boolean);
+  if (values.length > MAX_EXTERNAL_REFERENCES) {
+    return { ok: false, references: [], error: `每篇帖子最多添加 ${MAX_EXTERNAL_REFERENCES} 条媒体引用。` };
+  }
+  const references: ExternalReference[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const parsed = parseExternalReference(value);
+    if (!parsed.ok || !parsed.kind) return { ok: false, references: [], error: parsed.error };
+    if (seen.has(parsed.url)) continue;
+    seen.add(parsed.url);
+    references.push({ url: parsed.url, kind: parsed.kind, sort_order: references.length });
+  }
+  return { ok: true, references };
 }
 
 export function validatePost(input: PostInput): PostValidation {
@@ -513,8 +582,9 @@ export function validatePost(input: PostInput): PostValidation {
       : "正文需要 20-20000 个字符。";
   }
 
-  const external = parseExternalReference(input.externalUrl);
+  const external = parseExternalReferences(input.externalUrls ?? [input.externalUrl ?? ""]);
   if (!external.ok) fields.externalUrl = external.error;
+  const firstExternal = external.references[0];
 
   return {
     ok: Object.keys(fields).length === 0,
@@ -523,8 +593,9 @@ export function validatePost(input: PostInput): PostValidation {
       board,
       title,
       body,
-      externalUrl: external.ok ? external.url : "",
-      externalKind: external.ok ? external.kind : null,
+      externalUrl: firstExternal?.url ?? "",
+      externalKind: firstExternal?.kind ?? null,
+      externalReferences: external.ok ? external.references : [],
     },
   };
 }

@@ -1,6 +1,6 @@
 import type { PublicProfile } from "@wavekb/domain";
 
-const premiumStyles = new Set(["blackgold", "platinum", "purplegold", "rainbow", "newyear"]);
+const premiumStyles = new Set(["premium", "blackgold", "platinum", "purplegold", "rainbow", "newyear"]);
 
 function normalizedStyle(style: string | undefined) {
   return premiumStyles.has(String(style)) ? String(style) : "classic";

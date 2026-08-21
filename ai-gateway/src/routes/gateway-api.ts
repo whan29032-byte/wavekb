@@ -144,6 +144,17 @@ export class SupabaseGatewayApi implements GatewayApi {
     const images = await this.database.request(
       `/rest/v1/post_images?post_id=eq.${encodedPostId}&owner_id=eq.${encodedActorId}&select=storage_path&order=sort_order.asc`,
     );
+    const timelineNodes = await this.database.request(
+      `/rest/v1/research_timeline_nodes?post_id=eq.${encodedPostId}&author_id=eq.${encodedActorId}&select=id`,
+    );
+    const timelineNodeIds = timelineNodes
+      .map((node: { id?: unknown }) => String(node.id || ""))
+      .filter((id: string) => UUID_PATTERN.test(id));
+    const timelineImages = timelineNodeIds.length
+      ? await this.database.request(
+        `/rest/v1/research_timeline_images?node_id=in.(${timelineNodeIds.map(encodeURIComponent).join(",")})&owner_id=eq.${encodedActorId}&select=storage_path&order=sort_order.asc`,
+      )
+      : [];
     const deleted = await this.database.request(
       `/rest/v1/posts?id=eq.${encodedPostId}&author_id=eq.${encodedActorId}&select=id`,
       { method: "DELETE", headers: { prefer: "return=representation" } },
@@ -151,7 +162,7 @@ export class SupabaseGatewayApi implements GatewayApi {
     if (!Array.isArray(deleted) || deleted.length !== 1) {
       throw Object.assign(new Error("post_delete_failed"), { statusCode: 409 });
     }
-    return images
+    return [...images, ...timelineImages]
       .map((image: { storage_path?: unknown }) => String(image.storage_path || ""))
       .filter((path: string) => path.startsWith(`${actor.id}/${postId}/`));
   }

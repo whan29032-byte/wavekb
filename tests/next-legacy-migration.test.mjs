@@ -80,11 +80,41 @@ test("production deployment applies every migration newer than the live schema",
 
 test("unified nameplates and semantic theme tokens cover migrated Next surfaces", async () => {
   const [plate, css, layout] = await Promise.all([read("apps/web/src/components/nameplate.tsx"), read("apps/web/src/app/globals.css"), read("apps/web/src/app/layout.tsx")]);
-  for (const style of ["blackgold", "platinum", "purplegold", "rainbow", "newyear"]) assert.match(css, new RegExp(`data-nameplate=\\"${style}\\"`));
+  for (const style of ["premium", "blackgold", "platinum", "purplegold", "rainbow", "newyear"]) assert.match(css, new RegExp(`data-nameplate=\\"${style}\\"`));
   assert.match(plate, /identity-drive-wave/);
   for (const token of ["--background", "--surface-raised", "--sidebar", "--popover", "--foreground", "--muted-foreground", "--border", "--input", "--primary-hover", "--primary-selected", "--destructive", "--shadow-floating"]) assert.match(css, new RegExp(token));
   assert.match(css, /prefers-reduced-motion/);
   assert.match(layout, /wavekb:appearance:v1/);
+});
+
+test("research posts use reusable media, lightbox and immutable server-timed timeline infrastructure", async () => {
+  const [page, composer, media, mediaParser, lightbox, timeline, repository, migration] = await Promise.all([
+    read("apps/web/src/app/community/post/[id]/page.tsx"),
+    read("apps/web/src/components/post-composer.tsx"),
+    read("apps/web/src/components/research-media.tsx"),
+    read("apps/web/src/lib/community/external-media.ts"),
+    read("apps/web/src/components/research-lightbox.tsx"),
+    read("apps/web/src/components/research-timeline.tsx"),
+    read("apps/web/src/lib/community/client-repository.ts"),
+    read("supabase/migrations/202608210001_research_timelines_media.sql"),
+  ]);
+  for (const component of ["ResearchAuthor", "ResearchBody", "ResearchLightbox", "ResearchMedia", "ResearchTimeline"]) assert.match(page, new RegExp(component));
+  assert.match(composer, /MAX_EXTERNAL_REFERENCES/);
+  assert.match(composer, /媒体与外部引用/);
+  assert.match(mediaParser, /youtube-nocookie/);
+  assert.match(media, /platform\.twitter\.com\/widgets\.js/);
+  assert.match(media, /noopener noreferrer/);
+  assert.match(lightbox, /Escape/);
+  assert.match(lightbox, /ArrowLeft/);
+  assert.match(lightbox, /MagnifyingGlassPlus/);
+  assert.match(timeline, /ResearchTimelineComposer/);
+  assert.match(repository, /append_research_timeline_node/);
+  assert.match(migration, /create table if not exists public\.research_timeline_nodes/);
+  assert.match(migration, /subject_type in \('post', 'private_entry'\)/);
+  assert.match(migration, /created_at timestamptz not null default now\(\)/);
+  assert.match(migration, /security definer/);
+  assert.match(migration, /authors add references to their posts/);
+  assert.doesNotMatch(migration.slice(migration.indexOf("create or replace function public.append_research_timeline_node")), /p_created_at/);
 });
 
 test("user points are managed with users rather than the reward catalog page", async () => {

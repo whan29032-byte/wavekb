@@ -1,10 +1,14 @@
 import Link from "next/link";
-import { ArrowLeft, ImageSquare } from "@phosphor-icons/react/dist/ssr";
+import { ArrowLeft } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { BOARDS } from "@wavekb/domain";
 import { PostOwnerActions } from "@/components/post-owner-actions";
 import { PostComments } from "@/components/post-comments";
-import { IdentityName, Nameplate } from "@/components/nameplate";
+import { ResearchAuthor } from "@/components/research-author";
+import { ResearchBody } from "@/components/research-body";
+import { ResearchLightbox } from "@/components/research-lightbox";
+import { ResearchMedia } from "@/components/research-media";
+import { ResearchTimeline } from "@/components/research-timeline";
 import { getPost, listPostComments } from "@/lib/community/server-repository";
 import { publicPostImageUrl } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth/dal";
@@ -12,6 +16,14 @@ import { getMyProfile } from "@/lib/member/server-repository";
 import { tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
 
 type PageProps = { params: Promise<{ id: string }> };
+
+const RESEARCH_GENRE = {
+  case_submission: "案例研究",
+  idea_sharing: "市场观点",
+  public_viewpoint: "公开观点",
+  question_answers: "问题讨论",
+  review_answers: "复盘讨论",
+} as const;
 
 export const dynamic = "force-dynamic";
 
@@ -25,37 +37,31 @@ export default async function PostPage({ params }: PageProps) {
   const chart = post.chart_package?.provider === "tradingview" ? post.chart_package as TradingViewPackage : null;
 
   return (
-    <main className="mx-auto grid max-w-4xl gap-7 px-4 py-10 md:px-6 md:py-14">
+    <main className="mx-auto grid max-w-7xl gap-8 px-4 py-8 md:px-6 md:py-12">
       <Link href={`/community/${post.board}`} className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary">
         <ArrowLeft aria-hidden size={17} />返回{BOARDS[post.board].title}
       </Link>
-      <article className="grid gap-8 rounded-xl border bg-surface p-5 md:p-9">
-        <header className="grid gap-3">
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>{BOARDS[post.board].title}</span><span aria-hidden>/</span>
-            {post.profiles?.public_uid ? <Link href={`/member/${post.profiles.public_uid}`} className="inline-flex items-center gap-2 hover:underline"><IdentityName profile={post.profiles} /><Nameplate uid={post.profiles.public_uid} style={post.profiles.nameplate_style} compact /></Link> : <span>{post.profiles?.display_name || "UID 未设置"}</span>}
-            <time dateTime={post.created_at}>{new Date(post.created_at).toLocaleString("zh-CN")}</time>
-          </div>
-          <h1 className="text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-4xl">{post.title}</h1>
+      <article className="grid gap-12 md:gap-16">
+        <header className="mx-auto grid w-full max-w-4xl gap-6 border-b pb-8 md:pb-10">
+          <p className="text-sm font-semibold tracking-[0.08em] text-primary">{BOARDS[post.board].title} · {RESEARCH_GENRE[post.board]}</p>
+          <h1 className="max-w-[20ch] text-[clamp(1.875rem,5vw,3rem)] font-semibold leading-[1.12] tracking-[-0.04em] text-balance">{post.title}</h1>
+          <ResearchAuthor profile={post.profiles} createdAt={post.created_at} updatedAt={post.updated_at} />
         </header>
-        <div className="whitespace-pre-wrap text-[1.02rem] leading-8 text-foreground/90">{post.body}</div>
-        {chart?.symbol ? <section className="grid gap-3" aria-labelledby="post-chart-title"><div><h2 id="post-chart-title" className="text-xl font-semibold">TradingView 图表</h2><p className="mt-1 text-xs text-muted-foreground">{chart.symbol} · {chart.interval}</p></div><iframe title={`${chart.symbol} TradingView 图表`} src={tradingViewEmbedUrl(chart)} className="h-[460px] w-full rounded-xl border bg-muted" loading="lazy" referrerPolicy="no-referrer" /></section> : null}
+        <section className="mx-auto w-full max-w-4xl" aria-label="正文观点"><ResearchBody body={post.body} /></section>
+        {chart?.symbol ? <section className="research-section" aria-labelledby="post-chart-title"><header className="research-section-heading"><p>实时参考</p><h2 id="post-chart-title">TradingView 图表</h2><span>{chart.symbol} · {chart.interval}</span></header><iframe title={`${chart.symbol} TradingView 图表`} src={tradingViewEmbedUrl(chart)} className="aspect-video min-h-[420px] w-full rounded-xl border bg-muted max-md:min-h-[300px]" loading="lazy" referrerPolicy="no-referrer" /></section> : null}
         {images.length ? (
-          <section className="grid gap-3 sm:grid-cols-2" aria-label={`帖子图片，共 ${images.length} 张`}>
-            {images.map((image, index) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={image.id} src={publicPostImageUrl(image.storage_path)} alt={`${post.title}，图片 ${index + 1}`} className="h-auto w-full rounded-xl border object-contain" />
-            ))}
+          <section className="research-section" aria-labelledby="post-images-title">
+            <header className="research-section-heading"><p>核心证据</p><h2 id="post-images-title">研究图表</h2><span>点击图片可放大、切换并查看原图。</span></header>
+            <ResearchLightbox assets={images.map((image, index) => ({ id: image.id, url: publicPostImageUrl(image.storage_path), alt: `${post.title}，图片 ${index + 1}`, caption: image.caption }))} />
           </section>
         ) : null}
-        {post.external_url ? (
-          <a href={post.external_url} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl border bg-muted p-4 text-sm font-medium hover:border-primary/50">
-            <ImageSquare aria-hidden size={20} className="text-primary" />查看引用的 {post.external_kind === "youtube" ? "YouTube 视频" : "X 帖子"}
-          </a>
-        ) : null}
-        {user?.id === post.author_id ? <PostOwnerActions post={post} userId={user.id} /> : null}
+        <div className="mx-auto grid w-full max-w-4xl gap-12 md:gap-16">
+          <ResearchMedia references={post.external_references} />
+          <ResearchTimeline postId={post.id} createdAt={post.created_at} nodes={post.timeline_nodes} author={post.profiles} actorId={user?.id === post.author_id ? user.id : undefined} />
+          {user?.id === post.author_id ? <PostOwnerActions post={post} userId={user.id} /> : null}
+        </div>
       </article>
-      <PostComments postId={post.id} comments={comments} actorId={user?.id} actorProfile={actorProfile} activeMember={actorProfile?.public_uid != null} commentsEnabled={post.comments_enabled} />
+      <div className="mx-auto w-full max-w-4xl"><PostComments postId={post.id} comments={comments} actorId={user?.id} actorProfile={actorProfile} activeMember={actorProfile?.public_uid != null} commentsEnabled={post.comments_enabled} /></div>
     </main>
   );
 }

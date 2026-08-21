@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
-import { ImageSquare, Trash, UploadSimple } from "@phosphor-icons/react";
-import { MAX_IMAGES, validateImages, validatePost, type BoardSlug, type CommunityPost, type PrivateEntry } from "@wavekb/domain";
+import { ImageSquare, LinkSimple, Plus, Trash, UploadSimple } from "@phosphor-icons/react";
+import { MAX_EXTERNAL_REFERENCES, MAX_IMAGES, parseExternalReference, validateImages, validatePost, type BoardSlug, type CommunityPost, type PrivateEntry } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { createPost, updatePost } from "@/lib/community/client-repository";
 import { compileStructuredPost, DIRECTIONS, MARKET_GROUPS, parseStructuredPost, RESEARCH_TIMEFRAMES, WAVE_PATTERNS, WAVE_POSITIONS, type StructuredPost } from "@/lib/community/research-catalog";
@@ -10,7 +10,8 @@ import { createClient } from "@/lib/supabase/client";
 import { publicPostImageUrl } from "@/lib/env";
 import { buildTradingViewPackage, tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
 
-type SelectedImage = { key: string; file: File; previewUrl: string };
+type SelectedImage = { key: string; file: File; previewUrl: string; caption: string };
+type MediaDraft = { key: string; url: string };
 type ComposerErrors = Partial<Record<"title" | "body" | "externalUrl" | "images" | "form", string>>;
 type EditorMode = "simple" | "professional";
 
@@ -44,7 +45,12 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
   const restoredPost = post ? parseStructuredPost(post.body) : null;
   const [title, setTitle] = useState(post?.title || source?.title || "");
   const [body, setBody] = useState(restoredPost?.notes || post?.body || source?.body || "");
-  const [externalUrl, setExternalUrl] = useState(post?.external_url || "");
+  const [references, setReferences] = useState<MediaDraft[]>(() => {
+    const existing = post?.external_references?.length
+      ? post.external_references.map((reference) => reference.url)
+      : post?.external_url ? [post.external_url] : [""];
+    return existing.map((url) => ({ key: crypto.randomUUID(), url }));
+  });
   const [mode, setMode] = useState<EditorMode>(post?.chart_package || restoredPost ? "professional" : "simple");
   const [structured, setStructured] = useState<StructuredPost>(restoredPost || blankStructured);
   const initialChart = post?.chart_package as TradingViewPackage | null;
@@ -69,11 +75,12 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
     if (post) return;
     const restoreDraft = window.setTimeout(() => {
       try {
-        const stored = JSON.parse(localStorage.getItem(draftKey) || "null") as { title?: string; body?: string; externalUrl?: string; mode?: EditorMode; structured?: StructuredPost; chartSource?: string; chartSymbol?: string; chartInterval?: string; chartTheme?: "auto" | "light" | "dark" } | null;
+        const stored = JSON.parse(localStorage.getItem(draftKey) || "null") as { title?: string; body?: string; externalUrl?: string; externalUrls?: string[]; mode?: EditorMode; structured?: StructuredPost; chartSource?: string; chartSymbol?: string; chartInterval?: string; chartTheme?: "auto" | "light" | "dark" } | null;
         if (stored) {
           setTitle(stored.title || "");
           setBody(stored.body || "");
-          setExternalUrl(stored.externalUrl || "");
+          const storedReferences = stored.externalUrls?.length ? stored.externalUrls : stored.externalUrl ? [stored.externalUrl] : [""];
+          setReferences(storedReferences.slice(0, MAX_EXTERNAL_REFERENCES).map((url) => ({ key: crypto.randomUUID(), url })));
           setMode(stored.mode === "professional" ? "professional" : "simple");
           if (stored.structured) setStructured({ ...blankStructured, ...stored.structured });
           setChartSource(stored.chartSource || "");
@@ -96,12 +103,13 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
   useEffect(() => {
     if (!draftLoaded || post) return;
     const timer = window.setTimeout(() => {
-      const draft = { title, body, externalUrl, mode, structured, chartSource, chartSymbol, chartInterval, chartTheme, savedAt: new Date().toISOString() };
-      if (title.trim() || body.trim() || externalUrl.trim() || mode === "professional" && Object.values(structured).some((value) => value.trim()) || chartSource.trim() || chartSymbol.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
+      const externalUrls = references.map((reference) => reference.url);
+      const draft = { title, body, externalUrls, mode, structured, chartSource, chartSymbol, chartInterval, chartTheme, savedAt: new Date().toISOString() };
+      if (title.trim() || body.trim() || externalUrls.some((url) => url.trim()) || mode === "professional" && Object.values(structured).some((value) => value.trim()) || chartSource.trim() || chartSymbol.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
       else localStorage.removeItem(draftKey);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [body, chartInterval, chartSource, chartSymbol, chartTheme, draftKey, draftLoaded, externalUrl, mode, post, structured, title]);
+  }, [body, chartInterval, chartSource, chartSymbol, chartTheme, draftKey, draftLoaded, mode, post, references, structured, title]);
 
   useEffect(() => () => {
     imagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
@@ -117,7 +125,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
     setErrors((current) => ({ ...current, images: undefined }));
     setImages((current) => [
       ...current,
-      ...files.map((file) => ({ key: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file) })),
+      ...files.map((file) => ({ key: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file), caption: "" })),
     ]);
   }
 
@@ -155,7 +163,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
       setErrors({ form: cause instanceof Error ? cause.message : "TradingView 图表配置无效。" });
       return;
     }
-    const validation = validatePost({ board, title, body: finalBody, externalUrl, imageCount: images.length + existingImages.length, mode });
+    const validation = validatePost({ board, title, body: finalBody, externalUrls: references.map((reference) => reference.url), imageCount: images.length + existingImages.length, mode });
     const imageError = validateImages(images.map((image) => image.file));
     if (!validation.ok || imageError) {
       setErrors({ ...validation.fields, images: imageError || undefined });
@@ -174,9 +182,9 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
           board: validation.value.board,
           title: validation.value.title,
           body: validation.value.body,
-          externalUrl: validation.value.externalUrl,
-          externalKind: validation.value.externalKind,
+          externalReferences: validation.value.externalReferences,
           files: images.map((image) => image.file),
+          imageCaptions: images.map((image) => image.caption),
           privateEntryId: source?.id,
           chartPackage,
         });
@@ -185,10 +193,11 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
           userId,
           title: validation.value.title,
           body: validation.value.body,
-          externalUrl: validation.value.externalUrl,
-          externalKind: validation.value.externalKind,
+          externalReferences: validation.value.externalReferences,
           keptImageIds: existingImages.map((image) => image.id),
+          imageCaptionsById: Object.fromEntries(existingImages.map((image) => [image.id, image.caption ?? ""])),
           files: images.map((image) => image.file),
+          newImageCaptions: images.map((image) => image.caption),
           chartPackage,
         });
       }
@@ -307,30 +316,55 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
             {existingImages.map((image, index) => (
               <figure key={image.id} className="relative overflow-hidden rounded-xl border bg-muted">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={publicPostImageUrl(image.storage_path)} alt={`现有图片 ${index + 1}`} className="aspect-square h-full w-full object-cover" />
+                <img src={publicPostImageUrl(image.storage_path)} alt={`现有图片 ${index + 1}`} className="aspect-square h-auto w-full object-cover" />
                 <Button type="button" variant="danger" size="icon" aria-label={`移除现有图片 ${index + 1}`} className="absolute right-2 top-2 size-9" onClick={() => setExistingImages((current) => current.filter((item) => item.id !== image.id))}>
                   <Trash aria-hidden size={17} />
                 </Button>
+                <Input aria-label={`现有图片 ${index + 1} 说明`} value={image.caption ?? ""} maxLength={240} placeholder={`图 ${index + 1} 说明（可选）`} className="rounded-none border-x-0 border-b-0 bg-surface" onChange={(event) => setExistingImages((current) => current.map((item) => item.id === image.id ? { ...item, caption: event.target.value } : item))} />
               </figure>
             ))}
             {images.map((image, index) => (
               <figure key={image.key} className="relative overflow-hidden rounded-xl border bg-muted">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image.previewUrl} alt={`待发布图片 ${index + 1}`} className="aspect-square h-full w-full object-cover" />
+                <img src={image.previewUrl} alt={`待发布图片 ${index + 1}`} className="aspect-square h-auto w-full object-cover" />
                 <Button type="button" variant="danger" size="icon" aria-label={`移除图片 ${index + 1}`} className="absolute right-2 top-2 size-9" onClick={() => removeImage(image.key)}>
                   <Trash aria-hidden size={17} />
                 </Button>
+                <Input aria-label={`待发布图片 ${index + 1} 说明`} value={image.caption} maxLength={240} placeholder={`图 ${existingImages.length + index + 1} 说明（可选）`} className="rounded-none border-x-0 border-b-0 bg-surface" onChange={(event) => setImages((current) => current.map((item) => item.key === image.key ? { ...item, caption: event.target.value } : item))} />
               </figure>
             ))}
           </div>
         ) : null}
       </Field>
 
-      <Field>
-        <Label htmlFor="external-url">外部引用（可选）</Label>
-        <Input id="external-url" type="url" inputMode="url" value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="https://www.youtube.com/... 或 https://x.com/..." aria-invalid={Boolean(errors.externalUrl)} aria-describedby={errors.externalUrl ? "external-url-error" : "external-url-help"} />
-        {errors.externalUrl ? <FieldMessage id="external-url-error">{errors.externalUrl}</FieldMessage> : <p id="external-url-help" className="text-xs text-muted-foreground">只支持完整的 YouTube 或 X HTTPS 链接。</p>}
-      </Field>
+      <section className="grid gap-4 border-t pt-6" aria-labelledby="post-media-title">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 id="post-media-title" className="flex items-center gap-2 text-lg font-semibold"><LinkSimple aria-hidden size={19} />媒体与外部引用</h2>
+            <p className="mt-1 text-xs text-muted-foreground">支持 YouTube 视频和 X 帖子，最多 {MAX_EXTERNAL_REFERENCES} 条；详情页会安全地延迟加载。</p>
+          </div>
+          <Button type="button" variant="secondary" size="small" disabled={references.length >= MAX_EXTERNAL_REFERENCES} onClick={() => setReferences((current) => [...current, { key: crypto.randomUUID(), url: "" }])}>
+            <Plus aria-hidden size={16} />添加引用
+          </Button>
+        </header>
+        <div className="grid gap-3">
+          {references.map((reference, index) => {
+            const parsed = parseExternalReference(reference.url);
+            const recognized = reference.url.trim() && parsed.ok && parsed.kind;
+            return (
+              <Field key={reference.key} className="rounded-xl border bg-muted/35 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor={`external-url-${reference.key}`}>媒体引用 {index + 1}</Label>
+                  <Button type="button" variant="ghost" size="icon" className="size-9" aria-label={`删除媒体引用 ${index + 1}`} onClick={() => setReferences((current) => current.length === 1 ? [{ key: crypto.randomUUID(), url: "" }] : current.filter((item) => item.key !== reference.key))}><Trash aria-hidden size={16} /></Button>
+                </div>
+                <Input id={`external-url-${reference.key}`} type="url" inputMode="url" value={reference.url} onChange={(event) => setReferences((current) => current.map((item) => item.key === reference.key ? { ...item, url: event.target.value } : item))} placeholder="https://www.youtube.com/watch?v=... 或 https://x.com/.../status/..." aria-invalid={Boolean(reference.url.trim() && !parsed.ok)} />
+                {recognized ? <p className="text-xs font-medium text-primary">已识别为 {parsed.kind === "youtube" ? "YouTube 视频" : "X 帖子"}</p> : reference.url.trim() ? <p className="text-xs text-destructive">{parsed.error}</p> : null}
+              </Field>
+            );
+          })}
+        </div>
+        {errors.externalUrl ? <FieldMessage id="external-url-error">{errors.externalUrl}</FieldMessage> : null}
+      </section>
 
       {errors.form ? <FieldMessage role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 p-3">{errors.form}</FieldMessage> : null}
       <div className="flex flex-col-reverse gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
