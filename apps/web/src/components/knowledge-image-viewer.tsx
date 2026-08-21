@@ -43,9 +43,9 @@ export function KnowledgeImageViewer({ assets }: { assets: ViewerAsset[] }) {
         ))}
       </div>
       {current ? (
-        <div className="fixed inset-0 z-[120] grid grid-rows-[auto_1fr] bg-black/85 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={current.alt} onMouseDown={(event) => { if (event.target === event.currentTarget) setActive(null); }}>
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 rounded-lg bg-black/55 px-3 py-2 text-white">
-            <p className="min-w-0 truncate text-sm">{current.alt}{current.caption ? ` · ${current.caption}` : ""}</p>
+        <div className="fixed inset-0 z-[120] grid min-w-0 grid-rows-[auto_1fr] overflow-hidden bg-black/85 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={current.alt} onMouseDown={(event) => { if (event.target === event.currentTarget) setActive(null); }}>
+          <div className="mx-auto flex min-w-0 w-full max-w-6xl items-center justify-between gap-3 rounded-lg bg-black/55 px-3 py-2 text-white">
+            <p className="min-w-0 flex-1 truncate text-sm">{current.alt}{current.caption ? ` · ${current.caption}` : ""}</p>
             <div className="flex shrink-0 items-center gap-1">
               <button type="button" className="grid size-10 place-items-center rounded-md hover:bg-white/15 disabled:opacity-40" onClick={() => zoom(-0.25)} disabled={scale <= 0.5} aria-label="缩小"><MagnifyingGlassMinus aria-hidden size={20} /></button>
               <output className="w-12 text-center text-xs tabular-nums" aria-live="polite">{Math.round(scale * 100)}%</output>
