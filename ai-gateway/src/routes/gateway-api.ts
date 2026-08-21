@@ -26,6 +26,8 @@ function optionalNumber(
   return value;
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export class SupabaseGatewayApi implements GatewayApi {
   private readonly database: SupabaseRest;
   constructor(privateConfig: GatewayConfig) {
@@ -126,6 +128,32 @@ export class SupabaseGatewayApi implements GatewayApi {
       `/rest/v1/external_recommendations?id=eq.${encodeURIComponent(resourceId)}`,
       { method: "DELETE" },
     );
+  }
+
+  async deleteOwnPost(postId: string, actor: GatewayUser): Promise<string[]> {
+    if (!UUID_PATTERN.test(postId)) {
+      throw Object.assign(new Error("invalid_post_id"), { statusCode: 400 });
+    }
+    const encodedPostId = encodeURIComponent(postId);
+    const encodedActorId = encodeURIComponent(actor.id);
+    const posts = await this.database.request(
+      `/rest/v1/posts?id=eq.${encodedPostId}&author_id=eq.${encodedActorId}&select=id&limit=1`,
+    );
+    if (!posts.length) return [];
+
+    const images = await this.database.request(
+      `/rest/v1/post_images?post_id=eq.${encodedPostId}&owner_id=eq.${encodedActorId}&select=storage_path&order=sort_order.asc`,
+    );
+    const deleted = await this.database.request(
+      `/rest/v1/posts?id=eq.${encodedPostId}&author_id=eq.${encodedActorId}&select=id`,
+      { method: "DELETE", headers: { prefer: "return=representation" } },
+    );
+    if (!Array.isArray(deleted) || deleted.length !== 1) {
+      throw Object.assign(new Error("post_delete_failed"), { statusCode: 409 });
+    }
+    return images
+      .map((image: { storage_path?: unknown }) => String(image.storage_path || ""))
+      .filter((path: string) => path.startsWith(`${actor.id}/${postId}/`));
   }
 
   async dashboard(): Promise<Record<string, unknown>> {

@@ -35,6 +35,9 @@ const api = {
     return { id: resourceId, ...input };
   },
   async deleteDirectoryResource() {},
+  async deleteOwnPost(postId: string, actor: any) {
+    return [`${actor.id}/${postId}/image.png`];
+  },
   async dashboard() {
     return { calls_today: 2, tokens_today: 90, cost_today: 0.01 };
   },
@@ -169,6 +172,25 @@ test("ordinary user can enqueue only through the site gateway", async () => {
   assert.equal(response.statusCode, 202);
   assert.equal((response.json() as any).job.status, "queued");
   assert.equal(response.body.includes("moonshot"), false);
+});
+
+test("authenticated users delete posts only through the owner-scoped gateway route", async () => {
+  const server = buildServer({ config, api });
+  const postId = "11111111-1111-4111-8111-111111111111";
+  assert.equal((await server.inject({
+    method: "POST",
+    url: `/v1/community/posts/${postId}/delete`,
+  })).statusCode, 401);
+  const response = await server.inject({
+    method: "POST",
+    url: `/v1/community/posts/${postId}/delete`,
+    headers: { authorization: "Bearer user-token" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), {
+    deleted: true,
+    storage_paths: [`user-1/${postId}/image.png`],
+  });
 });
 
 test("users can manage only their own masked AI connections", async () => {

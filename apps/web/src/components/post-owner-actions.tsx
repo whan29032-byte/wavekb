@@ -19,8 +19,8 @@ export function PostOwnerActions({ post, userId }: { post: CommunityPost; userId
     try {
       await deletePost(createClient(), post, userId);
       window.location.assign(new URL(`/community/${post.board}`, window.location.origin));
-    } catch {
-      setError("删除没有完成。帖子仍然保留，请刷新后重试。");
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "删除没有完成。帖子仍然保留，请刷新后重试。");
       setPending(false);
     }
   }

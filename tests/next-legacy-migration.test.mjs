@@ -105,3 +105,22 @@ test("site-wide rewards and private workbench use distinct navigation levels", a
   assert.doesNotMatch(ownActions, /href="\/rewards"|积分商城/);
   assert.match(ownActions, /grid-cols-1[\s\S]*?min-\[28rem\]:grid-cols-2[\s\S]*?sm:flex/);
 });
+
+test("post deletion is owner-scoped through the authenticated service gateway", async () => {
+  const [client, route, server, gateway] = await Promise.all([
+    read("apps/web/src/lib/community/client-repository.ts"),
+    read("apps/web/src/app/api/community/posts/[id]/delete/route.ts"),
+    read("ai-gateway/src/server.ts"),
+    read("ai-gateway/src/routes/gateway-api.ts"),
+  ]);
+  assert.match(client, /\/api\/community\/posts\/\$\{encodeURIComponent\(post\.id\)\}\/delete/);
+  assert.doesNotMatch(client.slice(client.indexOf("export async function deletePost"), client.indexOf("export async function addPostComment")), /from\("posts"\)\.delete/);
+  assert.match(route, /client\.auth\.getUser\(\)/);
+  assert.match(route, /gatewayRequestOrigin/);
+  assert.match(server, /deleteOwnPost/);
+  const deletion = gateway.slice(gateway.indexOf("async deleteOwnPost"), gateway.indexOf("async dashboard"));
+  assert.match(deletion, /author_id=eq\.\$\{encodedActorId\}/);
+  assert.match(deletion, /method: "DELETE"/);
+  assert.match(deletion, /return=representation/);
+  assert.doesNotMatch(deletion, /delete.*profiles|auth\.users/i);
+});

@@ -189,23 +189,18 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
 
 export async function deletePost(client: SupabaseClient, post: CommunityPost, userId: string) {
   if (post.author_id !== userId || post.status === "hidden") throw new Error("你不能删除这篇帖子。");
-  let deleteError: unknown = null;
-  let deleted = false;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const result = await client.from("posts").delete()
-      .eq("id", post.id)
-      .eq("author_id", userId)
-      .select("id")
-      .maybeSingle();
-    deleteError = result.error;
-    deleted = result.data?.id === post.id;
-    if (!deleteError && deleted) break;
-    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)));
+  const response = await fetch(`/api/community/posts/${encodeURIComponent(post.id)}/delete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  const payload = await response.json().catch(() => null) as { deleted?: boolean; storage_paths?: unknown[] } | null;
+  if (!response.ok || payload?.deleted !== true) {
+    throw new Error(response.status === 401 ? "登录状态已失效，请重新登录。" : "帖子未被删除，请刷新后重试。");
   }
-  if (deleteError) throw deleteError;
-  if (!deleted) throw new Error("帖子未被删除，请刷新后重试。");
-
-  const paths = post.post_images.map((image) => image.storage_path);
+  const paths = (payload.storage_paths ?? [])
+    .map((path) => String(path))
+    .filter((path) => path.startsWith(`${userId}/${post.id}/`));
   if (!paths.length) return { cleanupPending: false };
   const files = await client.storage.from("post-images").remove(paths);
   return { cleanupPending: Boolean(files.error) };

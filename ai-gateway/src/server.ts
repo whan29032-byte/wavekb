@@ -32,6 +32,7 @@ export type GatewayApi = {
     resourceId: string,
     actor: GatewayUser,
   ): Promise<void>;
+  deleteOwnPost(postId: string, actor: GatewayUser): Promise<string[]>;
   dashboard(): Promise<Record<string, unknown>>;
   listProviders(): Promise<unknown[]>;
   createProvider(input: Record<string, unknown>, actor: GatewayUser): Promise<unknown>;
@@ -187,6 +188,8 @@ function routeFailure(error: unknown): RouteResult {
     "invalid_sort_order",
     "resource_not_found",
     "directory_failed",
+    "invalid_post_id",
+    "post_delete_failed",
     "reason_too_long",
     "cannot_ban_self",
     "cannot_mute_self",
@@ -384,6 +387,14 @@ async function route(
       return { statusCode: 503, body: { error: "administration_unavailable" } };
     }
     return { statusCode: 200, body: await administration.listAudit(actor, query) };
+  }
+  const postDeleteMatch = path.match(/^\/v1\/community\/posts\/([^/]+)\/delete$/);
+  if (method === "POST" && postDeleteMatch?.[1]) {
+    const storagePaths = await api.deleteOwnPost(
+      decodeURIComponent(postDeleteMatch[1]),
+      actor,
+    );
+    return { statusCode: 200, body: { deleted: true, storage_paths: storagePaths } };
   }
   if (method === "GET" && path === "/v1/admin/directory") {
     return {

@@ -104,6 +104,12 @@ test("admin API rejects anonymous requests before contacting the gateway", async
   await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
 });
 
+test("post deletion API rejects anonymous requests before contacting the gateway", async ({ request }) => {
+  const response = await request.post("/api/community/posts/11111111-1111-4111-8111-111111111111/delete", { data: {} });
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
+});
+
 test("AI API rejects anonymous requests before contacting the gateway", async ({ request }) => {
   const response = await request.get("/api/ai/user/ai-connections");
   expect(response.status()).toBe(401);
