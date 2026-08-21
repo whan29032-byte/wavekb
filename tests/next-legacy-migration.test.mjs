@@ -92,13 +92,18 @@ test("friendship reader migration advances the production schema marker", async 
   assert.match(migration, /grant execute on function public\.wavekb_schema_version\(\) to anon, authenticated/);
 });
 
-test("friends navigation bypasses stale prefetch data and requires a fresh dynamic route", async () => {
-  const [page, actions, acceptance] = await Promise.all([
+test("friends navigation bypasses stale prefetch data and keeps private loading client-side", async () => {
+  const [page, directory, actions, acceptance] = await Promise.all([
     read("apps/web/src/app/friends/page.tsx"),
+    read("apps/web/src/components/friend-directory.tsx"),
     read("apps/web/src/components/member-profile-actions.tsx"),
     read("apps/web/e2e/member-shell.acceptance.spec.ts"),
   ]);
-  assert.match(page, /dynamic = "force-dynamic"/);
+  assert.doesNotMatch(page, /requireActiveMember|listFriendships/);
+  assert.match(page, /<FriendDirectory/);
+  assert.match(directory, /client\.auth\.getUser\(\)/);
+  assert.match(directory, /router\.replace\("\/login\?next=%2Ffriends"\)/);
+  assert.match(directory, /loadFriendships\(client\)/);
   assert.match(actions, /href="\/friends" prefetch=\{false\}/);
   assert.match(acceptance, /configure\(\{ retries: 0 \}\)/);
   assert.match(acceptance, /data-load-state", "ready"/);

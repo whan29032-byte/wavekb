@@ -16,8 +16,9 @@ function messageFor(error: unknown): string {
   return "操作没有完成，请稍后重试。";
 }
 
-export function FriendDirectory({ actorId }: { actorId: string }) {
+export function FriendDirectory() {
   const router = useRouter();
+  const [actorId, setActorId] = useState<string | null>(null);
   const [connections, setConnections] = useState<FriendshipConnection[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState("");
@@ -34,14 +35,15 @@ export function FriendDirectory({ actorId }: { actorId: string }) {
       router.replace("/login?next=%2Ffriends");
       return null;
     }
-    return loadFriendships(client);
+    return { actorId: user.data.user.id, connections: await loadFriendships(client) };
   }, [router]);
 
   useEffect(() => {
     let active = true;
-    void readConnections().then((nextConnections) => {
-      if (!active || !nextConnections) return;
-      setConnections(nextConnections);
+    void readConnections().then((result) => {
+      if (!active || !result) return;
+      setActorId(result.actorId);
+      setConnections(result.connections);
       setLoadState("ready");
     }).catch((error: unknown) => {
       if (!active) return;
@@ -57,9 +59,10 @@ export function FriendDirectory({ actorId }: { actorId: string }) {
     setLoadState("loading");
     setLoadError("");
     try {
-      const nextConnections = await readConnections();
-      if (!nextConnections) return;
-      setConnections(nextConnections);
+      const result = await readConnections();
+      if (!result) return;
+      setActorId(result.actorId);
+      setConnections(result.connections);
       setLoadState("ready");
     } catch (error) {
       setLoadError(messageFor(error));
@@ -68,6 +71,7 @@ export function FriendDirectory({ actorId }: { actorId: string }) {
   }, [readConnections]);
 
   useEffect(() => {
+    if (!actorId) return;
     const client = createClient();
     const channel = client.channel("wavekb-member-presence", { config: { presence: { key: actorId } } });
     const sync = () => {
