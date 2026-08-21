@@ -42,12 +42,20 @@ test("public member profiles are anonymous-readable and protect social actions",
   const profileGeometry = await page.evaluate(() => {
     const cover = document.querySelector<HTMLElement>("[data-profile-cover]")!.getBoundingClientRect();
     const avatar = document.querySelector<HTMLElement>("[data-profile-avatar] .identity-avatar-frame")!.getBoundingClientRect();
-    return { coverHeight: cover.height, coverBottom: cover.bottom, avatarTop: avatar.top, avatarBottom: avatar.bottom };
+    const overlapTarget = document.elementFromPoint(avatar.left + avatar.width / 2, Math.max(avatar.top + 8, cover.bottom - 8));
+    return {
+      coverHeight: cover.height,
+      coverBottom: cover.bottom,
+      avatarTop: avatar.top,
+      avatarBottom: avatar.bottom,
+      avatarOwnsOverlap: Boolean(overlapTarget?.closest("[data-profile-avatar]")),
+    };
   });
   expect(profileGeometry.coverHeight).toBeGreaterThanOrEqual(180);
   expect(profileGeometry.coverHeight).toBeLessThanOrEqual(220);
   expect(profileGeometry.avatarTop).toBeLessThan(profileGeometry.coverBottom);
   expect(profileGeometry.avatarBottom).toBeGreaterThan(profileGeometry.coverBottom);
+  expect(profileGeometry.avatarOwnsOverlap).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   const follow = page.getByRole("link", { name: "关注", exact: true });
   await expect(follow).toHaveAttribute("href", "/login?next=%2Fmember%2F33333");

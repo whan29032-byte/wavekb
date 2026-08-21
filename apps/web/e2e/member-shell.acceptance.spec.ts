@@ -54,12 +54,20 @@ test.describe("authenticated member shell acceptance", () => {
     const desktopGeometry = await page.evaluate(() => {
       const coverBox = document.querySelector<HTMLElement>("[data-profile-cover]")!.getBoundingClientRect();
       const avatarBox = document.querySelector<HTMLElement>("[data-profile-avatar] .identity-avatar-frame")!.getBoundingClientRect();
-      return { coverHeight: coverBox.height, coverBottom: coverBox.bottom, avatarTop: avatarBox.top, avatarBottom: avatarBox.bottom };
+      const overlapTarget = document.elementFromPoint(avatarBox.left + avatarBox.width / 2, Math.max(avatarBox.top + 8, coverBox.bottom - 8));
+      return {
+        coverHeight: coverBox.height,
+        coverBottom: coverBox.bottom,
+        avatarTop: avatarBox.top,
+        avatarBottom: avatarBox.bottom,
+        avatarOwnsOverlap: Boolean(overlapTarget?.closest("[data-profile-avatar]")),
+      };
     });
     expect(desktopGeometry.coverHeight).toBeGreaterThanOrEqual(180);
     expect(desktopGeometry.coverHeight).toBeLessThanOrEqual(220);
     expect(desktopGeometry.avatarTop).toBeLessThan(desktopGeometry.coverBottom);
     expect(desktopGeometry.avatarBottom).toBeGreaterThan(desktopGeometry.coverBottom);
+    expect(desktopGeometry.avatarOwnsOverlap).toBe(true);
 
     const theme = await avatar.getAttribute("data-nameplate");
     expect(await nameplate.getAttribute("data-nameplate")).toBe(theme);
