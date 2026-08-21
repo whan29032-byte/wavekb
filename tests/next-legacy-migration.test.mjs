@@ -101,7 +101,7 @@ test("friends navigation bypasses stale prefetch data and keeps private loading 
   ]);
   assert.doesNotMatch(page, /requireActiveMember|listFriendships/);
   assert.match(page, /<FriendDirectory/);
-  assert.match(directory, /client\.auth\.getUser\(\)/);
+  assert.match(directory, /client\.auth\.getSession\(\)/);
   assert.match(directory, /router\.replace\("\/login\?next=%2Ffriends"\)/);
   assert.match(directory, /loadFriendships\(client\)/);
   assert.match(actions, /href="\/friends" prefetch=\{false\}/);

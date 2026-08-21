@@ -30,12 +30,13 @@ export function FriendDirectory() {
 
   const readConnections = useCallback(async () => {
     const client = createClient();
-    const user = await client.auth.getUser();
-    if (user.error || !user.data.user) {
+    const session = await client.auth.getSession();
+    const user = session.data.session?.user;
+    if (session.error || !user) {
       router.replace("/login?next=%2Ffriends");
       return null;
     }
-    return { actorId: user.data.user.id, connections: await loadFriendships(client) };
+    return { actorId: user.id, connections: await loadFriendships(client) };
   }, [router]);
 
   useEffect(() => {
