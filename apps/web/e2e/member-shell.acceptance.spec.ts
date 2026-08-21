@@ -36,7 +36,7 @@ test.describe("authenticated member shell acceptance", () => {
   test.describe.configure({ retries: 0 });
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
-  test("profile hero, identity, friends and chat stay stable across production interactions", async ({ page }) => {
+  test("profile opens floating friends and chat without changing the current route", async ({ page }) => {
     test.setTimeout(120_000);
     await login(page);
 
@@ -48,26 +48,24 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(nameplate).toContainText("UID 33333");
     await expect(actions.getByRole("link", { name: "编辑资料" })).toHaveAttribute("href", "/member/profile");
-    await expect(actions.getByRole("link", { name: "我的好友" })).toHaveAttribute("href", "/friends");
+    await expect(actions.getByRole("button", { name: "我的好友" })).toBeVisible();
     await expect(actions.getByRole("link", { name: "交易工作台" })).toHaveAttribute("href", "/workbench");
     await expect(actions.getByRole("link", { name: "积分商城" })).toHaveCount(0);
 
-    const friendsResponsePromise = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/member/friends");
-    await actions.getByRole("link", { name: "我的好友" }).click();
-    await expect(page).toHaveURL(/\/friends$/);
-    await expect(page.getByRole("heading", { level: 1, name: "好友", exact: true })).toBeVisible({ timeout: 10_000 });
+    const friends = page.locator('[data-floating-window="friends"]');
+    if (await friends.isVisible()) await friends.getByRole("button", { name: "关闭" }).click();
+    await expect(friends).toHaveCount(0);
+    const profileUrl = page.url();
+    const friendsResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/member/friends" && url.searchParams.get("desktop") === "1";
+    });
+    await actions.getByRole("button", { name: "我的好友" }).click();
+    await expect(page).toHaveURL(profileUrl);
+    await expect(friends).toBeVisible({ timeout: 10_000 });
     const friendsResponse = await friendsResponsePromise;
-    expect(friendsResponse.status(), `Friendship API failed with ${friendsResponse.status()}: ${await friendsResponse.text()}`).toBe(200);
-    const directory = page.locator("[data-friends-directory]");
-    await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
-    expect(Number(await directory.getAttribute("data-friend-count")), "Acceptance user should retain real friendship rows.").toBeGreaterThan(0);
-    await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
-    await page.reload();
-    await expect(page).toHaveURL(/\/friends$/);
-    await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
-    expect(Number(await directory.getAttribute("data-friend-count")), "Friendship rows should survive a direct reload.").toBeGreaterThan(0);
-    await page.goto("/member/33333");
-    await expect(hero).toBeVisible();
+    expect(friendsResponse.status(), `Floating friendship API failed with ${friendsResponse.status()}: ${await friendsResponse.text()}`).toBe(200);
+    await expect(friends.getByRole("link", { name: "完整管理" })).toHaveAttribute("href", "/friends");
 
     const desktopGeometry = await page.evaluate(() => {
       const coverBox = document.querySelector<HTMLElement>("[data-profile-cover]")!.getBoundingClientRect();
@@ -105,7 +103,6 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(navigation.getByRole("link", { name: "积分商城" })).toHaveAttribute("href", "/rewards");
     await expect(navigation.getByRole("link", { name: "工作台" })).toHaveCount(0);
 
-    const friends = page.locator('[data-floating-window="friends"]');
     const friendsHandle = page.locator('[data-drag-handle="friends"]');
     await expect(friends).toBeVisible({ timeout: 20_000 });
     await expectReleased(friends, friendsHandle, page);
@@ -124,15 +121,17 @@ test.describe("authenticated member shell acceptance", () => {
     expect(Math.abs(afterBlurMove!.x - afterBlur!.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(afterBlurMove!.y - afterBlur!.y)).toBeLessThanOrEqual(1);
 
-    const friendButton = friends.locator("[data-friend-row] button[aria-label$='聊天']").first();
+    const friendButton = friends.locator("[data-friend-row]").first();
     const conversation = friends.locator("[data-conversation-row]").first();
     expect(await friendButton.count() + await conversation.count(), "Acceptance user needs a real friend or recent conversation for chat drag coverage.").toBeGreaterThan(0);
+    const chatRoute = page.url();
     if (await friendButton.count()) await friendButton.click();
     else await conversation.click();
 
     const chat = page.locator('[data-floating-window="chat"]').first();
     const chatHandle = chat.locator('[data-drag-handle="chat"]');
     await expect(chat).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(chatRoute);
     await expectReleased(chat, chatHandle, page);
 
     for (const viewport of [
@@ -161,4 +160,45 @@ test.describe("authenticated member shell acceptance", () => {
       }
     }
   });
+
+  test("complete friend management keeps production auth across reload and a new tab", async ({ page, context }) => {
+    test.setTimeout(120_000);
+    await login(page);
+
+    const waitForDirectoryApi = (target: Page) => target.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/member/friends" && !url.searchParams.has("desktop");
+    });
+    let responsePromise = waitForDirectoryApi(page);
+    await page.goto("/friends");
+    let response = await responsePromise;
+    expect(response.status(), `Friendship API failed with ${response.status()}: ${await response.text()}`).toBe(200);
+    const directory = page.locator("[data-friends-directory]");
+    await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
+    expect(Number(await directory.getAttribute("data-friend-count")), "Acceptance user should retain real friendship rows.").toBeGreaterThan(0);
+    await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
+
+    responsePromise = waitForDirectoryApi(page);
+    await page.reload();
+    response = await responsePromise;
+    expect(response.status()).toBe(200);
+    await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
+    expect(Number(await directory.getAttribute("data-friend-count"))).toBeGreaterThan(0);
+
+    const secondPage = await context.newPage();
+    const secondResponsePromise = waitForDirectoryApi(secondPage);
+    await secondPage.goto("/friends");
+    const secondResponse = await secondResponsePromise;
+    expect(secondResponse.status()).toBe(200);
+    const secondDirectory = secondPage.locator("[data-friends-directory]");
+    await expect(secondDirectory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
+    expect(Number(await secondDirectory.getAttribute("data-friend-count"))).toBeGreaterThan(0);
+  });
+});
+
+test("logged-out complete friend management redirects to login instead of an error boundary", async ({ page }) => {
+  await page.context().clearCookies();
+  await page.goto("/friends");
+  await expect(page).toHaveURL(/\/login\?next=%2Ffriends$/);
+  await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
 });

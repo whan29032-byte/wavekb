@@ -40,7 +40,7 @@ test("root-mounted messenger preserves real-data friend and independent chat sta
     read("apps/web/src/components/member-profile-actions.tsx"),
   ]);
   assert.match(layout, /<SocialDesktop/);
-  for (const contract of ["list_my_friendships", "list_my_conversations_v2", "list_my_mentor_access", "list_my_mentor_students", "list_my_mentor_payment_claims", "respond_friend_request", "send_direct_message", "mark_conversation_read_v1", "wavekb-member-presence"]) assert.match(desktop, new RegExp(contract));
+  for (const contract of ["readFriends", "runFriendAction", "list_my_mentor_access", "list_my_mentor_students", "list_my_mentor_payment_claims", "send_direct_message", "mark_conversation_read_v1", "wavekb-member-presence"]) assert.match(desktop, new RegExp(contract));
   assert.match(desktop, /搜索好友或 UID/);
   assert.match(desktop, /clampPanelCoordinates/);
   assert.match(desktop, /paste/);
@@ -54,6 +54,8 @@ test("root-mounted messenger preserves real-data friend and independent chat sta
   assert.match(css, /resize:both/);
   assert.match(css, /data-autohidden/);
   assert.match(profileActions, /wavekb:open-chat/);
+  assert.match(profileActions, /wavekb:open-friends/);
+  assert.match(desktop, /完整管理 →/);
 });
 
 test("public member profiles are anonymous-readable while social actions still require login", async () => {
@@ -92,11 +94,12 @@ test("friendship reader migration advances the production schema marker", async 
   assert.match(migration, /grant execute on function public\.wavekb_schema_version\(\) to anon, authenticated/);
 });
 
-test("friends navigation bypasses stale prefetch data and keeps private loading behind a protected API", async () => {
-  const [page, directory, route, loginRoute, accountNavigation, actions, acceptance] = await Promise.all([
+test("floating friends stay on the profile while complete management uses one protected server boundary", async () => {
+  const [page, directory, route, clientApi, loginRoute, accountNavigation, actions, acceptance] = await Promise.all([
     read("apps/web/src/app/friends/page.tsx"),
     read("apps/web/src/components/friend-directory.tsx"),
     read("apps/web/src/app/api/member/friends/route.ts"),
+    read("apps/web/src/lib/member/friends-api-client.ts"),
     read("apps/web/src/app/api/auth/login/route.ts"),
     read("apps/web/src/components/account-navigation.tsx"),
     read("apps/web/src/components/member-profile-actions.tsx"),
@@ -104,16 +107,22 @@ test("friends navigation bypasses stale prefetch data and keeps private loading 
   ]);
   assert.doesNotMatch(page, /requireActiveMember|listFriendships/);
   assert.match(page, /<FriendDirectory/);
-  assert.match(directory, /fetch\("\/api\/member\/friends"/);
+  assert.match(directory, /readFriends\(\)/);
   assert.match(directory, /router\.replace\("\/login\?next=%2Ffriends"\)/);
+  assert.match(clientApi, /fetch\(endpoint/);
+  assert.match(clientApi, /method: "POST"/);
   assert.match(route, /client\.auth\.getUser\(\)/);
   assert.match(route, /loadFriendships\(client\)/);
-  assert.match(route, /console\.error\("\[friends\.read\]"/);
+  for (const rpc of ["send_friend_request", "respond_friend_request", "open_direct_conversation", "search_profile_by_uid"]) assert.match(route, new RegExp(rpc));
+  for (const field of ["route", "rpc", "status", "code", "message", "details", "hint", "authCookieCount"]) assert.match(route, new RegExp(field));
   assert.match(loginRoute, /response\.cookies\.set/);
   assert.match(loginRoute, /return response/);
   assert.match(accountNavigation, /client\.auth\.getSession\(\)/);
-  assert.match(actions, /href="\/friends" prefetch=\{false\}/);
+  assert.match(actions, /wavekb:open-friends/);
+  assert.doesNotMatch(actions.slice(actions.indexOf("if (actorId === profileId)"), actions.indexOf("async function toggleFollow")), /href="\/friends"/);
   assert.match(acceptance, /configure\(\{ retries: 0 \}\)/);
+  assert.match(acceptance, /profileUrl/);
+  assert.match(acceptance, /完整管理/);
   assert.match(acceptance, /data-load-state", "ready"/);
   assert.match(acceptance, /page\.reload\(\)/);
   assert.match(acceptance, /data-friend-count/);

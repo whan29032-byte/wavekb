@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ChatCircleDots, Check, MagnifyingGlass, UserPlus, X } from "@phosphor-icons/react";
 import type { FriendshipConnection, MemberProfile } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
+import { readFriends, runFriendAction } from "@/lib/member/friends-api-client";
 import { createClient } from "@/lib/supabase/client";
 
 function messageFor(error: unknown): string {
@@ -29,16 +30,17 @@ export function FriendDirectory() {
   const [onlineIds, setOnlineIds] = useState<Set<string>>(() => new Set());
 
   const readConnections = useCallback(async () => {
-    const response = await fetch("/api/member/friends", { cache: "no-store", credentials: "same-origin" });
-    if (response.status === 401) {
-      router.replace("/login?next=%2Ffriends");
-      return null;
+    try {
+      const payload = await readFriends();
+      if (!payload.actorId || !Array.isArray(payload.connections)) throw new Error("friendships_unavailable");
+      return { actorId: payload.actorId, connections: payload.connections };
+    } catch (error) {
+      if (error instanceof Error && "status" in error && (error as Error & { status?: number }).status === 401) {
+        router.replace("/login?next=%2Ffriends");
+        return null;
+      }
+      throw error;
     }
-    const payload = await response.json().catch(() => null) as { actorId?: string; connections?: FriendshipConnection[] } | null;
-    if (!response.ok || !payload?.actorId || !Array.isArray(payload.connections)) {
-      throw new Error("friendships_unavailable");
-    }
-    return { actorId: payload.actorId, connections: payload.connections };
   }, [router]);
 
   useEffect(() => {
@@ -106,9 +108,8 @@ export function FriendDirectory() {
     setPending(true);
     setMessage("");
     try {
-      const result = await createClient().rpc("search_profile_by_uid", { p_uid: Number(query.trim()) });
-      if (result.error) throw result.error;
-      const profile = (Array.isArray(result.data) ? result.data[0] : result.data) as MemberProfile | undefined;
+      const result = await runFriendAction({ action: "search", uid: Number(query.trim()) });
+      const profile = result.profile ?? undefined;
       setSearchResult(profile ?? null);
       if (!profile) setMessage("没有找到该 UID。 ");
     } catch (error) {
@@ -127,10 +128,12 @@ export function FriendDirectory() {
     setPending(true);
     setMessage("");
     try {
-      const result = await createClient().rpc("send_friend_request", { p_target: profile.id });
-      if (result.error) throw result.error;
+      const result = await runFriendAction({ action: "request", targetId: profile.id });
       setMessage("好友请求已发送。 ");
-      await refreshConnections();
+      if (result.connections) {
+        setConnections(result.connections);
+        setLoadState("ready");
+      } else await refreshConnections();
     } catch (error) {
       setMessage(messageFor(error));
     } finally {
@@ -142,11 +145,10 @@ export function FriendDirectory() {
     setPending(true);
     setMessage("");
     try {
-      const result = await createClient().rpc("respond_friend_request", { p_friendship: item.friendship_id, p_accept: accept });
-      if (result.error) throw result.error;
-      setConnections((current) => current.map((connection) => connection.friendship_id === item.friendship_id ? { ...connection, status: accept ? "accepted" : "declined" } : connection));
+      const result = await runFriendAction({ action: "respond", friendshipId: item.friendship_id, accept });
+      if (result.connections) setConnections(result.connections);
       setMessage(accept ? "好友请求已接受。" : "好友请求已拒绝。 ");
-      await refreshConnections();
+      if (!result.connections) await refreshConnections();
     } catch (error) {
       setMessage(messageFor(error));
     } finally {
@@ -158,9 +160,8 @@ export function FriendDirectory() {
     setPending(true);
     setMessage("");
     try {
-      const result = await createClient().rpc("open_direct_conversation", { p_target: item.other_id });
-      if (result.error) throw result.error;
-      window.dispatchEvent(new CustomEvent("wavekb:open-chat", { detail: { conversation: { conversation_id: String(result.data), other_id: item.other_id, public_uid: item.public_uid ?? null, display_name: item.display_name || `UID ${item.public_uid || ""}`, avatar_url: item.avatar_url ?? null, display_title: item.display_title || "", nameplate_style: item.nameplate_style || "classic", last_message: null, last_message_at: null, unread_count: 0 } } }));
+      const result = await runFriendAction({ action: "conversation", targetId: item.other_id });
+      window.dispatchEvent(new CustomEvent("wavekb:open-chat", { detail: { conversation: { conversation_id: String(result.conversationId), other_id: item.other_id, public_uid: item.public_uid ?? null, display_name: item.display_name || `UID ${item.public_uid || ""}`, avatar_url: item.avatar_url ?? null, display_title: item.display_title || "", nameplate_style: item.nameplate_style || "classic", last_message: null, last_message_at: null, unread_count: 0 } } }));
       setPending(false);
     } catch (error) {
       setMessage(messageFor(error));

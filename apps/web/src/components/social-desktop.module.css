@@ -15,7 +15,7 @@
 .windowControls { display:flex; margin-left:auto; }
 .windowControls button,.composerTools button { display:grid; size:2rem; place-items:center; border-radius:.35rem; color:var(--muted-foreground); }
 .windowControls button:hover,.composerTools button:hover { background:var(--muted); color:var(--foreground); }
-.windowControls svg,.panelTabs svg,.friendRow>button svg { width:1rem; height:1rem; }
+.windowControls svg,.panelTabs svg,.friendAction svg { width:1rem; height:1rem; }
 .panelTabs { display:grid; grid-template-columns:repeat(3,1fr); border-bottom:1px solid var(--border); background:var(--sidebar); padding:.2rem; }
 .panelTabs button { position:relative; display:flex; min-height:38px; align-items:center; justify-content:center; gap:.25rem; border-radius:.35rem; color:var(--muted-foreground); font-size:.7rem; }
 .panelTabs button[data-active] { background:var(--primary-selected); color:var(--primary); font-weight:700; }
@@ -28,7 +28,7 @@
 .friendRow>div,.requestRow>span,.conversationRow>span,.notificationRow>span,.searchResult>span { display:grid; min-width:0; gap:.08rem; }
 .friendRow strong,.requestRow strong,.conversationRow strong,.notificationRow strong,.searchResult strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.73rem; }
 .friendRow div>span,.requestRow small,.conversationRow small,.notificationRow small { overflow:hidden; color:var(--muted-foreground); font-size:.64rem; text-overflow:ellipsis; white-space:nowrap; }
-.friendRow>button { display:grid; size:2rem; place-items:center; border-radius:.4rem; color:var(--primary); }
+.friendAction { display:grid; size:2rem; place-items:center; border-radius:.4rem; color:var(--primary); }
 .presence { position:absolute; left:2rem; bottom:.55rem; z-index:2; size:.55rem; border:2px solid var(--surface); border-radius:50%; background:#929dac; }
 .presence[data-online] { background:#24a866; }
 .conversationRow { width:100%; grid-template-columns:auto minmax(0,1fr) auto auto; }
@@ -55,6 +55,8 @@
 .empty { padding:1rem; color:var(--muted-foreground); font-size:.7rem; text-align:center; }
 .error { margin:.4rem .55rem; border-radius:.4rem; background:color-mix(in srgb,var(--destructive) 10%,transparent); padding:.4rem .5rem; color:var(--destructive); font-size:.66rem; }
 .notificationRow { width:100%; grid-template-columns:auto minmax(0,1fr) auto; }
+.fullManagement { position:sticky; bottom:0; display:flex; min-height:38px; align-items:center; justify-content:flex-end; border-top:1px solid var(--border); background:color-mix(in srgb,var(--surface-raised) 94%,transparent); padding:.4rem .7rem; color:var(--primary); font-size:.7rem; font-weight:700; backdrop-filter:blur(10px); }
+.fullManagement:hover { text-decoration:underline; }
 
 .chatWindow { position:fixed; display:grid; width:min(440px,calc(100vw - 24px)); min-width:320px; height:min(570px,calc(100dvh - 92px)); min-height:340px; grid-template-rows:auto 1fr auto; overflow:hidden; resize:both; border:1px solid var(--border); border-radius:12px; background:var(--surface-raised); box-shadow:var(--shadow-floating); }
 .chatWindow[data-minimized] { width:240px; min-width:220px; height:48px!important; min-height:48px; resize:none; }

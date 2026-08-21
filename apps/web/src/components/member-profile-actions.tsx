@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChatCircleDots, Notebook, PencilSimple, UserPlus, UsersThree } from "@phosphor-icons/react";
 import type { FriendshipConnection } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
+import { runFriendAction } from "@/lib/member/friends-api-client";
 import { createClient } from "@/lib/supabase/client";
 
 type Props = {
@@ -43,7 +44,7 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
     return (
       <div className="grid w-full grid-cols-1 gap-2 min-[28rem]:grid-cols-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
         <Button asChild size="small" className="min-h-11 w-full sm:w-auto"><Link href="/member/profile"><PencilSimple aria-hidden size={16} />编辑资料</Link></Button>
-        <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/friends" prefetch={false}><UsersThree aria-hidden size={16} />我的好友</Link></Button>
+        <Button type="button" variant="secondary" size="small" className="min-h-11 w-full sm:w-auto" onClick={() => window.dispatchEvent(new CustomEvent("wavekb:open-friends"))}><UsersThree aria-hidden size={16} />我的好友</Button>
         <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/workbench"><Notebook aria-hidden size={16} />交易工作台</Link></Button>
       </div>
     );
@@ -74,13 +75,9 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
     setPending("friend");
     setMessage("");
     try {
-      const client = createClient();
-      const result = await client.rpc("send_friend_request", { p_target: profileId });
-      if (result.error) throw result.error;
-      const connectionsResult = await client.rpc("list_my_friendships");
-      if (connectionsResult.error) throw connectionsResult.error;
-      const current = ((connectionsResult.data ?? []) as FriendshipConnection[]).find((item) => item.other_id === profileId);
-      setConnection(current ?? { friendship_id: String(result.data), status: "pending", direction: "outgoing", other_id: profileId });
+      const result = await runFriendAction({ action: "request", targetId: profileId });
+      const current = result.connections?.find((item) => item.other_id === profileId);
+      setConnection(current ?? { friendship_id: String(result.friendshipId), status: "pending", direction: "outgoing", other_id: profileId });
       setMessage(current?.status === "accepted" ? "你们已成为好友。" : "好友请求已发送，等待对方接受。 ");
     } catch (error) {
       setMessage(socialError(error));
@@ -93,9 +90,8 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
     setPending("friend");
     setMessage("");
     try {
-      const result = await createClient().rpc("open_direct_conversation", { p_target: profileId });
-      if (result.error) throw result.error;
-      window.dispatchEvent(new CustomEvent("wavekb:open-chat", { detail: { conversation: { conversation_id: String(result.data), other_id: profileId, public_uid: profile.public_uid, display_name: profile.display_name, avatar_url: profile.avatar_url, display_title: profile.display_title, nameplate_style: profile.nameplate_style, last_message: null, last_message_at: null, unread_count: 0 } } }));
+      const result = await runFriendAction({ action: "conversation", targetId: profileId });
+      window.dispatchEvent(new CustomEvent("wavekb:open-chat", { detail: { conversation: { conversation_id: String(result.conversationId), other_id: profileId, public_uid: profile.public_uid, display_name: profile.display_name, avatar_url: profile.avatar_url, display_title: profile.display_title, nameplate_style: profile.nameplate_style, last_message: null, last_message_at: null, unread_count: 0 } } }));
       setPending(null);
     } catch (error) {
       setMessage(socialError(error));
