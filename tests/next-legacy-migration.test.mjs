@@ -32,9 +32,10 @@ test("knowledge images are locally published, audited and opened in an internal 
 });
 
 test("root-mounted messenger preserves real-data friend and independent chat state", async () => {
-  const [layout, desktop, css, profileActions] = await Promise.all([
+  const [layout, desktop, drag, css, profileActions] = await Promise.all([
     read("apps/web/src/app/layout.tsx"),
     read("apps/web/src/components/social-desktop.tsx"),
+    read("apps/web/src/hooks/use-floating-window-drag.ts"),
     read("apps/web/src/components/social-desktop.module.css"),
     read("apps/web/src/components/member-profile-actions.tsx"),
   ]);
@@ -45,6 +46,10 @@ test("root-mounted messenger preserves real-data friend and independent chat sta
   assert.match(desktop, /paste/);
   assert.match(desktop, /drop/);
   assert.match(desktop, /staged/);
+  assert.match(desktop, /useFloatingWindowDrag/);
+  for (const lifecycle of ["pointerup", "pointercancel", "lostpointercapture", "blur", "visibilitychange"]) assert.match(drag.toLowerCase(), new RegExp(lifecycle));
+  assert.match(drag, /setPointerCapture/);
+  assert.match(drag, /isInteractiveDragTarget/);
   assert.match(css, /width:304px/);
   assert.match(css, /resize:both/);
   assert.match(css, /data-autohidden/);
@@ -84,7 +89,24 @@ test("unified nameplates and semantic theme tokens cover migrated Next surfaces"
   assert.match(plate, /identity-drive-wave/);
   for (const token of ["--background", "--surface-raised", "--sidebar", "--popover", "--foreground", "--muted-foreground", "--border", "--input", "--primary-hover", "--primary-selected", "--destructive", "--shadow-floating"]) assert.match(css, new RegExp(token));
   assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /identity-border-flow/);
+  assert.match(css, /identity-shine/);
+  assert.match(css, /\.identity-avatar-frame\)\[data-nameplate=/);
   assert.match(layout, /wavekb:appearance:v1/);
+});
+
+test("the production member page uses the compact cross-cover profile hero", async () => {
+  const [page, css, actions] = await Promise.all([
+    read("apps/web/src/app/member/[uid]/page.tsx"),
+    read("apps/web/src/app/globals.css"),
+    read("apps/web/src/components/member-profile-actions.tsx"),
+  ]);
+  for (const marker of ["data-profile-hero", "data-profile-cover", "data-profile-avatar", "data-profile-identity", "data-profile-actions"]) assert.match(page, new RegExp(marker));
+  assert.match(css, /\.profile-hero-cover \{ height: 12\.5rem/);
+  assert.match(css, /\.identity-avatar-frame\[data-size="large"\] \{ --avatar-size: 7rem/);
+  const ownActions = actions.slice(actions.indexOf("if (actorId === profileId)"), actions.indexOf("async function toggleFollow"));
+  assert.match(ownActions, /编辑资料[\s\S]*?我的好友[\s\S]*?交易工作台/);
+  assert.doesNotMatch(ownActions, /积分商城|href="\/rewards"/);
 });
 
 test("research posts use reusable media, lightbox and immutable server-timed timeline infrastructure", async () => {

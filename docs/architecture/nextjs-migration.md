@@ -2,7 +2,7 @@
 
 ## 目标
 
-在不停止现有网站、不复制生产数据的前提下，将浏览器全局脚本逐步迁移到可测试的 Next.js App Router 架构。旧静态站仍由当前 GitHub Actions 工作流发布，直到新应用通过功能对照和生产验收。
+在不停止现有网站、不复制生产数据的前提下，将浏览器全局脚本迁移到可测试的 Next.js App Router 架构。生产切流已经完成：Nginx 的 `/` 与 `/v1/` 分别转发到 Next.js 和网关；旧静态站冻结保留，只作为可恢复发布物和视觉/功能对照基准。
 
 ## 工作区
 
@@ -12,7 +12,7 @@ ai-gateway              现有 UID 登录、管理与 AI 网关
 packages/domain         板块、帖子、验证与领域类型
 packages/knowledge      从旧 HTML 抽出的 161 个知识条目
 packages/ui             定制 shadcn/ui 基础组件
-community               仍在线的旧社区实现
+community               冻结保留的旧社区实现（回滚与对照）
 assets                  原书图片与知识库资源
 supabase                数据库迁移和 Edge Functions
 ```
@@ -40,7 +40,7 @@ supabase                数据库迁移和 Edge Functions
 /community/[board]/new         登录后发布
 /community/post/[id]           帖子详情
 /community/post/[id]/edit      作者编辑
-/member/[uid]                  登录后公开主页与社交动作
+/member/[uid]                  匿名可读公开主页；登录后开放社交动作
 /member/profile                资料、头像、封面与铭牌管理
 /friends                       UID 查找与好友请求处理
 /messages                      私聊会话列表
@@ -66,7 +66,7 @@ supabase                数据库迁移和 Edge Functions
 
 逐项功能状态与生产验收证据见 [nextjs-feature-parity.md](nextjs-feature-parity.md)。
 
-现有 `/#page=...`、`/#board=...` 和 `/#post=...` 路由在切流前保持不变。最终切流时由 Nginx 添加显式的旧 Hash 入口提示和可逆回退，不会静默改变已有链接。
+现有 `/#page=...`、`/#board=...` 和 `/#post=...` 入口只属于冻结的旧静态实现。正式域名已使用 Next 路由；旧静态目录不再承接新功能，也不会在 Next 页面中被当作生产入口。
 
 知识数据由 `pnpm knowledge:extract` 从当前 `index.html` 的 `elliott-kb-data` 生成。提取脚本校验唯一 ID，并移除构建机绝对路径。Next 在构建期预生成全部 161 个详情页，原书图片仍由现有静态资源目录提供。
 
@@ -92,14 +92,14 @@ supabase                数据库迁移和 Edge Functions
 - 组件库代码由项目持有，Storybook 对共享组件执行可访问性检查。
 - 表单具备明确标签、帮助文本、字段错误、加载状态和失败恢复提示。
 
-## 部署阶段
+## 当前部署状态
 
-1. 旁路构建：Actions 验证 Next、Storybook 和 Playwright，但生产仍只部署旧静态站。
-2. 预发布：服务器新增 `wavekb-next` systemd 服务，只通过受保护的预览域访问。
-3. 功能对照：逐项验证知识库、账户、社区、会员、导师、好友、聊天、工作台和后台。
-4. 发帖验收：使用专用账号在预发布环境完成文本、多图、外链、编辑、删除、权限和失败清理测试。
-5. 灰度切流：Nginx 只将已通过的路径转发给 Next，未迁移路径继续由旧站处理。
-6. 全量切流：保留静态站备份和一条命令回滚，观察稳定后再归档旧脚本。
+1. `wavekb-next-preview.service` 是历史沿用的服务名，实际承载正式 Next.js 生产流量，监听 `127.0.0.1:3100`。
+2. `elliott-wave-gateway.service` 承载 `/v1/` 与认证/管理网关，监听 `127.0.0.1:8787`。
+3. Nginx `location /` 全量转发 Next.js；没有启用中的 WaveKB 静态 `root/index` 入口。
+4. 推送 `main` 后先完成测试、类型检查、Lint、生产构建和静态资源检查，再备份上一版本、原子切换软链接并执行生产 HTTPS 验收。
+5. 正式验收包含桌面/移动公开路由、真实账号个人主页与悬浮好友/聊天拖拽，以及完整发帖生命周期；失败自动恢复 Next 与网关上一版本。
+6. 旧静态目录继续冻结保留，在回滚观察期结束前不删除用户数据、上传文件或旧发布物。
 
 ## 完成定义
 

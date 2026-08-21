@@ -3,10 +3,11 @@
 /* eslint-disable @next/next/no-img-element -- Avatars and stickers are user-managed Supabase objects. */
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import { Bell, ChatCircleDots, Check, DotsThree, MagnifyingGlass, Minus, PaperPlaneRight, PushPin, PushPinSlash, Smiley, SpeakerHigh, SpeakerSlash, UserPlus, UsersThree, X } from "@phosphor-icons/react";
 import { formatMentorPrice, type ChatSticker, type DirectConversation, type DirectMessage, type FriendshipConnection, type MemberProfile, type MentorAccess, type MentorPaymentClaim, type MentorStudent, type PublicProfile } from "@wavekb/domain";
 import { AvatarFrame, IdentityName, Nameplate } from "@/components/nameplate";
+import { useFloatingWindowDrag } from "@/hooks/use-floating-window-drag";
 import { publicChatStickerUrl } from "@/lib/env";
 import { customStickerToken, uploadChatSticker } from "@/lib/member/chat-stickers";
 import { clampPanelCoordinates } from "@/lib/member/social-panel-state";
@@ -77,7 +78,8 @@ function FloatingChat({ actorId, chat, sound, onClose, onFocus, onPatch, onRead 
   const end = useRef<HTMLDivElement>(null);
   const windowRef = useRef<HTMLElement>(null);
   const [position, setPosition] = useState(() => ({ x: Math.max(12, window.innerWidth - 470 - (chat.z % 3) * 26), y: 92 + (chat.z % 3) * 26 }));
-  const drag = useRef<{ id: number; x: number; y: number; left: number; top: number } | null>(null);
+  const commitPosition = useCallback((next: { x: number; y: number }) => setPosition(next), []);
+  const windowDrag = useFloatingWindowDrag({ windowRef, disabled: Boolean(chat.maximized), onCommit: commitPosition });
 
   async function refresh(markRead = true) {
     const client = createClient();
@@ -147,8 +149,8 @@ function FloatingChat({ actorId, chat, sound, onClose, onFocus, onPatch, onRead 
 
   const windowZ = chat.pinned ? 100 : Math.min(chat.z, 89);
   const style = chat.maximized ? { inset: "4.5rem .75rem .75rem .75rem", zIndex: windowZ } : { left: position.x, top: position.y, zIndex: windowZ };
-  return <section ref={windowRef} className={styles.chatWindow} data-minimized={chat.minimized || undefined} data-maximized={chat.maximized || undefined} style={style} onPointerDown={onFocus} aria-label={`与${chat.display_name}聊天`}>
-    <header className={styles.windowTitle} onDoubleClick={() => onPatch({ maximized: !chat.maximized, minimized: false })} onPointerDown={(event) => { if ((event.target as HTMLElement).closest("button,a")) return; const element = windowRef.current; if (!element || chat.maximized) return; element.setPointerCapture(event.pointerId); const box = element.getBoundingClientRect(); drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, left: box.left, top: box.top }; }} onPointerMove={(event) => { const state = drag.current; const element = windowRef.current; if (!state || !element || state.id !== event.pointerId) return; const next = { x: Math.max(0, Math.min(window.innerWidth - 220, state.left + event.clientX - state.x)), y: Math.max(64, Math.min(window.innerHeight - 42, state.top + event.clientY - state.y)) }; element.style.left = `${next.x}px`; element.style.top = `${next.y}px`; }} onPointerUp={(event) => { const element = windowRef.current; if (drag.current && element) { const box = element.getBoundingClientRect(); setPosition({ x: box.left, y: box.top }); } drag.current = null; event.currentTarget.releasePointerCapture?.(event.pointerId); }}>
+  return <section ref={windowRef} className={styles.chatWindow} data-floating-window="chat" data-minimized={chat.minimized || undefined} data-maximized={chat.maximized || undefined} data-window-dragging={windowDrag.isDragging || undefined} style={style} onPointerDown={onFocus} aria-label={`与${chat.display_name}聊天`}>
+    <header className={styles.windowTitle} data-drag-handle="chat" onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest("button,a,input,textarea,select,[role='button'],[contenteditable='true']")) onPatch({ maximized: !chat.maximized, minimized: false }); }} {...windowDrag.handleProps}>
       <AvatarFrame profile={{ display_name: chat.display_name, avatar_url: chat.avatar_url, nameplate_style: chat.nameplate_style }} size="small" />
       <div className={styles.titleCopy}><IdentityName profile={chat} as="strong" /><Nameplate uid={chat.public_uid} style={chat.nameplate_style} compact /></div>
       <div className={styles.windowControls}><button type="button" onClick={() => onPatch({ pinned: !chat.pinned })} aria-label={chat.pinned ? "取消置顶" : "置顶"}>{chat.pinned ? <PushPinSlash /> : <PushPin />}</button><button type="button" onClick={() => onPatch({ minimized: !chat.minimized })} aria-label="最小化"><Minus /></button><button type="button" onClick={() => onPatch({ maximized: !chat.maximized, minimized: false })} aria-label={chat.maximized ? "还原" : "最大化"}><DotsThree /></button><button type="button" onClick={onClose} aria-label="关闭"><X /></button></div>
@@ -190,8 +192,20 @@ export function SocialDesktop() {
     } catch { return fallback; }
   });
   const panelRef = useRef<HTMLElement>(null);
-  const drag = useRef<{ id: number; x: number; y: number; left: number; top: number } | null>(null);
   const z = useRef(50);
+  const commitPanelPosition = useCallback((position: { x: number; y: number }, size: { width: number; height: number }) => {
+    const distances = {
+      left: position.x,
+      right: window.innerWidth - position.x - size.width,
+      top: position.y - 70,
+      bottom: window.innerHeight - position.y - size.height,
+    };
+    const edge = (Object.entries(distances).sort((a, b) => a[1] - b[1])[0]?.[0] || "right") as PanelState["edge"];
+    const x = edge === "left" ? 8 : edge === "right" ? Math.max(8, window.innerWidth - size.width - 8) : position.x;
+    const y = edge === "top" ? 70 : edge === "bottom" ? Math.max(70, window.innerHeight - size.height - 8) : position.y;
+    setPanel((value) => ({ ...value, ...clampPanelCoordinates({ x, y }, { width: window.innerWidth, height: window.innerHeight }, size), edge }));
+  }, []);
+  const panelDrag = useFloatingWindowDrag({ windowRef: panelRef, onCommit: commitPanelPosition });
 
   async function load() {
     const client = createClient();
@@ -227,18 +241,6 @@ export function SocialDesktop() {
 
   useEffect(() => { if (actor) localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized, pinned: item.pinned })) })); }, [actor, panel, chats]);
   useEffect(() => {
-    const clampToViewport = () => {
-      const box = panelRef.current?.getBoundingClientRect();
-      setPanel((value) => {
-        const next = clampPanelCoordinates(value, { width: window.innerWidth, height: window.innerHeight }, { width: box?.width || 304, height: box?.height || (value.minimized ? 48 : 520) });
-        return next.x === value.x && next.y === value.y ? value : { ...value, ...next };
-      });
-    };
-    window.addEventListener("resize", clampToViewport);
-    window.addEventListener("orientationchange", clampToViewport);
-    return () => { window.removeEventListener("resize", clampToViewport); window.removeEventListener("orientationchange", clampToViewport); };
-  }, []);
-  useEffect(() => {
     if (!actor) return;
     const client = createClient();
     const channel = client.channel("wavekb-member-presence", { config: { presence: { key: actor.id } } });
@@ -254,10 +256,6 @@ export function SocialDesktop() {
   async function search(event: FormEvent) { event.preventDefault(); setMessage(""); if (!/^\d{5,6}$/.test(query)) { setMessage("请输入 5 至 6 位 UID。"); return; } const result = await createClient().rpc("search_profile_by_uid", { p_uid: Number(query) }); if (result.error) { setMessage(errorText(result.error)); return; } setSearchResult(((Array.isArray(result.data) ? result.data[0] : result.data) as MemberProfile | null) ?? null); }
   async function request(profile: MemberProfile) { const result = await createClient().rpc("send_friend_request", { p_target: profile.id }); if (result.error) setMessage(errorText(result.error)); else { tone(700, sound); setMessage("好友请求已发送。"); await load(); } }
   async function respond(item: FriendshipConnection, accept: boolean) { const result = await createClient().rpc("respond_friend_request", { p_friendship: item.friendship_id, p_accept: accept }); if (result.error) setMessage(errorText(result.error)); else { tone(accept ? 760 : 420, sound); await load(); } }
-  function panelPointerDown(event: ReactPointerEvent) { if ((event.target as HTMLElement).closest("button,a,input")) return; const element = panelRef.current; if (!element) return; const box = element.getBoundingClientRect(); element.setPointerCapture(event.pointerId); drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, left: box.left, top: box.top }; }
-  function panelPointerMove(event: ReactPointerEvent) { const state = drag.current; const element = panelRef.current; if (!state || !element || state.id !== event.pointerId) return; const next = { x: Math.max(0, Math.min(window.innerWidth - 42, state.left + event.clientX - state.x)), y: Math.max(64, Math.min(window.innerHeight - 42, state.top + event.clientY - state.y)) }; element.style.left = `${next.x}px`; element.style.top = `${next.y}px`; }
-  function panelPointerUp() { const element = panelRef.current; if (!drag.current || !element) return; drag.current = null; const box = element.getBoundingClientRect(); const distances = { left: box.left, right: innerWidth - box.right, top: box.top - 64, bottom: innerHeight - box.bottom }; const edge = (Object.entries(distances).sort((a,b) => a[1] - b[1])[0]?.[0] || "right") as PanelState["edge"]; const x = edge === "left" ? 8 : edge === "right" ? Math.max(8, innerWidth - box.width - 8) : Math.max(8, Math.min(innerWidth - box.width - 8, box.left)); const y = edge === "top" ? 70 : edge === "bottom" ? Math.max(70, innerHeight - box.height - 8) : Math.max(70, Math.min(innerHeight - box.height - 8, box.top)); setPanel((value) => ({ ...value, x, y, edge })); }
-
   if (!actor) return null;
   const friends = connections.filter((item) => item.status === "accepted");
   const requests = connections.filter((item) => item.status === "pending");
@@ -269,8 +267,8 @@ export function SocialDesktop() {
   const notificationTotal = unread + submittedClaims.length;
   return <>
     {!panel.open ? <button type="button" className={styles.launcher} onClick={() => setPanel((value) => ({ ...value, open: true }))} aria-label={`打开好友面板${notificationTotal ? `，${notificationTotal}条待处理通知` : ""}`}><UsersThree />{notificationTotal ? <span>{notificationTotal > 99 ? "99+" : notificationTotal}</span> : null}</button> : null}
-    {panel.open ? <section ref={panelRef} className={styles.friendPanel} aria-label="好友与聊天" data-minimized={panel.minimized || undefined} data-autohidden={autoHidden || undefined} data-edge={panel.edge} style={{ left: panel.x, top: panel.y }} onMouseEnter={() => setAutoHidden(false)} onMouseLeave={() => { if (!panel.pinned && !drag.current) setAutoHidden(true); }}>
-      <header className={styles.panelTitle} onPointerDown={panelPointerDown} onPointerMove={panelPointerMove} onPointerUp={panelPointerUp}>
+    {panel.open ? <section ref={panelRef} className={styles.friendPanel} aria-label="好友与聊天" data-floating-window="friends" data-minimized={panel.minimized || undefined} data-autohidden={autoHidden || undefined} data-edge={panel.edge} data-window-dragging={panelDrag.isDragging || undefined} style={{ left: panel.x, top: panel.y }} onMouseEnter={() => setAutoHidden(false)} onMouseLeave={() => { if (!panel.pinned && !panelDrag.isActive()) setAutoHidden(true); }}>
+      <header className={styles.panelTitle} data-drag-handle="friends" {...panelDrag.handleProps}>
         <AvatarFrame profile={actor} size="small" /><div className={styles.titleCopy}><IdentityName profile={actor} as="strong" /><span>{online.has(actor.id) ? "在线" : "已连接"}</span></div>
         <div className={styles.windowControls}><button type="button" onClick={() => { const next = !sound; setSound(next); localStorage.setItem(SOUND_KEY, next ? "on" : "off"); }} aria-label={sound ? "关闭提示音" : "开启提示音"}>{sound ? <SpeakerHigh /> : <SpeakerSlash />}</button><button type="button" onClick={() => setPanel((value) => ({ ...value, pinned: !value.pinned }))} aria-label={panel.pinned ? "取消固定" : "固定"}>{panel.pinned ? <PushPin /> : <PushPinSlash />}</button><button type="button" onClick={() => setPanel((value) => ({ ...value, minimized: !value.minimized }))} aria-label="最小化"><Minus /></button><button type="button" onClick={() => setPanel((value) => ({ ...value, open: false }))} aria-label="关闭"><X /></button></div>
       </header>
@@ -278,10 +276,10 @@ export function SocialDesktop() {
       <div className={styles.panelBody}>{tab === "friends" ? <>
         <label className={styles.contactSearch}><MagnifyingGlass aria-hidden /><span className="sr-only">搜索好友或 UID</span><input type="search" value={contactQuery} onChange={(event) => setContactQuery(event.target.value.slice(0, 80))} placeholder="搜索好友或 UID" aria-label="搜索好友或 UID" /></label>
         <div className={styles.groupHeading}><span>我的好友</span><span>{friends.filter((item) => online.has(item.other_id)).length}/{friends.length}</span></div>
-        <div className={styles.rows}>{visibleFriends.length ? visibleFriends.map((item) => <div key={item.friendship_id} className={styles.friendRow} onDoubleClick={() => void chatWith(item)}><span className={styles.presence} data-online={online.has(item.other_id) || undefined} /><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><AvatarFrame profile={{ display_name: item.display_name || "好友", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /></Link><div><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><IdentityName profile={{ display_name: item.display_name || `UID ${item.public_uid || ""}`, nameplate_style: item.nameplate_style }} as="strong" /></Link><span>{item.bio || (online.has(item.other_id) ? "在线" : "离线")}</span></div><button type="button" onClick={() => void chatWith(item)} aria-label={`与${item.display_name || "好友"}聊天`}><ChatCircleDots /></button></div>) : <p className={styles.empty}>{friends.length ? "没有匹配的好友。" : "还没有好友。"}</p>}</div>
+        <div className={styles.rows}>{visibleFriends.length ? visibleFriends.map((item) => <div key={item.friendship_id} className={styles.friendRow} data-friend-row onDoubleClick={() => void chatWith(item)}><span className={styles.presence} data-online={online.has(item.other_id) || undefined} /><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><AvatarFrame profile={{ display_name: item.display_name || "好友", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /></Link><div><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"}><IdentityName profile={{ display_name: item.display_name || `UID ${item.public_uid || ""}`, nameplate_style: item.nameplate_style }} as="strong" /></Link><span>{item.bio || (online.has(item.other_id) ? "在线" : "离线")}</span></div><button type="button" onClick={() => void chatWith(item)} aria-label={`与${item.display_name || "好友"}聊天`}><ChatCircleDots /></button></div>) : <p className={styles.empty}>{friends.length ? "没有匹配的好友。" : "还没有好友。"}</p>}</div>
         {teachers.length ? <><div className={styles.groupHeading}><span>我的老师</span><span>{teachers.length}</span></div><div className={styles.rows}>{teachers.map((item) => <Link key={item.thread_id} href={`/tutoring/${item.thread_id}`} className={styles.mentorRow}><AvatarFrame profile={{ display_name: item.mentor_name, avatar_url: item.mentor_avatar_url, nameplate_style: "classic" }} size="small" /><span><strong>{item.mentor_name}</strong><small>{item.status === "active" ? "辅导进行中" : "辅导权益已结束"}</small></span><ChatCircleDots /></Link>)}</div></> : null}
         {students.length ? <><div className={styles.groupHeading}><span>我的学生</span><span>{students.length}</span></div><div className={styles.rows}>{students.map((item) => <Link key={item.thread_id} href={`/tutoring/${item.thread_id}`} className={styles.mentorRow}><AvatarFrame profile={{ display_name: item.display_name, avatar_url: item.avatar_url, nameplate_style: item.nameplate_style }} size="small" /><span><IdentityName profile={item} as="strong" /><small>{item.last_message || "打开辅导会话"}</small></span><ChatCircleDots /></Link>)}</div></> : null}
-        <button className={styles.recentHeading} type="button" aria-expanded={recentOpen} onClick={() => setRecentOpen((value) => !value)}><span>最近会话</span><span>{conversations.length}</span></button>{recentOpen ? <div className={styles.rows}>{conversations.map((item) => <button type="button" className={styles.conversationRow} key={item.conversation_id} onClick={() => openChat(item)}><AvatarFrame profile={item} size="small" /><span><strong>{item.display_name}</strong><small>{item.last_message || "还没有消息"}</small></span><time>{formatTime(item.last_message_at)}</time>{Number(item.unread_count || 0) ? <b>{item.unread_count}</b> : null}</button>)}</div> : null}
+        <button className={styles.recentHeading} type="button" aria-expanded={recentOpen} onClick={() => setRecentOpen((value) => !value)}><span>最近会话</span><span>{conversations.length}</span></button>{recentOpen ? <div className={styles.rows}>{conversations.map((item) => <button type="button" className={styles.conversationRow} data-conversation-row key={item.conversation_id} onClick={() => openChat(item)}><AvatarFrame profile={item} size="small" /><span><strong>{item.display_name}</strong><small>{item.last_message || "还没有消息"}</small></span><time>{formatTime(item.last_message_at)}</time>{Number(item.unread_count || 0) ? <b>{item.unread_count}</b> : null}</button>)}</div> : null}
       </> : tab === "new" ? <><form className={styles.friendSearch} onSubmit={search}><input aria-label="搜索好友 UID" inputMode="numeric" placeholder="输入 5–6 位 UID" value={query} onChange={(event) => setQuery(event.target.value.replace(/\D/g, "").slice(0,6))} /><button type="submit" aria-label="搜索"><MagnifyingGlass /></button></form>{searchResult && searchResult.id !== actor.id ? <div className={styles.searchResult}><AvatarFrame profile={searchResult} size="small" /><span><IdentityName profile={searchResult} as="strong" /><Nameplate uid={searchResult.public_uid} style={searchResult.nameplate_style} compact /></span><button type="button" onClick={() => void request(searchResult)}><UserPlus />添加</button></div> : null}<div className={styles.rows}>{requests.length ? requests.map((item) => <div key={item.friendship_id} className={styles.requestRow}><AvatarFrame profile={{ display_name: item.display_name || "用户", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /><span><strong>{item.display_name}</strong><small>{item.direction === "incoming" ? "请求添加你为好友" : "等待对方接受"}</small></span>{item.direction === "incoming" ? <div><button type="button" onClick={() => void respond(item,true)} aria-label="接受"><Check /></button><button type="button" onClick={() => void respond(item,false)} aria-label="拒绝"><X /></button></div> : null}</div>) : <p className={styles.empty}>没有待处理请求。</p>}</div></> : <div className={styles.rows}>{unreadConversations.map((item) => <button type="button" className={styles.notificationRow} key={item.conversation_id} onClick={() => openChat(item)}><Bell /><span><strong>{item.display_name} 发来新消息</strong><small>{item.last_message}</small></span><b>{item.unread_count}</b></button>)}{submittedClaims.map((claim) => <Link href="/mentor/manage" className={styles.notificationRow} key={claim.claim_id}><Bell /><span><strong>{claim.display_name || "用户"} 已提交付款确认</strong><small>{claim.offer_name || "辅导服务"} · {formatMentorPrice(claim.amount_cents, claim.currency)}</small></span><b>待核对</b></Link>)}{notificationTotal ? null : <p className={styles.empty}>暂无新消息通知。</p>}</div>}{message ? <p className={styles.error} role="status">{message}</p> : null}</div></> : null}
     </section> : null}
     {chats.map((chat) => <FloatingChat key={chat.conversation_id} actorId={actor.id} chat={chat} sound={sound} onClose={() => setChats((current) => current.filter((item) => item.conversation_id !== chat.conversation_id))} onFocus={() => { z.current += 1; setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, z: z.current } : item)); }} onPatch={(value) => setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, ...value } : item))} onRead={() => { setConversations((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); }} />)}

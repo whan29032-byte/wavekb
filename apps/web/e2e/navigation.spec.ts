@@ -37,6 +37,18 @@ test("public member profiles are anonymous-readable and protect social actions",
   await page.goto("/member/33333");
   await expect(page).toHaveURL(/\/member\/33333$/);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.locator("[data-profile-hero]")).toBeVisible();
+  await expect(page.locator("[data-profile-identity] .identity-nameplate")).toContainText("UID 33333");
+  const profileGeometry = await page.evaluate(() => {
+    const cover = document.querySelector<HTMLElement>("[data-profile-cover]")!.getBoundingClientRect();
+    const avatar = document.querySelector<HTMLElement>("[data-profile-avatar] .identity-avatar-frame")!.getBoundingClientRect();
+    return { coverHeight: cover.height, coverBottom: cover.bottom, avatarTop: avatar.top, avatarBottom: avatar.bottom };
+  });
+  expect(profileGeometry.coverHeight).toBeGreaterThanOrEqual(180);
+  expect(profileGeometry.coverHeight).toBeLessThanOrEqual(220);
+  expect(profileGeometry.avatarTop).toBeLessThan(profileGeometry.coverBottom);
+  expect(profileGeometry.avatarBottom).toBeGreaterThan(profileGeometry.coverBottom);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   const follow = page.getByRole("link", { name: "关注", exact: true });
   await expect(follow).toHaveAttribute("href", "/login?next=%2Fmember%2F33333");
   await follow.click();

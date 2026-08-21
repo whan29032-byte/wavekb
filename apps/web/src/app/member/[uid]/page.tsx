@@ -38,25 +38,27 @@ export default async function MemberProfilePage({ params }: PageProps) {
   const personal = isSelf && actor ? await getMyPersonalSpaceSummary(actor.id) : null;
 
   return (
-    <main className="mx-auto grid max-w-5xl gap-6 px-4 py-10 md:px-6 md:py-14">
-      <section className="overflow-hidden rounded-xl border bg-surface">
-        <div className={`relative h-36 overflow-hidden md:h-48 ${coverClasses[profile.cover_style] || coverClasses["chart-dark"]}`} aria-hidden>
+    <main className="mx-auto grid max-w-5xl gap-6 px-4 py-8 md:px-6 md:py-12">
+      <section className="profile-hero" data-profile-hero>
+        <div className={`profile-hero-cover ${coverClasses[profile.cover_style] || coverClasses["chart-dark"]}`} data-profile-cover aria-hidden>
           {profile.cover_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={profile.cover_url} alt="" className="h-full w-full object-cover" />
           ) : null}
         </div>
-        <div className="grid gap-6 p-5 md:grid-cols-[1fr_auto] md:items-end md:p-8">
-          <div className="flex min-w-0 items-start gap-4">
-            <div className="grid shrink-0 justify-items-center gap-2"><AvatarFrame profile={profile} size="large" className="-mt-14 md:-mt-20" />{personal ? <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold text-primary">研究积分 {personal.points.toLocaleString("zh-CN")}</span> : null}</div>
-            <div className="grid min-w-0 gap-2">
+        <div className="profile-hero-body">
+          <div className="profile-hero-identity" data-profile-identity>
+            <div className="profile-hero-avatar-column" data-profile-avatar><AvatarFrame profile={profile} size="large" />{personal ? <span className="profile-hero-points">研究积分 {personal.points.toLocaleString("zh-CN")}</span> : null}</div>
+            <div className="profile-hero-copy">
               <IdentityTitle title={profile.display_title || "波浪研究者"} />
               <IdentityName profile={profile} as="h1" className="truncate text-2xl font-semibold tracking-[-0.025em] md:text-3xl" />
               <Nameplate uid={profile.public_uid} style={profile.nameplate_style} />
               <p className="identity-effect max-w-[62ch] text-sm leading-6 text-muted-foreground" data-nameplate={profile.nameplate_style}>{profile.bio || "这位研究者还没有填写个人签名。"}</p>
             </div>
           </div>
-          <MemberProfileActions actorId={actor?.id ?? null} profileId={profile.id} initialFollowing={social.following} initialConnection={social.connection} profile={profile} />
+          <div className="profile-hero-actions" data-profile-actions>
+            <MemberProfileActions actorId={actor?.id ?? null} profileId={profile.id} initialFollowing={social.following} initialConnection={social.connection} profile={profile} />
+          </div>
         </div>
       </section>
 

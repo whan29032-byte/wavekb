@@ -8,6 +8,7 @@
 .friendPanel[data-autohidden][data-edge="top"] { transform:translateY(calc(-100% + 18px)); opacity:.86; }
 .friendPanel[data-autohidden][data-edge="bottom"] { transform:translateY(calc(100% - 18px)); opacity:.86; }
 .panelTitle,.windowTitle { display:flex; min-height:48px; align-items:center; gap:.55rem; border-bottom:1px solid var(--border); background:linear-gradient(180deg,color-mix(in srgb,var(--primary) 11%,var(--surface-raised)),var(--surface-raised)); padding:.4rem .5rem; cursor:grab; user-select:none; touch-action:none; }
+.friendPanel[data-window-dragging] .panelTitle,.chatWindow[data-window-dragging] .windowTitle { cursor:grabbing; }
 .titleCopy { display:grid; min-width:0; flex:1; gap:.05rem; }
 .titleCopy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.78rem; }
 .titleCopy > span { font-size:.62rem; color:var(--muted-foreground); }

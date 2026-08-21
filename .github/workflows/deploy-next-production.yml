@@ -352,10 +352,10 @@ jobs:
           test -n "$E2E_POSTING_IDENTIFIER"
           test -n "$E2E_POSTING_PASSWORD"
 
-      - name: Install Chromium for real posting acceptance
+      - name: Install Chromium for production browser acceptance
         run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
 
-      - name: Run real posting lifecycle through production HTTPS
+      - name: Run real production posting and member-shell acceptance
         env:
           E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
           E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
@@ -370,8 +370,15 @@ jobs:
           done
           health_payload=$(curl --fail --silent https://wavekb.com/api/health)
           grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$health_payload" > /dev/null
-          # Production data is mutated once. Mobile layout and interaction remain covered by the public-route suite.
-          pnpm --filter @wavekb/web exec playwright test e2e/posting.acceptance.spec.ts --project=desktop-chromium --workers=1
+          pnpm --filter @wavekb/web exec playwright test \
+            e2e/navigation.spec.ts \
+            --grep-invert "unknown community boards|knowledge search" \
+            --workers=2
+          # Posting mutates one disposable record; member-shell acceptance is read-only apart from session and local window state.
+          pnpm --filter @wavekb/web exec playwright test \
+            e2e/member-shell.acceptance.spec.ts \
+            e2e/posting.acceptance.spec.ts \
+            --project=desktop-chromium --workers=1
 
       - name: Finalize the accepted preview release
         env:
