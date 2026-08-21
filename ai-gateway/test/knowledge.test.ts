@@ -10,6 +10,10 @@ const unitsPath = fileURLToPath(
 
 test("hard rules from the tenth edition precede guides and experience", () => {
   const index = buildKnowledgeIndex(unitsPath);
+  assert.equal(
+    index.find((item) => item.knowledgeId === "ewp-guide-pattern-completion-confidence")?.type,
+    "guide",
+  );
   const context = retrieveKnowledge(index, "wave_hypothesis", "推动浪 浪4 重叠", 3000);
   assert.ok(context.items.length > 0);
   assert.equal(context.items[0]?.sourceId, "ewp-10-zh-2016");
