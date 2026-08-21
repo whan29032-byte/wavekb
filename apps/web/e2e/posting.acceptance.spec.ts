@@ -57,7 +57,7 @@ test.describe("authenticated posting acceptance", () => {
         buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
       });
       await page.getByLabel("待发布图片 1 说明").fill("Playwright 研究图表快照");
-      await page.getByLabel("媒体引用 1").fill("https://www.youtube.com/watch?v=posting-acceptance");
+      await page.getByLabel("媒体引用 1", { exact: true }).fill("https://www.youtube.com/watch?v=posting-acceptance");
       await page.getByRole("button", { name: "发布内容" }).click();
       try {
         await expect(page).toHaveURL(/\/community\/post\//, { timeout: 45_000 });
@@ -122,7 +122,7 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByLabel("公开图表链接或品种代码").fill("BINANCE:BTCUSDT");
       await page.getByLabel("正文").fill("这篇验收帖子已经完成编辑，用于确认作者修改链路和详情页刷新。 ");
       await page.getByRole("button", { name: "移除现有图片 1" }).click();
-      await page.getByLabel("媒体引用 1").fill("https://x.com/wavekb/status/1");
+      await page.getByLabel("媒体引用 1", { exact: true }).fill("https://x.com/wavekb/status/1");
       await page.getByRole("button", { name: "保存修改" }).click();
       await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
       const postArticle = page.locator("main > article");
