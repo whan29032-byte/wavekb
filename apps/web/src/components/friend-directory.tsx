@@ -1,27 +1,71 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChatCircleDots, Check, MagnifyingGlass, UserPlus, X } from "@phosphor-icons/react";
 import type { FriendshipConnection, MemberProfile } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
+import { loadFriendships } from "@/lib/member/friendships";
 import { createClient } from "@/lib/supabase/client";
 
 function messageFor(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error ?? "");
+  const value = error as { code?: unknown; message?: unknown } | null;
+  const message = error instanceof Error ? error.message : `${String(value?.code ?? "")} ${String(value?.message ?? error ?? "")}`;
   if (/auth|jwt|permission|row-level/i.test(message)) return "登录状态已失效，请重新登录。";
   return "操作没有完成，请稍后重试。";
 }
 
-export function FriendDirectory({ actorId, initialConnections }: { actorId: string; initialConnections: FriendshipConnection[] }) {
+export function FriendDirectory({ actorId }: { actorId: string }) {
   const router = useRouter();
-  const [connections, setConnections] = useState(initialConnections);
+  const [connections, setConnections] = useState<FriendshipConnection[]>([]);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
   const [searchResult, setSearchResult] = useState<MemberProfile | null>(null);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const [onlineIds, setOnlineIds] = useState<Set<string>>(() => new Set());
+
+  const readConnections = useCallback(async () => {
+    const client = createClient();
+    const user = await client.auth.getUser();
+    if (user.error || !user.data.user) {
+      router.replace("/login?next=%2Ffriends");
+      return null;
+    }
+    return loadFriendships(client);
+  }, [router]);
+
+  useEffect(() => {
+    let active = true;
+    void readConnections().then((nextConnections) => {
+      if (!active || !nextConnections) return;
+      setConnections(nextConnections);
+      setLoadState("ready");
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setLoadError(messageFor(error));
+      setLoadState("error");
+    });
+    return () => {
+      active = false;
+    };
+  }, [readConnections]);
+
+  const refreshConnections = useCallback(async () => {
+    setLoadState("loading");
+    setLoadError("");
+    try {
+      const nextConnections = await readConnections();
+      if (!nextConnections) return;
+      setConnections(nextConnections);
+      setLoadState("ready");
+    } catch (error) {
+      setLoadError(messageFor(error));
+      setLoadState("error");
+    }
+  }, [readConnections]);
 
   useEffect(() => {
     const client = createClient();
@@ -79,7 +123,7 @@ export function FriendDirectory({ actorId, initialConnections }: { actorId: stri
       const result = await createClient().rpc("send_friend_request", { p_target: profile.id });
       if (result.error) throw result.error;
       setMessage("好友请求已发送。 ");
-      router.refresh();
+      await refreshConnections();
     } catch (error) {
       setMessage(messageFor(error));
     } finally {
@@ -95,7 +139,7 @@ export function FriendDirectory({ actorId, initialConnections }: { actorId: stri
       if (result.error) throw result.error;
       setConnections((current) => current.map((connection) => connection.friendship_id === item.friendship_id ? { ...connection, status: accept ? "accepted" : "declined" } : connection));
       setMessage(accept ? "好友请求已接受。" : "好友请求已拒绝。 ");
-      router.refresh();
+      await refreshConnections();
     } catch (error) {
       setMessage(messageFor(error));
     } finally {
@@ -118,7 +162,7 @@ export function FriendDirectory({ actorId, initialConnections }: { actorId: stri
   }
 
   return (
-    <div className="grid gap-8">
+    <div className="grid gap-8" data-friends-directory data-load-state={loadState}>
       <section className="grid gap-4 rounded-xl border bg-surface p-5 md:p-6" aria-labelledby="friend-search-title">
         <div className="grid gap-1"><h2 id="friend-search-title" className="text-xl font-semibold">按 UID 查找</h2><p className="text-sm text-muted-foreground">UID 精确匹配，不会公开邮箱。</p></div>
         <form className="max-w-xl" onSubmit={submitSearch}>
@@ -138,7 +182,7 @@ export function FriendDirectory({ actorId, initialConnections }: { actorId: stri
 
       <section className="grid gap-4" aria-labelledby="friend-list-title">
         <div className="flex items-end justify-between gap-4"><div><h2 id="friend-list-title" className="text-2xl font-semibold">好友与请求</h2><p className="mt-1 text-sm text-muted-foreground">只有已接受好友关系才能打开私聊。</p></div><Button asChild variant="secondary"><Link href="/messages">会话列表</Link></Button></div>
-        {connections.length ? <div className="grid gap-3">{connections.map((item) => (
+        {loadState === "loading" ? <div className="grid gap-3" aria-label="正在读取好友"><div className="h-20 animate-pulse rounded-xl bg-muted" /><div className="h-20 animate-pulse rounded-xl bg-muted" /></div> : loadState === "error" ? <div className="grid justify-items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-5" role="alert"><p className="text-sm text-destructive">{loadError}</p><Button type="button" variant="secondary" onClick={() => void refreshConnections()}>重新读取好友</Button></div> : connections.length ? <div className="grid gap-3">{connections.map((item) => (
           <article key={item.friendship_id} className="flex flex-col gap-4 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0"><div className="flex items-center gap-2"><span className={`size-2 rounded-full ${onlineIds.has(item.other_id) ? "bg-emerald-500" : "bg-muted-foreground/35"}`} aria-label={onlineIds.has(item.other_id) ? "在线" : "离线"} /><Link href={item.public_uid ? `/member/${item.public_uid}` : "/friends"} className="font-semibold hover:text-primary hover:underline">{item.display_name || `UID ${item.public_uid || "未设置"}`}</Link></div><p className="truncate text-sm text-muted-foreground">{item.bio || (item.status === "accepted" ? "已成为好友" : item.direction === "incoming" ? "向你发送了好友请求" : "好友请求等待处理")}</p></div>
             <div className="flex shrink-0 flex-wrap gap-2">

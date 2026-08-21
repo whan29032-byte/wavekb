@@ -51,6 +51,14 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(actions.getByRole("link", { name: "交易工作台" })).toHaveAttribute("href", "/workbench");
     await expect(actions.getByRole("link", { name: "积分商城" })).toHaveCount(0);
 
+    await actions.getByRole("link", { name: "我的好友" }).click();
+    await expect(page).toHaveURL(/\/friends$/);
+    await expect(page.getByRole("heading", { level: 1, name: "好友" })).toBeVisible();
+    await expect(page.locator("[data-friends-directory]")).toHaveAttribute("data-load-state", "ready", { timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
+    await page.goto("/member/33333");
+    await expect(hero).toBeVisible();
+
     const desktopGeometry = await page.evaluate(() => {
       const coverBox = document.querySelector<HTMLElement>("[data-profile-cover]")!.getBoundingClientRect();
       const avatarBox = document.querySelector<HTMLElement>("[data-profile-avatar] .identity-avatar-frame")!.getBoundingClientRect();

@@ -1,6 +1,7 @@
 import "server-only";
 import type { ChatSticker, DirectConversation, DirectMessage, EditableMemberProfile, FriendshipConnection, MemberProfile } from "@wavekb/domain";
 import { createClient } from "@/lib/supabase/server";
+import { loadFriendships } from "@/lib/member/friendships";
 
 export type MemberSocialState = {
   following: boolean;
@@ -64,15 +65,13 @@ export async function getMemberSocialState(actorId: string, targetId: string): P
   if (actorId === targetId) return { following: false, connection: null };
   const client = await createClient();
   const [connectionsResult, followingResult] = await Promise.all([
-    client.rpc("list_my_friendships"),
+    loadFriendships(client),
     client.from("profile_follows").select("followed_id").eq("follower_id", actorId).eq("followed_id", targetId).limit(1),
   ]);
-  if (connectionsResult.error) throw connectionsResult.error;
   if (followingResult.error) throw followingResult.error;
-  const connections = (connectionsResult.data ?? []) as FriendshipConnection[];
   return {
     following: (followingResult.data ?? []).length > 0,
-    connection: connections.find((item) => item.other_id === targetId) ?? null,
+    connection: connectionsResult.find((item) => item.other_id === targetId) ?? null,
   };
 }
 
@@ -101,9 +100,7 @@ export async function getMyPersonalSpaceSummary(userId: string): Promise<Persona
 
 export async function listFriendships(): Promise<FriendshipConnection[]> {
   const client = await createClient();
-  const result = await client.rpc("list_my_friendships");
-  if (result.error) throw result.error;
-  return (result.data ?? []) as FriendshipConnection[];
+  return loadFriendships(client);
 }
 
 function missingRpc(error: unknown) {
