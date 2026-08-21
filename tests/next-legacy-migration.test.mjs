@@ -92,6 +92,18 @@ test("friendship reader migration advances the production schema marker", async 
   assert.match(migration, /grant execute on function public\.wavekb_schema_version\(\) to anon, authenticated/);
 });
 
+test("friends navigation bypasses stale prefetch data and requires a fresh dynamic route", async () => {
+  const [page, actions, acceptance] = await Promise.all([
+    read("apps/web/src/app/friends/page.tsx"),
+    read("apps/web/src/components/member-profile-actions.tsx"),
+    read("apps/web/e2e/member-shell.acceptance.spec.ts"),
+  ]);
+  assert.match(page, /dynamic = "force-dynamic"/);
+  assert.match(actions, /href="\/friends" prefetch=\{false\}/);
+  assert.match(acceptance, /configure\(\{ retries: 0 \}\)/);
+  assert.match(acceptance, /data-load-state", "ready"/);
+});
+
 test("unified nameplates and semantic theme tokens cover migrated Next surfaces", async () => {
   const [plate, css, layout] = await Promise.all([read("apps/web/src/components/nameplate.tsx"), read("apps/web/src/app/globals.css"), read("apps/web/src/app/layout.tsx")]);
   for (const style of ["premium", "blackgold", "platinum", "purplegold", "rainbow", "newyear"]) assert.match(css, new RegExp(`data-nameplate=\\"${style}\\"`));

@@ -3,6 +3,7 @@ import { FriendDirectory } from "@/components/friend-directory";
 import { requireActiveMember } from "@/lib/auth/dal";
 
 export const metadata: Metadata = { title: "好友" };
+export const dynamic = "force-dynamic";
 
 export default async function FriendsPage() {
   const actor = await requireActiveMember("/friends");

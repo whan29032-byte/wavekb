@@ -33,6 +33,7 @@ async function expectReleased(window: Locator, handle: Locator, page: Page) {
 }
 
 test.describe("authenticated member shell acceptance", () => {
+  test.describe.configure({ retries: 0 });
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
   test("profile hero, identity, friends and chat stay stable across production interactions", async ({ page }) => {
@@ -53,7 +54,7 @@ test.describe("authenticated member shell acceptance", () => {
 
     await actions.getByRole("link", { name: "我的好友" }).click();
     await expect(page).toHaveURL(/\/friends$/);
-    await expect(page.getByRole("heading", { level: 1, name: "好友" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "好友", exact: true })).toBeVisible();
     await expect(page.locator("[data-friends-directory]")).toHaveAttribute("data-load-state", "ready", { timeout: 20_000 });
     await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
     await page.goto("/member/33333");

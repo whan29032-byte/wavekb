@@ -43,7 +43,7 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
     return (
       <div className="grid w-full grid-cols-1 gap-2 min-[28rem]:grid-cols-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
         <Button asChild size="small" className="min-h-11 w-full sm:w-auto"><Link href="/member/profile"><PencilSimple aria-hidden size={16} />编辑资料</Link></Button>
-        <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/friends"><UsersThree aria-hidden size={16} />我的好友</Link></Button>
+        <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/friends" prefetch={false}><UsersThree aria-hidden size={16} />我的好友</Link></Button>
         <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/workbench"><Notebook aria-hidden size={16} />交易工作台</Link></Button>
       </div>
     );
