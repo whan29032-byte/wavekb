@@ -132,6 +132,23 @@ describe("post deletion transaction", () => {
     expect(request).toHaveBeenCalledWith(`/api/community/posts/${postId}/delete`, expect.objectContaining({ method: "POST" }));
     expect(remove).toHaveBeenCalledWith([`${userId}/${postId}/image.png`]);
   });
+
+  it("retries a transient gateway failure without duplicating destructive work", async () => {
+    const postId = "11111111-1111-4111-8111-111111111111";
+    const userId = "22222222-2222-4222-8222-222222222222";
+    const request = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "post_delete_failed" }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ deleted: true, storage_paths: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", request);
+
+    await expect(deletePost({ storage: { from: vi.fn() } } as never, {
+      id: postId,
+      author_id: userId,
+      status: "published",
+      post_images: [],
+    } as never, userId)).resolves.toEqual({ cleanupPending: false });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("comment publishing", () => {

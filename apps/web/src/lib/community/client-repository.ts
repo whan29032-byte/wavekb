@@ -189,14 +189,29 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
 
 export async function deletePost(client: SupabaseClient, post: CommunityPost, userId: string) {
   if (post.author_id !== userId || post.status === "hidden") throw new Error("你不能删除这篇帖子。");
-  const response = await fetch(`/api/community/posts/${encodeURIComponent(post.id)}/delete`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}",
-  });
-  const payload = await response.json().catch(() => null) as { deleted?: boolean; storage_paths?: unknown[] } | null;
-  if (!response.ok || payload?.deleted !== true) {
-    throw new Error(response.status === 401 ? "登录状态已失效，请重新登录。" : "帖子未被删除，请刷新后重试。");
+  type DeletePayload = { deleted?: boolean; storage_paths?: unknown[] };
+  const retryableStatuses = new Set([409, 429, 500, 502, 503, 504]);
+  let response: Response | null = null;
+  let payload: DeletePayload | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(`/api/community/posts/${encodeURIComponent(post.id)}/delete`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(5_000),
+      });
+      payload = await response.json().catch(() => null) as DeletePayload | null;
+      if (response.ok && payload?.deleted === true) break;
+      if (!response.ok && !retryableStatuses.has(response.status)) break;
+    } catch {
+      response = null;
+      payload = null;
+    }
+    if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+  }
+  if (!response?.ok || payload?.deleted !== true) {
+    throw new Error(response?.status === 401 ? "登录状态已失效，请重新登录。" : "帖子未被删除，请稍后重试。");
   }
   const paths = (payload.storage_paths ?? [])
     .map((path) => String(path))

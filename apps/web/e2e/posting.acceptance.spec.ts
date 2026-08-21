@@ -138,11 +138,29 @@ test.describe("authenticated posting acceptance", () => {
         }
       }
       if (published) {
+        const deletionResponses: Array<{ status: number; body: string }> = [];
+        const recordDeletionResponse = async (response: import("@playwright/test").Response) => {
+          if (response.request().method() !== "POST" || !new URL(response.url()).pathname.endsWith("/delete")) return;
+          deletionResponses.push({ status: response.status(), body: (await response.text().catch(() => "")).slice(0, 500) });
+        };
+        page.on("response", recordDeletionResponse);
         const deleteButton = page.getByRole("button", { name: "删除帖子" });
         if (!await deleteButton.isVisible().catch(() => false)) await page.goBack().catch(() => undefined);
         page.once("dialog", (dialog) => dialog.accept());
         await page.getByRole("button", { name: "删除帖子" }).click();
-        await expect(page).toHaveURL(/\/community\/idea_sharing$/, { timeout: 20_000 });
+        try {
+          await expect(page).toHaveURL(/\/community\/idea_sharing$/, { timeout: 20_000 });
+        } catch (error) {
+          console.log("Post deletion diagnostic", JSON.stringify({
+            url: page.url(),
+            responses: deletionResponses,
+            alert: await page.getByRole("alert").last().innerText().catch(() => ""),
+            button: await page.getByRole("button", { name: /删除帖子|正在删除/ }).innerText().catch(() => ""),
+          }));
+          throw error;
+        } finally {
+          page.off("response", recordDeletionResponse);
+        }
       }
       if (await accountMenu.isVisible().catch(() => false)) await accountMenu.click();
       await page.getByRole("button", { name: "退出登录" }).click();
