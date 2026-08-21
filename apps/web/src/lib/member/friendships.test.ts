@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isMissingFriendshipsV2, loadFriendships } from "./friendships";
+import { FriendshipRpcError, isMissingFriendshipsV2, loadFriendships } from "./friendships";
 
 const connection = {
   friendship_id: "11111111-1111-4111-8111-111111111111",
@@ -36,7 +36,14 @@ describe("friendship RPC compatibility", () => {
     const error = { code: "42501", message: "permission denied" };
     const rpc = vi.fn().mockResolvedValue({ data: null, error });
 
-    await expect(loadFriendships({ rpc } as unknown as SupabaseClient)).rejects.toEqual(error);
+    const failure = await loadFriendships({ rpc } as unknown as SupabaseClient).catch((cause) => cause);
+    expect(failure).toBeInstanceOf(FriendshipRpcError);
+    expect(failure).toMatchObject({
+      name: "FriendshipRpcError",
+      rpc: "list_my_friendships_v2",
+      code: "42501",
+      message: "permission denied",
+    });
     expect(isMissingFriendshipsV2(error)).toBe(false);
   });
 });

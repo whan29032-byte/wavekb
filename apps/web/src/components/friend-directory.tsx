@@ -6,13 +6,13 @@ import { useRouter } from "next/navigation";
 import { ChatCircleDots, Check, MagnifyingGlass, UserPlus, X } from "@phosphor-icons/react";
 import type { FriendshipConnection, MemberProfile } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
-import { loadFriendships } from "@/lib/member/friendships";
 import { createClient } from "@/lib/supabase/client";
 
 function messageFor(error: unknown): string {
   const value = error as { code?: unknown; message?: unknown } | null;
   const message = error instanceof Error ? error.message : `${String(value?.code ?? "")} ${String(value?.message ?? error ?? "")}`;
   if (/auth|jwt|permission|row-level/i.test(message)) return "登录状态已失效，请重新登录。";
+  if (/friendships_unavailable/i.test(message)) return "好友列表暂时无法读取，请重试。";
   return "操作没有完成，请稍后重试。";
 }
 
@@ -29,14 +29,16 @@ export function FriendDirectory() {
   const [onlineIds, setOnlineIds] = useState<Set<string>>(() => new Set());
 
   const readConnections = useCallback(async () => {
-    const client = createClient();
-    const session = await client.auth.getSession();
-    const user = session.data.session?.user;
-    if (session.error || !user) {
+    const response = await fetch("/api/member/friends", { cache: "no-store", credentials: "same-origin" });
+    if (response.status === 401) {
       router.replace("/login?next=%2Ffriends");
       return null;
     }
-    return { actorId: user.id, connections: await loadFriendships(client) };
+    const payload = await response.json().catch(() => null) as { actorId?: string; connections?: FriendshipConnection[] } | null;
+    if (!response.ok || !payload?.actorId || !Array.isArray(payload.connections)) {
+      throw new Error("friendships_unavailable");
+    }
+    return { actorId: payload.actorId, connections: payload.connections };
   }, [router]);
 
   useEffect(() => {
@@ -167,7 +169,7 @@ export function FriendDirectory() {
   }
 
   return (
-    <div className="grid gap-8" data-friends-directory data-load-state={loadState}>
+    <div className="grid gap-8" data-friends-directory data-load-state={loadState} data-friend-count={loadState === "ready" ? connections.length : undefined}>
       <section className="grid gap-4 rounded-xl border bg-surface p-5 md:p-6" aria-labelledby="friend-search-title">
         <div className="grid gap-1"><h2 id="friend-search-title" className="text-xl font-semibold">按 UID 查找</h2><p className="text-sm text-muted-foreground">UID 精确匹配，不会公开邮箱。</p></div>
         <form className="max-w-xl" onSubmit={submitSearch}>

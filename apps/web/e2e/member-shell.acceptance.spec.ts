@@ -54,9 +54,15 @@ test.describe("authenticated member shell acceptance", () => {
 
     await actions.getByRole("link", { name: "我的好友" }).click();
     await expect(page).toHaveURL(/\/friends$/);
-    await expect(page.getByRole("heading", { level: 1, name: "好友", exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator("[data-friends-directory]")).toHaveAttribute("data-load-state", "ready", { timeout: 20_000 });
+    await expect(page.getByRole("heading", { level: 1, name: "好友", exact: true })).toBeVisible({ timeout: 10_000 });
+    const directory = page.locator("[data-friends-directory]");
+    await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
+    expect(Number(await directory.getAttribute("data-friend-count")), "Acceptance user should retain real friendship rows.").toBeGreaterThan(0);
     await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
+    await page.reload();
+    await expect(page).toHaveURL(/\/friends$/);
+    await expect(directory).toHaveAttribute("data-load-state", "ready", { timeout: 10_000 });
+    expect(Number(await directory.getAttribute("data-friend-count")), "Friendship rows should survive a direct reload.").toBeGreaterThan(0);
     await page.goto("/member/33333");
     await expect(hero).toBeVisible();
 
