@@ -21,7 +21,7 @@ export default defineConfig({
     { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
   ],
   webServer: externalBaseUrl ? undefined : {
-    command: "pnpm dev --hostname 127.0.0.1 --port 3100",
+    command: process.env.TLINE_E2E_FIXTURE === "1" ? "node scripts/start-tline-e2e.mjs --hostname 127.0.0.1 --port 3100" : "pnpm dev --hostname 127.0.0.1 --port 3100",
     url: localBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

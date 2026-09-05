@@ -34,12 +34,36 @@ export function researchView(row: TlineRecord, institutions: TlineRecord[]) {
 }
 export type ResearchView = ReturnType<typeof researchView>;
 
-export function researchWindow(query: Record<string, string | string[] | undefined>, now = Date.now()) {
-  const { since, cursor } = query;
-  if (Array.isArray(since) || Array.isArray(cursor) || (cursor !== undefined && (!cursor || cursor.length > 2048 || !since))) throw new Error("分页参数无效，请重新打开最近 7 天研报。");
-  const start = since ?? new Date(Math.floor(now / 60000) * 60000 - 7 * 86400000).toISOString();
-  const time = Date.parse(start);
-  // One day of tolerance lets a reader continue a fixed seven-day window later.
-  if (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(start) || !Number.isFinite(time) || time < now - 8 * 86400000 || time > now) throw new Error("时间窗口已过期或无效，请重新打开最近 7 天研报。");
-  return { since: start, cursor };
+type WindowQuery = Record<string, string | string[] | undefined>;
+const DAY = 86_400_000;
+const timestampPattern = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/;
+
+function parsedTimestamp(value: string): number {
+  if (!value || value.length > 64 || !timestampPattern.test(value)) return Number.NaN;
+  return Date.parse(value);
+}
+
+export function validateResearchWindow(query: WindowQuery): void {
+  const { since, until, cursor } = query;
+  if (Array.isArray(since) || Array.isArray(until) || Array.isArray(cursor) || cursor !== undefined || (!since && until !== undefined)) {
+    throw new Error("时间窗口无效，请重新打开最近 7 天研报。");
+  }
+  if (since !== undefined && !Number.isFinite(parsedTimestamp(since))) throw new Error("时间窗口无效，请重新打开最近 7 天研报。");
+  if (until !== undefined && !Number.isFinite(parsedTimestamp(until))) throw new Error("时间窗口无效，请重新打开最近 7 天研报。");
+}
+
+export function researchWindow(query: WindowQuery, lastSuccess: string | null, now = Date.now()) {
+  validateResearchWindow(query);
+  const success = lastSuccess === null ? now : parsedTimestamp(lastSuccess);
+  if (!Number.isFinite(success)) throw new Error("时间窗口无效，请重新打开最近 7 天研报。");
+  const anchor = Math.min(now, success);
+  if (query.since === undefined) return { since: new Date(anchor - 7 * DAY).toISOString(), until: new Date(anchor).toISOString() };
+
+  const since = parsedTimestamp(query.since as string);
+  const until = query.until === undefined ? Math.min(since + 7 * DAY, anchor) : parsedTimestamp(query.until as string);
+  const isLastGoodWindow = until === anchor && anchor < now - 8 * DAY;
+  if (!Number.isFinite(until) || since >= until || until - since > 7 * DAY || until > now || (until < now - 8 * DAY && !isLastGoodWindow)) {
+    throw new Error("时间窗口已过期或无效，请重新打开最近 7 天研报。");
+  }
+  return { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
 }
