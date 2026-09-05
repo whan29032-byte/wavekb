@@ -1,6 +1,6 @@
 export type TlineRecord = Record<string, unknown>;
 export type ResearchPage = { data: TlineRecord[]; nextCursor: string | null };
-type Options = { fetcher?: typeof fetch; sleep?: (ms: number) => Promise<void>; now?: () => number };
+type Options = { fetcher?: typeof fetch; sleep?: (ms: number) => Promise<void>; now?: () => number; deadline?: number };
 const BASE = "https://tlines.tech/api/v1/";
 
 export class TlineError extends Error {
@@ -21,12 +21,31 @@ export class TlineClient {
   #fetch: typeof fetch;
   #sleep: (ms: number) => Promise<void>;
   #now: () => number;
+  #deadline: number;
   constructor(options: Options = {}) {
     this.#key = process.env.TLINE_API_KEY?.trim() ?? "";
     if (!this.#key) throw new TlineError(503, "not_configured", "TLINE_API_KEY is not configured");
     this.#fetch = options.fetcher ?? fetch;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.#now = options.now ?? Date.now;
+    this.#deadline = options.deadline ?? Infinity;
+  }
+
+  #remaining(): number {
+    const remaining = this.#deadline - this.#now();
+    if (remaining <= 0) throw new TlineError(504, "deadline_exceeded", "Tline worker deadline exceeded");
+    return remaining;
+  }
+
+  async #bounded<T>(action: () => Promise<T>, maximum: number): Promise<T> {
+    const delay = Math.min(maximum, this.#remaining());
+    if (!Number.isFinite(delay)) return action();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([action(), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new TlineError(504, this.#now() >= this.#deadline ? "deadline_exceeded" : "network_error", "Tline request timed out")), delay);
+      })]);
+    } finally { clearTimeout(timer); }
   }
 
   async #get(path: string, query: Record<string, string> = {}): Promise<TlineRecord> {
@@ -34,13 +53,15 @@ export class TlineClient {
     for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
     for (let attempt = 0; ; attempt++) {
       let response: Response;
+      const timeout = Math.max(1, Math.floor(Math.min(20_000, this.#remaining())));
       try {
-        response = await this.#fetch(url, { headers: { Authorization: `Bearer ${this.#key}`, Accept: "application/json" }, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(20_000) });
+        response = await this.#bounded(() => this.#fetch(url, { headers: { Authorization: `Bearer ${this.#key}`, Accept: "application/json" }, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(timeout) }), timeout);
       } catch {
         // No request objects, headers, raw error causes or credentials escape.
+        this.#remaining();
         throw new TlineError(502, "network_error", "Tline request failed or timed out");
       }
-      const envelope: unknown = await response.json().catch(() => null);
+      const envelope: unknown = await this.#bounded(() => response.json().catch(() => null), 20_000);
       if (response.ok) {
         if (!isRecord(envelope) || !("data" in envelope)) throw new TlineError(502, "invalid_response", "Invalid Tline response");
         return envelope;
@@ -57,8 +78,8 @@ export class TlineClient {
       const error = new TlineError(response.status, clean(apiError.code, `http_${response.status}`), clean(apiError.message, `Tline returned HTTP ${response.status}`), response.status === 429 ? Math.ceil(delay / 1000) : undefined);
       // Only 429 retries, at most three. A long requested wait is surfaced rather
       // than shortened (which would violate the server's rate limit).
-      if (response.status !== 429 || attempt >= 3 || delay > 120_000) throw error;
-      await this.#sleep(delay);
+      if (response.status !== 429 || attempt >= 3 || delay > 120_000 || delay >= this.#remaining()) throw error;
+      await this.#bounded(() => this.#sleep(delay), Infinity);
     }
   }
 

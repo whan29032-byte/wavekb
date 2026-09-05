@@ -87,3 +87,20 @@ it("encodes detail IDs and ticker queries; rejects invalid since before network 
   await expect(client.researchPage("not-a-date")).rejects.toThrow(/since/i);
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
+
+it("does not fetch after the worker deadline", async () => {
+  vi.stubEnv("TLINE_API_KEY", "test-key");
+  const fetcher = vi.fn();
+  await expect(new TlineClient({ fetcher, now: () => 1000, deadline: 1000 }).institutions()).rejects.toMatchObject({ code: "deadline_exceeded" });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+
+it("bounds a sleep that ignores the requested delay by the worker deadline", async () => {
+  vi.stubEnv("TLINE_API_KEY", "test-key"); vi.useFakeTimers(); vi.setSystemTime(0);
+  try {
+    const fetcher = vi.fn(async () => json({}, 429, { "Retry-After": "1" }));
+    const run = new TlineClient({ fetcher, sleep: () => new Promise(() => {}), deadline: 2000 }).institutions();
+    const rejected = expect(run).rejects.toMatchObject({ code: "deadline_exceeded" });
+    await vi.advanceTimersByTimeAsync(2000); await rejected; expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
