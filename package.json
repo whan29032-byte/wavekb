@@ -7,6 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "tline:research": "node --experimental-strip-types scripts/tline-research.mjs",
     "dev": "pnpm --filter @wavekb/web dev",
     "build": "pnpm --filter @wavekb/web build",
     "typecheck": "pnpm -r typecheck",

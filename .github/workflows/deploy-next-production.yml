@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      read_only_acceptance:
+        description: "仅在人工确认本次无需真实发帖验收后开启；不跳过构建、只读验收或回滚门槛"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -81,7 +86,14 @@ jobs:
       # SHA/schema fails closed. Gateway changes require separately approved work.
       - name: Read-only schema compatibility and live-base change preflight
         id: preflight
+        env:
+          READ_ONLY_ACCEPTANCE_APPROVED: ${{ github.event_name == 'workflow_dispatch' && inputs.read_only_acceptance }}
         run: node scripts/deploy-preflight.mjs
+
+      - name: Require the server-only Tline credential before any remote write
+        env:
+          TLINE_API_KEY: ${{ secrets.TLINE_API_KEY }}
+        run: test -n "$TLINE_API_KEY"
 
       - name: Require credentials when relevant changes need real posting acceptance
         if: steps.preflight.outputs.posting_required == 'true'
@@ -114,8 +126,19 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
 
+      - name: Confirm the actual production service and Nginx target without exposing environment
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            'set -eu; test "$(sudo -n systemctl show wavekb-next-preview.service -p ActiveState --value)" = active; test "$(sudo -n systemctl show wavekb-next-preview.service -p WorkingDirectory --value)" = /srv/wavekb-next-preview/current; readlink -f /srv/wavekb-next-preview/current'
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            'sudo -n /usr/sbin/nginx -T 2>/dev/null' | node scripts/nginx-production-target.mjs
+
       # First production write: every build/local browser gate already passed.
-      # Preview-named root/service ARE production. No Nginx/env changes are made.
+      # Preview-named root/service ARE production. Existing Nginx/env stay intact.
       - name: Upload immutable production candidate and transaction runner
         id: upload
         env:
@@ -144,11 +167,12 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           BASE_SHA: ${{ steps.preflight.outputs.base_sha }}
+          TLINE_API_KEY: ${{ secrets.TLINE_API_KEY }}
         run: |
           set -Eeuo pipefail
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "sudo /usr/bin/node ./wavekb-deploy-${release_id}.mjs activate '${RELEASE_SHA}' '${RUN_ID}' '${RUN_ATTEMPT}' '${DEPLOY_USER}' './wavekb-next-${release_id}.tar.gz' '${BASE_SHA}'"
+          printf '%s' "$TLINE_API_KEY" | ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/node ./wavekb-deploy-${release_id}.mjs activate '${RELEASE_SHA}' '${RUN_ID}' '${RUN_ATTEMPT}' '${DEPLOY_USER}' './wavekb-next-${release_id}.tar.gz' '${BASE_SHA}'"
 
       - name: Verify production version and read-only browser journeys
         env:
@@ -164,6 +188,12 @@ jobs:
           '
           pnpm --filter @wavekb/web assets:check
           pnpm --filter @wavekb/web exec playwright test e2e/navigation.spec.ts --workers=2
+
+      - name: Verify real Tline research inside the production website without posting
+        env:
+          PLAYWRIGHT_BASE_URL: https://wavekb.com
+          TLINE_LIVE_ACCEPTANCE: "1"
+        run: pnpm --filter @wavekb/web exec playwright test e2e/tline.acceptance.spec.ts --workers=1
 
       # Conditional on relevant changes since LIVE base; this mutates dedicated
       # disposable records and is not a read-only smoke test.

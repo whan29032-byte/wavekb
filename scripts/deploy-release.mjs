@@ -41,6 +41,7 @@ async function requireHealth(options, version) {
 }
 
 export async function activate(options) {
+  if (options.tlineApiKey !== undefined) requireValue(/^tli_[A-Za-z0-9_-]{20,200}$/.test(options.tlineApiKey), "Invalid Tline runtime credential");
   requireValue(shaPattern.test(options.sha) && shaPattern.test(options.baseSha), "Invalid candidate or live base SHA");
   requireValue(/^[a-z_][a-z0-9_-]*$/.test(options.deployUser), "Invalid service user");
   const releaseId = `${options.sha}-${options.runId}-${options.runAttempt}`;
@@ -95,10 +96,19 @@ export async function activate(options) {
     fs.writeFileSync(path.join(p.releaseDir, "start-release.sh"), `#!/bin/sh\nexport DEPLOYMENT_VERSION='${options.sha}'\nexec /usr/bin/node apps/web/server.js\n`, { flag: "wx", mode: 0o755 });
     fs.chmodSync(path.join(p.releaseDir, "DEPLOYMENT_VERSION"), 0o644);
     fs.chmodSync(path.join(p.releaseDir, "start-release.sh"), 0o755);
+    // systemd reads this as root. Never put credentials in the immutable code
+    // archive or overwrite the site's existing environment file. Previous units
+    // keep referencing their own protected files when rolled back.
+    let supplementalEnvironment = "";
+    if (options.tlineApiKey !== undefined) {
+      const secretFile = path.join(p.backup, "tline.env");
+      fs.writeFileSync(secretFile, `TLINE_API_KEY=${options.tlineApiKey}\n`, { flag: "wx", mode: 0o600 });
+      supplementalEnvironment = `EnvironmentFile=${secretFile}\n`;
+    }
     const unit = `[Unit]\nDescription=WaveKB Next.js production\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=${options.deployUser}\nWorkingDirectory=${p.current}\nEnvironmentFile=${options.environmentFile}\nExecStart=${p.current}/start-release.sh\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=20\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=${p.applicationRoot}\nUMask=0027\n\n[Install]\nWantedBy=multi-user.target\n`;
     // Arm durable rollback before changing the service file or current link.
     state.phase = "activating"; saveMetadata(p.metadata, state);
-    fs.writeFileSync(options.unitFile, unit, { mode: 0o644 });
+    fs.writeFileSync(options.unitFile, unit.replace(`EnvironmentFile=${options.environmentFile}\n`, `EnvironmentFile=${options.environmentFile}\n${supplementalEnvironment}`), { mode: 0o644 });
     replaceCurrent(p.current, p.releaseDir);
     await options.service("daemon-reload");
     await options.service("restart");
@@ -175,8 +185,10 @@ async function main() {
   if (command === "rollback-accepted") requireValue(argument5 === "--confirm-previous-version", "Explicit previous SHA confirmation flag is required");
   const deployUser = command === "activate" ? argument5 : undefined;
   const archive = command === "activate" ? argument6 : undefined;
+  const tlineApiKey = command === "activate" ? fs.readFileSync(0, "utf8").trim() : undefined;
+  if (command === "activate") requireValue(/^tli_[A-Za-z0-9_-]{20,200}$/.test(tlineApiKey), "Tline credential is required on activation stdin");
   const options = {
-    sha, runId, runAttempt, deployUser, archive, baseSha,
+    sha, runId, runAttempt, deployUser, archive, baseSha, tlineApiKey,
     confirmedPreviousVersion: command === "rollback-accepted" ? argument6 : undefined,
     releaseId: `${sha}-${runId}-${runAttempt}`, accepted: command === "finalize",
     applicationRoot: "/srv/wavekb-next-preview",

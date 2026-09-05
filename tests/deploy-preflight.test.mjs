@@ -7,6 +7,15 @@ import { execFileSync } from "node:child_process";
 
 const moduleUrl = new URL("../scripts/deploy-preflight.mjs", import.meta.url);
 const api = fs.existsSync(moduleUrl) ? await import(moduleUrl.href) : {};
+
+test("explicit read-only approval skips posting without bypassing schema or gateway safety", (t) => {
+  const input = fixture(t, "apps/web/src/components/site-header.tsx");
+  assert.equal(api.planRelease(input).postingRequired, true);
+  assert.equal(api.planRelease({ ...input, readOnlyApproved: true }).postingRequired, false);
+  assert.equal(api.planRelease({ ...input, readOnlyApproved: "true" }).postingRequired, true);
+  assert.throws(() => api.planRelease({ ...input, readOnlyApproved: true, schemaVersion: "202608140005" }), /schema/);
+  assert.throws(() => api.planRelease({ ...fixture(t, "ai-gateway/src/server.ts"), readOnlyApproved: true }), /gateway/);
+});
 function fixture(t, changedFile) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-preflight-test-"));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));

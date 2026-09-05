@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpenText, ChatsCircle, Coins, GraduationCap } from "@phosphor-icons/react/dist/ssr";
+import { BookOpenText, ChatsCircle, Coins, GraduationCap, Newspaper } from "@phosphor-icons/react/dist/ssr";
 import { AccountNavigation } from "@/components/account-navigation";
 import { AppearanceSettings } from "@/components/appearance-settings";
 import { MobileNavigation } from "@/components/mobile-navigation";
@@ -26,6 +26,7 @@ export function SiteHeader() {
           <Link href="/rewards" aria-label="积分商城" className="hidden min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-2 text-muted-foreground hover:bg-muted hover:text-foreground md:flex lg:px-3">
             <Coins aria-hidden size={18} weight="duotone" /><span className="hidden lg:inline">积分商城</span>
           </Link>
+          <Link prefetch={false} href="/research" aria-label="机构研报" className="hidden min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-2 text-muted-foreground hover:bg-muted hover:text-foreground md:flex lg:px-3"><Newspaper aria-hidden size={18} weight="duotone" /><span className="hidden lg:inline">机构研报</span></Link>
           <AppearanceSettings />
           <AccountNavigation />
         </nav>

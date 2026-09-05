@@ -10,6 +10,30 @@ const api = fs.existsSync(moduleUrl) ? await import(moduleUrl.href) : {};
 const sha = "b".repeat(40);
 const oldSha = "a".repeat(40);
 
+test("Tline credentials stay outside code and original env; rollback restores the exact previous unit", async (t) => {
+  const f = fixture(t);
+  const key = "tli_fixture_only_not_a_real_secret";
+  const result = await api.activate({ ...f.options, tlineApiKey: key });
+  const secretFile = path.join(f.options.backupRoot, result.releaseId, "tline.env");
+  assert.ok(fs.existsSync(secretFile), "runtime secret must be provisioned outside the public release");
+  assert.equal(fs.statSync(secretFile).mode & 0o777, 0o600);
+  assert.equal(fs.readFileSync(secretFile, "utf8"), `TLINE_API_KEY=${key}\n`);
+  assert.equal(fs.readFileSync(f.options.environmentFile, "utf8"), f.env);
+  const unit = fs.readFileSync(f.options.unitFile, "utf8");
+  assert.ok(unit.includes(`EnvironmentFile=${secretFile}\n`));
+  for (const content of [unit, fs.readFileSync(path.join(result.releaseDir, "start-release.sh"), "utf8"), fs.readFileSync(path.join(f.options.backupRoot, result.releaseId, "rollback.json"), "utf8")]) assert.ok(!content.includes(key));
+  await api.rollback({ ...f.options, releaseId: result.releaseId });
+  assert.equal(fs.readFileSync(f.options.unitFile, "utf8"), "previous exact unit\n");
+  assert.equal(fs.readFileSync(f.options.environmentFile, "utf8"), f.env);
+});
+
+test("invalid Tline environment input aborts before production mutation", async (t) => {
+  const f = fixture(t);
+  await assert.rejects(api.activate({ ...f.options, tlineApiKey: "tli_invalid\nOTHER=value" }), /Tline/);
+  assert.equal(fs.readdirSync(path.join(f.options.applicationRoot, "releases")).length, 1);
+  assert.equal(fs.readFileSync(f.options.environmentFile, "utf8"), f.env);
+});
+
 function fixture(t) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-deploy-test-")));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

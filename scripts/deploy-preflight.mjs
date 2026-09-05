@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-export function planRelease({ cwd, baseSha, sha, schemaVersion, requiredSchema }) {
+export function planRelease({ cwd, baseSha, sha, schemaVersion, requiredSchema, readOnlyApproved = false }) {
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error("Live base SHA is missing or invalid; acceptance scope cannot be inferred");
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("Candidate SHA is invalid");
   if (!/^[0-9]{12}$/.test(schemaVersion) || !/^[0-9]{12}$/.test(requiredSchema) || schemaVersion !== requiredSchema) {
@@ -25,7 +25,8 @@ export function planRelease({ cwd, baseSha, sha, schemaVersion, requiredSchema }
     /^packages\/(domain|ui)\//,
     /^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|supabase\/)/,
   ];
-  return { baseSha, sha, postingRequired: changed.some((file) => postingPatterns.some((pattern) => pattern.test(file))), gatewayChanged };
+  const postingNormallyRequired = changed.some((file) => postingPatterns.some((pattern) => pattern.test(file)));
+  return { baseSha, sha, postingRequired: postingNormallyRequired && readOnlyApproved !== true, postingNormallyRequired, readOnlyApproved: readOnlyApproved === true, gatewayChanged };
 }
 
 async function readJson(url, options) {
@@ -47,9 +48,10 @@ async function main() {
     method: "POST", headers: { apikey: key, "content-type": "application/json" }, body: "{}",
   });
   const versions = fs.readdirSync(path.join(cwd, "supabase/migrations")).filter((name) => /^[0-9]{12}_.*\.sql$/.test(name)).map((name) => name.slice(0, 12)).sort();
-  const result = planRelease({ cwd, baseSha: health.deployment, sha: process.env.GITHUB_SHA, schemaVersion, requiredSchema: versions.at(-1) });
+  const result = planRelease({ cwd, baseSha: health.deployment, sha: process.env.GITHUB_SHA, schemaVersion, requiredSchema: versions.at(-1), readOnlyApproved: process.env.READ_ONLY_ACCEPTANCE_APPROVED === "true" });
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `base_sha=${result.baseSha}\nposting_required=${result.postingRequired}\n`);
   console.log(`Read-only compatibility passed. Posting acceptance required: ${result.postingRequired}. Gateway unchanged.`);
+  if (result.readOnlyApproved) console.log(`Operator explicitly approved read-only acceptance for this manual run. Normal posting classification: ${result.postingNormallyRequired}. Schema, gateway and read-only browser gates remain mandatory.`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

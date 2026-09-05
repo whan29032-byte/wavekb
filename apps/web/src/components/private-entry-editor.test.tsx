@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrivateEntry } from "@wavekb/domain";
 import { PrivateEntryEditor } from "./private-entry-editor";
@@ -126,7 +126,9 @@ describe("analysis review and chart context", () => {
     render(<PrivateEntryEditor actorId="owner" entry={{ ...record, review_data: { editor_mode: "professional", tradingview } }} />);
     const frame = screen.getByTitle("BINANCE:BTCUSDT 图表");
     await waitFor(() => expect(frame.getAttribute("src")).toContain("theme=light"));
-    document.documentElement.dataset.wavekbMode = "dark";
+    // Flush the MutationObserver-driven render and its new iframe listener
+    // before emitting an error for that source; src alone precedes effects.
+    await act(async () => { document.documentElement.dataset.wavekbMode = "dark"; });
     await waitFor(() => expect(frame.getAttribute("src")).toContain("theme=dark"));
     fireEvent.error(frame);
     expect(screen.getByText(/图表加载失败/)).toBeDefined();
