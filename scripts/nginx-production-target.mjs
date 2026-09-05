@@ -28,8 +28,9 @@ export function verifyNginxTarget(config) {
   const sites = all.filter((node) => node.name === "server" && node.children.some((child) => child.name === "server_name" && child.args.includes("wavekb.com")) && node.children.some((child) => child.name === "listen" && /(?:^|:)443$/.test(child.args[0])));
   if (!sites.length) throw new Error("Production HTTPS domain is not explicitly configured");
   for (const site of sites) {
-    const unsafeRouting = (node) => ["return", "rewrite", "try_files", "if", "error_page"].includes(node.name) || (node.name === "include" && node.args[0] !== "/etc/letsencrypt/options-ssl-nginx.conf");
-    if (site.children.some(unsafeRouting)) throw new Error("Unsupported production routing override");
+    const canonicalRedirect = (node) => node.name === "if" && node.args.join(" ") === "($host = www.wavekb.com)" && node.children.length === 1 && node.children[0].name === "return" && node.children[0].args.join(" ") === "301 https://wavekb.com$request_uri";
+    const unsafeRouting = (node) => (["return", "rewrite", "try_files", "if", "error_page"].includes(node.name) && !canonicalRedirect(node)) || (node.name === "include" && node.args[0] !== "/etc/letsencrypt/options-ssl-nginx.conf");
+    if (site.children.some(unsafeRouting)) throw new Error("Unsupported production routing override (conditional/rewrite/include)");
     for (const location of site.children.filter((child) => child.name === "location")) {
       if (location.args.join(" ") === "= /") throw new Error("Competing exact root target requires review");
       if (["~", "~*"].includes(location.args[0])) {
@@ -56,5 +57,5 @@ export function verifyNginxTarget(config) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try { verifyNginxTarget(fs.readFileSync(0, "utf8")); console.log("wavekb.com HTTPS root routes to Next.js 127.0.0.1:3100. Configuration values omitted."); }
-  catch { console.error("Nginx production target could not be verified; stop before production writes."); process.exitCode = 1; }
+  catch (error) { console.error(`Nginx production target could not be verified: ${error.message}. Stop before production writes.`); process.exitCode = 1; }
 }

@@ -5,6 +5,13 @@ const url = new URL("../scripts/nginx-production-target.mjs", import.meta.url);
 const api = fs.existsSync(url) ? await import(url) : {};
 const site = (host, target) => `server { listen 443 ssl; server_name ${host}; location / { proxy_pass http://${target}; } }`;
 
+test("the known www-to-canonical redirect does not override the canonical host", () => {
+  const base = site("wavekb.com www.wavekb.com", "127.0.0.1:3100");
+  const redirect = 'if ($host = www.wavekb.com) { return 301 https://wavekb.com$request_uri; }';
+  assert.equal(api.verifyNginxTarget(base.replace(/}$/, `${redirect} }`)), true);
+  assert.throws(() => api.verifyNginxTarget(base.replace(/}$/, 'if ($host = wavekb.com) { return 301 https://elsewhere.invalid; } }')), /routing/);
+});
+
 test("competing root locations and routing overrides fail closed", () => {
   for (const override of ["location = / { proxy_pass http://127.0.0.1:8080; }", "location ~ ^/ { proxy_pass http://127.0.0.1:8080; }", "rewrite ^ /elsewhere;", "include /unknown-routes.conf;"]) {
     assert.throws(() => api.verifyNginxTarget(site("wavekb.com", "127.0.0.1:3100").replace(/}$/, `${override} }`)), /target|routing/);
