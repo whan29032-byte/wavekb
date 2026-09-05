@@ -9,7 +9,7 @@ export const APPEARANCE_THEMES = {
 } as const;
 export type AppearanceTheme = keyof typeof APPEARANCE_THEMES;
 export type AppearanceMode = "system" | "light" | "dark";
-export type AppearanceSettings = { theme: AppearanceTheme; mode: AppearanceMode; customColor: string };
+export type AppearanceSettings = { theme: AppearanceTheme; mode: AppearanceMode; customColor: string; reduceMotion?: boolean };
 export const DEFAULT_APPEARANCE: AppearanceSettings = { theme: "wave", mode: "system", customColor: "#557fb8" };
 
 export function normalizeAppearance(value: unknown): AppearanceSettings {
@@ -18,6 +18,7 @@ export function normalizeAppearance(value: unknown): AppearanceSettings {
     theme: source.theme && source.theme in APPEARANCE_THEMES ? source.theme : DEFAULT_APPEARANCE.theme,
     mode: source.mode === "light" || source.mode === "dark" || source.mode === "system" ? source.mode : DEFAULT_APPEARANCE.mode,
     customColor: typeof source.customColor === "string" && /^#[0-9a-f]{6}$/i.test(source.customColor) ? source.customColor.toLowerCase() : DEFAULT_APPEARANCE.customColor,
+    ...(source.reduceMotion === true ? { reduceMotion: true } : {}),
   };
 }
 
@@ -25,9 +26,13 @@ export function applyAppearance(settings: AppearanceSettings) {
   const root = document.documentElement;
   root.dataset.wavekbTheme = settings.theme;
   root.dataset.wavekbMode = settings.mode;
+  root.dataset.wavekbReduceMotion = String(settings.reduceMotion === true);
   root.style.setProperty("--wavekb-user-accent", settings.customColor);
-  root.style.setProperty("--wavekb-user-accent-readable", readableAccent(settings.customColor));
-  root.style.setProperty("--wavekb-user-on-accent", textOnColor(readableAccent(settings.customColor)));
+  const palette = customAccentPalette(settings.customColor);
+  root.style.setProperty("--wavekb-user-accent-readable", palette.light);
+  root.style.setProperty("--wavekb-user-accent-dark", palette.dark);
+  root.style.setProperty("--wavekb-user-on-accent", palette.onLight);
+  root.style.setProperty("--wavekb-user-on-accent-dark", palette.onDark);
 }
 
 export function readableAccent(hex: string) {
@@ -43,7 +48,24 @@ export function readableAccent(hex: string) {
 }
 
 export function textOnColor(hex: string) {
+  return contrastRatio(hex, "#102033") > contrastRatio(hex, "#ffffff") ? "#102033" : "#f7fbff";
+}
+
+function rgb(hex: string) {
   const safe = /^#[0-9a-f]{6}$/i.test(hex) ? hex.slice(1) : DEFAULT_APPEARANCE.customColor.slice(1);
-  const channels = [safe.slice(0, 2), safe.slice(2, 4), safe.slice(4, 6)].map((value) => Number.parseInt(value, 16) / 255).map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2] > 0.42 ? "#102033" : "#f7fbff";
+  return [0, 2, 4].map((offset) => Number.parseInt(safe.slice(offset, offset + 2), 16));
+}
+
+export function contrastRatio(first: string, second: string) {
+  const luminance = (hex: string) => rgb(hex).map((v) => v / 255).map((v) => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
+  const a = luminance(first), b = luminance(second);
+  return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+}
+
+export function customAccentPalette(hex: string) {
+  const mix = (target: number, amount: number) => `#${rgb(hex).map((v) => Math.round(v + (target - v) * amount).toString(16).padStart(2, "0")).join("")}`;
+  let light = mix(0, 0), dark = light;
+  for (let step = 1; contrastRatio(light, "#f7fbff") < 4.7 && step <= 100; step++) light = mix(0, step / 100);
+  for (let step = 1; contrastRatio(dark, "#263342") < 5 && step <= 100; step++) dark = mix(255, step / 100);
+  return { light, dark, onLight: textOnColor(light), onDark: textOnColor(dark) };
 }

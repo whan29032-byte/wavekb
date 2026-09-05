@@ -4,7 +4,10 @@ test("home exposes the knowledge and community paths", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚");
   await expect(page.getByRole("link", { name: "进入社区" })).toBeVisible();
-  const navigation = page.getByRole("navigation", { name: "主导航" });
+  const mobileMenu = page.getByRole("button", { name: "展开主导航" });
+  const isMobile = await mobileMenu.isVisible();
+  if (isMobile) await mobileMenu.click();
+  const navigation = page.getByRole("navigation", { name: isMobile ? "移动主导航" : "主导航", exact: true });
   await expect(navigation).toBeVisible();
   await expect(navigation.getByRole("link", { name: "积分商城" })).toHaveAttribute("href", "/rewards");
   await expect(page.getByRole("heading", { name: "X 波浪理论博主推荐" })).toBeVisible();
@@ -16,7 +19,7 @@ test("home exposes the knowledge and community paths", async ({ page }) => {
 test("appearance changes the full color system and survives reload", async ({ page }) => {
   await page.goto("/");
   const before = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--background"));
-  await page.locator('summary[aria-label="网站外观"]').click();
+  await page.getByRole("button", { name: "网站外观", exact: true }).click();
   await page.getByRole("button", { name: /星夜紫/ }).click();
   const primary = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--theme-accent").trim());
   expect(primary).toBe("#6551a8");

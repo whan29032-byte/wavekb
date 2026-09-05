@@ -6,10 +6,12 @@ import { BOARD_SLUGS, BOARDS, isBoardSlug } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
 import { EmptyBoard } from "@/components/empty-board";
 import { PostCard } from "@/components/post-card";
+import { Pagination } from "@/components/pagination";
+import { parsePage } from "@/lib/pagination";
 import { publicSupabaseConfig } from "@/lib/env";
 import { listPosts } from "@/lib/community/server-repository";
 
-type PageProps = { params: Promise<{ board: string }> };
+type PageProps = { params: Promise<{ board: string }>; searchParams?: Promise<{ page?: string | string[] }> };
 
 export const dynamicParams = false;
 
@@ -22,10 +24,12 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   return isBoardSlug(board) ? { title: BOARDS[board].title, description: BOARDS[board].description } : {};
 }
 
-export default async function BoardPage({ params }: PageProps) {
+export default async function BoardPage({ params, searchParams }: PageProps) {
   const { board } = await params;
   if (!isBoardSlug(board)) notFound();
-  const posts = await listPosts(board);
+  const page = parsePage((await searchParams)?.page);
+  const result = await listPosts(board, 20, page);
+  const posts = result.items;
   const configured = publicSupabaseConfig().configured;
 
   return (
@@ -47,6 +51,7 @@ export default async function BoardPage({ params }: PageProps) {
         ))}
       </nav>
       {posts.length ? <div className="grid gap-3">{posts.map((post) => <PostCard key={post.id} post={post} />)}</div> : <EmptyBoard board={board} configured={configured} />}
+      <Pagination page={page} hasNext={result.hasNext} pathname={`/community/${board}`} />
     </main>
   );
 }

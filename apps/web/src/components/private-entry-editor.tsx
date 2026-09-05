@@ -10,10 +10,20 @@ import { MAX_IMAGES, splitEntryTags, validateImages, validatePrivateEntry, type 
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { savePrivateEntry, softDeletePrivateEntry } from "@/lib/workbench/client-repository";
-import { buildTradingViewPackage, parseTradingViewPackage, tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
+import { buildTradingViewPackage, parseTradingViewPackage, type TradingViewPackage } from "@/lib/workbench/tradingview";
+import { PrivateEntryChart } from "./private-entry-chart";
 
 type SelectedImage = { key: string; file: File; previewUrl: string };
 type EntryErrors = Partial<Record<"kind" | "title" | "body" | "instrument" | "market" | "timeframe" | "tags" | "knowledgeIds" | "images" | "form", string>>;
+type LocalEntryDraft = {
+  kind: PrivateEntryKind; mode: "simple" | "professional"; title: string; body: string; instrument: string; market: string; timeframe: string;
+  tags: string; knowledgeIds: string; pattern: string; position: string; direction: string;
+  outcome: NonNullable<PrivateEntryReviewData["outcome"]>; countResult: NonNullable<PrivateEntryReviewData["count_result"]>;
+  ruleCompliance: NonNullable<PrivateEntryReviewData["rule_compliance"]>; executionScore: string; lesson: string;
+  tradingViewSource: string; tradingViewSymbol: string; tradingViewInterval: string; tradingViewTheme: TradingViewPackage["theme"];
+  tradingViewLayout: TradingViewPackage["layout"]; tradingViewPreview: TradingViewPackage | null; keptImageIds: string[];
+  baseUpdatedAt: string | null; savedAt?: string;
+};
 
 const kinds: Array<{ value: PrivateEntryKind; label: string }> = [
   { value: "review", label: "复盘" },
@@ -43,6 +53,11 @@ function friendlyError(error: unknown): string {
 }
 
 export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: { actorId: string; entry?: PrivateEntry; initialKind?: PrivateEntryKind }) {
+  if (entry && entry.owner_id !== actorId) return <p role="alert">无法读取其他账号的私人记录。</p>;
+  return <PrivateEntryEditorForm key={`${actorId}:${entry?.id || initialKind}:${entry?.updated_at || "new"}`} actorId={actorId} entry={entry} initialKind={initialKind} />;
+}
+
+function PrivateEntryEditorForm({ actorId, entry, initialKind }: { actorId: string; entry?: PrivateEntry; initialKind: PrivateEntryKind }) {
   const router = useRouter();
   const draftKey = `wavekb:next:private-entry:${actorId}:${entry?.id || initialKind}`;
   const initialReview = entry?.review_data ?? {};
@@ -62,7 +77,7 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
   const [countResult, setCountResult] = useState<NonNullable<PrivateEntryReviewData["count_result"]>>(initialReview.count_result || "");
   const [ruleCompliance, setRuleCompliance] = useState<NonNullable<PrivateEntryReviewData["rule_compliance"]>>(initialReview.rule_compliance || "");
   const [executionScore, setExecutionScore] = useState(initialReview.execution_score ? String(initialReview.execution_score) : "");
-  const [lesson, setLesson] = useState(String(initialReview.lesson || ""));
+  const [lesson, setLesson] = useState(String(initialReview.lesson ?? initialReview.lessons ?? ""));
   const initialTradingView = initialReview.tradingview as TradingViewPackage | null | undefined;
   const [tradingViewSource, setTradingViewSource] = useState(initialTradingView?.chart_url || initialTradingView?.symbol || "");
   const [tradingViewSymbol, setTradingViewSymbol] = useState(initialTradingView?.symbol || "");
@@ -75,27 +90,43 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
   const [errors, setErrors] = useState<EntryErrors>({});
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
-  const [draftLoaded, setDraftLoaded] = useState(Boolean(entry));
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [draftStatus, setDraftStatus] = useState("正在检查本地草稿。");
+  const [conflictingDraft, setConflictingDraft] = useState<Partial<LocalEntryDraft> | null>(null);
+  const draftCleared = useRef(false);
   const imagesRef = useRef(images);
 
+  function restoreDraft(stored: Partial<LocalEntryDraft>) {
+    if (["review", "journal", "draft"].includes(stored.kind || "")) setKind(stored.kind!);
+    if (stored.mode === "professional" || stored.mode === "simple") setMode(stored.mode);
+    const fields = [["title", setTitle], ["body", setBody], ["instrument", setInstrument], ["market", setMarket], ["timeframe", setTimeframe],
+      ["tags", setTags], ["knowledgeIds", setKnowledgeIds], ["pattern", setPattern], ["position", setPosition], ["direction", setDirection],
+      ["executionScore", setExecutionScore], ["lesson", setLesson], ["tradingViewSource", setTradingViewSource],
+      ["tradingViewSymbol", setTradingViewSymbol], ["tradingViewInterval", setTradingViewInterval]] as const;
+    for (const [field, setter] of fields) if (typeof stored[field] === "string") setter(stored[field]);
+    if (["", "win", "loss", "breakeven", "cancelled"].includes(stored.outcome ?? "missing")) setOutcome(stored.outcome!);
+    if (["", "correct", "alternate", "invalid"].includes(stored.countResult ?? "missing")) setCountResult(stored.countResult!);
+    if (["", "yes", "no", "unclear"].includes(stored.ruleCompliance ?? "missing")) setRuleCompliance(stored.ruleCompliance!);
+    if (["auto", "light", "dark"].includes(stored.tradingViewTheme || "")) setTradingViewTheme(stored.tradingViewTheme!);
+    if (stored.tradingViewLayout === null || typeof stored.tradingViewLayout === "object") setTradingViewLayout(stored.tradingViewLayout);
+    if (stored.tradingViewPreview === null || typeof stored.tradingViewPreview === "object") setTradingViewPreview(stored.tradingViewPreview);
+    if (Array.isArray(stored.keptImageIds)) setExistingImages((entry?.private_entry_images || []).filter((image) => stored.keptImageIds!.includes(image.id)));
+    setDraftStatus("已恢复当前账号的本地草稿，尚未保存到私人空间。");
+  }
+
+  const restoreDraftRef = useRef(restoreDraft);
   useEffect(() => {
-    if (entry) return;
     const restore = window.setTimeout(() => {
       try {
-        const stored = JSON.parse(localStorage.getItem(draftKey) || "null") as Partial<{ title: string; body: string; instrument: string; market: string; timeframe: string; tags: string; pattern: string; position: string; direction: string }> | null;
-        if (stored) {
-          setTitle(stored.title || "");
-          setBody(stored.body || "");
-          setInstrument(stored.instrument || "");
-          setMarket(stored.market || "");
-          setTimeframe(stored.timeframe || "");
-          setTags(stored.tags || "");
-          setPattern(stored.pattern || "unknown");
-          setPosition(stored.position || "unknown");
-          setDirection(stored.direction || "unknown");
-        }
+        const stored = JSON.parse(localStorage.getItem(draftKey) || "null") as Partial<LocalEntryDraft> | null;
+        if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+          if (entry && stored.baseUpdatedAt !== entry.updated_at) {
+            setConflictingDraft(stored);
+            setDraftStatus("服务器记录已更新，或本地草稿版本无法确认。请先选择保留服务器内容或恢复本地草稿。");
+          } else restoreDraftRef.current(stored);
+        } else setDraftStatus("文字和配置会自动保存在当前设备。");
       } catch {
-        localStorage.removeItem(draftKey);
+        setDraftStatus("本地草稿无法读取；请及时保存到私人空间。");
       }
       setDraftLoaded(true);
     }, 0);
@@ -110,15 +141,30 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
     imagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
   }, []);
 
+  const draft: LocalEntryDraft = { kind, mode, title, body, instrument, market, timeframe, tags, knowledgeIds, pattern, position, direction,
+    outcome, countResult, ruleCompliance, executionScore, lesson, tradingViewSource, tradingViewSymbol, tradingViewInterval, tradingViewTheme,
+    tradingViewLayout, tradingViewPreview, keptImageIds: existingImages.map((image) => image.id), baseUpdatedAt: entry?.updated_at || null };
+  const serializedDraft = JSON.stringify(draft);
+  const initialDraft = useRef(serializedDraft);
+  const localDraftWritten = useRef(false);
   useEffect(() => {
-    if (!draftLoaded || entry) return;
-    const timer = window.setTimeout(() => {
-      const draft = { title, body, instrument, market, timeframe, tags, pattern, position, direction, savedAt: new Date().toISOString() };
-      if (title.trim() || body.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
-      else localStorage.removeItem(draftKey);
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [body, direction, draftKey, draftLoaded, entry, instrument, market, pattern, position, tags, timeframe, title]);
+    if (!draftLoaded || conflictingDraft || draftCleared.current) return;
+    try {
+      if (serializedDraft === initialDraft.current) {
+        if (localDraftWritten.current) {
+          localStorage.removeItem(draftKey);
+          localDraftWritten.current = false;
+          setDraftStatus("当前内容未作修改。");
+        }
+        return;
+      }
+      localStorage.setItem(draftKey, JSON.stringify({ ...JSON.parse(serializedDraft), savedAt: new Date().toISOString() }));
+      localDraftWritten.current = true;
+      setDraftStatus((current) => current.startsWith("已恢复") ? current : "本地草稿已保存，尚未保存到私人空间。");
+    } catch {
+      setDraftStatus("本地草稿未能保存，请及时保存到私人空间，勿关闭页面。");
+    }
+  }, [serializedDraft, draftKey, draftLoaded, conflictingDraft]);
 
   function addImages(files: File[]) {
     const total = existingImages.length + images.length + files.length;
@@ -193,6 +239,7 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!draftLoaded || conflictingDraft) return;
     let tradingViewValue: TradingViewPackage | null;
     try {
       tradingViewValue = buildTradingViewPackage({ source: tradingViewSource, symbol: tradingViewSymbol, interval: tradingViewInterval, theme: tradingViewTheme, layout: tradingViewLayout });
@@ -250,7 +297,8 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
         keptImageIds: existingImages.map((image) => image.id),
         files: images.map((image) => image.file),
       }, entry);
-      localStorage.removeItem(draftKey);
+      draftCleared.current = true;
+      try { localStorage.removeItem(draftKey); } catch { /* Remote save succeeded even if local storage is unavailable. */ }
       if (saved.cleanupPending) setStatus("记录已保存，旧图片清理将在后续重试。");
       router.push(`/workbench/entries/${saved.id}`);
       router.refresh();
@@ -267,6 +315,8 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
     setErrors({});
     try {
       await softDeletePrivateEntry(createClient(), entry, actorId);
+      draftCleared.current = true;
+      try { localStorage.removeItem(draftKey); } catch { /* Do not turn a successful deletion into an error. */ }
       router.push("/workbench");
       router.refresh();
     } catch (error) {
@@ -277,6 +327,9 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
 
   return (
     <form className="grid gap-7" onSubmit={submit} onPaste={handlePaste}>
+      {conflictingDraft ? <section role="alert" className="grid gap-3 rounded-xl border p-4"><p>{draftStatus}</p><div className="flex flex-wrap gap-2"><Button type="button" onClick={() => { restoreDraft(conflictingDraft); setConflictingDraft(null); }}>恢复本地草稿</Button><Button type="button" variant="secondary" onClick={() => { try { localStorage.removeItem(draftKey); } catch { setDraftStatus("本地草稿无法清除，请检查浏览器存储。"); return; } setConflictingDraft(null); setDraftStatus("已保留服务器内容。"); }}>保留服务器内容</Button></div></section> : null}
+      {initialReview.analysis_snapshot && typeof initialReview.analysis_snapshot === "object" ? <section aria-label="原始分析快照" className="grid gap-3 rounded-xl border bg-surface p-5"><h2 className="text-xl font-semibold">原始分析快照</h2><p className="text-sm text-muted-foreground">生成复盘时保存的分析，只读保留，不随后续分析修改。</p><details><summary className="cursor-pointer text-sm font-medium">查看分析数据</summary><pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-4 text-xs">{JSON.stringify(initialReview.analysis_snapshot, null, 2)}</pre></details></section> : null}
+      <fieldset disabled={!draftLoaded || Boolean(conflictingDraft) || pending} className="contents">
       <section className="grid gap-6 rounded-xl border bg-surface p-5 md:p-7">
         <header className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><LockKey aria-hidden size={21} weight="duotone" /></span><div><h2 className="text-xl font-semibold">私人记录</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">只有当前账号可以读取。需要公开时会另外生成社区帖子。</p></div></header>
 
@@ -300,10 +353,11 @@ export function PrivateEntryEditor({ actorId, entry, initialKind = "review" }: {
 
       {mode === "professional" && kind === "review" ? <section className="grid gap-5 rounded-xl border bg-surface p-5 md:p-7" aria-labelledby="review-check-title"><header><h2 id="review-check-title" className="text-xl font-semibold">复盘核验</h2><p className="mt-1 text-sm text-muted-foreground">把结构判断与交易执行分开记录，避免用盈亏替代规则核验。</p></header><div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4"><Field><Label htmlFor="entry-outcome">最终结果</Label><select id="entry-outcome" className={selectClassName} value={outcome} onChange={(event) => setOutcome(event.target.value as NonNullable<PrivateEntryReviewData["outcome"]>)}><option value="">尚未结束</option><option value="win">盈利</option><option value="loss">亏损</option><option value="breakeven">保本</option><option value="cancelled">未执行</option></select></Field><Field><Label htmlFor="entry-count-result">数浪结果</Label><select id="entry-count-result" className={selectClassName} value={countResult} onChange={(event) => setCountResult(event.target.value as NonNullable<PrivateEntryReviewData["count_result"]>)}><option value="">待核验</option><option value="correct">主计数成立</option><option value="alternate">备选计数成立</option><option value="invalid">计数失效</option></select></Field><Field><Label htmlFor="entry-rule-compliance">规则遵守</Label><select id="entry-rule-compliance" className={selectClassName} value={ruleCompliance} onChange={(event) => setRuleCompliance(event.target.value as NonNullable<PrivateEntryReviewData["rule_compliance"]>)}><option value="">待核验</option><option value="yes">遵守全部硬规则</option><option value="no">存在规则违规</option><option value="unclear">证据不足</option></select></Field><Field><Label htmlFor="entry-score">执行纪律</Label><Input id="entry-score" type="number" min={1} max={5} value={executionScore} onChange={(event) => setExecutionScore(event.target.value)} placeholder="1-5" /></Field></div><Field><Label htmlFor="entry-lesson">本次经验与下次改进</Label><Textarea id="entry-lesson" value={lesson} onChange={(event) => setLesson(event.target.value)} rows={4} maxLength={2000} /></Field></section> : null}
 
-      {mode === "professional" && kind === "review" ? <section className="grid gap-5 rounded-xl border bg-surface p-5 md:p-7" aria-labelledby="tradingview-title"><header><h2 id="tradingview-title" className="text-xl font-semibold">TradingView 图表</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">粘贴公开图表链接或输入品种代码。TradingView 不向普通第三方网站开放账号登录授权，私人布局可通过 JSON 配置导入。</p></header><div className="grid gap-5 sm:grid-cols-2"><Field className="sm:col-span-2"><Label htmlFor="tradingview-source">图表链接或品种代码</Label><Input id="tradingview-source" value={tradingViewSource} onChange={(event) => setTradingViewSource(event.target.value)} maxLength={2000} placeholder="https://www.tradingview.com/chart/... 或 BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="tradingview-symbol">品种代码</Label><Input id="tradingview-symbol" value={tradingViewSymbol} onChange={(event) => setTradingViewSymbol(event.target.value)} maxLength={80} placeholder="BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="tradingview-interval">图表周期</Label><select id="tradingview-interval" className={selectClassName} value={tradingViewInterval} onChange={(event) => setTradingViewInterval(event.target.value)}><option value="15">15分钟</option><option value="60">1小时</option><option value="240">4小时</option><option value="D">日线</option><option value="W">周线</option><option value="M">月线</option></select></Field><Field><Label htmlFor="tradingview-theme">图表主题</Label><select id="tradingview-theme" className={selectClassName} value={tradingViewTheme} onChange={(event) => setTradingViewTheme(event.target.value as "auto" | "light" | "dark")}><option value="auto">跟随网站</option><option value="dark">深色</option><option value="light">浅色</option></select></Field><Field><Label htmlFor="tradingview-import">导入图表配置</Label><Input id="tradingview-import" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importTradingView(file); }} /></Field></div><div className="flex flex-wrap gap-2"><Button type="button" onClick={refreshTradingView}>刷新图表</Button><Button type="button" variant="secondary" disabled={!tradingViewPreview} onClick={exportTradingView}>导出图表配置</Button><Button asChild type="button" variant="ghost"><a href="https://www.tradingview.com/chart/" target="_blank" rel="noreferrer">打开 TradingView</a></Button></div>{tradingViewPreview ? <div className="overflow-hidden rounded-xl border bg-muted"><iframe title={`${tradingViewPreview.symbol || "TradingView"} 图表`} src={tradingViewEmbedUrl(tradingViewPreview)} className="h-[460px] w-full" loading="lazy" referrerPolicy="no-referrer" /></div> : <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">填写链接或品种代码后刷新，即可预览并把图表配置绑定到本次复盘。</p>}</section> : null}
+      {mode === "professional" && kind === "review" ? <section className="grid gap-5 rounded-xl border bg-surface p-5 md:p-7" aria-labelledby="tradingview-title"><header><h2 id="tradingview-title" className="text-xl font-semibold">TradingView 图表</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">粘贴公开图表链接或输入品种代码。JSON 可保存和导入图表配置；嵌入预览不支持恢复私人布局或绘图对象。</p></header><div className="grid gap-5 sm:grid-cols-2"><Field className="sm:col-span-2"><Label htmlFor="tradingview-source">图表链接或品种代码</Label><Input id="tradingview-source" value={tradingViewSource} onChange={(event) => setTradingViewSource(event.target.value)} maxLength={2000} placeholder="https://www.tradingview.com/chart/... 或 BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="tradingview-symbol">品种代码</Label><Input id="tradingview-symbol" value={tradingViewSymbol} onChange={(event) => setTradingViewSymbol(event.target.value)} maxLength={80} placeholder="BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="tradingview-interval">图表周期</Label><select id="tradingview-interval" className={selectClassName} value={tradingViewInterval} onChange={(event) => setTradingViewInterval(event.target.value)}><option value="15">15分钟</option><option value="60">1小时</option><option value="240">4小时</option><option value="D">日线</option><option value="W">周线</option><option value="M">月线</option></select></Field><Field><Label htmlFor="tradingview-theme">图表主题</Label><select id="tradingview-theme" className={selectClassName} value={tradingViewTheme} onChange={(event) => setTradingViewTheme(event.target.value as "auto" | "light" | "dark")}><option value="auto">跟随网站</option><option value="dark">深色</option><option value="light">浅色</option></select></Field><Field><Label htmlFor="tradingview-import">导入图表配置</Label><Input id="tradingview-import" type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importTradingView(file); }} /></Field></div><div className="flex flex-wrap gap-2"><Button type="button" onClick={refreshTradingView}>刷新图表</Button><Button type="button" variant="secondary" disabled={!tradingViewPreview} onClick={exportTradingView}>导出图表配置</Button><Button asChild type="button" variant="ghost"><a href="https://www.tradingview.com/chart/" target="_blank" rel="noreferrer">打开 TradingView</a></Button></div>{tradingViewPreview ? <PrivateEntryChart value={tradingViewPreview} /> : <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">填写链接或品种代码后刷新，即可预览并把图表配置绑定到本次复盘。</p>}</section> : null}
 
       {errors.form ? <FieldMessage role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 p-3">{errors.form}</FieldMessage> : null}
-      <footer className="flex flex-col gap-4 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"><div className="grid gap-1">{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : <p className="text-xs text-muted-foreground">新记录的文字草稿会保存在当前设备，图片只在保存时上传。</p>}{entry ? <Link href={`/community/public_viewpoint/new?source=${entry.id}`} className="text-sm font-medium text-primary hover:underline">整理为公开社区副本</Link> : null}</div><div className="flex flex-wrap gap-2">{entry ? <Button type="button" variant="danger" disabled={pending} onClick={removeEntry}><Trash aria-hidden size={17} />移除记录</Button> : null}<Button asChild type="button" variant="secondary"><Link href="/workbench">取消</Link></Button><Button type="submit" disabled={pending}>{pending ? "正在保存" : "保存私人记录"}</Button></div></footer>
+      <footer className="flex flex-col gap-4 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"><div className="grid gap-1">{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : <p role="status" className="text-xs text-muted-foreground">{conflictingDraft ? "请先处理上方的草稿冲突。" : draftStatus}</p>}<p className="text-xs text-muted-foreground">本地草稿保留文字、配置和已保存图片的选择；新选择的图片不会保留，刷新后需重新添加。</p>{entry ? <Link href={`/community/public_viewpoint/new?source=${entry.id}`} className="text-sm font-medium text-primary hover:underline">整理为公开社区副本</Link> : null}</div><div className="flex flex-wrap gap-2">{entry ? <Button type="button" variant="danger" disabled={pending} onClick={removeEntry}><Trash aria-hidden size={17} />移除记录</Button> : null}<Button asChild type="button" variant="secondary"><Link href="/workbench">取消</Link></Button><Button type="submit" disabled={pending || !draftLoaded || Boolean(conflictingDraft)}>{pending ? "正在保存" : "保存私人记录"}</Button></div></footer>
+      </fieldset>
     </form>
   );
 }

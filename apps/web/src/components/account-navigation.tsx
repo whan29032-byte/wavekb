@@ -9,40 +9,58 @@ import type { PublicProfile } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { Nameplate } from "@/components/nameplate";
+import { subscribeIdentityChanges } from "@/lib/member/identity-events";
 
 export function AccountNavigation() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
+    let currentUser: User | null = null;
+    let revision = 0;
+    let receivedAuthEvent = false;
     async function applyUser(nextUser: User | null) {
       if (!active) return;
+      const request = ++revision;
+      if (currentUser?.id !== nextUser?.id) setProfile(null);
+      currentUser = nextUser;
       setUser(nextUser);
+      setSessionLoading(false);
       if (!nextUser) {
         setProfile(null);
         return;
       }
       const client = createClient();
-      const result = await client.from("profiles").select("id,public_uid,display_name,avatar_url,role,display_title,nameplate_style").eq("id", nextUser.id).maybeSingle();
-      if (active) setProfile((result.data as PublicProfile | null) ?? null);
+      const result = await client.rpc("get_public_post_profiles", { p_ids: [nextUser.id] });
+      if (active && request === revision) setProfile((result.data?.[0] as PublicProfile | null) ?? null);
     }
     try {
       const client = createClient();
       void client.auth.getSession().then(({ data }) => {
-        void applyUser(data.session?.user ?? null);
+        // The startup snapshot can finish after a newer sign-in/sign-out event.
+        if (!receivedAuthEvent) void applyUser(data.session?.user ?? null);
+      }).catch(() => {
+        if (active && !receivedAuthEvent) setSessionLoading(false);
       });
       const { data } = client.auth.onAuthStateChange((_event, session) => {
+        receivedAuthEvent = true;
         queueMicrotask(() => void applyUser(session?.user ?? null));
+      });
+      const stopIdentity = subscribeIdentityChanges((actorId) => {
+        if (currentUser?.id === actorId) void applyUser(currentUser);
       });
       return () => {
         active = false;
+        stopIdentity();
         data.subscription.unsubscribe();
       };
     } catch {
+      queueMicrotask(() => { if (active) setSessionLoading(false); });
       return () => {
         active = false;
       };
@@ -63,6 +81,10 @@ export function AccountNavigation() {
     } finally {
       setPending(false);
     }
+  }
+
+  if (sessionLoading) {
+    return <span role="status" className="flex min-h-11 w-28 shrink-0 items-center justify-center text-xs text-muted-foreground">正在加载账号…</span>;
   }
 
   if (!user) {

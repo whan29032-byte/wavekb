@@ -134,6 +134,15 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(page).toHaveURL(chatRoute);
     await expectReleased(chat, chatHandle, page);
 
+    // A client-side route change must not resubscribe an already joined presence
+    // channel or unmount the global friend/chat windows.
+    await friends.getByRole("link", { name: "完整管理" }).click();
+    await expect(page).toHaveURL(/\/friends$/);
+    await expect(page.locator("[data-friends-directory]")).toHaveAttribute("data-load-state", "ready");
+    await expect(friends).toBeVisible();
+    await expect(chat).toBeVisible();
+    await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
+
     for (const viewport of [
       { width: 1920, height: 1000 },
       { width: 1440, height: 900 },

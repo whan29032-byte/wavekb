@@ -1,6 +1,7 @@
 import "server-only";
 import type { PrivateEntry, PrivateEntryImage, PrivateEntryKind, WorkbenchAnalysis } from "@wavekb/domain";
 import { createClient } from "@/lib/supabase/server";
+import { pageRange, parsePage, type PaginatedResult } from "@/lib/pagination";
 
 const ENTRY_SELECT = "id,owner_id,kind,title,body,instrument,market,timeframe,tags,knowledge_ids,workbench_analysis_id,review_data,created_at,updated_at,deleted_at";
 
@@ -10,17 +11,21 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-export async function listPrivateEntries(ownerId: string, kind?: PrivateEntryKind): Promise<PrivateEntry[]> {
+export async function listPrivateEntries(ownerId: string, kind?: PrivateEntryKind, requestedPage = 1): Promise<PaginatedResult<PrivateEntry>> {
+  const page = parsePage(requestedPage);
+  const { from, to } = pageRange(page, 20);
   const client = await createClient();
   let query = client.from("private_entries").select(ENTRY_SELECT)
     .eq("owner_id", ownerId)
     .is("deleted_at", null)
     .order("updated_at", { ascending: false })
-    .limit(100);
+    .order("id", { ascending: false })
+    .range(from, to + 1);
   if (kind) query = query.eq("kind", kind);
   const result = await query;
   if (result.error) throw result.error;
-  return ((result.data ?? []) as EntryRow[]).map((entry) => ({ ...entry, private_entry_images: [] }));
+  const rows = (result.data ?? []) as EntryRow[];
+  return { items: rows.slice(0, 20).map((entry) => ({ ...entry, private_entry_images: [] })), page, hasNext: rows.length > 20 };
 }
 
 export async function getPrivateEntry(id: string, ownerId: string): Promise<PrivateEntry | null> {
@@ -48,11 +53,14 @@ export async function getPrivateEntry(id: string, ownerId: string): Promise<Priv
   return { ...(result.data as EntryRow), private_entry_images: images };
 }
 
-export async function listWorkbenchAnalyses(ownerId: string): Promise<WorkbenchAnalysis[]> {
+export async function listWorkbenchAnalyses(ownerId: string, requestedPage = 1): Promise<PaginatedResult<WorkbenchAnalysis>> {
+  const page = parsePage(requestedPage);
+  const { from, to } = pageRange(page, 20);
   const client = await createClient();
-  const result = await client.from("workbench_analyses").select("*").eq("owner_id", ownerId).order("updated_at", { ascending: false }).limit(20);
+  const result = await client.from("workbench_analyses").select("*").eq("owner_id", ownerId).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(from, to + 1);
   if (result.error) throw result.error;
-  return (result.data ?? []) as WorkbenchAnalysis[];
+  const rows = (result.data ?? []) as WorkbenchAnalysis[];
+  return { items: rows.slice(0, 20), page, hasNext: rows.length > 20 };
 }
 
 export async function getWorkbenchAnalysis(id: string, ownerId: string): Promise<WorkbenchAnalysis | null> {

@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import { BOARDS } from "@wavekb/domain";
 import { PostOwnerActions } from "@/components/post-owner-actions";
 import { PostComments } from "@/components/post-comments";
+import { Pagination } from "@/components/pagination";
+import { parsePage } from "@/lib/pagination";
 import { ResearchAuthor } from "@/components/research-author";
 import { ResearchBody } from "@/components/research-body";
 import { ResearchLightbox } from "@/components/research-lightbox";
@@ -15,7 +17,7 @@ import { getCurrentUser } from "@/lib/auth/dal";
 import { getMyProfile } from "@/lib/member/server-repository";
 import { tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
 
-type PageProps = { params: Promise<{ id: string }> };
+type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ page?: string | string[] }> };
 
 const RESEARCH_GENRE = {
   case_submission: "案例研究",
@@ -27,9 +29,10 @@ const RESEARCH_GENRE = {
 
 export const dynamic = "force-dynamic";
 
-export default async function PostPage({ params }: PageProps) {
+export default async function PostPage({ params, searchParams }: PageProps) {
   const { id } = await params;
-  const [post, comments] = await Promise.all([getPost(id), listPostComments(id)]);
+  const page = parsePage((await searchParams)?.page);
+  const [post, comments] = await Promise.all([getPost(id), listPostComments(id, page)]);
   if (!post || post.status === "hidden") notFound();
   const user = await getCurrentUser();
   const actorProfile = user ? await getMyProfile(user.id).catch(() => null) : null;
@@ -61,7 +64,7 @@ export default async function PostPage({ params }: PageProps) {
           {user?.id === post.author_id ? <PostOwnerActions post={post} userId={user.id} /> : null}
         </div>
       </article>
-      <div className="mx-auto w-full max-w-4xl"><PostComments postId={post.id} comments={comments} actorId={user?.id} actorProfile={actorProfile} activeMember={actorProfile?.public_uid != null} commentsEnabled={post.comments_enabled} /></div>
+      <div className="mx-auto grid w-full max-w-4xl gap-5"><PostComments key={`${post.id}:${page}`} postId={post.id} comments={comments.items} actorId={user?.id} actorProfile={actorProfile} activeMember={actorProfile?.public_uid != null} commentsEnabled={post.comments_enabled} /><Pagination page={page} hasNext={comments.hasNext} pathname={`/community/post/${id}`} /></div>
     </main>
   );
 }

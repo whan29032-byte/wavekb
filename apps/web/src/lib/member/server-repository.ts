@@ -79,21 +79,24 @@ export type PersonalSpaceSummary = { points: number; reviews: number; journals: 
 
 export async function getMyPersonalSpaceSummary(userId: string): Promise<PersonalSpaceSummary> {
   const client = await createClient();
-  const [entries, analyses, rewards] = await Promise.all([
-    client.from("private_entries").select("kind").eq("owner_id", userId).is("deleted_at", null),
+  const [reviews, journals, drafts, analyses, rewards] = await Promise.all([
+    client.from("private_entries").select("id", { count: "exact", head: true }).eq("owner_id", userId).is("deleted_at", null).eq("kind", "review"),
+    client.from("private_entries").select("id", { count: "exact", head: true }).eq("owner_id", userId).is("deleted_at", null).eq("kind", "journal"),
+    client.from("private_entries").select("id", { count: "exact", head: true }).eq("owner_id", userId).is("deleted_at", null).eq("kind", "draft"),
     client.from("workbench_analyses").select("id", { count: "exact", head: true }).eq("owner_id", userId),
     client.rpc("get_my_reward_center"),
   ]);
-  if (entries.error) throw entries.error;
+  if (reviews.error) throw reviews.error;
+  if (journals.error) throw journals.error;
+  if (drafts.error) throw drafts.error;
   if (analyses.error) throw analyses.error;
   if (rewards.error) throw rewards.error;
-  const rows = (entries.data ?? []) as Array<{ kind: string }>;
   const center = (rewards.data ?? {}) as { wallet?: { balance?: number } };
   return {
     points: Number(center.wallet?.balance || 0),
-    reviews: rows.filter((item) => item.kind === "review").length,
-    journals: rows.filter((item) => item.kind === "journal").length,
-    drafts: rows.filter((item) => item.kind === "draft").length,
+    reviews: Number(reviews.count || 0),
+    journals: Number(journals.count || 0),
+    drafts: Number(drafts.count || 0),
     analyses: Number(analyses.count || 0),
   };
 }

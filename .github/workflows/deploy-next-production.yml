@@ -22,11 +22,13 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     environment: next-preview
     steps:
-      - name: Check out source
+      - name: Check out complete history for comparison with the live release
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
@@ -41,46 +43,12 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify the release candidate
+      - name: Verify the release candidate and deployment rollback fixtures
         run: |
           set -Eeuo pipefail
           pnpm test
           pnpm typecheck
           pnpm --filter @wavekb/web lint
-
-      - name: Apply production database migrations
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: |
-          set -Eeuo pipefail
-          schema_version=$(curl --fail --silent --show-error \
-            -H "apikey: $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
-            -H 'content-type: application/json' \
-            -d '{}' \
-            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/wavekb_schema_version" | tr -d '"')
-          [[ "$schema_version" =~ ^[0-9]{12}$ ]]
-          latest_migration=$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print | sort | tail -n 1)
-          test -n "$latest_migration"
-          latest_file=$(basename "$latest_migration")
-          latest_version=${latest_file%%_*}
-          [[ "$latest_version" =~ ^[0-9]{12}$ ]]
-          if [ -n "$SUPABASE_DB_URL" ]; then
-            psql "$SUPABASE_DB_URL" -X --set ON_ERROR_STOP=1 --command 'select 1' > /dev/null
-            while IFS= read -r migration; do
-              migration_file=$(basename "$migration")
-              migration_version=${migration_file%%_*}
-              [[ "$migration_version" =~ ^[0-9]{12}$ ]]
-              if (( 10#$migration_version > 10#$schema_version )); then
-                psql "$SUPABASE_DB_URL" -X --set ON_ERROR_STOP=1 --single-transaction --file "$migration"
-              fi
-            done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -print | sort)
-          fi
-          deployed_version=$(curl --fail --silent --show-error \
-            -H "apikey: $NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" \
-            -H 'content-type: application/json' \
-            -d '{}' \
-            "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/wavekb_schema_version" | tr -d '"')
-          test "$deployed_version" = "$latest_version"
 
       - name: Build the standalone application
         env:
@@ -90,34 +58,43 @@ jobs:
       - name: Install Chromium for browser acceptance
         run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
 
-      - name: Verify book shelf before uploading the release
+      - name: Verify local critical browser journeys before any production write
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:3108
           PORT: 3108
           HOSTNAME: 127.0.0.1
+          DEPLOYMENT_VERSION: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
-          pnpm --filter @wavekb/web start > /tmp/wavekb-book-acceptance.log 2>&1 &
+          pnpm --filter @wavekb/web start > /tmp/wavekb-candidate-acceptance.log 2>&1 &
           candidate_pid=$!
           trap 'kill "$candidate_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do
-            curl --fail --silent http://127.0.0.1:3108/knowledge/books > /dev/null && break
+            curl --fail --silent http://127.0.0.1:3108/api/health > /dev/null && break
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:3108/knowledge/books > /dev/null
-          pnpm --filter @wavekb/web exec playwright test e2e/navigation.spec.ts \
-            --grep "extension shelf" --workers=2
+          curl --fail --silent http://127.0.0.1:3108/api/health > /dev/null
+          pnpm --filter @wavekb/web exec playwright test e2e/navigation.spec.ts --workers=2
+          pnpm --filter @wavekb/web exec playwright test --config=playwright.ui.config.ts
 
-      - name: Package the standalone application
-        run: tar -C apps/web/.next/standalone -czf wavekb-next-preview.tar.gz .
+      # No DB credentials or migrations belong in a code deployment. Unknown live
+      # SHA/schema fails closed. Gateway changes require separately approved work.
+      - name: Read-only schema compatibility and live-base change preflight
+        id: preflight
+        run: node scripts/deploy-preflight.mjs
 
-      - name: Package the gateway and AI worker
+      - name: Require credentials when relevant changes need real posting acceptance
+        if: steps.preflight.outputs.posting_required == 'true'
+        env:
+          E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
+          E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
         run: |
           set -Eeuo pipefail
-          tar -czf wavekb-gateway.tar.gz \
-            ai-gateway/package.json \
-            ai-gateway/tsconfig.json \
-            ai-gateway/src
+          test -n "$E2E_POSTING_IDENTIFIER"
+          test -n "$E2E_POSTING_PASSWORD"
+
+      - name: Package the accepted standalone application
+        run: tar -C apps/web/.next/standalone --exclude='./apps/web/.next/cache' -czf wavekb-next-preview.tar.gz .
 
       - name: Configure pinned SSH access
         env:
@@ -137,344 +114,95 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
 
-      - name: Upload the production release candidate
+      # First production write: every build/local browser gate already passed.
+      # Preview-named root/service ARE production. No Nginx/env changes are made.
+      - name: Upload immutable production candidate and transaction runner
+        id: upload
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          RELEASE_ID: ${{ github.sha }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -Eeuo pipefail
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
-          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ && "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            wavekb-next-preview.tar.gz \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-next-preview-${RELEASE_ID}.tar.gz"
+            wavekb-next-preview.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-next-${release_id}.tar.gz"
           scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            wavekb-gateway.tar.gz \
-            deployment/systemd/elliott-wave-gateway.service \
-            deployment/systemd/elliott-wave-ai-worker.service \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:"
+            scripts/deploy-release.mjs "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-deploy-${release_id}.mjs"
 
-      - name: Activate the gateway and AI worker with rollback
+      - name: Activate production with durable exact rollback state
+        id: activation
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          RELEASE_ID: ${{ github.sha }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          BASE_SHA: ${{ steps.preflight.outputs.base_sha }}
         run: |
           set -Eeuo pipefail
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}$ ]]
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo /usr/bin/node ./wavekb-deploy-${release_id}.mjs activate '${RELEASE_SHA}' '${RUN_ID}' '${RUN_ATTEMPT}' '${DEPLOY_USER}' './wavekb-next-${release_id}.tar.gz' '${BASE_SHA}'"
 
-          application_root=/opt/elliott-wave-gateway
-          releases_root="${application_root}/releases"
-          release_dir="${releases_root}/${RELEASE_ID}"
-          current_link="${application_root}/current"
-          upload_archive="$HOME/wavekb-gateway.tar.gz"
-          gateway_unit="$HOME/elliott-wave-gateway.service"
-          worker_unit="$HOME/elliott-wave-ai-worker.service"
-          rollback_marker="$HOME/wavekb-gateway-rollback-${RELEASE_ID}"
-          previous_release=$(readlink -f "$current_link" 2>/dev/null || true)
-
-          sudo test -s /etc/elliott-wave/gateway.env
-          sudo install -d -m 0755 "$releases_root"
-          if [ -n "$previous_release" ] && ! curl --fail --silent --max-time 5 http://127.0.0.1:8787/health > /dev/null; then
-            previous_release=""
-          fi
-          printf '%s\n' "$previous_release" > "$rollback_marker"
-
-          rollback() {
-            status=$?
-            trap - ERR
-            if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
-              sudo ln -sfn "$previous_release" "${current_link}.rollback"
-              sudo mv -Tf "${current_link}.rollback" "$current_link"
-              sudo systemctl restart elliott-wave-gateway.service || true
-              if [ -f "$previous_release/src/worker-main.ts" ]; then
-                sudo systemctl restart elliott-wave-ai-worker.service || true
-              else
-                sudo systemctl stop elliott-wave-ai-worker.service || true
-              fi
-            fi
-            exit "$status"
-          }
-          trap rollback ERR
-
-          sudo rm -rf -- "$release_dir"
-          sudo install -d -m 0755 "$release_dir"
-          sudo tar -xzf "$upload_archive" -C "$release_dir" --strip-components=1 --no-same-owner
-          printf '%s\n' "$RELEASE_ID" | sudo tee "$release_dir/DEPLOYMENT_VERSION" > /dev/null
-          sudo chmod 0644 "$release_dir/DEPLOYMENT_VERSION"
-          sudo test -f "$release_dir/src/server.ts"
-          sudo test -f "$release_dir/src/worker-main.ts"
-          sudo install -m 0644 "$gateway_unit" /etc/systemd/system/elliott-wave-gateway.service
-          sudo install -m 0644 "$worker_unit" /etc/systemd/system/elliott-wave-ai-worker.service
-          sudo ln -sfn "$release_dir" "${current_link}.new"
-          sudo mv -Tf "${current_link}.new" "$current_link"
-          sudo systemctl daemon-reload
-          sudo systemctl enable elliott-wave-gateway.service elliott-wave-ai-worker.service
-          sudo systemctl restart elliott-wave-gateway.service
-          gateway_health=""
-          for gateway_attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-            gateway_health=$(curl --fail --silent --show-error --max-time 5 \
-              http://127.0.0.1:8787/health 2>/dev/null || true)
-            if grep -F '"ok":true' <<< "$gateway_health" > /dev/null \
-              && grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$gateway_health" > /dev/null; then
-              break
-            fi
-            sleep 2
-          done
-          grep -F '"ok":true' <<< "$gateway_health" > /dev/null
-          grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$gateway_health" > /dev/null
-          sudo systemctl restart elliott-wave-ai-worker.service
-          sudo systemctl is-active --quiet elliott-wave-ai-worker.service
-
-          trap - ERR
-          rm -f -- "$upload_archive" "$gateway_unit" "$worker_unit"
-          REMOTE
-
-      - name: Activate the preview release with rollback
+      - name: Verify production version and read-only browser journeys
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          RELEASE_ID: ${{ github.sha }}
-        run: |
-          set -Eeuo pipefail
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "DEPLOY_USER='${DEPLOY_USER}' RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
-          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}$ ]]
-
-          application_root=/srv/wavekb-next-preview
-          releases_root="${application_root}/releases"
-          release_dir="${releases_root}/${RELEASE_ID}"
-          current_link="${application_root}/current"
-          upload_archive="$HOME/wavekb-next-preview-${RELEASE_ID}.tar.gz"
-          rollback_marker="$HOME/wavekb-next-preview-rollback-${RELEASE_ID}"
-          previous_release=$(readlink -f "$current_link" 2>/dev/null || true)
-
-          printf '%s\n' "$previous_release" > "$rollback_marker"
-
-          sudo install -d -m 0755 "$releases_root"
-          if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
-            backup_root=/var/backups/wavekb-next-production
-            backup_file="${backup_root}/${RELEASE_ID}-previous.tar.gz"
-            sudo install -d -m 0750 "$backup_root"
-            sudo tar -C "$previous_release" -czf "$backup_file" .
-            sudo test -s "$backup_file"
-          fi
-          sudo rm -rf -- "$release_dir"
-          sudo install -d -m 0755 "$release_dir"
-          sudo tar -xzf "$upload_archive" -C "$release_dir" --no-same-owner
-          test -f "$release_dir/apps/web/server.js"
-
-          unit_file=$(mktemp)
-          environment_file=$(mktemp)
-          trap 'rm -f -- "$unit_file" "$environment_file"' EXIT
-          cat > "$unit_file" <<UNIT
-          [Unit]
-          Description=WaveKB Next.js preview
-          After=network-online.target
-          Wants=network-online.target
-
-          [Service]
-          Type=simple
-          User=${DEPLOY_USER}
-          WorkingDirectory=/srv/wavekb-next-preview/current
-          EnvironmentFile=/etc/wavekb/next-preview.env
-          ExecStart=/usr/bin/node apps/web/server.js
-          Restart=on-failure
-          RestartSec=5
-          TimeoutStopSec=20
-          NoNewPrivileges=true
-          PrivateTmp=true
-          ProtectSystem=strict
-          ProtectHome=true
-          ReadWritePaths=/srv/wavekb-next-preview
-          UMask=0027
-
-          [Install]
-          WantedBy=multi-user.target
-          UNIT
-          cat > "$environment_file" <<ENV
-          NODE_ENV=production
-          HOSTNAME=127.0.0.1
-          PORT=3100
-          NEXT_PUBLIC_SUPABASE_URL=https://odmtxwlnlvwldrjttyqu.supabase.co
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
-          NEXT_PUBLIC_LEGACY_SITE_URL=https://wavekb.com
-          AUTH_GATEWAY_INTERNAL_URL=http://127.0.0.1:8787
-          AUTH_GATEWAY_PUBLIC_ORIGIN=https://wavekb.com
-          DEPLOYMENT_VERSION=${RELEASE_ID}
-          ENV
-          sudo install -d -m 0755 /etc/wavekb
-          sudo install -m 0644 "$unit_file" /etc/systemd/system/wavekb-next-preview.service
-          sudo install -m 0640 "$environment_file" /etc/wavekb/next-preview.env
-
-          rollback() {
-            status=$?
-            trap - ERR
-            if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
-              previous_version=$(basename "$previous_release")
-              if [[ "$previous_version" =~ ^[0-9a-f]{40}$ ]]; then
-                sudo sed -i "s/^DEPLOYMENT_VERSION=.*/DEPLOYMENT_VERSION=${previous_version}/" /etc/wavekb/next-preview.env
-              fi
-              sudo ln -sfn "$previous_release" "${current_link}.rollback"
-              sudo mv -Tf "${current_link}.rollback" "$current_link"
-              sudo systemctl restart wavekb-next-preview.service || true
-            else
-              sudo rm -f -- "$current_link"
-              sudo systemctl stop wavekb-next-preview.service || true
-            fi
-            exit "$status"
-          }
-          trap rollback ERR
-
-          sudo ln -sfn "$release_dir" "${current_link}.new"
-          sudo mv -Tf "${current_link}.new" "$current_link"
-          sudo systemctl daemon-reload
-          sudo systemctl enable wavekb-next-preview.service
-          sudo systemctl restart wavekb-next-preview.service
-          if ! health_payload=$(curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-            --retry-connrefused http://127.0.0.1:3100/api/health) \
-            || ! grep -F '"ok":true' <<< "$health_payload" > /dev/null \
-            || ! grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$health_payload" > /dev/null; then
-            sudo systemctl --no-pager --full status wavekb-next-preview.service || true
-            sudo journalctl --no-pager -u wavekb-next-preview.service -n 80 || true
-            false
-          fi
-
-          trap - ERR
-          rm -f -- "$upload_archive"
-          current_release=$(readlink -f "$current_link")
-          while IFS= read -r stale_release; do
-            [ "$stale_release" = "$current_release" ] && continue
-            case "$stale_release" in
-              "$releases_root"/[0-9a-f]*) sudo rm -rf -- "$stale_release" ;;
-            esac
-          done < <(find "$releases_root" -mindepth 1 -maxdepth 1 -type d -mtime +14 -print)
-          REMOTE
-
-      - name: Verify production knowledge image URLs and MIME types
-        env:
+          PLAYWRIGHT_BASE_URL: https://wavekb.com
+          RELEASE_SHA: ${{ github.sha }}
           KNOWLEDGE_ASSET_CHECK_ORIGIN: https://wavekb.com
-        run: pnpm --filter @wavekb/web assets:check
-
-      - name: Require real posting acceptance credentials
-        env:
-          E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
-          E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
         run: |
           set -Eeuo pipefail
-          test -n "$E2E_POSTING_IDENTIFIER"
-          test -n "$E2E_POSTING_PASSWORD"
+          node --input-type=module -e '
+            const response = await fetch("https://wavekb.com/api/health", { cache: "no-store", signal: AbortSignal.timeout(15000) });
+            const health = await response.json();
+            if (!response.ok || health.ok !== true || health.deployment !== process.env.RELEASE_SHA) process.exit(1);
+          '
+          pnpm --filter @wavekb/web assets:check
+          pnpm --filter @wavekb/web exec playwright test e2e/navigation.spec.ts --workers=2
 
-      - name: Run real production posting and member-shell acceptance
+      # Conditional on relevant changes since LIVE base; this mutates dedicated
+      # disposable records and is not a read-only smoke test.
+      - name: Run required production posting and authenticated member-shell acceptance
+        if: steps.preflight.outputs.posting_required == 'true'
         env:
           E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
           E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
           PLAYWRIGHT_BASE_URL: https://wavekb.com
-          RELEASE_ID: ${{ github.sha }}
         run: |
-          set -Eeuo pipefail
-          for attempt in 1 2 3 4 5 6; do
-            health_payload=$(curl --fail --silent https://wavekb.com/api/health) || true
-            grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "${health_payload:-}" > /dev/null && break
-            sleep 2
-          done
-          health_payload=$(curl --fail --silent https://wavekb.com/api/health)
-          grep -F "\"deployment\":\"${RELEASE_ID}\"" <<< "$health_payload" > /dev/null
           pnpm --filter @wavekb/web exec playwright test \
-            e2e/navigation.spec.ts \
-            --grep-invert "unknown community boards|knowledge search" \
-            --workers=2
-          # Posting mutates one disposable record; member-shell acceptance is read-only apart from session and local window state.
-          pnpm --filter @wavekb/web exec playwright test \
-            e2e/member-shell.acceptance.spec.ts \
-            e2e/posting.acceptance.spec.ts \
+            e2e/member-shell.acceptance.spec.ts e2e/posting.acceptance.spec.ts \
             --project=desktop-chromium --workers=1
 
-      - name: Finalize the accepted preview release
+      - name: Finalize only the externally accepted release
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          RELEASE_ID: ${{ github.sha }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "rm -f -- \"\$HOME/wavekb-next-preview-rollback-${RELEASE_ID}\" \"\$HOME/wavekb-gateway-rollback-${RELEASE_ID}\""
-
-      - name: Roll back a release that failed acceptance
-        if: failure()
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          RELEASE_ID: ${{ github.sha }}
-        run: |
-          test -f "$HOME/.ssh/deploy_key" || exit 0
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "RELEASE_ID='${RELEASE_ID}' bash -s" <<'REMOTE'
           set -Eeuo pipefail
-          marker="$HOME/wavekb-next-preview-rollback-${RELEASE_ID}"
-          if [ -f "$marker" ]; then
-            previous_release=$(cat "$marker")
-            current_link=/srv/wavekb-next-preview/current
-            if [ -n "$previous_release" ] && [ -d "$previous_release" ]; then
-              previous_version=$(basename "$previous_release")
-              [[ "$previous_version" =~ ^[0-9a-f]{40}$ ]]
-              sudo sed -i "s/^DEPLOYMENT_VERSION=.*/DEPLOYMENT_VERSION=${previous_version}/" /etc/wavekb/next-preview.env
-              sudo ln -sfn "$previous_release" "${current_link}.rollback"
-              sudo mv -Tf "${current_link}.rollback" "$current_link"
-              sudo systemctl restart wavekb-next-preview.service
-              health_payload=$(curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-                --retry-connrefused http://127.0.0.1:3100/api/health)
-              grep -F "\"deployment\":\"${previous_version}\"" <<< "$health_payload" > /dev/null
-            fi
-            rm -f -- "$marker"
-          fi
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo /usr/bin/node ./wavekb-deploy-${release_id}.mjs finalize '${RELEASE_SHA}' '${RUN_ID}' '${RUN_ATTEMPT}'"
 
-          gateway_marker="$HOME/wavekb-gateway-rollback-${RELEASE_ID}"
-          if [ -f "$gateway_marker" ]; then
-            previous_gateway=$(cat "$gateway_marker")
-            gateway_link=/opt/elliott-wave-gateway/current
-            if [ -n "$previous_gateway" ] && [ -d "$previous_gateway" ]; then
-              sudo ln -sfn "$previous_gateway" "${gateway_link}.rollback"
-              sudo mv -Tf "${gateway_link}.rollback" "$gateway_link"
-              sudo systemctl restart elliott-wave-gateway.service
-              if [ -f "$previous_gateway/src/worker-main.ts" ]; then
-                sudo systemctl restart elliott-wave-ai-worker.service
-              else
-                sudo systemctl stop elliott-wave-ai-worker.service
-              fi
-              curl --fail --silent --show-error --retry 12 --retry-delay 2 \
-                --retry-connrefused http://127.0.0.1:8787/health > /dev/null
-            fi
-            rm -f -- "$gateway_marker"
-          fi
-          REMOTE
-
-      - name: Print production service diagnostics
-        if: failure()
+      - name: Restore previous code and service after failed acceptance
+        if: (failure() || cancelled()) && steps.upload.outcome == 'success'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "sudo systemctl --no-pager --full status wavekb-next-preview.service; sudo journalctl --no-pager -u wavekb-next-preview.service -n 120" || true
-
-      - name: Remove failed upload
-        if: failure()
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          RELEASE_ID: ${{ github.sha }}
-        run: |
-          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "rm -f -- \"\$HOME/wavekb-next-preview-${RELEASE_ID}.tar.gz\"" || true
+          set -Eeuo pipefail
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo /usr/bin/node ./wavekb-deploy-${release_id}.mjs rollback '${RELEASE_SHA}' '${RUN_ID}' '${RUN_ATTEMPT}'"
+          # Retain archive, runner and protected backup metadata for investigation.
+          # Never print systemd environment or potentially sensitive journal data.

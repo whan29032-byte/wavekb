@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { notifyIdentityChanged, subscribeIdentityChanges } from "@/lib/member/identity-events";
 import { Check, ImageSquare, UploadSimple } from "@phosphor-icons/react";
 import type { EditableMemberProfile } from "@wavekb/domain";
-import { IdentityName, Nameplate } from "@/components/nameplate";
+import { AvatarFrame, IdentityName, IdentityPreview, Nameplate } from "@/components/nameplate";
 import { splitProfileTags, validateMemberProfile, validateProfileImage } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import type { NameplateEntitlement } from "@/lib/member/server-repository";
@@ -28,7 +30,13 @@ function friendlyError(error: unknown): string {
   return message || "资料没有保存，请稍后重试。";
 }
 
-export function ProfileEditor({ profile, initialNameplates }: { profile: EditableMemberProfile; initialNameplates: NameplateEntitlement[] }) {
+type ProfileEditorProps = { profile: EditableMemberProfile; initialNameplates: NameplateEntitlement[] };
+
+export function ProfileEditor(props: ProfileEditorProps) {
+  return <ProfileEditorForm key={props.profile.id} {...props} />;
+}
+
+function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
   const [displayName, setDisplayName] = useState(profile.display_name);
   const [bio, setBio] = useState(profile.bio || "");
   const [markets, setMarkets] = useState(profile.markets.join("、"));
@@ -39,7 +47,17 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
   const [avatarPreview, setAvatarPreview] = useState(profile.avatar_url || "");
   const [coverPreview, setCoverPreview] = useState(profile.cover_url || "");
   const [coverRemoved, setCoverRemoved] = useState(false);
+  const router = useRouter();
+  const [equipment, setEquipment] = useState({ source: profile.nameplate_style, value: profile.nameplate_style });
+  // Refresh only identity state when new server props arrive; never reset unsaved text/images.
+  if (equipment.source !== profile.nameplate_style) setEquipment({ source: profile.nameplate_style, value: profile.nameplate_style });
+  const equippedStyle = equipment.source === profile.nameplate_style ? equipment.value : profile.nameplate_style;
   const [nameplates, setNameplates] = useState(initialNameplates);
+  const [nameplatesSource, setNameplatesSource] = useState(initialNameplates);
+  if (nameplatesSource !== initialNameplates) {
+    setNameplatesSource(initialNameplates);
+    setNameplates(initialNameplates);
+  }
   const [errors, setErrors] = useState<ProfileErrors>({});
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
@@ -48,6 +66,17 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
   const coverObjectUrl = useRef("");
   const persistedAvatarUrl = useRef(profile.avatar_url);
   const persistedCoverUrl = useRef(profile.cover_url);
+  const localIdentityChange = useRef(false);
+
+  useEffect(() => subscribeIdentityChanges((id) => {
+    if (id === profile.id && !localIdentityChange.current) router.refresh();
+  }), [profile.id, router]);
+
+  function refreshIdentity() {
+    localIdentityChange.current = true;
+    try { notifyIdentityChanged(profile.id); } finally { localIdentityChange.current = false; }
+    router.refresh();
+  }
 
   useEffect(() => () => {
     if (avatarObjectUrl.current) URL.revokeObjectURL(avatarObjectUrl.current);
@@ -109,6 +138,8 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
     let nextAvatarUrl = persistedAvatarUrl.current;
     let nextCoverUrl = coverRemoved ? null : persistedCoverUrl.current;
     try {
+      const auth = await client.auth.getUser();
+      if (auth.error || auth.data.user?.id !== profile.id) throw new Error("authentication_required");
       const timestamp = Date.now();
       if (avatarFile) {
         setStatus("正在裁切并上传头像。");
@@ -156,6 +187,7 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
       setAvatarPreview(nextAvatarUrl || "");
       setCoverPreview(nextCoverUrl || "");
       setStatus("资料已保存。");
+      refreshIdentity();
     } catch (error) {
       if (uploadedPaths.length) await client.storage.from("profile-avatars").remove(uploadedPaths).catch(() => undefined);
       setErrors({ form: friendlyError(error) });
@@ -172,6 +204,9 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
       const result = await createClient().rpc("equip_my_nameplate", { p_entitlement: item.id });
       if (result.error) throw result.error;
       setNameplates((current) => current.map((entry) => ({ ...entry, equipped: entry.id === item.id })));
+      setEquipment({ source: profile.nameplate_style, value: item.style });
+      setErrors((current) => ({ ...current, form: undefined }));
+      refreshIdentity();
       setStatus("身份铭牌已同步。");
     } catch (error) {
       setErrors((current) => ({ ...current, form: friendlyError(error) }));
@@ -181,19 +216,19 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
   }
 
   const previewCoverClass = coverOptions.find((item) => item.value === coverStyle)?.className || "bg-slate-800";
-  const previewInitial = (displayName.trim() || "研").slice(0, 1);
 
   return (
     <form className="grid gap-8" onSubmit={submit}>
-      <section className="overflow-hidden rounded-xl border bg-surface" aria-label="个人名片实时预览">
-        <div className={`relative h-36 overflow-hidden md:h-44 ${previewCoverClass}`}>
+      <section className="profile-hero" aria-label="个人名片实时预览">
+        <div className={`profile-hero-cover ${previewCoverClass}`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {coverPreview ? <img src={coverPreview} alt="个人页背景预览" className="h-full w-full object-cover" /> : null}
         </div>
-        <div className="flex items-start gap-4 p-5 md:p-7">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {avatarPreview ? <img src={avatarPreview} alt="头像预览" className="-mt-16 size-24 shrink-0 rounded-xl border-4 border-surface bg-muted object-cover md:size-28" /> : <div className="-mt-16 grid size-24 shrink-0 place-items-center rounded-xl border-4 border-surface bg-muted text-3xl font-semibold md:size-28">{previewInitial}</div>}
-          <div className="grid min-w-0 gap-1"><p className="text-xs font-semibold text-primary">{profile.display_title || "波浪研究者"}</p><IdentityName profile={{ display_name: displayName.trim() || "波浪研究者", nameplate_style: profile.nameplate_style }} as="h2" className="truncate text-2xl font-semibold" /><Nameplate uid={profile.public_uid} style={profile.nameplate_style} /><p className="identity-effect mt-1 max-w-[62ch] text-sm leading-6 text-muted-foreground" data-nameplate={profile.nameplate_style}>{bio.trim() || "写一句属于你的研究签名。"}</p></div>
+        <div className="profile-hero-body">
+          <div className="profile-hero-identity">
+            <div className="profile-hero-avatar-column"><AvatarFrame profile={{ display_name: displayName.trim() || "波浪研究者", avatar_url: avatarPreview || null, nameplate_style: equippedStyle }} size="large" /></div>
+            <div className="profile-hero-copy"><p className="text-xs font-semibold text-primary">{profile.display_title || "波浪研究者"}</p><IdentityName profile={{ display_name: displayName.trim() || "波浪研究者", nameplate_style: equippedStyle }} as="h2" className="truncate text-xl font-semibold" /><Nameplate uid={profile.public_uid} style={equippedStyle} /><p className="identity-effect mt-1 max-w-[62ch] break-words text-sm leading-6 text-muted-foreground" data-nameplate={equippedStyle}>{bio.trim() || "写一句属于你的研究签名。"}</p></div>
+          </div>
         </div>
       </section>
 
@@ -216,7 +251,7 @@ export function ProfileEditor({ profile, initialNameplates }: { profile: Editabl
 
       <section className="grid gap-4 rounded-xl border bg-surface p-5 md:p-6" aria-labelledby="profile-nameplate-title">
         <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><h2 id="profile-nameplate-title" className="text-xl font-semibold">身份铭牌</h2><p className="mt-1 text-sm text-muted-foreground">佩戴后同步更新昵称、头像框、好友列表和私聊。</p></div><Button asChild variant="secondary"><Link href="/rewards">前往积分商城</Link></Button></header>
-        {nameplates.length ? <div className="grid gap-3 sm:grid-cols-2">{nameplates.map((item) => <article key={item.id} className="flex items-center justify-between gap-4 rounded-xl bg-muted p-4"><div className="min-w-0"><strong className="block truncate text-sm">{item.product_name}</strong><span className="text-xs text-muted-foreground">有效至 {new Date(item.expires_at).toLocaleDateString("zh-CN")}</span></div><Button type="button" variant={item.equipped ? "secondary" : "primary"} size="small" disabled={item.equipped || equipping !== null} onClick={() => equipNameplate(item)}>{item.equipped ? "当前佩戴" : equipping === item.id ? "正在切换" : "佩戴"}</Button></article>)}</div> : <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">目前没有可佩戴的身份铭牌，可以前往积分商城兑换。</div>}
+        {nameplates.length ? <div className="grid gap-3 sm:grid-cols-2">{nameplates.map((item) => <article key={item.id} className="grid gap-3 rounded-xl bg-muted p-4"><IdentityPreview style={item.style} profile={profile} /><div className="min-w-0"><strong className="block truncate text-sm">{item.product_name}</strong><span className="text-xs text-muted-foreground">有效至 {new Date(item.expires_at).toLocaleDateString("zh-CN")}</span></div><Button type="button" variant={item.equipped ? "secondary" : "primary"} size="small" disabled={item.equipped || new Date(item.expires_at).getTime() <= Date.now() || equipping !== null} onClick={() => equipNameplate(item)}>{new Date(item.expires_at).getTime() <= Date.now() ? "已到期" : item.equipped ? "当前佩戴" : equipping === item.id ? "正在切换" : "佩戴"}</Button></article>)}</div> : <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">目前没有可佩戴的身份铭牌，可以前往积分商城兑换。</div>}
       </section>
 
       <footer className="flex flex-col gap-3 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"><div className="grid gap-1">{errors.form ? <FieldMessage role="alert">{errors.form}</FieldMessage> : null}{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : <p className="text-xs text-muted-foreground">保存后所有会员页面会读取同一份资料。</p>}</div><div className="flex gap-2"><Button asChild variant="secondary"><Link href={`/member/${profile.public_uid}`}>取消</Link></Button><Button type="submit" disabled={pending}>{pending ? "正在保存" : "保存资料"}</Button></div></footer>

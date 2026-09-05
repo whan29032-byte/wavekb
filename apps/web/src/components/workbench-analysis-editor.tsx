@@ -73,11 +73,18 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   }, [actorId, analysisId, draft]);
 
   function patchDraft(value: Partial<WorkbenchAnalysisDraft>) {
-    setDraft((current) => ({ ...current, ...value }));
+    const contextChanged = ["instrument", "market", "primary_timeframe", "parent_timeframe", "child_timeframe", "holding_style"].some((key) => key in value);
+    setDraft((current) => ({ ...current, ...(contextChanged ? { rule_result: {}, score_result: {}, risk_result: {}, drawdown_result: {} } : {}), ...value }));
   }
 
   function patchStep(value: Record<string, unknown>) {
-    setDraft((current) => ({ ...current, step_data: { ...current.step_data, [String(step)]: { ...objectValue(current.step_data[String(step)]), ...value } } }));
+    setDraft((current) => ({
+      ...current,
+      ...(step === 3 ? { drawdown_result: {} } : {}),
+      ...(step === 8 ? { risk_result: {} } : {}),
+      ...(step <= 7 ? { rule_result: {}, score_result: {} } : {}),
+      step_data: { ...current.step_data, [String(step)]: { ...objectValue(current.step_data[String(step)]), ...value } },
+    }));
   }
 
   async function persist() {
@@ -113,15 +120,24 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
 
   function runRisk() {
     const keys = ["equity", "risk_percent", "entry", "stop", "target", "contract_multiplier", "lot_size", "fees"];
-    const values = Object.fromEntries(keys.map((key) => [key, Number(currentData[key] ?? (key === "equity" ? 100000 : key === "risk_percent" || key === "contract_multiplier" || key === "lot_size" ? 1 : 0))]));
+    const defaults: Record<string, number> = { equity: 100000, risk_percent: 1, contract_multiplier: 1, lot_size: 1, fees: 0 };
+    const values = Object.fromEntries(keys.map((key) => {
+      const value = currentData[key] ?? defaults[key];
+      return [key, value === "" || value == null ? NaN : Number(value)];
+    }));
     patchDraft({ risk_result: calculateRisk(values) });
   }
 
   function runRules() {
+    const pattern = objectValue(draft.step_data["5"]).pattern;
+    if (pattern !== "impulse") {
+      patchDraft({ rule_result: { calculation_version: 2, status: "not_checked", error: pattern === "leading_diagonal" || pattern === "ending_diagonal" ? "楔形专用规则尚未实现，不能使用普通推动浪规则判断。" : "请先在第5步选择驱动结构候选。" }, score_result: {} });
+      return;
+    }
     const keys = ["w1_start", "w1_end", "w2_end", "w3_end", "w4_end", "w5_end"];
-    const values = Object.fromEntries(keys.map((key) => [key, Number(currentData[key])]));
+    const values = Object.fromEntries(keys.map((key) => [key, currentData[key] === "" || currentData[key] == null ? NaN : Number(currentData[key])]));
     const result = evaluateImpulse(values, currentData.direction === "down" ? "down" : "up");
-    patchDraft({ rule_result: result, score_result: { structural_score: result.status === "valid" ? 66 : null, trading_suitability: result.status === "valid" ? 71 : null, band: result.status === "valid" ? "中等置信" : "已淘汰", disclaimer: "置信评分用于比较当前证据，不是历史胜率或客观概率。" } });
+    patchDraft({ rule_result: { ...result, calculation_version: 2 }, score_result: {} });
   }
 
   async function startAi() {
@@ -155,6 +171,12 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   }
 
   const notes = String(currentData.notes || "");
+  // Preserve historical data, but do not certify results produced by the old
+  // checker (including incorrect diagonal checks) until the user reruns it.
+  const ruleResult = draft.rule_result.calculation_version === 2 ? draft.rule_result : {};
+  const legacyRules = Object.keys(draft.rule_result).length > 0 && draft.rule_result.calculation_version !== 2;
+  const ruleStatus = ({ valid: "已通过已实现规则", eliminated: "未通过规则", invalid_input: "输入无效", not_checked: "尚未检查" } as Record<string, string>)[String(ruleResult.status)] || "尚未检查";
+  const calculationErrors = [ruleResult.error, draft.drawdown_result.error, draft.risk_result.error].filter(Boolean);
   return (
     <div className="grid gap-6">
       <nav className="flex gap-2 overflow-x-auto pb-2" aria-label="分析步骤">{steps.map((label, index) => <button key={label} type="button" onClick={() => go(index)} aria-current={step === index ? "step" : undefined} className={`grid min-w-20 gap-1 rounded-lg border px-3 py-2 text-left ${step === index ? "border-primary bg-primary text-primary-foreground" : "bg-surface text-muted-foreground"}`}><span className="text-xs">第 {index} 步</span><span className="text-sm font-semibold">{label.slice(0, 4)}</span></button>)}</nav>
@@ -166,7 +188,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
           {step === 3 ? <div className="grid gap-5"><Field><Label htmlFor="analysis-curve">价格或权益序列</Label><Textarea id="analysis-curve" value={String(currentData.equity_curve || "")} onChange={(event) => patchStep({ equity_curve: event.target.value })} placeholder="100, 112, 108, 125, 117" /></Field><label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={Boolean(currentData.same_degree_refresh)} onChange={(event) => patchStep({ same_degree_refresh: event.target.checked })} />同级别波段刷新</label><label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={Boolean(currentData.segment_complete)} onChange={(event) => patchStep({ segment_complete: event.target.checked })} />内部浪型已完成</label><Button type="button" className="w-fit" onClick={runDrawdown}>测量最大回撤</Button></div> : null}
           {step === 4 ? <Field><Label htmlFor="analysis-correction">调整结构候选</Label><select id="analysis-correction" className={selectClass} value={String(currentData.pattern || "unknown")} onChange={(event) => patchStep({ pattern: event.target.value })}><option value="unknown">待确认</option><option value="zigzag">锯齿</option><option value="flat">平台</option><option value="triangle">三角</option><option value="combination">联合形</option></select></Field> : null}
           {step === 5 ? <Field><Label htmlFor="analysis-motive">驱动结构候选</Label><select id="analysis-motive" className={selectClass} value={String(currentData.pattern || "unknown")} onChange={(event) => patchStep({ pattern: event.target.value })}><option value="unknown">待确认</option><option value="impulse">普通推动浪</option><option value="leading_diagonal">引导楔形</option><option value="ending_diagonal">终结楔形</option></select></Field> : null}
-          {step === 6 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="rule-direction">方向</Label><select id="rule-direction" className={selectClass} value={String(currentData.direction || "up")} onChange={(event) => patchStep({ direction: event.target.value })}><option value="up">上涨</option><option value="down">下跌</option></select></Field>{[["w1_start","浪1起点",100],["w1_end","浪1终点",120],["w2_end","浪2终点",110],["w3_end","浪3终点",160],["w4_end","浪4终点",140],["w5_end","浪5终点",175]].map(([key,label,fallback]) => <Field key={String(key)}><Label htmlFor={`rule-${key}`}>{label}</Label><Input id={`rule-${key}`} type="number" step="any" value={String(currentData[String(key)] ?? fallback)} onChange={(event) => patchStep({ [String(key)]: event.target.value })} /></Field>)}<Button type="button" className="w-fit" onClick={runRules}>执行硬规则检查</Button></div> : null}
+          {step === 6 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="rule-direction">方向</Label><select id="rule-direction" className={selectClass} value={String(currentData.direction || "up")} onChange={(event) => patchStep({ direction: event.target.value })}><option value="up">上涨</option><option value="down">下跌</option></select></Field>{[["w1_start","浪1起点",100],["w1_end","浪1终点",120],["w2_end","浪2终点",110],["w3_end","浪3终点",160],["w4_end","浪4终点",140],["w5_end","浪5终点",175]].map(([key,label,fallback]) => <Field key={String(key)}><Label htmlFor={`rule-${key}`}>{label}</Label><Input id={`rule-${key}`} type="number" step="any" placeholder={String(fallback)} value={String(currentData[String(key)] ?? "")} onChange={(event) => patchStep({ [String(key)]: event.target.value })} /></Field>)}<Button type="button" className="w-fit" onClick={runRules}>执行硬规则检查</Button></div> : null}
           {step === 7 ? <div className="grid gap-5">{[["primary","首选方案"],["alternative_a","备选方案 A"],["alternative_b","备选方案 B"]].map(([key,label]) => <Field key={key}><Label htmlFor={`scenario-${key}`}>{label}</Label><Textarea id={`scenario-${key}`} value={String(currentData[key] || "")} onChange={(event) => patchStep({ [key]: event.target.value })} placeholder="写明成立、确认、失效和目标区" /></Field>)}</div> : null}
           {step === 8 ? <div className="grid gap-5 sm:grid-cols-2">{[["equity","账户权益",100000],["risk_percent","单笔风险百分比",1],["entry","计划入场价",""],["stop","交易止损价",""],["target","目标价",""],["contract_multiplier","合约乘数",1],["lot_size","最小交易单位",1],["fees","单单位费用",0]].map(([key,label,fallback]) => <Field key={String(key)}><Label htmlFor={`risk-${key}`}>{label}</Label><Input id={`risk-${key}`} type="number" step="any" value={String(currentData[String(key)] ?? fallback)} onChange={(event) => patchStep({ [String(key)]: event.target.value })} /></Field>)}<Button type="button" className="w-fit" onClick={runRisk}>计算风险收益</Button></div> : null}
           {step === 9 ? <div className="grid gap-5"><Field><Label htmlFor="execution-status">执行状态</Label><select id="execution-status" className={selectClass} value={draft.execution_status} onChange={(event) => patchDraft({ execution_status: event.target.value as WorkbenchAnalysisDraft["execution_status"] })}><option value="draft">草稿</option><option value="waiting">等待条件</option><option value="ready">可以执行</option><option value="executed">已执行</option><option value="closed">已结束</option></select></Field><Field><Label htmlFor="entry-condition">入场条件</Label><Textarea id="entry-condition" value={String(currentData.entry_condition || "")} onChange={(event) => patchStep({ entry_condition: event.target.value })} /></Field><Field><Label htmlFor="invalidation">结构失效条件</Label><Textarea id="invalidation" value={String(currentData.invalidation || "")} onChange={(event) => patchStep({ invalidation: event.target.value })} /></Field></div> : null}
@@ -176,7 +198,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
           {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t pt-5"><Button type="button" variant="secondary" disabled={step === 0} onClick={() => go(step - 1)}>上一步</Button><div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={pending} onClick={() => void save()}>{pending ? "正在处理" : "保存分析"}</Button>{step < 10 ? <Button type="button" onClick={() => go(step + 1)}>下一步</Button> : null}</div></footer>
         </section>
-        <aside className="grid h-fit gap-4 rounded-xl border bg-surface p-5 lg:sticky lg:top-20"><h2 className="font-semibold">实时结果</h2>{[["硬规则", draft.rule_result.status || "尚未检查"],["结构置信评分", draft.score_result.structural_score ?? "尚未评分"],["交易适宜度", draft.score_result.trading_suitability ?? "尚未评分"],["最大回撤", draft.drawdown_result.max_drawdown ?? "尚未测量"],["最大亏损", draft.risk_result.max_loss ?? "尚未计算"],["仓位上限", draft.risk_result.max_position ?? "尚未计算"],["盈亏比", draft.risk_result.reward_risk ?? "尚未计算"]].map(([label,value]) => <div key={String(label)} className="flex items-center justify-between gap-3 border-t pt-3 text-sm"><span className="text-muted-foreground">{String(label)}</span><strong>{String(value)}</strong></div>)}{status ? <p className="rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground" role="status">{status}</p> : null}<Link className="text-sm font-semibold text-primary hover:underline" href="/knowledge/unit-ewp-method-alternative-count-scorecard">打开第10版方法页</Link></aside>
+        <aside className="grid h-fit gap-4 rounded-xl border bg-surface p-5 lg:sticky lg:top-20"><h2 className="font-semibold">实时结果</h2>{[["硬规则", ruleStatus],["结构置信评分", "未评分"],["交易适宜度", "未评分"],["最大回撤", draft.drawdown_result.max_drawdown ?? "尚未测量"],["最大回撤比例", draft.drawdown_result.max_drawdown_percent == null ? "尚未测量" : `${draft.drawdown_result.max_drawdown_percent}%`],["最大亏损", draft.risk_result.max_loss ?? "尚未计算"],["仓位上限", draft.risk_result.max_position ?? "尚未计算"],["盈亏比", draft.risk_result.reward_risk ?? "尚未计算"]].map(([label,value]) => <div key={String(label)} className="flex items-center justify-between gap-3 border-t pt-3 text-sm"><span className="text-muted-foreground">{String(label)}</span><strong>{String(value)}</strong></div>)}{legacyRules ? <p role="status" className="text-xs text-muted-foreground">历史规则结果需要重新检查。</p> : null}{calculationErrors.map((message, index) => <FieldMessage key={index} role="alert">{String(message)}</FieldMessage>)}{Array.isArray(ruleResult.checks) ? <ul className="grid gap-2 text-xs">{ruleResult.checks.map((check, index) => { const item = objectValue(check); return <li key={index}><span className="font-semibold">{item.passed ? "通过：" : "未通过："}</span><span>{String(item.message)}</span></li>; })}</ul> : null}<p className="text-xs leading-5 text-muted-foreground">评分方法尚未实现；规则检查仅覆盖已实现条件，不代表完整浪型确认或交易建议。</p>{status ? <p className="rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground" role="status">{status}</p> : null}<Link className="text-sm font-semibold text-primary hover:underline" href="/knowledge/unit-ewp-method-alternative-count-scorecard">打开第10版方法页</Link></aside>
       </div>
     </div>
   );

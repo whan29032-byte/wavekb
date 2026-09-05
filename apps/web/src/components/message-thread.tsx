@@ -10,48 +10,11 @@ import { Button, FieldMessage, Label, Textarea } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { publicChatStickerUrl } from "@/lib/env";
 import { customStickerToken, deleteChatSticker, uploadChatSticker } from "@/lib/member/chat-stickers";
+import { playSocialTone } from "@/hooks/use-social-sound";
+import { useChatIdentities } from "@/hooks/use-chat-identities";
+import { hasFileTransfer, imageFromTransfer } from "@/lib/member/chat-transfer";
+import { MessageBody, chatStickers as stickers } from "@/components/chat-message-body";
 import { AvatarFrame, IdentityName, Nameplate } from "@/components/nameplate";
-
-const stickers = {
-  wave: { glyph: "🌊", label: "波浪" },
-  "chart-up": { glyph: "📈", label: "上涨" },
-  "chart-down": { glyph: "📉", label: "下跌" },
-  target: { glyph: "🎯", label: "目标" },
-  fire: { glyph: "🔥", label: "精彩" },
-  thinking: { glyph: "🤔", label: "思考" },
-  agree: { glyph: "🤝", label: "赞同" },
-  check: { glyph: "✅", label: "确认" },
-  diamond: { glyph: "💎", label: "高质量" },
-  laugh: { glyph: "😂", label: "开心" },
-} as const;
-
-function standardSticker(body: string) {
-  const match = /^\[\[sticker:([a-z0-9-]+)\]\]$/.exec(body.trim());
-  return match ? stickers[match[1] as keyof typeof stickers] ?? null : null;
-}
-
-function customSticker(body: string): { path: string; label: string } | null {
-  const match = /^\[\[custom-sticker:([^|\]]+)\|([^\]]*)\]\]$/.exec(body.trim());
-  if (!match) return null;
-  try {
-    const path = decodeURIComponent(match[1]);
-    const label = decodeURIComponent(match[2]) || "自定义表情";
-    if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(?:png|jpg|gif|webp)$/i.test(path)) return null;
-    return { path, label: label.slice(0, 40) };
-  } catch {
-    return null;
-  }
-}
-
-function MessageBody({ body }: { body: string }) {
-  const sticker = standardSticker(body);
-  if (sticker) return <span role="img" aria-label={sticker.label} className="text-4xl leading-none">{sticker.glyph}</span>;
-  const custom = customSticker(body);
-  if (custom) {
-    return <img src={publicChatStickerUrl(custom.path)} alt={custom.label} className="max-h-44 max-w-44 rounded-lg object-contain" />;
-  }
-  return <p className="whitespace-pre-wrap break-words text-sm leading-6">{body}</p>;
-}
 
 function threadError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -60,31 +23,14 @@ function threadError(error: unknown): string {
   return "消息没有完成同步，请稍后重试。";
 }
 
-function playMessageTone(frequency: number) {
-  try {
-    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextClass) return;
-    const context = new AudioContextClass();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.025, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.09);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.09);
-    oscillator.addEventListener("ended", () => void context.close(), { once: true });
-  } catch {
-    // Sound is optional and may be blocked by the browser.
-  }
-}
-
 export function MessageThread({ actorId, conversation, initialMessages, initialCustomStickers }: {
   actorId: string;
   conversation: DirectConversation;
   initialMessages: DirectMessage[];
   initialCustomStickers: ChatSticker[];
 }) {
+  const identities = useChatIdentities([conversation.other_id]);
+  const profile = { ...conversation, ...identities[conversation.other_id] };
   const [messages, setMessages] = useState(initialMessages);
   const [customStickers, setCustomStickers] = useState(initialCustomStickers);
   const [body, setBody] = useState("");
@@ -95,6 +41,8 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   const endRef = useRef<HTMLDivElement>(null);
   const previousNewestId = useRef(initialMessages.at(-1)?.id ?? 0);
   const refreshing = useRef(false);
+  const nearBottom = useRef(true);
+  const active = useRef(true);
 
   async function refresh(markRead = true) {
     if (refreshing.current) return;
@@ -109,18 +57,18 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
         result = await client.rpc("list_conversation_messages", { p_conversation: conversation.conversation_id });
       }
       if (result.error) throw result.error;
+      if (!active.current) return;
       const rows = (result.data ?? []) as DirectMessage[];
-      if (!rows.length) return;
-      if (afterId > 0 && rows.every((row) => row.id > afterId)) {
+      if (rows.length && afterId > 0 && rows.every((row) => row.id > afterId)) {
         setMessages((current) => [...current, ...rows.filter((row) => !current.some((item) => item.id === row.id))]);
-      } else {
+      } else if (rows.length) {
         setMessages(rows);
       }
       const newest = rows.at(-1);
-      if (newest && newest.id !== afterId && newest.sender_id !== actorId && afterId) playMessageTone(560);
+      if (newest && newest.id !== afterId && newest.sender_id !== actorId && afterId) playSocialTone(560);
       previousNewestId.current = newest?.id ?? afterId;
-      if (markRead && newest && newest.sender_id !== actorId && document.visibilityState === "visible") {
-        await client.rpc("mark_conversation_read_v1", { p_conversation: conversation.conversation_id, p_through_id: newest.id });
+      if (markRead && previousNewestId.current && document.visibilityState === "visible" && nearBottom.current) {
+        await client.rpc("mark_conversation_read_v1", { p_conversation: conversation.conversation_id, p_through_id: previousNewestId.current });
       }
     } finally {
       refreshing.current = false;
@@ -128,20 +76,25 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   }
 
   useEffect(() => {
+    active.current = true;
     const newest = initialMessages.at(-1);
-    if (newest && document.visibilityState === "visible") {
-      queueMicrotask(() => void createClient().rpc("mark_conversation_read_v1", {
+    if (newest) {
+      queueMicrotask(() => { if (active.current && document.visibilityState === "visible") void createClient().rpc("mark_conversation_read_v1", {
         p_conversation: conversation.conversation_id,
         p_through_id: newest.id,
-      }));
+      }); });
     }
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh().catch(() => undefined);
     }, 7000);
-    return () => window.clearInterval(timer);
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh().catch(() => undefined); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { active.current = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
     // The conversation id is immutable for the lifetime of this route.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.conversation_id]);
+
+  useEffect(() => { if (nearBottom.current) endRef.current?.scrollIntoView({ block: "end" }); }, [messages]);
 
   async function send(value: string, allowCurrentUpload = false) {
     const normalized = (stagedSticker ? customStickerToken(stagedSticker) : value).trim();
@@ -151,9 +104,10 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
     try {
       const result = await createClient().rpc("send_direct_message", { p_conversation: conversation.conversation_id, p_body: normalized });
       if (result.error) throw result.error;
-      playMessageTone(760);
+      playSocialTone(760);
       setBody("");
       setStagedSticker(null);
+      nearBottom.current = true;
       await refresh(false);
       window.requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
     } catch (cause) {
@@ -183,26 +137,20 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
     }
   }
 
-  function firstImage(transfer: DataTransfer | null) {
-    if (!transfer) return null;
-    return Array.from(transfer.files).find((file) => file.type.startsWith("image/"))
-      ?? Array.from(transfer.items).filter((item) => item.kind === "file" && item.type.startsWith("image/")).map((item) => item.getAsFile()).find((file): file is File => Boolean(file))
-      ?? null;
-  }
-
   function pasteImage(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const file = firstImage(event.clipboardData);
+    const file = imageFromTransfer(event.clipboardData);
     if (!file) return;
     event.preventDefault();
     void addImage(file);
   }
 
   function dropImage(event: DragEvent<HTMLFormElement>) {
-    const file = firstImage(event.dataTransfer);
     setDraggingImage(false);
-    if (!file) return;
+    if (!hasFileTransfer(event.dataTransfer)) return;
     event.preventDefault();
-    void addImage(file);
+    const file = imageFromTransfer(event.dataTransfer);
+    if (file) void addImage(file);
+    else setError("仅支持 GIF、WebP、PNG 或 JPEG 图片。");
   }
 
   function messageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -229,11 +177,11 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   return (
     <section className="grid min-h-[65dvh] grid-rows-[auto_1fr_auto] overflow-hidden rounded-xl border bg-surface" aria-labelledby="conversation-title">
       <header className="flex items-center gap-3 border-b p-4 md:p-5">
-        <AvatarFrame profile={conversation} size="medium" />
-        <div className="min-w-0"><IdentityName profile={conversation} as="h1" className="truncate text-lg font-semibold" />{conversation.public_uid ? <Link href={`/member/${conversation.public_uid}`} className="mt-1 block hover:underline"><Nameplate uid={conversation.public_uid} style={conversation.nameplate_style} compact /></Link> : null}</div>
+        <AvatarFrame profile={profile} size="medium" />
+        <div className="min-w-0" id="conversation-title"><IdentityName profile={profile} as="h1" className="truncate text-lg font-semibold" />{profile.public_uid ? <Link href={`/member/${profile.public_uid}`} className="mt-1 block hover:underline"><Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link> : null}</div>
       </header>
 
-      <div className="grid content-start gap-3 overflow-y-auto p-4 md:p-6" aria-live="polite">
+      <div className="grid max-h-[60dvh] content-start gap-3 overflow-y-auto p-4 md:p-6" aria-live="polite" onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }}>
         {messages.length ? messages.map((message) => {
           const mine = message.sender_id === actorId;
           return <article key={message.id} className={`grid max-w-[85%] gap-1 ${mine ? "ml-auto justify-items-end" : "mr-auto"}`}><div className={`rounded-xl px-4 py-3 ${mine ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"}`}><MessageBody body={message.body} /></div><time dateTime={message.created_at} className="text-[11px] text-muted-foreground">{new Date(message.created_at).toLocaleString("zh-CN")}</time></article>;
@@ -241,7 +189,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
         <div ref={endRef} />
       </div>
 
-      <form className={`grid gap-3 border-t p-4 ${draggingImage ? "bg-primary/5 ring-2 ring-inset ring-primary/35" : ""}`} onSubmit={submit} onDragOver={(event) => { if (firstImage(event.dataTransfer)) { event.preventDefault(); setDraggingImage(true); } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={dropImage}>
+      <form className={`grid gap-3 border-t p-4 ${draggingImage ? "bg-primary/5 ring-2 ring-inset ring-primary/35" : ""}`} onSubmit={submit} onDragOver={(event) => { if (hasFileTransfer(event.dataTransfer)) { event.preventDefault(); setDraggingImage(true); } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingImage(false); }} onDrop={dropImage}>
         <div className="flex flex-wrap gap-1" aria-label="快捷表情">{Object.entries(stickers).map(([id, sticker]) => <Button key={id} type="button" variant="ghost" size="icon" aria-label={`加入${sticker.label}`} onClick={() => setBody((value) => `${value}${sticker.glyph}`)} disabled={pending}><span aria-hidden className="text-xl">{sticker.glyph}</span></Button>)}</div>
         <div className="grid gap-2">
           <div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-muted-foreground">我的表情</span><span className="text-xs text-muted-foreground">粘贴或拖入图片即可加入</span></div>

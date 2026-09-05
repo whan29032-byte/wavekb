@@ -3,8 +3,9 @@ function rounded(value: number, places = 8) {
 }
 
 export function calculateMaxDrawdown(raw: string, sameDegreeRefresh: boolean, segmentComplete: boolean) {
-  const values = raw.split(/[\s,，;；]+/).map(Number).filter(Number.isFinite);
+  const values = raw.trim().split(/[\s,，;；]+/).filter(Boolean).map(Number);
   if (values.length < 2) return { ok: false, error: "至少需要两个连续价格或权益点。" };
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) return { ok: false, error: "序列必须全部为有效的非负数字，不能跳过无效数据。" };
   let peak = values[0];
   let peakIndex = 0;
   let drawdownPeak = peak;
@@ -12,9 +13,11 @@ export function calculateMaxDrawdown(raw: string, sameDegreeRefresh: boolean, se
   let trough = values[0];
   let troughIndex = 0;
   let maxLoss = 0;
+  let maxPercent = 0;
   values.forEach((value, index) => {
     if (value > peak) { peak = value; peakIndex = index; }
     const loss = peak - value;
+    if (peak > 0) maxPercent = Math.max(maxPercent, loss / peak * 100);
     if (loss > maxLoss) { maxLoss = loss; drawdownPeak = peak; drawdownPeakIndex = peakIndex; trough = value; troughIndex = index; }
   });
   return {
@@ -22,7 +25,7 @@ export function calculateMaxDrawdown(raw: string, sameDegreeRefresh: boolean, se
     peak: rounded(drawdownPeak),
     trough: rounded(trough),
     max_drawdown: rounded(maxLoss),
-    max_drawdown_percent: drawdownPeak ? rounded(maxLoss / Math.abs(drawdownPeak) * 100, 4) : null,
+    max_drawdown_percent: values.some((value) => value > 0) ? rounded(maxPercent, 4) : null,
     peak_index: drawdownPeakIndex,
     trough_index: troughIndex,
     same_degree_refresh: sameDegreeRefresh,
@@ -47,6 +50,12 @@ export function calculateRisk(input: Record<string, number>) {
 }
 
 export function evaluateImpulse(values: Record<string, number>, direction: "up" | "down") {
+  const pivots = [values.w1_start, values.w1_end, values.w2_end, values.w3_end, values.w4_end, values.w5_end];
+  if (!pivots.every(Number.isFinite)) return { status: "invalid_input", error: "请完整填写六个有效的浪端点价格。", checks: [], violations: [] };
+  const sign = direction === "up" ? 1 : -1;
+  if (pivots.slice(1).some((value, index) => (value - pivots[index]) * sign * (index % 2 === 0 ? 1 : -1) <= 0)) {
+    return { status: "invalid_input", error: "浪端点必须按所选方向交替推进与回撤，请检查方向及端点顺序。", checks: [], violations: [] };
+  }
   const up = direction === "up";
   const checks = [
     { key: "wave2_origin", passed: up ? values.w2_end >= values.w1_start : values.w2_end <= values.w1_start, message: "浪2不得越过浪1起点。" },

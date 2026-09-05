@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { MemberProfileActions } from "@/components/member-profile-actions";
 import { PostCard } from "@/components/post-card";
+import { Pagination } from "@/components/pagination";
+import { parsePage } from "@/lib/pagination";
 import { getOptionalActiveMember } from "@/lib/auth/dal";
 import { listPostsByAuthor } from "@/lib/community/server-repository";
 import { getMemberProfileByUid, getMemberSocialState, getMyPersonalSpaceSummary } from "@/lib/member/server-repository";
 import { AvatarFrame, IdentityName, IdentityTitle, Nameplate } from "@/components/nameplate";
 
-type PageProps = { params: Promise<{ uid: string }> };
+type PageProps = { params: Promise<{ uid: string }>; searchParams?: Promise<{ page?: string | string[] }> };
 
 const coverClasses = {
   "chart-dark": "bg-slate-800",
@@ -21,7 +23,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   return { title: /^\d{5,6}$/.test(uid) ? `UID ${uid} 的公开主页` : "用户主页" };
 }
 
-export default async function MemberProfilePage({ params }: PageProps) {
+export default async function MemberProfilePage({ params, searchParams }: PageProps) {
   const { uid } = await params;
   if (!/^\d{5,6}$/.test(uid)) notFound();
   const [actor, profile] = await Promise.all([
@@ -29,11 +31,13 @@ export default async function MemberProfilePage({ params }: PageProps) {
     getMemberProfileByUid(Number(uid)),
   ]);
   if (!profile) notFound();
-  const [posts, social] = await Promise.all([
-    listPostsByAuthor(profile.id),
+  const page = parsePage((await searchParams)?.page);
+  const [published, social] = await Promise.all([
+    listPostsByAuthor(profile.id, 16, page),
     actor ? getMemberSocialState(actor.id, profile.id) : Promise.resolve({ following: false, connection: null }),
   ]);
-  const boardCount = new Set(posts.map((post) => post.board)).size;
+  const posts = published.items;
+  const boardCount = published.boardCount;
   const isSelf = actor?.id === profile.id;
   const personal = isSelf && actor ? await getMyPersonalSpaceSummary(actor.id) : null;
 
@@ -65,7 +69,7 @@ export default async function MemberProfilePage({ params }: PageProps) {
       {personal ? <section className="grid grid-cols-2 divide-x divide-y rounded-xl border bg-surface sm:grid-cols-4 sm:divide-y-0" aria-label="个人研究统计">{[["复盘", personal.reviews], ["交易日记", personal.journals], ["研究草稿", personal.drafts], ["交易分析", personal.analyses]].map(([label, value]) => <div key={label} className="grid gap-1 p-4 text-center"><strong className="text-xl tabular-nums">{value}</strong><span className="text-xs text-muted-foreground">{label}</span></div>)}</section> : null}
 
       <section className="grid grid-cols-3 divide-x rounded-xl border bg-surface" aria-label="公开资料摘要">
-        {[["公开内容", posts.length], ["参与板块", boardCount], ["身份样式", profile.nameplate_style === "classic" ? "经典" : "已装配"]].map(([label, value]) => (
+        {[["公开内容", published.total], ["参与板块", boardCount], ["身份样式", profile.nameplate_style === "classic" ? "经典" : "已装配"]].map(([label, value]) => (
           <div key={label} className="grid gap-1 p-4 text-center md:p-5"><strong className="text-xl font-semibold">{value}</strong><span className="text-xs text-muted-foreground">{label}</span></div>
         ))}
       </section>
@@ -76,6 +80,7 @@ export default async function MemberProfilePage({ params }: PageProps) {
           <p className="text-sm text-muted-foreground">只展示已发布内容，私人复盘、日记和草稿不会出现在这里。</p>
         </header>
         {posts.length ? <div className="grid gap-3">{posts.map((post) => <PostCard key={post.id} post={post} />)}</div> : <div className="rounded-xl border border-dashed bg-surface p-7 text-sm text-muted-foreground">这位研究者还没有公开内容。</div>}
+        <Pagination page={page} hasNext={published.hasNext} pathname={`/member/${uid}`} />
       </section>
     </main>
   );

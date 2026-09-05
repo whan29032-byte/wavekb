@@ -50,7 +50,9 @@ test("root-mounted messenger preserves real-data friend and independent chat sta
     read("apps/web/src/components/member-profile-actions.tsx"),
   ]);
   assert.match(layout, /<SocialDesktop/);
-  for (const contract of ["readFriends", "runFriendAction", "list_my_mentor_access", "list_my_mentor_students", "list_my_mentor_payment_claims", "send_direct_message", "mark_conversation_read_v1", "wavekb-member-presence"]) assert.match(desktop, new RegExp(contract));
+  // Presence ownership now has behavioral coverage with both real components
+  // mounted in apps/web/src/components/friends-presence.test.tsx.
+  for (const contract of ["readFriends", "runFriendAction", "list_my_mentor_access", "list_my_mentor_students", "list_my_mentor_payment_claims", "send_direct_message", "mark_conversation_read_v1"]) assert.match(desktop, new RegExp(contract));
   assert.match(desktop, /搜索好友或 UID/);
   assert.match(desktop, /clampPanelCoordinates/);
   assert.match(desktop, /paste/);
@@ -83,16 +85,13 @@ test("public member profiles are anonymous-readable while social actions still r
   assert.match(actions, /login\?next=/);
 });
 
-test("production deployment applies every migration newer than the live schema", async () => {
+test("production code deployment checks schema read-only and never applies database migrations", async () => {
   const workflow = await read(".github/workflows/deploy-next-production.yml");
-  const migrationStep = workflow.slice(workflow.indexOf("Apply production database migrations"), workflow.indexOf("Build the standalone application"));
-  assert.match(migrationStep, /find supabase\/migrations/);
-  assert.match(migrationStep, /migration_version > 10#\$schema_version/);
-  assert.match(migrationStep, /--single-transaction/);
-  assert.match(migrationStep, /test "\$deployed_version" = "\$latest_version"/);
-  assert.doesNotMatch(migrationStep, /202608140\*\.sql/);
+  assert.match(workflow, /node scripts\/deploy-preflight\.mjs/);
+  assert.doesNotMatch(workflow, /SUPABASE_DB_URL|psql|Apply production database migrations/);
   assert.match(workflow, /DEPLOYMENT_VERSION/);
-  assert.match(workflow, /gateway_health[\s\S]*?deployment/);
+  assert.match(workflow, /posting_required == 'true'/);
+  assert.match(workflow, /rollback/);
 });
 
 test("friendship reader migration advances the production schema marker", async () => {
@@ -147,7 +146,8 @@ test("unified nameplates and semantic theme tokens cover migrated Next surfaces"
   assert.match(css, /identity-border-flow/);
   assert.match(css, /identity-shine/);
   assert.match(css, /\.identity-avatar-frame\)\[data-nameplate=/);
-  assert.match(layout, /wavekb:appearance:v1/);
+  assert.match(layout, /APPEARANCE_BOOTSTRAP/);
+  assert.match(await read("apps/web/src/lib/appearance-bootstrap.ts"), /wavekb:appearance:v1/);
 });
 
 test("the production member page uses the compact cross-cover profile hero", async () => {

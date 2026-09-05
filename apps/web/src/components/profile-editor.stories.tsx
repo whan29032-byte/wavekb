@@ -40,3 +40,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+export const WithAvatar: Story = {
+  args: { profile: { ...meta.args.profile, avatar_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Crect width='128' height='128' fill='%233b82f6'/%3E%3Ccircle cx='64' cy='64' r='32' fill='white'/%3E%3C/svg%3E" } },
+};

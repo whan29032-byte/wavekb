@@ -1,8 +1,9 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BoardSlug, CommunityPost, ExternalReference, PostComment, PublicProfile, ResearchTimelineNode } from "@wavekb/domain";
+import { BOARD_SLUGS, type BoardSlug, type CommunityPost, type ExternalReference, type PostComment, type PublicProfile, type ResearchTimelineNode } from "@wavekb/domain";
 import { publicSupabaseConfig } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
+import { pageRange, parsePage } from "@/lib/pagination";
 
 const POST_SELECT = [
   "id", "board", "title", "body", "author_id", "status", "created_at", "updated_at",
@@ -11,6 +12,24 @@ const POST_SELECT = [
   "research_timeline_nodes(id,subject_type,post_id,private_entry_id,author_id,kind,body,created_at,research_timeline_images(id,storage_path,sort_order,caption))",
   "comments_enabled",
 ].join(",");
+
+// Cards do not render embedded charts, external media or research timelines.
+const POST_LIST_SELECT = "id,board,title,body,author_id,status,created_at,updated_at,comments_enabled,post_images(id,storage_path,sort_order,caption)";
+type PageResult<T> = { items: T[]; hasNext: boolean; total: number };
+type AuthorPostPage = PageResult<CommunityPost> & { boardCount: number };
+
+async function postsPage(field: "board" | "author_id", value: string, size: number, page: number): Promise<PageResult<CommunityPost>> {
+  if (!publicSupabaseConfig().configured) return { items: [], hasNext: false, total: 0 };
+  const client = await createClient();
+  const { from, to } = pageRange(parsePage(page), size);
+  const result = await client.from("posts").select(POST_LIST_SELECT, { count: "exact" })
+    .eq(field, value).eq("status", "published")
+    .order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to + 1);
+  if (result.error) throw result.error;
+  const rows = (result.data ?? []) as unknown as PostRow[];
+  const items = await attachProfiles(client, rows.slice(0, size).map((row) => ({ ...row, chart_package: null, external_url: null, external_kind: null })));
+  return { items, hasNext: rows.length > size, total: result.count ?? 0 };
+}
 
 type TimelineRow = Omit<ResearchTimelineNode, "profiles">;
 type PostRow = Omit<CommunityPost, "profiles" | "external_references" | "timeline_nodes"> & {
@@ -54,32 +73,23 @@ async function attachProfiles(client: SupabaseClient, rows: PostRow[]): Promise<
   });
 }
 
-export async function listPosts(board: BoardSlug, limit = 20): Promise<CommunityPost[]> {
-  if (!publicSupabaseConfig().configured) return [];
-  const client = await createClient();
-  const result = await client
-    .from("posts")
-    .select(POST_SELECT)
-    .eq("board", board)
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (result.error) throw result.error;
-  return attachProfiles(client, (result.data ?? []) as unknown as PostRow[]);
+export function listPosts(board: BoardSlug, limit?: number): Promise<CommunityPost[]>;
+export function listPosts(board: BoardSlug, limit: number, page: number): Promise<PageResult<CommunityPost>>;
+export async function listPosts(board: BoardSlug, limit = 20, page?: number): Promise<CommunityPost[] | PageResult<CommunityPost>> {
+  const result = await postsPage("board", board, Math.min(Math.max(limit, 1), 40), page ?? 1);
+  return page === undefined ? result.items : result;
 }
 
-export async function listPostsByAuthor(authorId: string, limit = 16): Promise<CommunityPost[]> {
-  if (!publicSupabaseConfig().configured) return [];
+export function listPostsByAuthor(authorId: string, limit?: number): Promise<CommunityPost[]>;
+export function listPostsByAuthor(authorId: string, limit: number, page: number): Promise<AuthorPostPage>;
+export async function listPostsByAuthor(authorId: string, limit = 16, page?: number): Promise<CommunityPost[] | AuthorPostPage> {
+  const result = await postsPage("author_id", authorId, Math.min(Math.max(limit, 1), 40), page ?? 1);
+  if (page === undefined) return result.items;
+  if (!publicSupabaseConfig().configured) return { ...result, boardCount: 0 };
   const client = await createClient();
-  const result = await client
-    .from("posts")
-    .select(POST_SELECT)
-    .eq("author_id", authorId)
-    .eq("status", "published")
-    .order("created_at", { ascending: false })
-    .limit(Math.min(Math.max(limit, 1), 40));
-  if (result.error) throw result.error;
-  return attachProfiles(client, (result.data ?? []) as unknown as PostRow[]);
+  const counts = await Promise.all(BOARD_SLUGS.map((board) => client.from("posts").select("id", { count: "exact", head: true }).eq("author_id", authorId).eq("status", "published").eq("board", board)));
+  for (const count of counts) if (count.error) throw count.error;
+  return { ...result, boardCount: counts.filter((count) => Number(count.count) > 0).length };
 }
 
 export async function getPost(id: string): Promise<CommunityPost | null> {
@@ -92,22 +102,30 @@ export async function getPost(id: string): Promise<CommunityPost | null> {
   return post ?? null;
 }
 
-export async function listPostComments(postId: string): Promise<PostComment[]> {
-  if (!publicSupabaseConfig().configured) return [];
+export function listPostComments(postId: string): Promise<PostComment[]>;
+export function listPostComments(postId: string, page: number): Promise<PageResult<PostComment>>;
+export async function listPostComments(postId: string, page?: number): Promise<PostComment[] | PageResult<PostComment>> {
+  if (!publicSupabaseConfig().configured) return page === undefined ? [] : { items: [], hasNext: false, total: 0 };
   const client = await createClient();
+  const size = page === undefined ? 200 : 50;
+  const { from, to } = pageRange(parsePage(page), size);
   const result = await client.from("post_comments")
-    .select("id,post_id,author_id,parent_id,body,status,created_at,updated_at")
+    .select("id,post_id,author_id,parent_id,body,status,created_at,updated_at", { count: "exact" })
     .eq("post_id", postId)
     .eq("status", "visible")
     .order("created_at", { ascending: true })
-    .limit(200);
+    .order("id", { ascending: true })
+    .range(from, to + 1);
   if (result.error) throw result.error;
-  const rows = (result.data ?? []) as Omit<PostComment, "profiles">[];
+  const fetched = (result.data ?? []) as Omit<PostComment, "profiles">[];
+  const rows = fetched.slice(0, size);
+  const pagination = { hasNext: fetched.length > size, total: result.count ?? 0 };
   const authorIds = [...new Set(rows.map((comment) => comment.author_id))];
-  if (!authorIds.length) return [];
+  if (!authorIds.length) return page === undefined ? [] : { ...pagination, items: [] };
   const primary = await client.rpc("get_public_post_profiles", { p_ids: authorIds });
   const profilesResult = primary.error ? await client.rpc("get_public_profiles", { p_ids: authorIds }) : primary;
   if (profilesResult.error) throw profilesResult.error;
   const profileById = new Map(((profilesResult.data ?? []) as PublicProfile[]).map((profile) => [profile.id, profile]));
-  return rows.map((comment) => ({ ...comment, profiles: profileById.get(comment.author_id) ?? null }));
+  const items = rows.map((comment) => ({ ...comment, profiles: profileById.get(comment.author_id) ?? null }));
+  return page === undefined ? items : { ...pagination, items };
 }

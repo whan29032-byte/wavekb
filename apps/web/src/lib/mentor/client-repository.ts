@@ -48,11 +48,13 @@ function defaultCheckoutGateway(client: SupabaseClient): MentorCheckoutGateway {
 
 export async function submitManualMentorPayment(
   client: SupabaseClient,
-  value: { offerId: string; paymentMethodId: string; buyerNote: string },
+  value: { offerId: string; paymentMethodId: string; buyerNote: string; onOrderCreated?: (orderId: string) => void | Promise<void> },
   injectedGateway?: MentorCheckoutGateway,
 ) {
   const gateway = injectedGateway ?? defaultCheckoutGateway(client);
   const orderId = await gateway.createOrder(value.offerId, value.paymentMethodId);
+  // Checkpoint before the next network write so a failed claim can be reconciled.
+  await value.onOrderCreated?.(orderId);
   const claimId = await gateway.submitClaim(orderId, String(value.buyerNote || "").trim().slice(0, 1000));
   return { orderId, claimId };
 }

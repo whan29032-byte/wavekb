@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { submitManualMentorPayment } from "./client-repository";
 
 describe("manual mentor payment transaction", () => {
+  it("records the returned order ID before a claim can fail", async () => {
+    const checkpoints: string[] = [];
+    await expect(submitManualMentorPayment({} as never, { offerId: "offer", paymentMethodId: "method", buyerNote: "", onOrderCreated: (id) => { checkpoints.push(id); } }, {
+      createOrder: async () => "known-order", submitClaim: async () => { throw new Error("ambiguous claim response"); },
+    })).rejects.toThrow("ambiguous claim response");
+    expect(checkpoints).toEqual(["known-order"]);
+  });
   it("creates the pending order before submitting its payment claim", async () => {
     const calls: string[] = [];
     const result = await submitManualMentorPayment({} as never, {
