@@ -34,7 +34,7 @@ export default async function KnowledgeBookDetailPage({ params }: PageProps) {
       <article className="grid min-w-0 gap-8">
         <Link href="/knowledge/books" className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回扩展书架</Link>
         <header className="grid gap-6 border-b pb-8 sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-end">
-          <div className="relative aspect-[0.71] overflow-hidden rounded-xl border bg-muted"><Image src={assetUrl(book.cover_path)} alt={`${book.title}封面`} fill sizes="10rem" className="object-cover object-top" /></div>
+          <div className="relative aspect-[0.71] overflow-hidden rounded-xl border bg-muted"><Image src={assetUrl(book.cover_path)} alt={`${book.title}封面`} fill sizes="10rem" className="object-contain" /></div>
           <div className="grid gap-4"><span className="flex items-center gap-2 text-sm font-medium text-primary"><BookOpenText aria-hidden size={20} weight="duotone" />{book.eyebrow}</span><h1 className="max-w-[20ch] text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-5xl">{book.title}</h1><p className="max-w-[62ch] text-sm leading-6 text-muted-foreground">{book.description}</p><a href={assetUrl(book.pdf_path)} target="_blank" rel="noopener noreferrer" className="inline-flex w-fit items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"><FilePdf aria-hidden size={18} />打开完整蒸馏 PDF <ArrowSquareOut aria-hidden size={16} /></a></div>
         </header>
 

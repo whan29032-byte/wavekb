@@ -31,7 +31,7 @@ export default function KnowledgeBooksPage() {
       <section className="grid gap-5" aria-label="扩展书架书目">
         {library.books.map((book) => (
           <article key={book.id} className="grid overflow-hidden rounded-2xl border bg-surface md:grid-cols-[11.5rem_minmax(0,1fr)]">
-            <div className="relative min-h-56 bg-muted md:min-h-full"><Image src={assetUrl(book.cover_path)} alt={`${book.title}封面`} fill sizes="(min-width: 768px) 11.5rem, 100vw" className="object-cover object-top" /></div>
+            <div className="relative min-h-56 bg-muted md:min-h-full"><Image src={assetUrl(book.cover_path)} alt={`${book.title}封面`} fill sizes="(min-width: 768px) 11.5rem, 100vw" className="object-contain" /></div>
             <div className="grid gap-5 p-5 md:p-7">
               <div className="grid gap-2"><span className="text-xs font-semibold tracking-wide text-primary">{book.eyebrow}</span><h2 className="text-2xl font-semibold tracking-tight">{book.title}</h2><p className="max-w-[72ch] text-sm leading-6 text-muted-foreground">{book.description}</p></div>
               <div className="flex flex-wrap gap-2">{book.topics.map((topic) => <span key={topic} className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{topic}</span>)}</div>

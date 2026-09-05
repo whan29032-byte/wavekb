@@ -172,6 +172,13 @@ test("extension shelf publishes the two supplied distillations with PDF MIME typ
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("专题文献，和核心规则分开读。");
   await expect(page.getByRole("heading", { name: "艾略特波浪理论：自然法则" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "缠中说禅 CHM 整本文集蒸馏" })).toBeVisible();
+  for (const title of ["艾略特波浪理论：自然法则", "缠中说禅 CHM 整本文集蒸馏"]) {
+    const cover = page.getByRole("img", { name: `${title}封面`, exact: true });
+    await cover.scrollIntoViewIfNeeded();
+    await expect(cover).toBeVisible();
+    await expect(cover).toHaveCSS("object-fit", "contain");
+    await expect.poll(() => cover.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+  }
   await page.getByRole("article").filter({ has: page.getByRole("heading", { name: "艾略特波浪理论：自然法则", exact: true }) }).getByRole("link", { name: "查看阅读导览与全文" }).click();
   const naturalPdf = page.getByRole("link", { name: "打开完整蒸馏 PDF" });
   await expect(naturalPdf).toHaveAttribute("href", "/assets/books/elliott-wave-natural-law-distilled.pdf");
