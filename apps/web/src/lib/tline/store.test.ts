@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,6 +36,24 @@ it("does not create or mutate through read-only connections", () => {
   expect(() => reader.failure(start, "network_error", null)).toThrow();
   expect(() => reader.acquireLease("owner", 0)).toThrow();
   expect(reader.detail("r1")).not.toBeNull();
+});
+
+it("keeps full integrity scans off reader open/detail/status but rejects corruption on writer open", () => {
+  const path = file(); const writer = open(path);
+  writer.publish(institutions, [report("r1")], start, finish); writer.close();
+  const db = new DatabaseSync(path);
+  // A real constraint violation outside the requested rows: readable schema/data,
+  // but the writer's whole-database integrity gate must still reject this file.
+  db.exec("PRAGMA ignore_check_constraints=ON; INSERT INTO sync_state(singleton,schema_version) VALUES(2,1)"); db.close();
+  const prepared = vi.spyOn(DatabaseSync.prototype, "prepare");
+  try {
+    const reader = open(path, true);
+    expect(reader.detail("r1")?.title).toEqual({ zh: "黄金" });
+    expect(reader.status().watermark).toBe(start);
+    expect(prepared.mock.calls.some(([sql]) => /\b(?:quick_check|integrity_check)\b/i.test(sql))).toBe(false);
+    expect(() => open(path)).toThrow("Corrupt research database");
+    expect(prepared.mock.calls.some(([sql]) => /\bquick_check\b/i.test(sql))).toBe(true);
+  } finally { prepared.mockRestore(); }
 });
 
 it("keeps all prior values on validation and mid-transaction write failure", () => {

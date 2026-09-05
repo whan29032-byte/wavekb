@@ -57,7 +57,8 @@ export class ResearchStore {
       }
       const version = this.#db.prepare("PRAGMA user_version").get()?.user_version;
       if (version !== SCHEMA || this.#db.prepare("SELECT schema_version FROM sync_state WHERE singleton=1").get()?.schema_version !== SCHEMA) throw new Error("Unsupported research database schema");
-      if (this.#db.prepare("PRAGMA quick_check").get()?.quick_check !== "ok") throw new Error("Corrupt research database");
+      // Full-file integrity checks belong to writer/ops startup, not request readers.
+      if (!this.#readOnly && this.#db.prepare("PRAGMA quick_check").get()?.quick_check !== "ok") throw new Error("Corrupt research database");
       // Validate expected columns before enabling WAL; never repair unfamiliar databases.
       this.#db.prepare("SELECT slug,name,raw,updated_at FROM institutions LIMIT 0");
       this.#db.prepare("SELECT id,institution_slug,published_at,ingested_at,raw,search_text,first_seen_at,updated_at FROM research LIMIT 0");
