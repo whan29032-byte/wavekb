@@ -1,5 +1,5 @@
 import "server-only";
-import { TlineClient, TlineError } from "./client";
+import { TlineClient, TlineError, type TlineRecord } from "./client";
 
 // Share identical reads for one minute, with a bounded cache. This is not a
 // database sync and never advances a persisted watermark after a partial page.
@@ -41,5 +41,27 @@ export async function readResearchPage(since: string, cursor?: string) {
 export async function readResearch(id: string) {
   const institutions = await readInstitutions();
   const data = await cached(JSON.stringify(["detail", id]), () => new TlineClient().research(id));
+  return { institutions, data };
+}
+
+export async function readResearchCollection(since: string) {
+  const institutions = await readInstitutions();
+  const data = await cached(JSON.stringify(["collection", since]), async () => {
+    const client = new TlineClient();
+    const records: TlineRecord[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    // API batches stay at 200 to minimize paid requests; the UI paginates at 30.
+    // Never serve a partial search result as a complete seven-day collection.
+    for (let pages = 0; pages < 50; pages++) {
+      const result = await client.researchPage(since, cursor);
+      if (result.nextCursor && seen.has(result.nextCursor)) throw new TlineError(502, "repeated_cursor", "Tline repeated a cursor");
+      records.push(...result.data);
+      if (records.length > 10_000) throw new TlineError(502, "collection_limit", "Research collection exceeds the safe limit");
+      if (result.nextCursor === null) return records;
+      seen.add(result.nextCursor); cursor = result.nextCursor;
+    }
+    throw new TlineError(502, "collection_limit", "Research collection exceeds the safe page limit");
+  });
   return { institutions, data };
 }

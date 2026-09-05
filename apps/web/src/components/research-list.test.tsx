@@ -27,3 +27,9 @@ it("shows an explicit empty state with no invented rows", () => {
   expect(screen.getByText(/当前页没有研报/)).toBeDefined();
   expect(screen.queryAllByRole("article")).toHaveLength(0);
 });
+
+it("shows asset labels with readable directions and no invented direction for missing data", () => {
+  render(<ResearchList items={[{ ...item, assets: [{ ticker: "SPX", name: "标普500", direction: 1 }, { ticker: "FED", name: "美联储", direction: null }] }]} />);
+  expect(screen.getByText("SPX · 看多")).toBeDefined();
+  expect(screen.getByText("FED")).toBeDefined();
+});

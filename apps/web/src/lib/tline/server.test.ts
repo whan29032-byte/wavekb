@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
-import { readInstitutions, readResearchPage } from "./server";
+import { readInstitutions, readResearchPage, readResearchCollection } from "./server";
 const calls = vi.hoisted(() => ({ institutions: vi.fn(), page: vi.fn() }));
 vi.mock("./client", async (original) => ({ ...await original<typeof import("./client")>(), TlineClient: class { institutions = calls.institutions; researchPage = calls.page; } }));
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); vi.useRealTimers(); });
@@ -51,4 +51,44 @@ it("bounds concurrent distinct research requests before hitting the upstream", a
   for (const resolve of finish) resolve({ data: [], nextCursor: null });
   await Promise.all(pending);
   expect(calls.page).toHaveBeenCalledTimes(4);
+});
+
+it("loads all cursor pages for search and shares the completed collection", async () => {
+  vi.stubEnv("TLINE_API_KEY", "test-collection");
+  calls.institutions.mockResolvedValue([]);
+  calls.page.mockReset().mockResolvedValueOnce({ data: [{ id: "first" }], nextCursor: "second" }).mockResolvedValueOnce({ data: [{ id: "last" }], nextCursor: null });
+  const since = "2026-09-01T00:00:00Z";
+  expect((await readResearchCollection(since)).data).toEqual([{ id: "first" }, { id: "last" }]);
+  await readResearchCollection(since);
+  expect(calls.page.mock.calls).toEqual([[since, undefined], [since, "second"]]);
+});
+
+it("never publishes a partial collection after a later page fails or repeats a cursor", async () => {
+  vi.stubEnv("TLINE_API_KEY", "test-collection-failure");
+  calls.institutions.mockResolvedValue([]);
+  calls.page.mockReset().mockResolvedValueOnce({ data: [{ id: "first" }], nextCursor: "second" }).mockRejectedValueOnce(new Error("rate limited"));
+  await expect(readResearchCollection("2026-09-01T00:00:00Z")).rejects.toThrow("rate limited");
+  calls.page.mockReset().mockResolvedValue({ data: [], nextCursor: "repeat" });
+  await expect(readResearchCollection("2026-09-01T00:00:00Z")).rejects.toThrow(/cursor/);
+});
+
+it("coalesces concurrent collections and continues empty intermediate pages", async () => {
+  vi.stubEnv("TLINE_API_KEY", "test-collection-concurrent");
+  calls.institutions.mockResolvedValue([]);
+  calls.page.mockReset().mockResolvedValueOnce({ data: [], nextCursor: "more" }).mockResolvedValueOnce({ data: [{ id: "after-empty" }], nextCursor: null });
+  const result = await Promise.all([readResearchCollection("2026-09-01T00:00:00Z"), readResearchCollection("2026-09-01T00:00:00Z")]);
+  expect(result[0].data).toEqual([{ id: "after-empty" }]); expect(result[1]).toEqual(result[0]);
+  expect(calls.page).toHaveBeenCalledTimes(2);
+});
+
+it("stops unique but unbounded upstream cursors and oversized collections without partial success", async () => {
+  vi.stubEnv("TLINE_API_KEY", "test-collection-pages-cap");
+  calls.institutions.mockResolvedValue([]);
+  let next = 0;
+  calls.page.mockReset().mockImplementation(async () => ({ data: [], nextCursor: String(++next) }));
+  await expect(readResearchCollection("2026-09-01T00:00:00Z")).rejects.toMatchObject({ code: "collection_limit" });
+  expect(calls.page).toHaveBeenCalledTimes(50);
+  vi.stubEnv("TLINE_API_KEY", "test-collection-records-cap");
+  calls.page.mockReset().mockResolvedValue({ data: Array.from({ length: 10_001 }, (_, id) => ({ id: String(id) })), nextCursor: null });
+  await expect(readResearchCollection("2026-09-01T00:00:00Z")).rejects.toMatchObject({ code: "collection_limit" });
 });

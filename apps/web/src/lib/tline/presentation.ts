@@ -17,6 +17,11 @@ export function researchView(row: TlineRecord, institutions: TlineRecord[]) {
   return {
     id: text(row.id), title: translated(row.title) || "未提供标题",
     institution: text(institution.name) || text(known?.name) || "未提供机构",
+    institutionSlug: text(institution.slug),
+    assets: (Array.isArray(row.assets) ? row.assets : []).flatMap((value) => {
+      const asset = object(value); const ticker = text(asset.ticker);
+      return ticker ? [{ ticker, name: translated(asset.name), direction: typeof asset.direction === "number" && Number.isFinite(asset.direction) ? asset.direction : null }] : [];
+    }),
     date: rawDate && Number.isFinite(Date.parse(rawDate)) ? new Date(rawDate).toISOString() : null,
     summary: translated(analysis.summary), interpretation: translated(analysis.interpretation),
     arguments: translatedArray(analysis.keyArguments).map(translated).filter(Boolean),
