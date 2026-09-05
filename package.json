@@ -4,10 +4,12 @@
   "private": true,
   "packageManager": "pnpm@11.19.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "scripts": {
     "tline:research": "node --experimental-strip-types scripts/tline-research.mjs",
+    "tline:sync": "node scripts/tline-sync.mjs",
+    "tline:worker:smoke": "node scripts/smoke-tline-worker.mjs",
     "dev": "pnpm --filter @wavekb/web dev",
     "build": "pnpm --filter @wavekb/web build",
     "typecheck": "pnpm -r typecheck",

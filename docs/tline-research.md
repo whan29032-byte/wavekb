@@ -1,65 +1,66 @@
-# Tline 机构研报（增量接入）
+# Tline 机构研报：持久目录与后台同步
 
-站内入口：桌面顶部/移动菜单「机构研报」→ `/research` → `/research/{id}`。复用现有布局与主题，不更改数据库、登录或用户权益。
+站内入口为「机构研报」→ `/research` → `/research/{id}`。只增加独立研报 SQLite，不更改 Supabase、用户数据、登录、发帖或上传文件。
 
-## 服务端配置
+## 运行与读取边界
 
-使用 Node.js 22.18+。在 **Next.js 运行进程** 的环境中设置 `TLINE_API_KEY`（名称不能加 `NEXT_PUBLIC_`）。本地也可使用被 Git 忽略的 `apps/web/.env.local`；不要提交真实密钥，不要写到浏览器设置或网页源码中。构建不需要真实密钥。
+要求 Node.js 22.18+，使用内置 `node:sqlite`（Node 22 仍为实验性）。上传前用实际生产 `/usr/bin/node` 执行内存建表/查询探针；失败停止，不自动升级 Node。
 
-客户端位于 `apps/web/src/lib/tline/client.ts`，固定调用 `https://tlines.tech/api/v1`，提供 `institutions()`、`researchPage(since,cursor?)`、`researchSince(since,cursor?)` 异步迭代器、`research(id)`、`consensus(ticker)`。HTTP 重定向禁止跟随，避免 Bearer 泄露；错误保留 `status/code/message`，反射密钥会脱敏。
+生产路径固定为 `/srv/wavekb-next-preview/data/tline/research.sqlite`，用 `TLINE_RESEARCH_DB_PATH` 显式传入，独立于 releases、public、缓存和开发机。目录归部署服务账号所有，0750；新库0600。拒绝非规范路径/符号链接。
 
-## 本地验证
+页面以 `readOnly: true` 打开，不创建/修复库、不访问供应商、不调用同步器。SQLite 可维护 WAL/SHM 协调文件；不能用 immutable 忽略活动 WAL。Web unit 使用 `UnsetEnvironment=TLINE_API_KEY`；读取、刷新、分页、搜索和已保存详情不依赖密钥；缺失详情不远程补抓。
 
-在已配置好环境变量的终端执行：
+列表每页30条，默认最近7天；分页/筛选固定 since/until 窗口。关键词在整个本地窗口内做 NFKC、不区分大小写、多关键词同时匹配，机构按slug筛选。「刷新列表」保留筛选、重置窗口/页码，只读取最新本地快照。正文只展示实际保存的分析，不冒充完整PDF。
+
+显示最后成功时间；超过20分钟提醒延迟，失败继续展示已有内容。长期失联显示最后成功时的7天快照。未初始化显示准备状态，不制造研报。
+
+## Worker 与增量语义
+
+源码CLI：`pnpm tline:sync`（默认sync），或 `node scripts/tline-sync.mjs status`、`node scripts/tline-sync.mjs backup /absolute/private/snapshot.sqlite`。所有命令必须提供 DB 路径；只有sync需要进程环境中的 `TLINE_API_KEY`。不自动加载 .env.local；不把密钥写进 argv、日志或Git。
+
+standalone 包含 `apps/web/tline-worker/cli.mjs`：显式复制CLI与client/store/sync三个.ts模块，保持源码相对导入。Node22.18原生类型剥离，不依赖开发工具；不复制测试、fixture初始化或数据库。
+
+每轮先获取机构，再完整遍历since/cursor（200条/页）。首次since为开始前7天，后续为成功水位减10分钟。按ID幂等更新，完整成功后短事务发布，水位取开始时刻。请求期间没有长SQL写事务。最多50页/10,000条/8分钟；失败不推进水位、不删旧内容。
+
+SQLite非阻塞租约保证单写者。`locked/deferred` 是正常运维跳过，但CLI exit0不等于完成同步：发布预热必须返回 `status: synced`，随后readonly status必须返回相同、有效lastSuccess。429长退避持久化retryAt，不提前绕过；401/403不重试。上游只有since语义，窗口外静默修订/删除不承诺自动发现；不自动清除历史。
+
+## 事务发布顺序
+
+`deploy-next-production.yml` 的历史名称 next-preview 指真正wavekb.com生产，不是沙盒。实施前核实线上基线为 `c1ead90`；每次仍重新核实实际live SHA、Nginx目标与current。
+
+1. 全仓测试/类型/Lint/构建；actual Node22.18 standalone worker smoke；持有临时SQLite的standalone桌面/手机浏览器验收；导航/UI/知识资源门槛。构建不接收生产key/DB。
+2. 固定指纹SSH只读核实生产服务、Nginx、实际Node/SQLite；全部通过后才上传。
+3. 保留旧完整代码/静态archive、web unit原文/权限/live SHA；记录sync service/timer存在、原文/权限、active/enabled。未管理路径、drop-in、masked/runtime-enabled等无法精确恢复的配置fail closed，交人工核实。
+4. 先停timer，active/activating旧oneshot最多等待540秒自然完成，再stop。超时不杀写者、不清租约，恢复原timer，旧网页不中断。已有库由服务账号SQLite VACUUM INTO生成同目录私有快照；关闭后root将一致快照复制到受保护备份目录，避免root在live库旁创建WAL/SHM，也不让服务账号写root备份目录。
+5. GitHub environment key经SSH stdin写入版本专属 `/var/backups/wavekb-next-production/<SHA-run-attempt>/tline.env`（0600）。原 `/etc/wavekb/next-preview.env` 字节不变。systemd/root读取补充文件；worker不接收整站认证/Supabase环境。独立候选oneshot预热（systemd540秒上限），synced和lastSuccess复核后持久记录preheatComplete。
+6. 原子切换current/web，安装 `wavekb-tline-sync.service` 和timer。worker仅能写研报目录；10分钟日历计划 `OnCalendar=*-*-* *:0/10:00`、`Persistent=true`。预热和web health/version成功之后才启用timer，检查下次计划、worker Result和本地状态。
+7. 公网SHA、本地目录/30条分页/搜索/详情、知识资源与只读浏览器验收后finalize；再次检查timer/库。仅清理超过14天、不属于current/previous的明确识别releases。保留代码备份、SQLite快照、配置key和回滚元数据；cleanup不访问data目录。
+
+所有版本共享同一数据库路径。备份失败、warmup失败或locked/deferred不能授权切换。首次合法空结果也可以成功，不得以合成数据代替生产预热。
+
+## 回滚与验收
+
+使用版本专属 retained `wavekb-deploy-<SHA-run-attempt>.mjs`，runner没有可能被新版覆盖的共享helper依赖。恢复exact previous current/web unit；warmup阶段失败不重启旧web。恢复此前sync/timer文件/模式/启用运行状态；此前正在执行的oneshot通过同一个systemd service安全排队一次，不恢复被中断的中间指令。首次新增managed units停用并删除，研报库/备份均保留。
+
+finalize后普通失败任务rollback不覆盖已接受版本。人工rollback-accepted必须确认exact previous SHA且current仍为该候选。若恢复失败保留rolling-back元数据供重试，不声称已恢复。
+
+回滚至c1ead90恢复按请求访问供应商的旧实现及旧unit/key配置引用，因此不保证上游离线可读。更早258dfcf若引用已撤销key，也不能保证研报可用。任何回滚不清空SQLite、用户数据库或上传。
+
+本次人工批准read_only_acceptance=true，不执行真实发帖/member-shell变更验收；后续发布仍按live-base差异规则。报告必须区分“timer已配置、首次预热成功”与“已观察到后续真实定时执行”，不能把计划存在当作已运行证据。
+
+## 本地与CI
+
+构建前须提供 workflow 已有的公开 NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY；它们被编译进客户端，仅在启动时补充不能修复缺失的浏览器配置。TLINE_API_KEY 在构建与 fixture 验收中显式设为空。
 
 ```bash
-pnpm tline:research
+pnpm test
+pnpm typecheck
+pnpm lint
+pnpm build
+pnpm dlx node@22.18.0 scripts/smoke-tline-worker.mjs
+TLINE_E2E_FIXTURE=1 TLINE_E2E_STANDALONE=1 TLINE_API_KEY='' pnpm --filter @wavekb/web exec playwright test e2e/tline.acceptance.spec.ts --workers=1
 ```
 
-先调用 `/institutions`，成功后取运行时最近 7 天的固定 ISO 起点，以 `limit=200`、`nextCursor` 连续翻页并打印标题和机构。中文优先、英文回退；不打印密钥。CLI 从当前进程环境读取密钥，不自动加载 Next.js 的 `.env.local`。
+fixture由Playwright独占本地服务器，拒绝PLAYWRIGHT_BASE_URL/live组合，reuseExistingServer=false；已有端口导致失败而非复用。临时DB位于规范系统tmp目录，owner token匹配才允许publish；helper拒绝已存在DB，退出清理其拥有的DB/WAL/SHM/owner。SIGKILL/掉电无法执行清理；遗留路径需人工核实，下次不会覆盖。不要指定真实数据或使用--workers=2。
 
-- 401/403 直接失败，不重试；其他非 429 错误也不自动重试。
-- 429 支持 `Retry-After` 秒数和 HTTP 日期；缺失/非法头时退避 1、2、4 秒，最多重试 3 次。
-- 单次 HTTP 超时 20 秒。支持服务端要求的 60 秒等待；等待超过 120 秒时，不提前重试，返回 `retryAfterSeconds`，应等待该时间后重新运行。
-- 空中间页不代表结束；只有 `nextCursor: null` 才结束。重复 cursor/非法响应直接报错。
-- 没有写数据库或持久化增量水位。将来做入库同步时，必须完成整个固定 since 窗口后再推进水位，按研报 ID 幂等更新；本次不实现定时采集。
-
-## 网站行为
-
-全部 Tline 请求在 Server Components/服务端模块执行，无浏览器 API 密钥或任意 URL 代理。列表每页最多 30 篇，上下页保持同一个 since 和搜索/机构筛选；搜索提交自动回到第一页。正文展示 API 实际提供的摘要、论点、风险、关键数据和解读，不冒充完整原始 PDF。原始报告链接仅作辅助核对，安全地在新标签打开。
-
-搜索覆盖固定最近 7 天窗口内全部获取的研报（中英文标题、机构、分析、资产与观点），不是只筛选当前 30 条。多个空白分隔关键词须同时匹配；机构筛选按数据源 slug。服务端用 since + nextCursor、每批 200 条完整读取后再按 30 条分页，降低 API 请求数。按 ID 去重，最多 50 个上游页/10,000 条，异常或超过安全上限明确失败，不发布不完整搜索结果。UI 使用 `page` 页码；旧游标链接不再推进上游页，安全返回同一 since 窗口首页。
-
-相同服务器读取共享 Promise，成功后缓存 60 秒；最多 32 条缓存、4 个不同在途请求。失败不缓存，密钥轮换清除旧响应。翻页窗口限制在最近 8 天以内（给固定 7 天阅读窗口保留一天继续翻页余量），所有上游请求固定 `limit=200`。
-
-缺密钥、无权限、限流或网络失败显示页面错误和重试入口；其他网站页面不受影响。真实接口故障不能用假研报替代。
-
-## 测试
-
-```bash
-pnpm --filter @wavekb/web test src/lib/tline src/components/research-list.test.tsx src/app/research/page.test.tsx
-pnpm --filter @wavekb/web typecheck
-pnpm --filter @wavekb/web lint
-# 运行中的本地站点已配置服务器密钥时：
-TLINE_LIVE_ACCEPTANCE=1 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3108 pnpm --filter @wavekb/web exec playwright test e2e/tline.acceptance.spec.ts --workers=1
-```
-
-本功能与发帖无关，不执行生产发帖测试。部署前需另行配置服务器运行环境密钥；本地联调不会自动推送代码、创建 GitHub Secret 或更改生产环境。
-
-## 2026-09-05 本地联调记录
-
-- `/institutions` 真实返回 47 家机构；固定起点 `2026-08-29T12:08:52.865Z`，`limit=200` 按游标取完 207 篇研报，终端打印标题和机构，正常退出。
-- 初次请求遇到 429、`Retry-After: 60`；按服务端要求等待后成功。页面冷读取可能受第三方限流影响，需要等待，并非即时响应保证。
-- 全仓测试 484 项通过；类型检查、ESLint、Webpack 生产构建通过。构建没有注入 Tline 密钥，密钥只在本地运行进程中临时设置。
-- 静态资源检查：374 处知识图片引用和 2 本 PDF 全部存在。
-- 首轮浏览器测试发现一次上游网络超时，以及测试选择器和 Next.js 路由播报器冲突；页面正确显示失败状态，测试选择器已限定在主要内容区域。不是把失败数据替换为空列表。
-- 最终浏览器专项 6/6 通过：桌面/手机导航入口、真实列表→站内详情、非法翻页恢复；同时确认没有浏览器直连 Tline 的请求。导航另覆盖 768/1024px，无横向溢出；已人工查看真实列表和详情截图。另有首页、注册/找回密码入口回归 4/4 通过（没有发送注册或密码重置请求）。
-- 仅增量增加研报模块与导航入口，没有改动数据库、用户文件、登录权限、原有发帖逻辑，也没有上线或推送。
-
-## 授权生产发布配置
-
-用户随后要求上线，并明确批准本次仅做只读验收。生产发布使用 `next-preview` GitHub environment 的 `TLINE_API_KEY` Secret（这是既有正式服务的历史环境名称，不代表切换预览站）。构建不接收这个密钥；激活时通过 SSH stdin 传给事务脚本，写入 `/var/backups/wavekb-next-production/<SHA-run-attempt>/tline.env`，权限 `0600`。systemd 额外读取该文件，原 `/etc/wavekb/next-preview.env` 不改动。回滚恢复原 service unit，因此恢复原配置引用；密钥文件与受保护备份一起保留，不进入静态资源包或 Git。
-
-手动发布可显式选择 `read_only_acceptance=true`。默认关闭，普通 push 仍按原差异规则决定是否需要真实发帖。本次手动选项同时跳过真实发帖与会触及登录会话/聊天窗口的 member-shell suite；全量单元测试、类型检查、构建、导航/UI、知识资源、生产研报、版本核对和自动回滚仍执行。禁止把此选项作为以后无条件跳过验收的默认值。
-
-部署前使用 Nginx 只读配置解析，核对 `wavekb.com` HTTPS server 的根路径实际代理到本地 3100（支持同一已解析配置中的命名 upstream），并验证服务 active 和 current 工作目录。配置无法明确解析时停止，不猜测或修改 Nginx。
+已同步生产站的只读验收另用 `TLINE_LIVE_ACCEPTANCE=1 PLAYWRIGHT_BASE_URL=https://wavekb.com`，不启用fixture、不启动sync或发帖。真实部署、上游预热与后续timer观察由获授权发布控制者执行。

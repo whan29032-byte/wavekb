@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { ResearchStore } from "../apps/web/src/lib/tline/store.ts";
 
 const moduleUrl = new URL("../scripts/deploy-release.mjs", import.meta.url);
 const api = fs.existsSync(moduleUrl) ? await import(moduleUrl.href) : {};
@@ -69,6 +70,218 @@ function fixture(t) {
   };
   return { dir, old, options, calls, ownedCaches, failHealth: () => { failCandidateHealth = true; }, env: fs.readFileSync(environmentFile, "utf8") };
 }
+
+function persistentFixture(t, prior = false) {
+  const f = fixture(t);
+  const worker = path.join(f.dir, "candidate/apps/web/tline-worker");
+  fs.mkdirSync(worker);
+  fs.writeFileSync(path.join(worker, "cli.mjs"), "fixture worker");
+  execFileSync("tar", ["-czf", f.options.archive, "-C", path.join(f.dir, "candidate"), "."]);
+  const units = new Map();
+  const events = [];
+  const data = path.join(f.options.applicationRoot, "data/tline");
+  const database = path.join(data, "research.sqlite");
+  for (const name of ["service", "timer"]) {
+    const file = path.join(f.dir, `wavekb-tline-sync.${name}`);
+    if (prior) { fs.writeFileSync(file, `old ${name}\n`); fs.chmodSync(file, 0o640); }
+    units.set(name, { exists: prior, active: prior ? "active" : "inactive", enabled: prior ? "enabled" : "disabled" });
+  }
+  if (prior) {
+    fs.mkdirSync(data, { recursive: true });
+    const db = new ResearchStore(database);
+    db.publish([], [{ id: "old", ingestedAt: "2026-09-05T00:00:00Z" }], "2026-09-05T00:00:00Z", "2026-09-05T00:00:01Z");
+    db.close();
+  }
+  let fault;
+  const options = { ...f.options, tline: true, tlineApiKey: "tli_fixture_only_not_a_real_secret",
+    syncUnitFile: path.join(f.dir, "wavekb-tline-sync.service"), timerUnitFile: path.join(f.dir, "wavekb-tline-sync.timer"),
+    probe: async () => { events.push("probe"); if (fault === "probe") throw new Error("probe rejected"); },
+    syncService: async (action, name) => {
+      events.push(`${action}:${name}`);
+      const unit = units.get(name);
+      if (action === "state") return { ...unit };
+      if (fault === `${action}:${name}`) { fault = undefined; throw new Error("injected fault"); }
+      if (action === "stop") unit.active = "inactive";
+      if (action === "start") { unit.exists = true; unit.active = "active"; }
+      if (["enable", "disable"].includes(action)) unit.enabled = action === "enable" ? "enabled" : "disabled";
+      if (action === "check") return { next: "2026-09-05T01:10:00Z", result: "success" };
+    },
+    worker: async ({ command, file, output, user, environmentFiles }) => {
+      events.push(command);
+      if (fault === "backup" && command === "backup") throw new Error("backup failed");
+      assert.equal(file, database);
+      assert.equal(user, "fixture");
+      assert.equal(f.ownedCaches.get(data), "fixture", "DB operations run as the catalogue owner");
+      if (command === "sync") {
+        assert.ok(environmentFiles.every((file) => fs.existsSync(file)));
+        if (prior) assert.ok(fs.existsSync(path.join(f.options.backupRoot, `${sha}-${options.runId}-${options.runAttempt}`, "research.sqlite")), "backup precedes warmup");
+        if (fault === "sync") throw new Error("warmup failed");
+        if (fault === "locked" || fault === "deferred") return { status: fault, lastSuccess: "2026-09-05T00:00:01Z" };
+      }
+      const db = new ResearchStore(file, { readOnly: command === "status" });
+      try {
+        if (command === "backup") { assert.equal(path.dirname(output), data, "service writes snapshot to owned staging, not protected backup root"); db.backupTo(output); return { status: "backed_up" }; }
+        if (command === "status") return db.status();
+        db.publish([], [{ id: "new", ingestedAt: "2026-09-05T00:01:00Z" }], "2026-09-05T00:01:00Z", "2026-09-05T00:01:01Z");
+        return { status: "synced", lastSuccess: "2026-09-05T00:01:01Z" };
+      } finally { db.close(); }
+    },
+  };
+  return { ...f, options, units, events, database, fault: (value) => { fault = value; } };
+}
+
+test("persistent capability rejection occurs before production files or services mutate", async (t) => {
+  const f = persistentFixture(t); f.fault("probe");
+  await assert.rejects(api.activate(f.options), /probe/);
+  assert.deepEqual(f.events, ["probe"]);
+  assert.equal(fs.readdirSync(path.join(f.options.applicationRoot, "releases")).length, 1);
+  assert.ok(!fs.existsSync(path.dirname(f.database)));
+});
+
+test("an activating writer drains under a bounded wait before backup instead of losing its lease to SIGTERM", async (t) => {
+  const f = persistentFixture(t, true);
+  f.units.get("service").active = "activating";
+  const control = f.options.syncService;
+  f.options.syncService = async (action, name) => {
+    if (action === "stop" && name === "service") assert.notEqual(f.units.get(name).active, "activating", "must not kill a leased writer");
+    if (action === "wait-idle") { assert.equal(f.units.get("timer").active, "inactive"); f.units.get("service").active = "inactive"; }
+    return control(action, name);
+  };
+  await api.activate(f.options);
+  assert.ok(f.events.indexOf("wait-idle:service") < f.events.indexOf("backup"));
+});
+
+for (const phase of ["sync", "locked", "deferred", "enable:timer", "start:timer", "check:timer"]) {
+  test(`persistent failure at ${phase} restores exact previous units and retains data`, async (t) => {
+    const f = persistentFixture(t, true); f.fault(phase);
+    await assert.rejects(api.activate(f.options));
+    assert.equal(fs.realpathSync(path.join(f.options.applicationRoot, "current")), f.old);
+    for (const name of ["service", "timer"]) {
+      const file = name === "service" ? f.options.syncUnitFile : f.options.timerUnitFile;
+      assert.equal(fs.readFileSync(file, "utf8"), `old ${name}\n`);
+      assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+      assert.deepEqual(f.units.get(name), { exists: true, enabled: "enabled", active: "active" });
+    }
+    assert.equal(fs.readFileSync(f.options.environmentFile, "utf8"), f.env);
+    if (["sync", "locked", "deferred"].includes(phase)) assert.equal(f.calls.filter((call) => call === "restart").length, 0, "warmup failure must not restart the live web service");
+    const db = new ResearchStore(f.database, { readOnly: true });
+    assert.ok(db.detail("old")); db.close();
+    assert.ok(f.events.indexOf("stop:timer") < f.events.indexOf("backup"));
+    assert.ok(f.events.indexOf("stop:service") < f.events.indexOf("backup"));
+  });
+}
+
+for (const enabled of ["disabled", "static"]) {
+  test(`rollback preserves previously ${enabled}, inactive sync units without starting them`, async (t) => {
+    const f = persistentFixture(t, true);
+    for (const unit of f.units.values()) { unit.enabled = enabled; unit.active = "inactive"; }
+    const webControl = f.options.service;
+    f.options.service = async (action) => {
+      if (action === "daemon-reload" && enabled === "static") {
+        // systemd derives "static" from the restored unit's lack of [Install],
+        // not an enable/disable operation. Model that external reload boundary.
+        for (const [name, file] of [["service", f.options.syncUnitFile], ["timer", f.options.timerUnitFile]]) {
+          if (fs.readFileSync(file, "utf8") === `old ${name}\n`) f.units.get(name).enabled = "static";
+        }
+      }
+      return webControl(action);
+    };
+    const result = await api.activate(f.options);
+    f.events.length = 0;
+    await api.rollback({ ...f.options, releaseId: result.releaseId });
+    for (const unit of f.units.values()) { assert.equal(unit.active, "inactive"); assert.equal(unit.enabled, enabled); }
+    assert.ok(!f.events.some((event) => event.startsWith("start:")));
+  });
+}
+
+test("failed backup and bounded old-writer drain leave web untouched and restore its prior timer", async (t) => {
+  for (const fault of ["backup", "wait-idle:service", "stop:timer", "stop:service"]) {
+    const f = persistentFixture(t, true); f.fault(fault);
+    await assert.rejects(api.activate(f.options));
+    assert.equal(fs.realpathSync(path.join(f.options.applicationRoot, "current")), f.old);
+    assert.equal(f.units.get("timer").active, "active");
+    assert.equal(f.calls.filter((call) => call === "restart").length, 0);
+    assert.ok(!f.events.includes("sync"));
+  }
+});
+
+test("first install rollback removes only newly managed units and keeps catalogue and snapshot", async (t) => {
+  const f = persistentFixture(t);
+  const result = await api.activate(f.options);
+  const state = JSON.parse(fs.readFileSync(path.join(f.options.backupRoot, result.releaseId, "rollback.json")));
+  assert.equal(state.tline.preheatComplete, true);
+  assert.ok(!fs.readFileSync(f.options.syncUnitFile, "utf8").includes(`EnvironmentFile=${f.options.environmentFile}`), "worker does not receive unrelated site secrets");
+  assert.match(fs.readFileSync(f.options.unitFile, "utf8"), /UnsetEnvironment=TLINE_API_KEY/);
+  assert.match(fs.readFileSync(f.options.syncUnitFile, "utf8"), /ReadWritePaths=.*\/data\/tline\n/);
+  assert.match(fs.readFileSync(f.options.timerUnitFile, "utf8"), /OnCalendar=\*-\*-\* \*:0\/10:00\nPersistent=true/);
+  await api.rollback({ ...f.options, releaseId: result.releaseId });
+  assert.ok(!fs.existsSync(f.options.syncUnitFile)); assert.ok(!fs.existsSync(f.options.timerUnitFile));
+  const db = new ResearchStore(f.database, { readOnly: true }); assert.ok(db.detail("new")); db.close();
+});
+
+test("production adapter bounds an active writer wait without stopping or clearing its lease", async () => {
+  let elapsed = 0;
+  const adapter = api.productionResearchAdapter({
+    execute: (command, args) => {
+      assert.equal(command, "systemctl"); assert.equal(args[0], "show");
+      return "LoadState=loaded\nActiveState=activating\nUnitFileState=static\nFragmentPath=/etc/systemd/system/wavekb-tline-sync.service\nDropInPaths=\n";
+    },
+    now: () => elapsed, pause: async (ms) => { elapsed += ms; },
+  });
+  await assert.rejects(adapter.syncService("wait-idle", "service"), /Timed out/);
+  assert.equal(elapsed, 540_000);
+});
+
+test("host adapter distinguishes absent units from systemctl errors and keeps credentials out of argv", async () => {
+  const adapter = api.productionResearchAdapter({ execute: (command, args) => {
+    if (command === "systemctl") return "LoadState=not-found\n";
+    assert.equal(command, "systemd-run");
+    assert.ok(args.includes("--property=EnvironmentFile=/protected/tline.env"));
+    assert.ok(!args.some((arg) => arg.includes("site.env") || arg.includes("tli_")));
+    assert.ok(args.includes("--uid=fixture")); assert.ok(args.includes("--property=TimeoutStartSec=540"));
+    return '{"status":"synced","lastSuccess":"2026-09-05T00:00:00Z"}';
+  } });
+  assert.deepEqual(await adapter.syncService("state", "timer"), { exists: false, active: "inactive", enabled: "disabled" });
+  await adapter.worker({ command: "sync", worker: "/candidate/cli.mjs", file: "/data/research.sqlite", user: "fixture", environmentFiles: ["/protected/site.env", "/protected/tline.env"], releaseId: `${sha}-123-1` });
+  const broken = api.productionResearchAdapter({ execute: () => { throw new Error("systemctl transport failure"); } });
+  await assert.rejects(broken.syncService("state", "timer"), /transport failure/);
+});
+
+test("the host accepts explicit not-found show output even when systemctl exits one", async () => {
+  const adapter = api.productionResearchAdapter({ execute: () => {
+    throw Object.assign(new Error("unit absent"), { status: 1, stdout: "LoadState=not-found\nActiveState=inactive\nUnitFileState=\nFragmentPath=\nDropInPaths=\n" });
+  } });
+  assert.deepEqual(await adapter.syncService("state", "timer"), { exists: false, active: "inactive", enabled: "disabled" });
+});
+
+test("existing failed worker status does not invalidate a successful candidate warmup", async (t) => {
+  const f = persistentFixture(t, true);
+  f.units.get("service").active = "failed";
+  const control = f.options.syncService;
+  let result = "exit-code";
+  f.options.syncService = async (action, name) => {
+    if (action === "reset-failed") result = "success";
+    const value = await control(action, name);
+    return action === "check" ? { ...value, result } : value;
+  };
+  await api.activate(f.options);
+  assert.ok(f.events.indexOf("reset-failed:service") > f.events.indexOf("sync"));
+});
+
+test("two accepted releases share one catalogue and preserve consistent WAL backup on finalize", async (t) => {
+  const f = persistentFixture(t, true);
+  const openWriter = new ResearchStore(f.database);
+  openWriter.publish([], [{ id: "wal-only", ingestedAt: "2026-09-05T00:00:00Z" }], "2026-09-05T00:00:00Z", "2026-09-05T00:00:01Z");
+  t.after(() => openWriter.close());
+  const first = await api.activate(f.options);
+  await api.finalize({ ...f.options, releaseId: first.releaseId, accepted: true });
+  const backup = new ResearchStore(path.join(f.options.backupRoot, first.releaseId, "research.sqlite"), { readOnly: true });
+  assert.ok(backup.detail("wal-only")); assert.ok(!backup.detail("new")); backup.close();
+  f.options.runAttempt = "2"; f.options.baseSha = sha;
+  const second = await api.activate(f.options);
+  await api.finalize({ ...f.options, releaseId: second.releaseId, accepted: true });
+  const db = new ResearchStore(f.database, { readOnly: true }); assert.ok(db.detail("wal-only")); assert.ok(db.detail("new")); db.close();
+});
 
 test("same-SHA attempts are immutable and never replace the running release directory", async (t) => {
   assert.equal(typeof api.activate, "function", "release transaction must exist");

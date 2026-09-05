@@ -60,8 +60,21 @@ jobs:
           DEPLOYMENT_VERSION: ${{ github.sha }}
         run: pnpm --filter @wavekb/web build
 
+      - name: Smoke the packaged worker with initialized temporary SQLite on the minimum runtime
+        run: pnpm --package=node@22.18.0 dlx node scripts/smoke-tline-worker.mjs
+
+      - name: Verify the worker on the deployment CI runtime
+        run: pnpm tline:worker:smoke
+
       - name: Install Chromium for browser acceptance
         run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
+
+      - name: Verify persistent research against the built candidate with an owned SQLite fixture
+        env:
+          TLINE_E2E_FIXTURE: "1"
+          TLINE_E2E_STANDALONE: "1"
+          TLINE_API_KEY: ""
+        run: pnpm --filter @wavekb/web exec playwright test e2e/tline.acceptance.spec.ts --workers=1
 
       - name: Verify local critical browser journeys before any production write
         env:
@@ -106,7 +119,7 @@ jobs:
           test -n "$E2E_POSTING_PASSWORD"
 
       - name: Package the accepted standalone application
-        run: tar -C apps/web/.next/standalone --exclude='./apps/web/.next/cache' -czf wavekb-next-preview.tar.gz .
+        run: tar -C apps/web/.next/standalone --exclude='./apps/web/.next/cache' --exclude='*.sqlite*' --exclude='*.db-wal' --exclude='*.db-shm' -czf wavekb-next-preview.tar.gz .
 
       - name: Configure pinned SSH access
         env:
@@ -136,6 +149,15 @@ jobs:
             'set -eu; test "$(sudo -n systemctl show wavekb-next-preview.service -p ActiveState --value)" = active; test "$(sudo -n systemctl show wavekb-next-preview.service -p WorkingDirectory --value)" = /srv/wavekb-next-preview/current; readlink -f /srv/wavekb-next-preview/current'
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
             'sudo -n /usr/sbin/nginx -T 2>/dev/null' | node scripts/nginx-production-target.mjs
+
+      - name: Probe actual production Node and SQLite capability before uploading anything
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            '/usr/bin/node --input-type=module' < scripts/probe-tline-runtime.mjs
 
       # First production write: every build/local browser gate already passed.
       # Preview-named root/service ARE production. Existing Nginx/env stay intact.

@@ -1,5 +1,10 @@
 # 部署说明
 
+> 当前 Next.js 正式发布使用 `.github/workflows/deploy-next-production.yml`。
+> `/srv/wavekb-next-preview/current` 与 `wavekb-next-preview.service` 保留历史名称，已服务真正的 wavekb.com。
+> 下文静态/preview 迁移流程是历史说明，不可据此把生产当预览环境。
+> 研报持久目录、Node 22.18+ 预检、worker/timer 与精确回滚见 [研报运维说明](docs/tline-research.md)。
+
 ## GitHub Actions 自动部署
 
 仓库包含 `deploy-static-production.yml`：拉取请求运行网站测试；`main` 更新后自动备份并同步静态站点，失败自动回滚，再检查公网首页和好友模块。

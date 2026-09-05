@@ -2,10 +2,14 @@ import { defineConfig, devices } from "@playwright/test";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL?.replace(/\/$/, "");
 const localBaseUrl = "http://127.0.0.1:3100";
 const acceptanceClientIp = process.env.E2E_POSTING_CLIENT_IP;
+const fixture = process.env.TLINE_E2E_FIXTURE === "1";
+if (fixture && (externalBaseUrl || process.env.TLINE_LIVE_ACCEPTANCE === "1")) throw new Error("Fixture mode cannot use an external or live server");
+if (fixture && !process.env.TLINE_E2E_OWNER) process.env.TLINE_E2E_OWNER = randomUUID();
 if (process.env.TLINE_E2E_FIXTURE === "1" && !process.env.TLINE_E2E_DB_PATH) {
   process.env.TLINE_E2E_DB_PATH = join(realpathSync(tmpdir()), `wavekb-tline-e2e-${process.pid}.sqlite`);
 }
@@ -28,9 +32,9 @@ export default defineConfig({
     { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
   ],
   webServer: externalBaseUrl ? undefined : {
-    command: process.env.TLINE_E2E_FIXTURE === "1" ? "node scripts/start-tline-e2e.mjs --hostname 127.0.0.1 --port 3100" : "pnpm dev --hostname 127.0.0.1 --port 3100",
+    command: fixture ? `node scripts/start-tline-e2e.mjs ${process.env.TLINE_E2E_STANDALONE === "1" ? "standalone" : "dev"} --hostname 127.0.0.1 --port 3100` : "pnpm dev --hostname 127.0.0.1 --port 3100",
     url: localBaseUrl,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: fixture ? false : !process.env.CI,
     gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
     timeout: 120_000,
   },
