@@ -32,13 +32,17 @@
 - 静态知识资源：374 个图片引用及 2 本 PDF 全部存在。分页图片和原始 PDF 分开判断。
 - 本机默认 Turbopack 曾因内部端口环境限制失败，采用官方 Webpack 构建通过；正式 CI 仍要求默认构建通过，不以本机替代结果冒充默认构建成功。
 - 本地 standalone 的首轮运行遗漏公开 Supabase 环境配置而失败，已按 CI 的公开配置重建重跑；未修改生产环境配置。
-- 全量本地自动化测试：445/445（根目录 115、gateway 60、domain 14、knowledge 5、web 251）；全部 workspace 类型检查和前端 ESLint 通过。生产结果在发布完成后另附实际证据，不以本地通过代替上线完成。
+- 最终全量本地自动化测试：460/460（根目录 115、gateway 60、domain 14、knowledge 5、web 266）；全部 workspace 类型检查和前端 ESLint 通过。补充身份兼容后重新通过生产构建、28 项导航和 12 项 Storybook UI 检查，不以本地通过代替上线完成。
 
 ## 生产路由与回滚边界
 
 只读路由审计 [Actions 33959992086](https://github.com/whan29032-byte/wavekb/actions/runs/33959992086) 确认正式 `wavekb.com`：Nginx `/` 指向 `127.0.0.1:3100`，`/v1/` 指向 `127.0.0.1:8787`。`wavekb-next-preview.service` 的历史名称不代表预览页面；本次保留正式服务和 Nginx 路由。
 
 发布环境回归曾发现 GNU tar 权限受 umask 影响，已使用显式权限恢复修复。随后生产验收发现 Next.js 对 HTTPS 转发头下的 loopback 404 重写产生 EPROTO；本地完整 Host/Forwarded 头已复现。失败运行 `33961398348` 自动恢复原 `9f2625e`，健康检查确认；无效板块现直接返回无用户插值的静态 404，正常路径与鉴权不变。真实发帖在该失败运行中尚未开始。
+
+运行 `33961931003` 的发帖及两项鉴权验收通过，但聊天拖动后覆盖了测试要点击的好友管理链接，未通过全部门禁，因此自动恢复 `9f2625e`。验收改为真实最小化/恢复窗口操作，仍检查客户端路由切换和原 DOM 持久化，不使用强制点击。
+
+上线只读检查另证实生产缺少 `get_public_post_profiles`（PGRST202），而现有 `search_profile_by_uid` 返回真实佩戴铭牌。补充共享公开身份兼容层：仅缺函数时通过既有 basic projection 查 UID，再有界并发读取旧公开接口；核对 ID/UID，限制输出公共身份字段。顶部、帖子/评论/时间轴和聊天同步使用它。无数据库迁移、不猜测权益、不以网络或权限错误触发降级。新增浏览器断言要求顶部及每张本人 PostCard 与 Hero 铭牌一致，避免缺失身份被空循环漏检。
 
 发布前受保护备份：`/var/backups/wavekb-next-production/SHA-runid-attempt/`，包含旧版完整代码/static/public、原 systemd 文件及精确旧版本的回滚元数据。保留当前与 previous 目录。发布事务和操作命令见 `scripts/deploy-production-plan.md`。
 

@@ -86,7 +86,17 @@ test.describe("authenticated member shell acceptance", () => {
     expect(desktopGeometry.avatarOwnsOverlap).toBe(true);
 
     const theme = await avatar.getAttribute("data-nameplate");
+    expect(theme).not.toBeNull();
     expect(await nameplate.getAttribute("data-nameplate")).toBe(theme);
+    const headerNameplates = page.getByRole("navigation", { name: "主导航" }).locator('.identity-nameplate[aria-label="UID 33333"]');
+    // A missing account identity is a failure, not a reason to skip comparison.
+    await expect(headerNameplates.first()).toHaveAttribute("data-nameplate", theme!, { timeout: 15_000 });
+    for (const badge of await headerNameplates.all()) await expect(badge).toHaveAttribute("data-nameplate", theme!);
+    if ((page.viewportSize()?.width ?? 0) >= 768) await expect(headerNameplates.locator("visible=true").first()).toBeVisible();
+    const ownPostCards = page.getByRole("region", { name: "我的公开研究", exact: true }).getByRole("article");
+    for (const card of await ownPostCards.all()) {
+      await expect(card.locator('.identity-nameplate[aria-label="UID 33333"]')).toHaveAttribute("data-nameplate", theme!);
+    }
     if (theme !== "classic") {
       const animation = await page.evaluate(() => ({
         avatar: getComputedStyle(document.querySelector<HTMLElement>("[data-profile-avatar] .identity-avatar-frame")!).animationName,
@@ -134,6 +144,14 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(page).toHaveURL(chatRoute);
     await expectReleased(chat, chatHandle, page);
 
+    // Chat windows intentionally sit above the friend panel. After dragging,
+    // its composer can cover the management link; use the visible window control
+    // to uncover it instead of clicking through another window.
+    await chat.getByRole("button", { name: "最小化", exact: true }).click();
+    await expect(chat).toHaveAttribute("data-minimized", "true");
+    await expect(chat.locator("textarea")).toHaveCount(0);
+    const persistentWindows = await page.evaluateHandle(() => Array.from(document.querySelectorAll("[data-floating-window]")));
+
     // A client-side route change must not resubscribe an already joined presence
     // channel or unmount the global friend/chat windows.
     await friends.getByRole("link", { name: "完整管理" }).click();
@@ -141,6 +159,12 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(page.locator("[data-friends-directory]")).toHaveAttribute("data-load-state", "ready");
     await expect(friends).toBeVisible();
     await expect(chat).toBeVisible();
+    expect(await persistentWindows.evaluate((windows) => windows.every((window) => window.isConnected)), "Client navigation must preserve the original floating window nodes.").toBe(true);
+    await persistentWindows.dispose();
+    await expect(chat).toHaveAttribute("data-minimized", "true");
+    await chat.getByRole("button", { name: "最小化", exact: true }).click();
+    await expect(chat).not.toHaveAttribute("data-minimized", "true");
+    await expect(chat.locator("textarea")).toBeVisible();
     await expect(page.getByRole("heading", { name: "好友列表暂时无法读取" })).toHaveCount(0);
 
     for (const viewport of [

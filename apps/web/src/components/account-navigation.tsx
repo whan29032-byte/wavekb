@@ -10,6 +10,7 @@ import { Button } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { Nameplate } from "@/components/nameplate";
 import { subscribeIdentityChanges } from "@/lib/member/identity-events";
+import { loadPublicIdentities } from "@/lib/member/public-identities";
 
 export function AccountNavigation() {
   const router = useRouter();
@@ -35,9 +36,13 @@ export function AccountNavigation() {
         setProfile(null);
         return;
       }
-      const client = createClient();
-      const result = await client.rpc("get_public_post_profiles", { p_ids: [nextUser.id] });
-      if (active && request === revision) setProfile((result.data?.[0] as PublicProfile | null) ?? null);
+      try {
+        const profiles = await loadPublicIdentities(createClient(), [nextUser.id]);
+        if (active && request === revision) setProfile(profiles[0] ?? null);
+      } catch {
+        // Retain this account's last verified identity during transient outages.
+        // Account changes already clear it above; a rejected read cannot leak it.
+      }
     }
     try {
       const client = createClient();

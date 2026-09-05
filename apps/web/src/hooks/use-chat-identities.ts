@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { PublicProfile } from "@wavekb/domain";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeIdentityChanges } from "@/lib/member/identity-events";
+import { loadPublicIdentities } from "@/lib/member/public-identities";
 
 type ChatIdentity = Pick<PublicProfile, "id" | "public_uid" | "display_name" | "avatar_url" | "display_title" | "nameplate_style">;
 
@@ -20,10 +21,10 @@ export function useChatIdentities(memberIds: string[]) {
     async function refresh() {
       const request = ++revision;
       try {
-        const result = await createClient().rpc("get_public_post_profiles", { p_ids: ids });
-        if (!active || request !== revision || result.error) return;
+        const profiles = await loadPublicIdentities(createClient(), ids);
+        if (!active || request !== revision) return;
         const next: Record<string, ChatIdentity> = {};
-        for (const row of (result.data ?? []) as ChatIdentity[]) {
+        for (const row of profiles) {
           if (ids.includes(row.id)) next[row.id] = { id: row.id, public_uid: row.public_uid, display_name: row.display_name, avatar_url: row.avatar_url, display_title: row.display_title, nameplate_style: row.nameplate_style };
         }
         setProfiles(next);

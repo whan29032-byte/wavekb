@@ -2,10 +2,17 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { listPosts, listPostsByAuthor, listPostComments, getPost } from "./server-repository";
 
 type Row = Record<string, unknown>;
-const db = vi.hoisted(() => ({ rows: {} as Record<string, Row[]>, calls: [] as Array<{ table: string; select: string; count?: string; filters: Array<[string, unknown]>; orders: Array<[string, boolean]>; range?: number[] }>, fail: false }));
+const db = vi.hoisted(() => ({ rows: {} as Record<string, Row[]>, calls: [] as Array<{ table: string; select: string; count?: string; filters: Array<[string, unknown]>; orders: Array<[string, boolean]>; range?: number[] }>, fail: false, legacyIdentity: false }));
 vi.mock("@/lib/env", () => ({ publicSupabaseConfig: () => ({ configured: true }) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({
-  rpc: async () => ({ data: [{ id: "author", public_uid: 12345, display_name: "作者", avatar_url: null, nameplate_style: "classic" }], error: null }),
+  rpc: async (name: string, args: Record<string, unknown>) => {
+    const basic = { id: "author", public_uid: 12345, display_name: "作者", avatar_url: null };
+    if (!db.legacyIdentity) return { data: [{ ...basic, nameplate_style: "classic" }], error: null };
+    if (name === "get_public_post_profiles") return { data: null, error: { code: "PGRST202" } };
+    if (name === "get_public_profiles") return { data: [basic], error: null };
+    if (name === "search_profile_by_uid" && args.p_uid === 12345) return { data: [{ ...basic, nameplate_style: "blackgold", role: "member", display_title: "研究者" }], error: null };
+    throw new Error("Unexpected identity query");
+  },
   from(table: string) {
     const call = { table, select: "", count: undefined as string | undefined, filters: [] as Array<[string, unknown]>, orders: [] as Array<[string, boolean]>, range: undefined as number[] | undefined };
     db.calls.push(call); let limit = 1000; let single = false;
@@ -31,7 +38,16 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({
   },
 }) }));
 const posts = (count: number, author = "author", board = "idea_sharing") => Array.from({ length: count }, (_, n) => ({ id: `post-${String(n).padStart(4, "0")}`, author_id: author, board, status: "published", created_at: "2026-09-01", body: "body", post_images: [], chart_package: { large: "chart-payload" }, research_timeline_nodes: [{ id: "timeline", author_id: "author", created_at: "2026-09-01", body: "timeline-payload" }] }));
-beforeEach(() => { db.rows = {}; db.calls = []; db.fail = false; });
+beforeEach(() => { db.rows = {}; db.calls = []; db.fail = false; db.legacyIdentity = false; });
+
+it("preserves equipped identity on post cards, timeline nodes and comments with the deployed legacy RPCs", async () => {
+  db.legacyIdentity = true;
+  db.rows.posts = posts(1);
+  db.rows.post_comments = [{ id: "comment", post_id: "post-0000", author_id: "author", status: "visible", body: "comment", created_at: "2026-09-01" }];
+  expect((await listPosts("idea_sharing"))[0].profiles?.nameplate_style).toBe("blackgold");
+  expect((await getPost("post-0000"))?.timeline_nodes[0].profiles?.nameplate_style).toBe("blackgold");
+  expect((await listPostComments("post-0000"))[0].profiles?.nameplate_style).toBe("blackgold");
+});
 
 it("pages published board posts beyond the old cap with stable ties and a sentinel", async () => {
   db.rows.posts = [...posts(65), ...posts(20, "other", "question_answers"), { ...posts(1)[0], id: "hidden", status: "hidden" }];

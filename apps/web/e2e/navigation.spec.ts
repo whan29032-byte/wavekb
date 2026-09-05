@@ -48,6 +48,9 @@ test("public member profiles are anonymous-readable and protect social actions",
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.locator("[data-profile-hero]")).toBeVisible();
   await expect(page.locator("[data-profile-identity] .identity-nameplate")).toContainText("UID 33333");
+  const equippedStyle = await page.locator("[data-profile-identity] .identity-nameplate").getAttribute("data-nameplate");
+  const ownPostCards = page.getByRole("region", { name: "公开研究", exact: true }).getByRole("article");
+  for (const card of await ownPostCards.all()) await expect(card.locator('.identity-nameplate[aria-label="UID 33333"]')).toHaveAttribute("data-nameplate", equippedStyle!);
   const profileGeometry = await page.evaluate(() => {
     const cover = document.querySelector<HTMLElement>("[data-profile-cover]")!.getBoundingClientRect();
     const avatar = document.querySelector<HTMLElement>("[data-profile-avatar] .identity-avatar-frame")!.getBoundingClientRect();

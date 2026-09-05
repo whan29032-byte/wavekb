@@ -1,9 +1,10 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { BOARD_SLUGS, type BoardSlug, type CommunityPost, type ExternalReference, type PostComment, type PublicProfile, type ResearchTimelineNode } from "@wavekb/domain";
+import { BOARD_SLUGS, type BoardSlug, type CommunityPost, type ExternalReference, type PostComment, type ResearchTimelineNode } from "@wavekb/domain";
 import { publicSupabaseConfig } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { pageRange, parsePage } from "@/lib/pagination";
+import { loadPublicIdentities } from "@/lib/member/public-identities";
 
 const POST_SELECT = [
   "id", "board", "title", "body", "author_id", "status", "created_at", "updated_at",
@@ -44,13 +45,7 @@ async function attachProfiles(client: SupabaseClient, rows: PostRow[]): Promise<
   ]).filter(Boolean))];
   if (!authorIds.length) return [];
 
-  const primary = await client.rpc("get_public_post_profiles", { p_ids: authorIds });
-  const fallback = primary.error
-    ? await client.rpc("get_public_profiles", { p_ids: authorIds })
-    : primary;
-  if (fallback.error) throw fallback.error;
-
-  const profiles = (fallback.data ?? []) as PublicProfile[];
+  const profiles = await loadPublicIdentities(client, authorIds);
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
   return rows.map((row) => {
     const { post_external_references, research_timeline_nodes, ...post } = row;
@@ -122,10 +117,8 @@ export async function listPostComments(postId: string, page?: number): Promise<P
   const pagination = { hasNext: fetched.length > size, total: result.count ?? 0 };
   const authorIds = [...new Set(rows.map((comment) => comment.author_id))];
   if (!authorIds.length) return page === undefined ? [] : { ...pagination, items: [] };
-  const primary = await client.rpc("get_public_post_profiles", { p_ids: authorIds });
-  const profilesResult = primary.error ? await client.rpc("get_public_profiles", { p_ids: authorIds }) : primary;
-  if (profilesResult.error) throw profilesResult.error;
-  const profileById = new Map(((profilesResult.data ?? []) as PublicProfile[]).map((profile) => [profile.id, profile]));
+  const profiles = await loadPublicIdentities(client, authorIds);
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
   const items = rows.map((comment) => ({ ...comment, profiles: profileById.get(comment.author_id) ?? null }));
   return page === undefined ? items : { ...pagination, items };
 }
