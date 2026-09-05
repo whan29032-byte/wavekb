@@ -72,7 +72,10 @@ export async function activate(options) {
   saveMetadata(p.metadata, state);
 
   try {
-    execFileSync("tar", ["-xzf", options.archive, "-C", p.releaseDir, "--no-same-owner"]);
+    // GNU tar applies a non-root test runner's umask unless permissions are
+    // explicit, and the archive's '.' entry can overwrite releaseDir's mode.
+    execFileSync("tar", ["-xzf", options.archive, "-C", p.releaseDir, "--no-same-owner", "--same-permissions"]);
+    fs.chmodSync(p.releaseDir, 0o755);
     requireValue(fs.existsSync(path.join(p.releaseDir, "apps/web/server.js")), "Candidate server is missing");
     requireValue(fs.statSync(path.join(p.releaseDir, "apps/web/.next/static")).isDirectory(), "Candidate static assets are missing");
     // Next's image optimizer writes .next/cache/images at runtime. Keep that
@@ -135,7 +138,7 @@ export async function rollback(options) {
   if (!fs.existsSync(state.previousRelease)) {
     checkArchive(path.join(p.backup, "previous-release.tar.gz"));
     fs.mkdirSync(state.previousRelease, { mode: 0o755 });
-    execFileSync("tar", ["-xzf", path.join(p.backup, "previous-release.tar.gz"), "-C", state.previousRelease]);
+    execFileSync("tar", ["-xzf", path.join(p.backup, "previous-release.tar.gz"), "-C", state.previousRelease, "--same-permissions"]);
   }
   // Explicit authorization has passed. Persist recovery intent before touching
   // the service so an interrupted restoration can resume with normal rollback.

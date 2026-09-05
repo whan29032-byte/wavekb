@@ -131,6 +131,8 @@ test("release startup remains executable by the service user under a restrictive
     const result = await api.activate(f.options);
     assert.equal(fs.statSync(result.releaseDir).mode & 0o777, 0o755);
     assert.equal(fs.statSync(path.join(result.releaseDir, "start-release.sh")).mode & 0o777, 0o755);
+    assert.ok(fs.statSync(path.join(result.releaseDir, "apps/web")).mode & 0o005, "service user can traverse archived directories");
+    assert.ok(fs.statSync(path.join(result.releaseDir, "apps/web/server.js")).mode & 0o004, "service user can read archived code");
   } finally { process.umask(previousUmask); }
 });
 
