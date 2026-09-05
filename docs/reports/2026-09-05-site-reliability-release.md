@@ -28,7 +28,7 @@
 
 - 使用测试驱动和独立交叉审查；异步账号、表单草稿、付款未知结果、缓存权限及发布事务问题均增加失败后通过的行为回归。
 - Storybook 隔离 UI：12/12；包含 320/375/768/1440px 头像、外观浮层、移动导航、明暗自定义主题、系统及用户减少动效。
-- standalone 桌面/移动关键路由：26/26；覆盖首页分区、个人公开主页、登录/注册/找回密码表单、匿名权限、导师目录、知识查看器与书目 PDF MIME。
+- standalone 桌面/移动关键路由：28/28；覆盖首页分区、个人公开主页、登录/注册/找回密码表单、匿名权限、导师目录、知识查看器与书目 PDF MIME，以及 Nginx HTTPS 转发头下的无效板块 404。
 - 静态知识资源：374 个图片引用及 2 本 PDF 全部存在。分页图片和原始 PDF 分开判断。
 - 本机默认 Turbopack 曾因内部端口环境限制失败，采用官方 Webpack 构建通过；正式 CI 仍要求默认构建通过，不以本机替代结果冒充默认构建成功。
 - 本地 standalone 的首轮运行遗漏公开 Supabase 环境配置而失败，已按 CI 的公开配置重建重跑；未修改生产环境配置。
@@ -37,6 +37,8 @@
 ## 生产路由与回滚边界
 
 只读路由审计 [Actions 33959992086](https://github.com/whan29032-byte/wavekb/actions/runs/33959992086) 确认正式 `wavekb.com`：Nginx `/` 指向 `127.0.0.1:3100`，`/v1/` 指向 `127.0.0.1:8787`。`wavekb-next-preview.service` 的历史名称不代表预览页面；本次保留正式服务和 Nginx 路由。
+
+发布环境回归曾发现 GNU tar 权限受 umask 影响，已使用显式权限恢复修复。随后生产验收发现 Next.js 对 HTTPS 转发头下的 loopback 404 重写产生 EPROTO；本地完整 Host/Forwarded 头已复现。失败运行 `33961398348` 自动恢复原 `9f2625e`，健康检查确认；无效板块现直接返回无用户插值的静态 404，正常路径与鉴权不变。真实发帖在该失败运行中尚未开始。
 
 发布前受保护备份：`/var/backups/wavekb-next-production/SHA-runid-attempt/`，包含旧版完整代码/static/public、原 systemd 文件及精确旧版本的回滚元数据。保留当前与 previous 目录。发布事务和操作命令见 `scripts/deploy-production-plan.md`。
 

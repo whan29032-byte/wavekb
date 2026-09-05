@@ -36,6 +36,12 @@ test("unknown community boards return a real not-found page", async ({ page }) =
   expect(response?.status()).toBe(404);
 });
 
+test("invalid boards remain 404 behind HTTPS termination without a loopback rewrite", async ({ request }) => {
+  const response = await request.get("/community/not-a-board", { headers: { Host: "wavekb.com", "X-Forwarded-Proto": "https" } });
+  expect(response.status()).toBe(404);
+  expect(await response.text()).toContain("找不到这个社区板块");
+});
+
 test("public member profiles are anonymous-readable and protect social actions", async ({ page }) => {
   await page.goto("/member/33333");
   await expect(page).toHaveURL(/\/member\/33333$/);

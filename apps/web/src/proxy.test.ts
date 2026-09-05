@@ -9,7 +9,9 @@ beforeEach(() => boundary.session.mockReset().mockResolvedValue(NextResponse.nex
 it("rejects an unknown public board before streaming commits a successful response", async () => {
   const response = await proxy(new NextRequest("https://wavekb.com/community/not-a-board"));
   expect(response.status).toBe(404);
-  expect(response.headers.get("x-middleware-rewrite")).toBe("https://wavekb.com/_not-found");
+  expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+  expect(response.headers.get("content-type")).toContain("text/html");
+  expect(await response.text()).toContain("找不到这个社区板块");
   expect(boundary.session).not.toHaveBeenCalled();
 });
 
