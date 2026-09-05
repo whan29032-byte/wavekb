@@ -20,6 +20,9 @@ if (fs.existsSync(publicDirectory)) {
 // Preserve the CLI's exact source-relative imports in a tiny portable tree.
 // Explicit allowlist: never copy tests, fixture initialization or SQLite files.
 const worker = path.join(standaloneApp, "tline-worker");
+// Only replace this generated subtree; reject aliased parents before cleanup.
+if (fs.realpathSync(standaloneApp) !== standaloneApp) throw new Error("Unsafe standalone worker parent");
+fs.rmSync(worker, { recursive: true, force: true });
 const modules = path.join(worker, "apps/web/src/lib/tline");
 fs.mkdirSync(modules, { recursive: true });
 fs.mkdirSync(path.join(worker, "scripts"), { recursive: true });

@@ -17,8 +17,13 @@ test("prepared worker runs independently of the source checkout without shipping
   fs.copyFileSync(new URL("../scripts/tline-sync.mjs", import.meta.url), path.join(root, "scripts/tline-sync.mjs"));
   fs.cpSync(new URL("../apps/web/src/lib/tline/", import.meta.url), path.join(app, "src/lib/tline"), { recursive: true });
   fs.writeFileSync(path.join(app, "src/lib/tline/research.sqlite"), "must not ship");
-  execFileSync(process.execPath, [new URL("../apps/web/scripts/prepare-standalone.mjs", import.meta.url).pathname], { cwd: app });
   const worker = path.join(output, "tline-worker");
+  const stale = path.join(worker, "legacy/unlisted.txt");
+  fs.mkdirSync(path.dirname(stale), { recursive: true });
+  fs.writeFileSync(stale, "stale incremental-build file must not ship");
+  execFileSync(process.execPath, [new URL("../apps/web/scripts/prepare-standalone.mjs", import.meta.url).pathname], { cwd: app });
+  assert.ok(!fs.existsSync(stale), "repackaging must remove stale files outside the worker allowlist");
+  assert.equal(fs.readFileSync(path.join(output, "server.js"), "utf8"), "server", "cleanup must preserve the sibling standalone server");
   assert.ok(fs.existsSync(path.join(worker, "cli.mjs")), "portable worker launcher must be packaged");
   const shipped = fs.readdirSync(worker, { recursive: true });
   assert.ok(!shipped.some((file) => /sqlite|test\.|e2e/.test(file)));
