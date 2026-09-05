@@ -2,8 +2,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import ResearchPage from "./page";
 
-const read = vi.hoisted(() => vi.fn());
+const { read, push, refresh } = vi.hoisted(() => ({ read: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("@/lib/tline/server", () => ({ readResearchDirectory: read }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 
 const state = { lastSuccess: "2026-09-05T11:55:00.000Z", watermark: "2026-09-05T11:50:00.000Z", lastAttempt: "2026-09-05T11:50:00.000Z", errorCode: null, retryAt: null };
 function result(overrides: Record<string, unknown> = {}) {
@@ -21,9 +22,9 @@ function result(overrides: Record<string, unknown> = {}) {
   };
 }
 
-afterEach(() => { cleanup(); vi.useRealTimers(); read.mockReset(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); read.mockReset(); push.mockReset(); refresh.mockReset(); });
 
-it("renders local DB rows and preserves both window bounds and filters in controls and links", async () => {
+it("keeps fixed bounds for paging and filters but starts refresh from the latest filtered snapshot", async () => {
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-05T12:00:00Z"));
   read.mockResolvedValue(result());
   render(await ResearchPage({ searchParams: Promise.resolve({ since: "2026-08-29T11:55:00.000Z", until: "2026-09-05T11:55:00.000Z", page: "2", q: "黄金", institution: "bank" }) }));
@@ -36,8 +37,9 @@ it("renders local DB rows and preserves both window bounds and filters in contro
   expect(Object.fromEntries(next.searchParams)).toEqual({ since: "2026-08-29T11:55:00.000Z", until: "2026-09-05T11:55:00.000Z", q: "黄金", institution: "bank", page: "3" });
   const previous = new URL(screen.getByRole("link", { name: "上一页研报" }).getAttribute("href")!, "http://localhost");
   expect(previous.searchParams.get("until")).toBe("2026-09-05T11:55:00.000Z");
-  const refresh = new URL(screen.getByRole("link", { name: "刷新列表" }).getAttribute("href")!, "http://localhost");
-  expect(Object.fromEntries(refresh.searchParams)).toEqual({ since: "2026-08-29T11:55:00.000Z", until: "2026-09-05T11:55:00.000Z", q: "黄金", institution: "bank", page: "2" });
+  fireEvent.click(screen.getByRole("button", { name: "刷新列表" }));
+  expect(push).toHaveBeenCalledWith("/research?q=%E9%BB%84%E9%87%91&institution=bank");
+  expect(refresh).not.toHaveBeenCalled();
   expect((screen.getByRole("searchbox", { name: "搜索研报内容" }) as HTMLInputElement).value).toBe("黄金");
   expect(document.querySelector<HTMLInputElement>('input[name="until"]')?.value).toBe("2026-09-05T11:55:00.000Z");
 });

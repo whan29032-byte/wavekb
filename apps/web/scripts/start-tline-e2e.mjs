@@ -1,13 +1,49 @@
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { ResearchStore } from "../src/lib/tline/store.ts";
 
 const webRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const root = mkdtempSync(join(realpathSync(tmpdir()), "wavekb-tline-e2e-"));
-const file = join(root, "research.sqlite");
+const temporaryRoot = realpathSync(tmpdir());
+
+function assertFixturePath(file) {
+  if (!isAbsolute(file) || resolve(file) !== file || dirname(file) !== temporaryRoot || !basename(file).startsWith("wavekb-tline-e2e-")) {
+    throw new Error("TLINE_E2E_DB_PATH must be an absolute wavekb-tline-e2e-* file in the system temporary directory");
+  }
+}
+
+function removeFixtureFiles(file) {
+  for (const suffix of ["", "-wal", "-shm", "-journal"]) rmSync(`${file}${suffix}`, { force: true });
+}
+
+const configuredFile = process.env.TLINE_E2E_DB_PATH;
+if (configuredFile) assertFixturePath(configuredFile);
+
+if (process.argv[2] === "publish") {
+  if (!configuredFile) throw new Error("TLINE_E2E_DB_PATH is required in publish mode");
+  const id = process.argv[3];
+  const title = process.argv[4];
+  if (!id || !/^r-refresh-[a-z0-9-]+$/.test(id) || !title) throw new Error("Publish mode requires a synthetic refresh row id and title");
+  const finishedAt = Date.now();
+  const writer = new ResearchStore(configuredFile);
+  writer.publish([], [{
+    id,
+    title: { zh: title },
+    institution: { slug: "bank-a" },
+    ingestedAt: new Date(finishedAt - 1).toISOString(),
+    publishedAt: new Date(finishedAt - 1).toISOString(),
+    analysis: { summary: { zh: "刷新后才写入本地测试数据库的合成研报。" } },
+  }], new Date(finishedAt - 1_000).toISOString(), new Date(finishedAt).toISOString());
+  writer.close();
+  process.stdout.write(`${JSON.stringify({ id, database: configuredFile })}\n`);
+  process.exit(0);
+}
+
+const root = configuredFile ? null : mkdtempSync(join(temporaryRoot, "wavekb-tline-e2e-"));
+const file = configuredFile ?? join(root, "research.sqlite");
+if (configuredFile) removeFixtureFiles(file);
 const finished = Math.floor(Date.now() / 60_000) * 60_000;
 const store = new ResearchStore(file);
 
@@ -39,7 +75,8 @@ const child = spawn("pnpm", ["dev", ...process.argv.slice(2)], {
 
 let stopping = false;
 function cleanup() {
-  rmSync(root, { recursive: true, force: true });
+  if (root) rmSync(root, { recursive: true, force: true });
+  else removeFixtureFiles(file);
 }
 function stop(signal) {
   if (stopping) return;

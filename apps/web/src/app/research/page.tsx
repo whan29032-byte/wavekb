@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@wavekb/ui";
 import { ResearchList } from "@/components/research-list";
+import { ResearchRefresh } from "@/components/research-refresh";
 import { researchView } from "@/lib/tline/presentation";
 import { readResearchDirectory } from "@/lib/tline/server";
 
@@ -37,13 +38,15 @@ export default async function ResearchPage({ searchParams }: { searchParams: Pro
     ...(page > 1 ? { page: String(page) } : {}),
   });
   const href = (page: number, filters = true) => `/research?${new URLSearchParams(values(page, filters))}`;
-  const refresh = href(result.page);
+  const latestSearch = new URLSearchParams({ ...(query.q ? { q: query.q } : {}), ...(query.institution ? { institution: query.institution } : {}) });
+  const latestHref = `/research${latestSearch.size ? `?${latestSearch}` : ""}`;
+  const alreadyLatest = params.since === undefined && params.until === undefined && params.page === undefined;
   const reset = href(1, false);
 
   return <main className="mx-auto grid max-w-5xl gap-6 px-4 py-9 md:px-6 md:py-12">
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div><p className="mb-2 text-xs font-semibold uppercase tracking-widest text-primary">Tline · Research</p><h1 className="text-3xl font-semibold tracking-tight">机构研报</h1><p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">搜索最近 7 天已同步保存的机构研究、观点与相关资产。中文优先，站内展示已保存的摘要与分析字段。</p></div>
-      <Button asChild variant="secondary"><Link prefetch={false} href={refresh}>刷新列表</Link></Button>
+      <ResearchRefresh href={latestHref} alreadyLatest={alreadyLatest} />
     </header>
 
     {!result.initialized ? <section className="rounded-xl border border-dashed bg-surface px-5 py-10" aria-live="polite"><h2 className="font-semibold">研报正在准备</h2><p className="mt-2 max-w-2xl text-sm leading-7 text-muted-foreground">本地研报目录尚未完成首次同步。后台准备完成后，这里会自动提供已保存内容；网站其他功能不受影响。</p></section> : <>

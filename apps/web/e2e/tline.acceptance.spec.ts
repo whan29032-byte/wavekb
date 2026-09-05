@@ -1,4 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const fixtureHelper = fileURLToPath(new URL("../scripts/start-tline-e2e.mjs", import.meta.url));
 
 test("research entry stays inside WaveKB and fits desktop/mobile navigation", async ({ page }) => {
   await page.goto("/");
@@ -18,6 +22,7 @@ test("research entry stays inside WaveKB and fits desktop/mobile navigation", as
 
 test("seeded local research supports paging, filters, refresh, and detail without upstream requests", async ({ page }) => {
   test.skip(process.env.TLINE_E2E_FIXTURE !== "1", "Run with the deterministic local research fixture server.");
+  expect(test.info().config.workers).toBe(1);
   const upstream: string[] = [];
   page.on("request", (request) => { if (new URL(request.url()).hostname === "tlines.tech") upstream.push(request.url()); });
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -41,10 +46,21 @@ test("seeded local research supports paging, filters, refresh, and detail withou
   await expect(page.locator("main article")).toHaveCount(30);
   await page.screenshot({ path: test.info().outputPath("local-research-dark.png"), fullPage: false });
 
-  const refresh = page.getByRole("link", { name: "刷新列表" });
-  await expect(refresh).toHaveAttribute("href", /since=.*until=/);
-  await refresh.click();
+  const refreshTitle = `刷新后新增研报 ${test.info().project.name} ${test.info().retry}`;
+  const refreshId = `r-refresh-${test.info().project.name}-retry-${test.info().retry}`;
+  expect(process.env.TLINE_API_KEY).toBe("");
+  execFileSync(process.execPath, [fixtureHelper, "publish", refreshId, refreshTitle], {
+    env: { ...process.env, TLINE_API_KEY: "" },
+    stdio: "pipe",
+  });
+  await expect(page.getByRole("heading", { name: refreshTitle })).toHaveCount(0);
+  await page.getByRole("button", { name: "刷新列表" }).click();
+  await expect(page.getByRole("heading", { name: refreshTitle })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("since")).toBeNull();
+  expect(new URL(page.url()).searchParams.get("until")).toBeNull();
+  expect(new URL(page.url()).searchParams.get("page")).toBeNull();
   await expect(page.locator("main article")).toHaveCount(30);
+  await page.screenshot({ path: test.info().outputPath("local-research-refreshed.png"), fullPage: false });
 
   const firstPage = await page.locator("main article h2 a").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
   await page.getByRole("link", { name: "下一页研报" }).click();
