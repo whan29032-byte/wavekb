@@ -14,21 +14,31 @@ test("Next homepage reads the managed X and Discord directory without demo recor
   assert.match(repository, /cache: "no-store"/);
 });
 
-test("knowledge images are locally published, audited and opened in an internal viewer", async () => {
-  const [page, viewer, sync, audit] = await Promise.all([
+test("knowledge images and extension books are locally published and audited", async () => {
+  const [page, books, detail, viewer, sync, audit, library] = await Promise.all([
     read("apps/web/src/app/knowledge/[id]/page.tsx"),
+    read("apps/web/src/app/knowledge/books/page.tsx"),
+    read("apps/web/src/app/knowledge/books/[id]/page.tsx"),
     read("apps/web/src/components/knowledge-image-viewer.tsx"),
     read("apps/web/scripts/sync-legacy-assets.mjs"),
     read("apps/web/scripts/check-knowledge-assets.mjs"),
+    read("knowledge/source/library.json"),
   ]);
   assert.match(page, /NEXT_PUBLIC_KNOWLEDGE_ASSET_BASE_URL/);
   assert.doesNotMatch(page, /legacySiteUrl/);
   assert.match(viewer, /Escape/);
   assert.match(viewer, /onPointerMove/);
   assert.match(viewer, /MagnifyingGlassPlus/);
-  for (const directory of ["source-pages", "figures", "figures-v10"]) assert.match(sync, new RegExp(directory));
+  for (const directory of ["source-pages", "figures", "figures-v10", "books"]) assert.match(sync, new RegExp(directory));
   assert.match(audit, /Missing .* referenced knowledge assets/);
   assert.match(audit, /content-type/);
+  assert.match(audit, /application\/pdf/);
+  assert.match(books, /专题文献，和核心规则分开读/);
+  assert.match(detail, /打开完整蒸馏 PDF/);
+  assert.match(detail, /noopener noreferrer/);
+  const catalog = JSON.parse(library);
+  assert.deepEqual(catalog.books.map((book) => book.id), ["elliott-wave-natural-law", "chan-theory-complete"]);
+  assert.ok(catalog.books.every((book) => book.pdf_path.startsWith("assets/books/") && book.sha256.length === 64));
 });
 
 test("root-mounted messenger preserves real-data friend and independent chat state", async () => {

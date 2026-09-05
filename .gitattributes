@@ -1,0 +1,2 @@
+# Preserve PDF bytes, including cross-reference offsets and checksums.
+assets/books/*.pdf binary

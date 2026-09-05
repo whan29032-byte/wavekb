@@ -9,6 +9,7 @@
 - 知识关系：174条跨单元关系。
 - 问题入口：18条常见问题路线，以及一套统一分析手册。
 - 可点击页面：本地浏览器当前构建161页，并把第10版来源页与第11版图示补充分别折叠展示。
+- 扩展书架：另收录《艾略特波浪理论：自然法则》与《缠中说禅》CHM 的两本完整蒸馏 PDF。它们保留独立来源、覆盖范围和证据边界，不会改写第10版核心规则的权威层级。
 - 视觉核验：第10版全部280个PDF页已按连续页序渲染检查，章节边界与逐页蒸馏一致；旧报告中第217页扫描条带和281至320页引用属于版本页码混用，现已纠正。
 
 ## 主要入口
@@ -22,6 +23,7 @@
 - `knowledge/questions/index.jsonl`：18条问题到规则、指南和方法的机器可读路由。
 - `knowledge/coverage/tenth-edition-pages.jsonl`：第10版280页逐页覆盖账本。
 - `knowledge/images/registry.json`：第10版 Primary 与第11版 Supplement 分离的图像语义注册表。
+- `knowledge/source/library.json`：扩展书架的书目、静态文件哈希、覆盖范围与阅读边界；不是核心 Unit 来源。
 - `knowledge/source/supplements.json`：第11版补充来源清单。
 - `knowledge/reports/quality-report.md`：最终质量与边界报告。
 - `knowledge/reports/framework-verification.md`：未完善学习框架的核验结论。

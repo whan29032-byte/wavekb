@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, BookOpenText, CheckCircle } from "@phosphor-icons/react/dist/ssr";
 import { childrenOf, knowledgeData, type KnowledgeTheme } from "@wavekb/knowledge";
@@ -6,17 +7,23 @@ import { KnowledgeExplorer } from "@/components/knowledge-explorer";
 
 export const metadata: Metadata = {
   title: "知识库",
-  description: "浏览已核验的艾略特波浪理论规则、指南、识别步骤与原书来源。",
+  description: "浏览已核验的艾略特波浪理论规则、指南、识别步骤、原书来源与扩展书架。",
 };
 
 function unitsInTheme(theme: KnowledgeTheme): string[] {
   return [...theme.unit_ids, ...theme.children.flatMap(unitsInTheme)];
 }
 
+function assetUrl(assetPath: string) {
+  const base = (process.env.NEXT_PUBLIC_KNOWLEDGE_ASSET_BASE_URL || "").replace(/\/$/, "");
+  return `${base}/${assetPath.replace(/^\//, "")}`;
+}
+
 export default function KnowledgePage() {
   const data = knowledgeData();
   const coreCount = data.pages.filter((page) => page.kind === "core").length;
-  const listItems = data.pages.map(({ id, title, kind, parent, sections, search_terms, source_refs }) => ({
+  const listItems = [
+    ...data.pages.map(({ id, title, kind, parent, sections, search_terms, source_refs }) => ({
     id,
     title,
     kind,
@@ -26,7 +33,9 @@ export default function KnowledgePage() {
       ...search_terms,
       ...source_refs.flatMap((source) => [source.chapter, source.section, source.source_id, ...source.figures]),
     ].join(" "),
-  }));
+    })),
+    ...data.library.books.map((book) => ({ id: `book-${book.id}`, title: book.title, kind: "candidate" as const, parent: null, href: `/knowledge/books/${book.id}`, searchText: [book.eyebrow, book.description, book.source_label, book.coverage_note, ...book.topics, ...book.reading_guide.flatMap((item) => [item.title, item.description]), ...book.boundaries].join(" ") })),
+  ];
   const chapterTitles: Record<string, string> = { "front-matter": "前置内容", "chapter-01": "第一章", "chapter-02": "第二章", "chapter-03": "第三章", "chapter-04": "第四章", "chapter-05": "第五章", "chapter-06": "第六章", "chapter-07": "第七章", "chapter-08": "第八章", appendix: "附录", glossary: "词汇表", "publisher-postscript": "原出版者后记" };
 
   return (
@@ -40,10 +49,11 @@ export default function KnowledgePage() {
         <div className="flex items-center gap-2 rounded-xl border bg-surface px-4 py-3 text-sm text-muted-foreground"><CheckCircle aria-hidden size={20} weight="duotone" className="text-primary" />{coreCount} 个核心条目</div>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-3" aria-label="知识库入口">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="知识库入口">
         <a href="#theme-routes" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">按主题系统学习</strong><span className="text-sm leading-6 text-muted-foreground">从八大主题进入，先规则、再指南与证据。</span></a>
         <a href="#question-routes" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">按问题查答案</strong><span className="text-sm leading-6 text-muted-foreground">18 条 Reasoning Routes 直接解析到同一批 Units。</span></a>
         <a href="#chapter-routes" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">按原书阅读</strong><span className="text-sm leading-6 text-muted-foreground">保留前置、八章、附录、词汇表与后记顺序。</span></a>
+        <a href="#library" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">阅读扩展书架</strong><span className="text-sm leading-6 text-muted-foreground">专题蒸馏独立收录，不改写核心规则层级。</span></a>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2" aria-label="知识库分区">
@@ -63,6 +73,11 @@ export default function KnowledgePage() {
             </article>
           );
         })}
+      </section>
+
+      <section id="library" className="grid scroll-mt-24 gap-4" aria-labelledby="library-title">
+        <div className="flex flex-wrap items-end justify-between gap-4"><div className="grid gap-2"><h2 id="library-title" className="text-2xl font-semibold tracking-tight">扩展书架</h2><p className="text-sm leading-6 text-muted-foreground">专题蒸馏保留覆盖范围和使用边界，与核心规则库分开维护。</p></div><Link href="/knowledge/books" className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline">查看全部书目 <ArrowRight aria-hidden size={16} /></Link></div>
+        <div className="grid gap-4 md:grid-cols-2">{data.library.books.map((book) => <Link key={book.id} href={`/knowledge/books/${book.id}`} className="grid overflow-hidden rounded-xl border bg-surface hover:border-primary/45 sm:grid-cols-[7.5rem_minmax(0,1fr)]"><div className="relative min-h-44 bg-muted sm:min-h-full"><Image src={assetUrl(book.cover_path)} alt="" fill sizes="(min-width: 640px) 7.5rem, 100vw" className="object-cover object-top" /></div><div className="grid gap-3 p-5"><span className="text-xs font-semibold text-primary">{book.eyebrow}</span><h3 className="text-lg font-semibold leading-6">{book.title}</h3><p className="text-sm leading-6 text-muted-foreground">{book.description}</p><span className="text-xs text-muted-foreground">{book.pdf_pages} 页蒸馏 · 覆盖 {book.source_page_count.toLocaleString("zh-CN")} 页/篇来源</span></div></Link>)}</div>
       </section>
 
       <section id="theme-routes" className="grid scroll-mt-24 gap-4" aria-labelledby="theme-routes-title">

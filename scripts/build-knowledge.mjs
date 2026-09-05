@@ -171,7 +171,28 @@ const roots = readJson(path.join(knowledgeRoot, "pages/roots.json")).roots;
 const imageRegistry = readJson(path.join(knowledgeRoot, "images/registry.json"));
 const manifest = readJson(path.join(knowledgeRoot, "source/manifest.json"));
 const framework = readJson(path.join(knowledgeRoot, "source/framework.json"));
+const library = readJson(path.join(knowledgeRoot, "source/library.json"));
 const coverage = readJsonl(path.join(knowledgeRoot, "coverage/tenth-edition-pages.jsonl"));
+
+if (!library || !Array.isArray(library.books)) throw new Error("knowledge/source/library.json must contain a books array");
+const libraryBookIds = new Set();
+for (const book of library.books) {
+  for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "sha256"]) {
+    if (!book?.[field]) throw new Error(`Knowledge library book is missing ${field}`);
+  }
+  if (libraryBookIds.has(book.id)) throw new Error(`Duplicate knowledge library book id: ${book.id}`);
+  libraryBookIds.add(book.id);
+  for (const assetPath of [book.pdf_path, book.cover_path]) {
+    if (!String(assetPath).startsWith("assets/books/") || String(assetPath).includes("..")) throw new Error(`Unsafe knowledge library asset path: ${assetPath}`);
+    if (!fs.existsSync(path.join(repositoryRoot, assetPath))) throw new Error(`Missing knowledge library asset: ${assetPath}`);
+  }
+  if (!Number.isInteger(book.pdf_pages) || book.pdf_pages < 1 || !Number.isInteger(book.source_page_count) || book.source_page_count < 1) {
+    throw new Error(`Knowledge library book has invalid page counts: ${book.id}`);
+  }
+  if (!Array.isArray(book.topics) || !book.topics.length || !Array.isArray(book.reading_guide) || !book.reading_guide.length || !Array.isArray(book.boundaries) || !book.boundaries.length) {
+    throw new Error(`Knowledge library book is missing reading metadata: ${book.id}`);
+  }
+}
 const adjacentRelations = new Map(units.map((unit) => [unit.id, []]));
 for (const relation of relations) {
   adjacentRelations.get(relation.source).push(relation.target);
@@ -270,6 +291,7 @@ const data = {
   chapters,
   questions,
   relations,
+  library,
   summary: {
     source: {
       source_id: manifest.source_id,
@@ -303,4 +325,4 @@ const data = {
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(data)}\n`);
-console.log(JSON.stringify({ output: path.relative(repositoryRoot, outputPath), pages: pages.length, units: units.length, relations: relations.length, questions: questions.length }, null, 2));
+console.log(JSON.stringify({ output: path.relative(repositoryRoot, outputPath), pages: pages.length, units: units.length, relations: relations.length, questions: questions.length, library_books: library.books.length }, null, 2));

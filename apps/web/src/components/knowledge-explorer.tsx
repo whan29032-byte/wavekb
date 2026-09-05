@@ -11,6 +11,7 @@ type KnowledgeListItem = {
   kind: "core" | "candidate";
   parent: string | null;
   searchText: string;
+  href?: string;
 };
 
 export function KnowledgeExplorer({ items }: { items: KnowledgeListItem[] }) {
@@ -36,7 +37,7 @@ export function KnowledgeExplorer({ items }: { items: KnowledgeListItem[] }) {
       {results.length ? (
         <div className="grid gap-3 sm:grid-cols-2">
           {results.map((item) => (
-            <Link key={item.id} href={`/knowledge/${item.id}`} className="grid gap-1 rounded-xl border bg-surface p-4 hover:border-primary/45">
+            <Link key={item.id} href={item.href || `/knowledge/${item.id}`} className="grid gap-1 rounded-xl border bg-surface p-4 hover:border-primary/45">
               <strong className="text-sm font-semibold leading-6">{item.title}</strong>
               <span className="text-xs text-muted-foreground">{item.kind === "core" ? "核心知识" : "已核验辅助资料"}</span>
             </Link>

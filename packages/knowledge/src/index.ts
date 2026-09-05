@@ -72,6 +72,30 @@ export type KnowledgeRelation = { source: string; target: string; type: string }
 export type KnowledgeChapter = { id: string; unit_ids: string[] };
 export type KnowledgeTheme = { id: string; title: string; unit_ids: string[]; children: KnowledgeTheme[] };
 
+export type KnowledgeLibraryBook = {
+  id: string;
+  title: string;
+  eyebrow: string;
+  description: string;
+  source_label: string;
+  coverage_note: string;
+  generated_on: string;
+  pdf_path: string;
+  cover_path: string;
+  pdf_pages: number;
+  source_page_count: number;
+  sha256: string;
+  topics: string[];
+  reading_guide: Array<{ title: string; description: string }>;
+  boundaries: string[];
+};
+
+export type KnowledgeLibrary = {
+  title: string;
+  description: string;
+  books: KnowledgeLibraryBook[];
+};
+
 export type KnowledgeRoot = Pick<KnowledgePage, "id" | "title" | "kind" | "order" | "parent">;
 export type KnowledgeData = {
   schema_version: number;
@@ -81,6 +105,7 @@ export type KnowledgeData = {
   chapters: KnowledgeChapter[];
   questions: KnowledgeQuestion[];
   relations: KnowledgeRelation[];
+  library: KnowledgeLibrary;
   summary: Record<string, unknown>;
 };
 

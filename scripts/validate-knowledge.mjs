@@ -54,6 +54,7 @@ const coverage = readJsonl(path.join(knowledgeRoot, "coverage/tenth-edition-page
 const manifest = readJson(path.join(knowledgeRoot, "source/manifest.json"));
 const supplements = readJson(path.join(knowledgeRoot, "source/supplements.json"));
 const framework = readJson(path.join(knowledgeRoot, "source/framework.json"));
+const library = readJson(path.join(knowledgeRoot, "source/library.json"));
 const imageRegistry = readJson(path.join(knowledgeRoot, "images/registry.json"));
 const sourceRanges = readJson(path.join(knowledgeRoot, "source/ranges.json"));
 const sourcePackets = readJson(path.join(knowledgeRoot, "source/packets.json"));
@@ -63,6 +64,24 @@ const compiled = readJson(path.join(repositoryRoot, "packages/knowledge/src/know
 const chapterFiles = fs.readdirSync(path.join(knowledgeRoot, "chapters")).filter((name) => name.endsWith(".jsonl")).sort();
 const imageIds = new Set((imageRegistry.assets || []).map((asset) => asset.id));
 const assetById = new Map((imageRegistry.assets || []).map((asset) => [asset.id, asset]));
+
+expect(Array.isArray(library.books) && library.books.length > 0, "Knowledge library has no books");
+const libraryBookIds = uniqueIds(library.books || [], "Knowledge library books");
+for (const book of library.books || []) {
+  for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "sha256"]) {
+    expect(Boolean(book[field]), `${book.id || "library book"} is missing ${field}`);
+  }
+  expect(Number.isInteger(book.pdf_pages) && book.pdf_pages > 0, `${book.id} has invalid PDF page count`);
+  expect(Number.isInteger(book.source_page_count) && book.source_page_count > 0, `${book.id} has invalid source page count`);
+  expect(Array.isArray(book.topics) && book.topics.length > 0, `${book.id} has no topics`);
+  expect(Array.isArray(book.reading_guide) && book.reading_guide.length > 0, `${book.id} has no reading guide`);
+  expect(Array.isArray(book.boundaries) && book.boundaries.length > 0, `${book.id} has no usage boundaries`);
+  for (const assetPath of [book.pdf_path, book.cover_path]) {
+    expect(String(assetPath || "").startsWith("assets/books/") && !String(assetPath).includes(".."), `${book.id} has unsafe library asset path: ${assetPath}`);
+    expect(fs.existsSync(path.join(repositoryRoot, assetPath || "")), `${book.id} is missing library asset: ${assetPath}`);
+  }
+  if (book.pdf_path && fs.existsSync(path.join(repositoryRoot, book.pdf_path))) expect(sha256(path.join(repositoryRoot, book.pdf_path)) === book.sha256, `${book.id} PDF SHA-256 mismatch`);
+}
 
 expect(units.length === 117, `Expected 117 Units, found ${units.length}`);
 expect(relations.length === 174, `Expected 174 Relations, found ${relations.length}`);
@@ -205,6 +224,7 @@ expect(compiled.pages?.length === 161, `Expected 161 compiled pages, found ${com
 expect(compiled.relations?.length === 174, "Compiled Relations count drifted");
 expect(compiled.questions?.length === 18, "Compiled Questions count drifted");
 expect(compiled.themes?.length === 8, "Compiled theme count drifted");
+expect(JSON.stringify((compiled.library?.books || []).map((book) => book.id)) === JSON.stringify([...libraryBookIds]), "Compiled library book list drifted from source library");
 const compiledPageIds = uniqueIds(compiled.pages || [], "Compiled pages");
 for (const unitId of unitIds) expect(compiledPageIds.has(`unit-${unitId}`), `Missing compiled page for Unit ${unitId}`);
 for (const page of compiled.pages || []) {

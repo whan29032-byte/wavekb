@@ -26,6 +26,7 @@ user-data/
 apps/web/public/assets/source-pages/
 apps/web/public/assets/figures/
 apps/web/public/assets/figures-v10/
+apps/web/public/assets/books/
 *.db
 *.sqlite
 *.sqlite3

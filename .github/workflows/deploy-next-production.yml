@@ -87,6 +87,27 @@ jobs:
           DEPLOYMENT_VERSION: ${{ github.sha }}
         run: pnpm --filter @wavekb/web build
 
+      - name: Install Chromium for browser acceptance
+        run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
+
+      - name: Verify book shelf before uploading the release
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3108
+          PORT: 3108
+          HOSTNAME: 127.0.0.1
+        run: |
+          set -Eeuo pipefail
+          pnpm --filter @wavekb/web start > /tmp/wavekb-book-acceptance.log 2>&1 &
+          candidate_pid=$!
+          trap 'kill "$candidate_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:3108/knowledge/books > /dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3108/knowledge/books > /dev/null
+          pnpm --filter @wavekb/web exec playwright test e2e/navigation.spec.ts \
+            --grep "extension shelf" --workers=2
+
       - name: Package the standalone application
         run: tar -C apps/web/.next/standalone -czf wavekb-next-preview.tar.gz .
 
@@ -351,9 +372,6 @@ jobs:
           set -Eeuo pipefail
           test -n "$E2E_POSTING_IDENTIFIER"
           test -n "$E2E_POSTING_PASSWORD"
-
-      - name: Install Chromium for production browser acceptance
-        run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
 
       - name: Run real production posting and member-shell acceptance
         env:
