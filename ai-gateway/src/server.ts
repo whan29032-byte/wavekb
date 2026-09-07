@@ -47,6 +47,13 @@ export type GatewayApi = {
   ): Promise<unknown>;
   enqueueJob(ownerId: string, analysisId: string, input: Record<string, unknown>): Promise<unknown>;
   getJob(ownerId: string, jobId: string): Promise<unknown>;
+  listTradingLeaderboard?(period: string): Promise<unknown[]>;
+  getExchangeConnection?(ownerId: string): Promise<unknown>;
+  createExchangeConnection?(ownerId: string, input: Record<string, unknown>): Promise<unknown>;
+  syncExchangeConnection?(ownerId: string): Promise<unknown>;
+  disconnectExchangeConnection?(ownerId: string): Promise<unknown>;
+  listAdminExchangeConnections?(limit?: number): Promise<unknown[]>;
+  disableAdminExchangeConnection?(actorId: string, connectionId: string, reason: string): Promise<unknown>;
 };
 
 export type AuthRouteApi = {
@@ -167,6 +174,28 @@ function authFailure(error: unknown): RouteResult {
     "uid_selection_expired",
     "uid_refresh_exhausted",
     "uid_unavailable",
+    "read_only_ack_required",
+    "invalid_api_key",
+    "invalid_secret_key",
+    "invalid_exchange_label",
+    "exchange_connection_not_found",
+    "exchange_connection_failed",
+    "exchange_secret_missing",
+    "exchange_secret_invalid",
+    "exchange_sync_failed",
+    "binance_1021",
+    "binance_1022",
+    "binance_2014",
+    "binance_2015",
+    "binance_unavailable",
+    "binance_multi_asset_not_supported",
+    "binance_transfer_asset_not_supported",
+    "binance_income_window_too_large",
+    "binance_invalid_equity",
+    "binance_invalid_wallet_balance",
+    "binance_invalid_unrealized_pnl",
+    "binance_invalid_income",
+    "reason_required",
     "uid_already_assigned",
     "account_banned",
     "rate_limited",
@@ -206,6 +235,29 @@ function routeFailure(error: unknown): RouteResult {
     "cannot_change_own_role",
     "user_is_banned",
     "uid_unavailable",
+    "read_only_ack_required",
+    "invalid_api_key",
+    "invalid_secret_key",
+    "invalid_exchange_label",
+    "exchange_connection_not_found",
+    "exchange_connection_failed",
+    "exchange_secret_missing",
+    "exchange_secret_invalid",
+    "exchange_sync_failed",
+    "exchange_sync_gap_too_large",
+    "binance_1021",
+    "binance_1022",
+    "binance_2014",
+    "binance_2015",
+    "binance_unavailable",
+    "binance_multi_asset_not_supported",
+    "binance_transfer_asset_not_supported",
+    "binance_income_window_too_large",
+    "binance_invalid_equity",
+    "binance_invalid_wallet_balance",
+    "binance_invalid_unrealized_pnl",
+    "binance_invalid_income",
+    "reason_required",
   ]);
   return {
     statusCode: Number(candidate?.statusCode || 500),
@@ -355,6 +407,14 @@ async function route(
       headers: { "cache-control": "public, max-age=60, stale-while-revalidate=300" },
     };
   }
+  if (method === "GET" && path === "/api/trading-leaderboard") {
+    if (!api.listTradingLeaderboard) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return {
+      statusCode: 200,
+      body: { entries: await api.listTradingLeaderboard(String(query.period || "30d")) },
+      headers: { "cache-control": "public, max-age=60, stale-while-revalidate=300" },
+    };
+  }
   const actor = await actorFor(deps, headers);
   if (!actor) return { statusCode: 401, body: { error: "authentication_required" } };
   if (path.startsWith("/v1/admin/") && actor.role !== "admin") {
@@ -461,6 +521,31 @@ async function route(
       statusCode: 200,
       body: { connections: await api.listUserConnections(actor.id) },
     };
+  }
+  if (method === "GET" && path === "/v1/admin/trading-connections") {
+    if (!api.listAdminExchangeConnections) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 200, body: { connections: await api.listAdminExchangeConnections(Number(query.limit || 100)) } };
+  }
+  const adminExchangeMatch = path.match(/^\/v1\/admin\/trading-connections\/([^/]+)\/disable$/);
+  if (method === "POST" && adminExchangeMatch?.[1]) {
+    if (!api.disableAdminExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 200, body: { connection: await api.disableAdminExchangeConnection(actor.id, decodeURIComponent(adminExchangeMatch[1]), String((payload as Record<string, unknown> | null)?.reason || "")) } };
+  }
+  if (method === "GET" && path === "/v1/user/exchange-connection") {
+    if (!api.getExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 200, body: { connection: await api.getExchangeConnection(actor.id) } };
+  }
+  if (method === "POST" && path === "/v1/user/exchange-connection") {
+    if (!api.createExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 201, body: { connection: await api.createExchangeConnection(actor.id, (payload ?? {}) as Record<string, unknown>) } };
+  }
+  if (method === "POST" && path === "/v1/user/exchange-connection/sync") {
+    if (!api.syncExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 200, body: { connection: await api.syncExchangeConnection(actor.id) } };
+  }
+  if (method === "POST" && path === "/v1/user/exchange-connection/disconnect") {
+    if (!api.disconnectExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 200, body: { connection: await api.disconnectExchangeConnection(actor.id) } };
   }
   if (method === "POST" && path === "/v1/user/ai-connections") {
     return {

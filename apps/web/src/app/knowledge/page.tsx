@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, BookOpenText, CheckCircle } from "@phosphor-icons/react/dist/ssr";
+import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { childrenOf, knowledgeData, type KnowledgeTheme } from "@wavekb/knowledge";
 import { KnowledgeExplorer } from "@/components/knowledge-explorer";
+import { getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
 
 export const metadata: Metadata = {
   title: "知识库",
-  description: "浏览已核验的艾略特波浪理论规则、指南、识别步骤、原书来源与扩展书架。",
+  description: "按图书、主题、问题和章节阅读已核验的波浪理论知识。",
 };
 
 function unitsInTheme(theme: KnowledgeTheme): string[] {
@@ -19,92 +20,127 @@ function assetUrl(assetPath: string) {
   return `${base}/${assetPath.replace(/^\//, "")}`;
 }
 
+const chapterTitles: Record<string, string> = {
+  "front-matter": "前置内容",
+  "chapter-01": "第一章",
+  "chapter-02": "第二章",
+  "chapter-03": "第三章",
+  "chapter-04": "第四章",
+  "chapter-05": "第五章",
+  "chapter-06": "第六章",
+  "chapter-07": "第七章",
+  "chapter-08": "第八章",
+  appendix: "附录",
+  glossary: "词汇表",
+  "publisher-postscript": "原出版者后记",
+};
+
 export default function KnowledgePage() {
   const data = knowledgeData();
+  const books = getKnowledgeBookCatalog(data);
   const coreCount = data.pages.filter((page) => page.kind === "core").length;
   const listItems = [
     ...data.pages.map(({ id, title, kind, parent, sections, search_terms, source_refs }) => ({
-    id,
-    title,
-    kind,
-    parent,
-    searchText: [
-      ...sections.flatMap((section) => [...section.paragraphs, ...section.items]),
-      ...search_terms,
-      ...source_refs.flatMap((source) => [source.chapter, source.section, source.source_id, ...source.figures]),
-    ].join(" "),
+      id,
+      title,
+      kind,
+      parent,
+      searchText: [
+        ...sections.flatMap((section) => [...section.paragraphs, ...section.items]),
+        ...search_terms,
+        ...source_refs.flatMap((source) => [source.chapter, source.section, source.source_id, ...source.figures]),
+      ].join(" "),
     })),
-    ...data.library.books.map((book) => ({ id: `book-${book.id}`, title: book.title, kind: "candidate" as const, parent: null, href: `/knowledge/books/${book.id}`, searchText: [book.eyebrow, book.description, book.source_label, book.coverage_note, ...book.topics, ...book.reading_guide.flatMap((item) => [item.title, item.description]), ...book.boundaries].join(" ") })),
+    ...books.map((book) => ({
+      id: `book-${book.id}`,
+      title: book.title,
+      kind: book.kind === "core" ? "core" as const : "candidate" as const,
+      parent: null,
+      href: book.href,
+      searchText: [book.edition, book.description, ...book.topics].join(" "),
+    })),
   ];
-  const chapterTitles: Record<string, string> = { "front-matter": "前置内容", "chapter-01": "第一章", "chapter-02": "第二章", "chapter-03": "第三章", "chapter-04": "第四章", "chapter-05": "第五章", "chapter-06": "第六章", "chapter-07": "第七章", "chapter-08": "第八章", appendix: "附录", glossary: "词汇表", "publisher-postscript": "原出版者后记" };
 
   return (
-    <main className="mx-auto grid max-w-6xl gap-12 px-4 py-10 md:px-6 md:py-16">
-      <header className="grid gap-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+    <main className="mx-auto grid max-w-6xl gap-12 px-4 py-10 md:px-6 md:py-14">
+      <header className="grid gap-4 border-b pb-8 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
         <div className="grid gap-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-primary"><BookOpenText aria-hidden size={20} weight="duotone" />艾略特波浪理论</div>
-          <h1 className="max-w-[16ch] text-4xl font-semibold leading-tight tracking-[-0.04em] md:text-5xl">规则、指南与原书证据放在一起。</h1>
-          <p className="max-w-[65ch] text-sm leading-6 text-muted-foreground md:text-base">共 {data.pages.length} 个条目。每页保留适用范围、强制规则、检查步骤、失效条件、常见错误和来源。</p>
+          <h1 className="text-4xl font-semibold tracking-[-0.04em] md:text-5xl">知识库</h1>
+          <p className="max-w-[68ch] text-base leading-7 text-muted-foreground">从一本书开始，也可以按主题、问题或原书章节定位规则。所有核心结论都保留来源与失效边界。</p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl border bg-surface px-4 py-3 text-sm text-muted-foreground"><CheckCircle aria-hidden size={20} weight="duotone" className="text-primary" />{coreCount} 个核心条目</div>
+        <p className="text-sm tabular-nums text-muted-foreground"><strong className="text-foreground">{coreCount}</strong> 个核心知识条目</p>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="知识库入口">
-        <a href="#theme-routes" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">按主题系统学习</strong><span className="text-sm leading-6 text-muted-foreground">从八大主题进入，先规则、再指南与证据。</span></a>
-        <a href="#question-routes" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">按问题查答案</strong><span className="text-sm leading-6 text-muted-foreground">18 条 Reasoning Routes 直接解析到同一批 Units。</span></a>
-        <a href="#chapter-routes" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">按原书阅读</strong><span className="text-sm leading-6 text-muted-foreground">保留前置、八章、附录、词汇表与后记顺序。</span></a>
-        <a href="#library" className="grid gap-2 rounded-xl border bg-surface p-5 hover:border-primary/45"><strong className="text-lg">阅读扩展书架</strong><span className="text-sm leading-6 text-muted-foreground">专题蒸馏独立收录，不改写核心规则层级。</span></a>
+      <KnowledgeExplorer items={listItems} />
+
+      <section className="grid gap-5" aria-labelledby="book-shelf-title">
+        <header className="grid gap-1">
+          <h2 id="book-shelf-title" className="text-2xl font-semibold tracking-tight">选择一本书</h2>
+          <p className="text-sm leading-6 text-muted-foreground">核心主书提供站内规则依据；扩展资料用于交叉阅读，不覆盖核心结论。</p>
+        </header>
+        <div className="grid gap-6 lg:grid-cols-3">
+          {books.map((book) => (
+            <Link key={book.id} href={book.href} className="group grid grid-cols-[7.25rem_minmax(0,1fr)] gap-4 border-t pt-4 focus-visible:rounded-lg">
+              <div className="relative aspect-[.71] overflow-hidden rounded-lg border bg-muted">
+                <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="7.25rem" className="object-cover" />
+              </div>
+              <span className="grid min-w-0 content-start gap-2">
+                <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.kind === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>
+                <strong className="text-lg leading-6 group-hover:text-primary">{book.title}</strong>
+                <span className="line-clamp-3 text-sm leading-6 text-muted-foreground">{book.description}</span>
+                <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-foreground">{book.itemCount} {book.itemLabel}<ArrowRight aria-hidden size={14} className="transition-transform group-hover:translate-x-0.5" /></span>
+              </span>
+            </Link>
+          ))}
+        </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2" aria-label="知识库分区">
-        {data.roots.map((root) => {
-          const children = childrenOf(root.id);
-          const first = children[0];
-          return (
-            <article key={root.id} className="grid gap-5 rounded-xl border bg-surface p-5 md:p-7">
-              <div className="grid gap-2">
-                <h2 className="text-2xl font-semibold tracking-tight">{root.title}</h2>
-                <p className="text-sm leading-6 text-muted-foreground">{root.kind === "core" ? "以第 10 版原书为核心，区分硬规则、指南和历史观察。" : "保留来源状态，用于训练、复盘和交叉核验。"}</p>
-              </div>
-              <div className="grid gap-2">
-                {children.slice(0, 5).map((page) => <Link key={page.id} href={`/knowledge/${page.id}`} className="flex items-center justify-between gap-3 rounded-lg bg-muted px-3 py-2.5 text-sm font-medium hover:text-primary"><span>{page.title}</span><ArrowRight aria-hidden size={16} /></Link>)}
-              </div>
-              {first ? <Link href={`/knowledge/${first.id}`} className="w-fit text-sm font-semibold text-primary hover:underline">从本分区开始</Link> : null}
-            </article>
-          );
-        })}
-      </section>
+      <nav className="grid border-y sm:grid-cols-3 sm:divide-x" aria-label="知识库阅读方式">
+        <a href="#theme-routes" className="flex items-center justify-between gap-3 px-4 py-4 text-sm font-semibold hover:bg-muted">按主题学习<ArrowRight aria-hidden size={16} /></a>
+        <a href="#question-routes" className="flex items-center justify-between gap-3 border-t px-4 py-4 text-sm font-semibold hover:bg-muted sm:border-t-0">按问题查答案<ArrowRight aria-hidden size={16} /></a>
+        <a href="#chapter-routes" className="flex items-center justify-between gap-3 border-t px-4 py-4 text-sm font-semibold hover:bg-muted sm:border-t-0">按原书章节阅读<ArrowRight aria-hidden size={16} /></a>
+      </nav>
 
-      <section id="library" className="grid scroll-mt-24 gap-4" aria-labelledby="library-title">
-        <div className="flex flex-wrap items-end justify-between gap-4"><div className="grid gap-2"><h2 id="library-title" className="text-2xl font-semibold tracking-tight">扩展书架</h2><p className="text-sm leading-6 text-muted-foreground">专题蒸馏保留覆盖范围和使用边界，与核心规则库分开维护。</p></div><Link href="/knowledge/books" className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline">查看全部书目 <ArrowRight aria-hidden size={16} /></Link></div>
-        <div className="grid gap-4 md:grid-cols-2">{data.library.books.map((book) => <Link key={book.id} href={`/knowledge/books/${book.id}`} className="grid overflow-hidden rounded-xl border bg-surface hover:border-primary/45 sm:grid-cols-[7.5rem_minmax(0,1fr)]"><div className="relative min-h-44 bg-muted sm:min-h-full"><Image src={assetUrl(book.cover_path)} alt="" fill sizes="(min-width: 640px) 7.5rem, 100vw" className="object-contain" /></div><div className="grid gap-3 p-5"><span className="text-xs font-semibold text-primary">{book.eyebrow}</span><h3 className="text-lg font-semibold leading-6">{book.title}</h3><p className="text-sm leading-6 text-muted-foreground">{book.description}</p><span className="text-xs text-muted-foreground">{book.pdf_pages} 页蒸馏 · 覆盖 {book.source_page_count.toLocaleString("zh-CN")} 页/篇来源</span></div></Link>)}</div>
+      <section className="grid gap-4" aria-labelledby="knowledge-source-title">
+        <header><h2 id="knowledge-source-title" className="text-2xl font-semibold tracking-tight">知识来源</h2></header>
+        <div className="divide-y border-y">
+          {data.roots.map((root) => {
+            const children = childrenOf(root.id);
+            const first = children[0];
+            return (
+              <div key={root.id} className="grid gap-3 py-5 md:grid-cols-[14rem_minmax(0,1fr)_auto] md:items-start">
+                <div><h3 className="font-semibold">{root.title}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">{root.kind === "core" ? "第10版核心规则、指南和历史观察" : "训练、复盘与交叉核验资料"}</p></div>
+                <div className="flex flex-wrap gap-x-4 gap-y-2">{children.slice(0, 5).map((page) => <Link key={page.id} href={`/knowledge/${page.id}`} className="text-sm text-muted-foreground hover:text-primary hover:underline">{page.title}</Link>)}</div>
+                {first ? <Link href={`/knowledge/${first.id}`} className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">开始阅读<ArrowRight aria-hidden size={15} /></Link> : null}
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <section id="theme-routes" className="grid scroll-mt-24 gap-4" aria-labelledby="theme-routes-title">
-        <div className="grid gap-2"><h2 id="theme-routes-title" className="text-2xl font-semibold tracking-tight">按八大主题系统学习</h2><p className="text-sm leading-6 text-muted-foreground">主题只组织 Unit 引用，不复制正文。</p></div>
-        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-          {data.themes.map((theme) => {
+        <header className="grid gap-1"><h2 id="theme-routes-title" className="text-2xl font-semibold tracking-tight">按八大主题学习</h2><p className="text-sm text-muted-foreground">每个主题按知识条目组织，正文只维护一份。</p></header>
+        <div className="grid border-y sm:grid-cols-2 lg:grid-cols-4">
+          {data.themes.map((theme, index) => {
             const unitIds = unitsInTheme(theme);
-            return unitIds[0] ? <Link key={theme.id} href={`/knowledge/unit-${unitIds[0]}`} className="grid gap-2 rounded-xl border bg-surface p-4 hover:border-primary/45"><strong className="text-sm leading-5">{theme.title}</strong><span className="text-xs text-muted-foreground">{unitIds.length} 个 Units</span></Link> : null;
+            return unitIds[0] ? <Link key={theme.id} href={`/knowledge/themes/${theme.id}`} className={`grid gap-1 px-4 py-4 hover:bg-muted ${index >= 2 ? "border-t lg:border-t-0" : index ? "border-t sm:border-l sm:border-t-0" : ""} ${index >= 4 ? "lg:border-t" : ""}`}><strong className="text-sm leading-5">{theme.title}</strong><span className="text-xs text-muted-foreground">{unitIds.length} 个知识条目</span></Link> : null;
           })}
         </div>
       </section>
 
       <section id="question-routes" className="grid scroll-mt-24 gap-4" aria-labelledby="question-routes-title">
-        <div className="grid gap-2"><h2 id="question-routes-title" className="text-2xl font-semibold tracking-tight">按问题查答案</h2><p className="text-sm leading-6 text-muted-foreground">每条路线先打开 required Units；页面正文仍来自同一 Unit 数据。</p></div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {data.questions.map((question) => <Link key={question.id} href={`/knowledge/questions/${question.id}`} className="grid gap-2 rounded-xl border bg-surface p-4 hover:border-primary/45"><strong className="text-sm leading-6">{question.question}</strong><span className="text-xs text-muted-foreground">4 阶段 · {question.required_unit_ids.length} 个必读 · {question.optional_unit_ids.length} 个辅助</span></Link>)}
+        <header className="grid gap-1"><h2 id="question-routes-title" className="text-2xl font-semibold tracking-tight">按问题查答案</h2><p className="text-sm text-muted-foreground">从判断问题进入规则、证据和失效管理。</p></header>
+        <div className="grid gap-x-8 md:grid-cols-2">
+          {data.questions.map((question) => <Link key={question.id} href={`/knowledge/questions/${question.id}`} className="flex items-start justify-between gap-4 border-t py-4 hover:text-primary"><span><strong className="block text-sm leading-6">{question.question}</strong><span className="text-xs text-muted-foreground">{question.required_unit_ids.length} 个必读 · {question.optional_unit_ids.length} 个辅助</span></span><ArrowRight aria-hidden size={16} className="mt-1 shrink-0" /></Link>)}
         </div>
       </section>
 
       <section id="chapter-routes" className="grid scroll-mt-24 gap-4" aria-labelledby="chapter-routes-title">
-        <div className="grid gap-2"><h2 id="chapter-routes-title" className="text-2xl font-semibold tracking-tight">按原书阅读</h2><p className="text-sm leading-6 text-muted-foreground">Chapter 只提供顺序和 Unit 引用，不另维护正文。</p></div>
-        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-          {data.chapters.map((chapter) => chapter.unit_ids[0] ? <Link key={chapter.id} href={`/knowledge/chapters/${chapter.id}`} className="flex items-center justify-between gap-3 rounded-xl border bg-surface p-4 hover:border-primary/45"><span><strong className="block text-sm">{chapterTitles[chapter.id] || chapter.id}</strong><span className="text-xs text-muted-foreground">{chapter.unit_ids.length} 个 Units</span></span><ArrowRight aria-hidden size={16} /></Link> : null)}
+        <header className="grid gap-1"><h2 id="chapter-routes-title" className="text-2xl font-semibold tracking-tight">按原书章节阅读</h2><p className="text-sm text-muted-foreground">按原书顺序查看同一批核心知识条目。</p></header>
+        <div className="grid gap-x-8 sm:grid-cols-2 md:grid-cols-3">
+          {data.chapters.map((chapter) => chapter.unit_ids[0] ? <Link key={chapter.id} href={`/knowledge/chapters/${chapter.id}`} className="flex items-center justify-between gap-3 border-t py-3 text-sm hover:text-primary"><span><strong className="block">{chapterTitles[chapter.id] || chapter.id}</strong><span className="text-xs text-muted-foreground">{chapter.unit_ids.length} 个知识条目</span></span><ArrowRight aria-hidden size={16} /></Link> : null)}
         </div>
       </section>
-
-      <KnowledgeExplorer items={listItems} />
     </main>
   );
 }

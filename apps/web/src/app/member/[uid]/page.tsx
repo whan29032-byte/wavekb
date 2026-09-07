@@ -55,8 +55,10 @@ export default async function MemberProfilePage({ params, searchParams }: PagePr
             <div className="profile-hero-avatar-column" data-profile-avatar><AvatarFrame profile={profile} size="large" />{personal ? <span className="profile-hero-points">研究积分 {personal.points.toLocaleString("zh-CN")}</span> : null}</div>
             <div className="profile-hero-copy">
               <IdentityTitle title={profile.display_title || "波浪研究者"} />
-              <IdentityName profile={profile} as="h1" className="truncate text-2xl font-semibold tracking-[-0.025em] md:text-3xl" />
-              <Nameplate uid={profile.public_uid} style={profile.nameplate_style} />
+              <div className="identity-line">
+                <IdentityName profile={profile} as="h1" className="min-w-0 truncate text-2xl font-semibold tracking-[-0.025em] md:text-3xl" />
+                <Nameplate uid={profile.public_uid} style={profile.nameplate_style} />
+              </div>
               <p className="identity-effect max-w-[62ch] text-sm leading-6 text-muted-foreground" data-nameplate={profile.nameplate_style}>{profile.bio || "这位研究者还没有填写个人签名。"}</p>
             </div>
           </div>

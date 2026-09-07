@@ -474,6 +474,34 @@ export type RewardLeaderboardEntry = {
   lifetime_earned: number;
 };
 
+export type TradingLeaderboardEntry = {
+  rank_no: number;
+  user_id: string;
+  public_uid: number;
+  display_name: string;
+  avatar_url: string | null;
+  display_title: string;
+  nameplate_style: MemberProfile["nameplate_style"];
+  return_rate: number;
+  sample_count: number;
+  tracking_started_at: string;
+  last_synced_at: string;
+};
+
+export type ExchangeConnection = {
+  id: string;
+  label: string;
+  exchange: "binance";
+  market: "usdm_futures";
+  public_enabled: boolean;
+  status: "active" | "error" | "disabled";
+  secret_mask: string;
+  started_at: string;
+  last_synced_at: string | null;
+  last_error_code: string;
+  consecutive_failures: number;
+};
+
 export type PostInput = {
   board: string;
   title: string;

@@ -227,7 +227,7 @@ function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
         <div className="profile-hero-body">
           <div className="profile-hero-identity">
             <div className="profile-hero-avatar-column"><AvatarFrame profile={{ display_name: displayName.trim() || "波浪研究者", avatar_url: avatarPreview || null, nameplate_style: equippedStyle }} size="large" /></div>
-            <div className="profile-hero-copy"><p className="text-xs font-semibold text-primary">{profile.display_title || "波浪研究者"}</p><IdentityName profile={{ display_name: displayName.trim() || "波浪研究者", nameplate_style: equippedStyle }} as="h2" className="truncate text-xl font-semibold" /><Nameplate uid={profile.public_uid} style={equippedStyle} /><p className="identity-effect mt-1 max-w-[62ch] break-words text-sm leading-6 text-muted-foreground" data-nameplate={equippedStyle}>{bio.trim() || "写一句属于你的研究签名。"}</p></div>
+            <div className="profile-hero-copy"><p className="text-xs font-semibold text-primary">{profile.display_title || "波浪研究者"}</p><div className="identity-line"><IdentityName profile={{ display_name: displayName.trim() || "波浪研究者", nameplate_style: equippedStyle }} as="h2" className="min-w-0 truncate text-xl font-semibold" /><Nameplate uid={profile.public_uid} style={equippedStyle} /></div><p className="identity-effect mt-1 max-w-[62ch] break-words text-sm leading-6 text-muted-foreground" data-nameplate={equippedStyle}>{bio.trim() || "写一句属于你的研究签名。"}</p></div>
           </div>
         </div>
       </section>

@@ -5,6 +5,7 @@ import { encryptSecret } from "../secrets/crypto.ts";
 import { validateProviderUrl, validateUserProviderUrl } from "../security/provider-url.ts";
 import type { GatewayApi, GatewayUser } from "../server.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
+import { BinanceLeaderboardService } from "../trading/leaderboard-service.ts";
 
 function requiredString(input: Record<string, unknown>, key: string): string {
   const value = String(input[key] ?? "").trim();
@@ -30,9 +31,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 export class SupabaseGatewayApi implements GatewayApi {
   private readonly database: SupabaseRest;
+  private readonly trading: BinanceLeaderboardService;
   constructor(privateConfig: GatewayConfig) {
     this.config = privateConfig;
     this.database = new SupabaseRest(privateConfig);
+    this.trading = new BinanceLeaderboardService(privateConfig);
   }
   private readonly config: GatewayConfig;
 
@@ -433,5 +436,33 @@ export class SupabaseGatewayApi implements GatewayApi {
     );
     if (!rows.length) throw Object.assign(new Error("job not found"), { statusCode: 404 });
     return rows[0];
+  }
+
+  async listTradingLeaderboard(period: string): Promise<unknown[]> {
+    return this.trading.leaderboard(period);
+  }
+
+  async getExchangeConnection(ownerId: string): Promise<unknown> {
+    return this.trading.get(ownerId);
+  }
+
+  async createExchangeConnection(ownerId: string, input: Record<string, unknown>): Promise<unknown> {
+    return this.trading.connect(ownerId, input);
+  }
+
+  async syncExchangeConnection(ownerId: string): Promise<unknown> {
+    return this.trading.sync(ownerId);
+  }
+
+  async disconnectExchangeConnection(ownerId: string): Promise<unknown> {
+    return this.trading.disconnect(ownerId);
+  }
+
+  async listAdminExchangeConnections(limit = 100): Promise<unknown[]> {
+    return this.trading.adminList(limit);
+  }
+
+  async disableAdminExchangeConnection(actorId: string, connectionId: string, reason: string): Promise<unknown> {
+    return this.trading.adminDisable(actorId, connectionId, reason);
   }
 }

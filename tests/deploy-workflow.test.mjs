@@ -11,6 +11,8 @@ const webRequire = createRequire(new URL("../apps/web/package.json", import.meta
 const yaml = createRequire(webRequire.resolve("eslint"))("js-yaml");
 const workflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-next-production.yml", import.meta.url), "utf8"));
 const steps = workflow.jobs["build-and-deploy"].steps;
+const backendWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-backend-production.yml", import.meta.url), "utf8"));
+const backendSteps = backendWorkflow.jobs["migrate-and-deploy"].steps;
 
 test("persistent candidate runs owned standalone SQLite browser and worker gates before upload", () => {
   const upload = steps.findIndex((step) => step.id === "upload");
@@ -28,10 +30,25 @@ test("persistent candidate runs owned standalone SQLite browser and worker gates
 });
 
 test("every emitted workflow shell program parses before a runner can execute it", () => {
-  for (const step of steps.filter((item) => item.run)) {
+  for (const step of [...steps, ...backendSteps].filter((item) => item.run)) {
     const result = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
     assert.equal(result.status, 0, `${step.name}: ${result.stderr}`);
   }
+});
+
+test("backend deployment validates host before migration and rolls gateway code back on activation failure", () => {
+  const hostPreflight = backendSteps.findIndex((step) => /Verify gateway host/.test(step.name));
+  const migration = backendSteps.findIndex((step) => /Apply the additive/.test(step.name));
+  const upload = backendSteps.findIndex((step) => /Upload gateway archive/.test(step.name));
+  const activation = backendSteps.findIndex((step) => /Activate gateway/.test(step.name));
+  assert.ok(hostPreflight >= 0 && hostPreflight < migration && migration < upload && upload < activation);
+  assert.match(backendSteps[migration].run, /schema_before/);
+  assert.match(backendSteps[migration].run, /202608210002/);
+  assert.match(backendSteps[migration].run, /202609080001/);
+  assert.equal(backendSteps[migration].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
+  assert.match(backendSteps[activation].run, /rollback\(\)/);
+  assert.match(backendSteps[activation].run, /previous-release/);
+  assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
 });
 
 test("build, local browser gates and read-only compatibility precede every remote write", () => {

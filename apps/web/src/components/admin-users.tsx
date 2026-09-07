@@ -109,6 +109,9 @@ export function AdminUsers({ summary, users, total, page, limit, queryString }: 
           const muted = isMuted(user);
           const rowPending = pending.startsWith(`${user.id}:`);
           const name = user.display_name || "未命名用户";
+          const uidValue = uid[user.id] ?? String(user.public_uid || "");
+          const uidValid = /^[1-9]\d{4,5}$/.test(uidValue);
+          const uidChanged = uidValid && Number(uidValue) !== user.public_uid;
           return (
             <details key={user.id} className="group overflow-hidden rounded-xl border bg-surface">
               <summary className="grid cursor-pointer list-none gap-4 p-4 marker:hidden md:grid-cols-[minmax(13rem,1.4fr)_minmax(8rem,.6fr)_minmax(8rem,.6fr)_auto] md:items-center">
@@ -145,11 +148,14 @@ export function AdminUsers({ summary, users, total, page, limit, queryString }: 
                     <Input id={`admin-reason-${user.id}`} value={reason[user.id] || ""} onChange={(event) => setReason((current) => ({ ...current, [user.id]: event.target.value }))} maxLength={500} placeholder="必填，将写入审计日志" />
                   </Field>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="flex gap-2">
-                      <Input aria-label={`设置 ${name} 的 UID`} value={uid[user.id] ?? String(user.public_uid || "")} onChange={(event) => setUid((current) => ({ ...current, [user.id]: event.target.value }))} inputMode="numeric" maxLength={6} />
-                      <Button type="button" variant="secondary" disabled={rowPending} onClick={() => mutate(user, "uid", { uid: Number(uid[user.id] ?? user.public_uid) }, `确认修改 ${name} 的公开 UID？`)}>
+                    <div className="grid gap-1">
+                      <div className="flex gap-2">
+                      <Input aria-label={`设置 ${name} 的 UID`} aria-describedby={`admin-uid-help-${user.id}`} value={uidValue} onChange={(event) => setUid((current) => ({ ...current, [user.id]: event.target.value.replace(/\D/g, "") }))} inputMode="numeric" pattern="[1-9][0-9]{4,5}" minLength={5} maxLength={6} />
+                      <Button type="button" variant="secondary" disabled={rowPending || !uidChanged} onClick={() => mutate(user, "uid", { uid: Number(uidValue) }, `确认把 ${name} 的永久公开 UID 从 ${user.public_uid || "未设置"} 改为 ${uidValue}？旧 UID 将立即失效，此操作会写入审计日志。`)}>
                         <IdentificationCard aria-hidden size={17} />保存 UID
                       </Button>
+                      </div>
+                      <p id={`admin-uid-help-${user.id}`} className={`text-xs ${uidValue && !uidValid ? "text-destructive" : "text-muted-foreground"}`}>{uidValue && !uidValid ? "UID 必须是 5 至 6 位数字且不能以 0 开头。" : uidChanged ? `${user.public_uid || "未设置"} → ${uidValue}；请确认无外部链接仍使用旧 UID。` : "UID 是公开永久身份号，仅在纠错或人工恢复时修改。"}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" variant="secondary" disabled={rowPending || user.account_status === "banned"} onClick={() => mutate(user, "mute", { muted_until: new Date(Date.now() + 24 * 3600000).toISOString() }, `确认禁言 ${name} 24 小时？`)}>

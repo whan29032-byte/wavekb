@@ -1,0 +1,241 @@
+name: Deploy WaveKB database and gateway production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY_WAVEKB_BACKEND to migrate the database and release the gateway"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-backend-production
+  cancel-in-progress: false
+
+jobs:
+  migrate-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Require main and explicit production confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRMATION" = DEPLOY_WAVEKB_BACKEND
+
+      - name: Check out the release commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Verify gateway and deployment contracts
+        run: |
+          set -Eeuo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --dir ai-gateway typecheck
+          pnpm --dir ai-gateway test
+          node --test tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/trading-leaderboard.test.mjs
+
+      - name: Package immutable gateway release
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' "$GITHUB_SHA" > ai-gateway/DEPLOYMENT_VERSION
+          tar -C ai-gateway -czf wavekb-gateway.tar.gz package.json src DEPLOYMENT_VERSION
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Verify gateway host before the database write
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<'REMOTE'
+          set -Eeuo pipefail
+          test "$(sudo -n systemctl show elliott-wave-gateway.service -p ActiveState --value)" = active
+          test "$(sudo -n systemctl show elliott-wave-gateway.service -p WorkingDirectory --value)" = /opt/elliott-wave-gateway/current
+          test -L /opt/elliott-wave-gateway/current
+          test -d "$(readlink -f /opt/elliott-wave-gateway/current)"
+          test -f /etc/elliott-wave/gateway.env
+          sudo -n true
+          /usr/bin/node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
+          curl --fail --silent --show-error http://127.0.0.1:8787/health > /dev/null
+          REMOTE
+
+      - name: Apply the additive trading leaderboard migration
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$SUPABASE_DB_URL"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          schema_before=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
+          case "$schema_before" in
+            202608210002)
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202609080001_binance_trading_leaderboard.sql
+              ;;
+            202609080001)
+              echo "Trading leaderboard migration already applied; continuing idempotently."
+              ;;
+            *)
+              echo "Unexpected production schema marker; refusing migration."
+              exit 1
+              ;;
+          esac
+          schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
+          test "$schema_after" = 202609080001
+          rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('exchange_connections','exchange_connection_secrets','trading_equity_snapshots') and c.relrowsecurity;" | tr -d '[:space:]')
+          test "$rls_tables" = 3
+
+      - name: Upload gateway archive and reviewed units
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ && "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+            wavekb-gateway.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-gateway-${release_id}.tar.gz"
+          for unit in elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer; do
+            scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
+              "deployment/systemd/${unit}" "${DEPLOY_USER}@${DEPLOY_HOST}:${unit}-${release_id}"
+          done
+
+      - name: Activate gateway with exact code and unit rollback
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          release_root=/opt/elliott-wave-gateway
+          release_dir="${release_root}/releases/${release_id}"
+          backup_root="/var/backups/elliott-wave-gateway/${release_id}"
+          archive="$HOME/wavekb-gateway-${release_id}.tar.gz"
+          current_link="${release_root}/current"
+          previous=$(readlink -f "$current_link")
+          units=(elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer)
+
+          test -d "$previous"
+          sudo test ! -e "$release_dir"
+          sudo install -d -m 0755 "${release_root}/releases"
+          sudo install -d -m 0750 "$backup_root"
+          printf '%s\n' "$previous" | sudo tee "${backup_root}/previous-release" > /dev/null
+          for unit in "${units[@]}"; do
+            if sudo test -f "/etc/systemd/system/${unit}"; then
+              sudo cp --preserve=mode,ownership,timestamps "/etc/systemd/system/${unit}" "${backup_root}/${unit}"
+            else
+              sudo touch "${backup_root}/${unit}.missing"
+            fi
+          done
+          sudo install -d -m 0755 "$release_dir"
+          sudo tar -xzf "$archive" -C "$release_dir"
+          sudo chown -R root:root "$release_dir"
+          sudo chmod -R a+rX "$release_dir"
+
+          rollback() {
+            status=$?
+            trap - ERR
+            rollback_link="${release_root}/.rollback-${release_id}"
+            sudo ln -sfn "$previous" "$rollback_link"
+            sudo mv -Tf "$rollback_link" "$current_link"
+            for unit in "${units[@]}"; do
+              if sudo test -f "${backup_root}/${unit}.missing"; then
+                sudo systemctl disable --now "$unit" >/dev/null 2>&1 || true
+                sudo rm -f "/etc/systemd/system/${unit}"
+              else
+                sudo cp --preserve=mode,ownership,timestamps "${backup_root}/${unit}" "/etc/systemd/system/${unit}"
+              fi
+            done
+            sudo systemctl daemon-reload
+            sudo systemctl restart elliott-wave-gateway.service
+            sudo systemctl try-restart elliott-wave-ai-worker.service || true
+            exit "$status"
+          }
+          trap rollback ERR
+
+          for unit in "${units[@]}"; do
+            sudo install -m 0644 "$HOME/${unit}-${release_id}" "/etc/systemd/system/${unit}"
+          done
+          candidate_link="${release_root}/.candidate-${release_id}"
+          sudo ln -sfn "$release_dir" "$candidate_link"
+          sudo mv -Tf "$candidate_link" "$current_link"
+          sudo systemctl daemon-reload
+          sudo systemctl restart elliott-wave-gateway.service
+          sudo systemctl try-restart elliott-wave-ai-worker.service
+          sudo systemctl enable --now elliott-wave-trading-sync.timer
+          sudo systemctl start elliott-wave-trading-sync.service
+
+          accepted=0
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if curl --fail --silent --show-error http://127.0.0.1:8787/health | grep -F "\"deployment\":\"${RELEASE_SHA}\"" > /dev/null; then
+              accepted=1
+              break
+            fi
+            sleep 2
+          done
+          test "$accepted" -eq 1
+          test "$(sudo systemctl is-active elliott-wave-gateway.service)" = active
+          test "$(sudo systemctl is-active elliott-wave-trading-sync.timer)" = active
+          trap - ERR
+          rm -f -- "$archive"
+          for unit in "${units[@]}"; do rm -f -- "$HOME/${unit}-${release_id}"; done
+          REMOTE
+
+      - name: Verify the public schema marker
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
+        run: |
+          set -Eeuo pipefail
+          schema=$(curl --fail --silent --show-error \
+            -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
+            -H 'content-type: application/json' \
+            -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]')
+          test "$schema" = 202609080001

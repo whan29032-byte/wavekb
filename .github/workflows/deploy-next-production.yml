@@ -9,6 +9,10 @@ on:
         description: "仅在人工确认本次无需真实发帖验收后开启；不跳过构建、只读验收或回滚门槛"
         type: boolean
         default: false
+      gateway_release_approved:
+        description: "确认同一提交的数据库迁移和 Gateway 已由生产后端工作流成功发布"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -101,6 +105,7 @@ jobs:
         id: preflight
         env:
           READ_ONLY_ACCEPTANCE_APPROVED: ${{ github.event_name == 'workflow_dispatch' && inputs.read_only_acceptance }}
+          GATEWAY_RELEASE_APPROVED: ${{ github.event_name == 'workflow_dispatch' && inputs.gateway_release_approved }}
         run: node scripts/deploy-preflight.mjs
 
       - name: Require the server-only Tline credential before any remote write

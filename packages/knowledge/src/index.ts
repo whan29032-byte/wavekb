@@ -82,12 +82,14 @@ export type KnowledgeLibraryBook = {
   generated_on: string;
   pdf_path: string;
   cover_path: string;
+  text_path: string;
   pdf_pages: number;
   source_page_count: number;
   sha256: string;
   topics: string[];
   reading_guide: Array<{ title: string; description: string }>;
   boundaries: string[];
+  text_pages: Array<{ page: number; text: string }>;
 };
 
 export type KnowledgeLibrary = {

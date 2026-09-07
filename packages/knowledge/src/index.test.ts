@@ -37,5 +37,6 @@ describe("knowledge package", () => {
     expect(books.map((book) => book.id)).toEqual(["elliott-wave-natural-law", "chan-theory-complete"]);
     expect(books.every((book) => book.pdf_path.startsWith("assets/books/") && book.cover_path.startsWith("assets/books/"))).toBe(true);
     expect(books.every((book) => book.pdf_pages > 0 && book.source_page_count > 0 && book.reading_guide.length > 0 && book.boundaries.length > 0)).toBe(true);
+    expect(books.every((book) => book.text_pages.length === book.pdf_pages && book.text_pages.every((page) => page.text.length > 0))).toBe(true);
   });
 });

@@ -16,6 +16,8 @@ export type GatewayConfig = {
   AUTH_LOGIN_LIMIT_PER_15_MINUTES: number;
   AUTH_UID_ACTION_LIMIT_PER_HOUR: number;
   AUTH_FEATURE_ENABLED: boolean;
+  BINANCE_FUTURES_API_URL: string;
+  TRADING_SYNC_MINUTES: number;
 };
 
 const integer = (value: string | undefined, fallback: number, minimum: number, maximum: number): number => {
@@ -57,6 +59,13 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
   if (masterKey.length !== 32) {
     throw new Error("AI_SECRET_MASTER_KEY must decode to 32-byte key");
   }
+  const binanceFuturesApiUrl = env.BINANCE_FUTURES_API_URL ?? "https://fapi.binance.com";
+  try {
+    const parsed = new URL(binanceFuturesApiUrl);
+    if (parsed.protocol !== "https:" || !["fapi.binance.com", "testnet.binancefuture.com"].includes(parsed.hostname)) throw new Error("host");
+  } catch {
+    throw new Error("BINANCE_FUTURES_API_URL must be an approved Binance HTTPS origin");
+  }
   return {
     PORT: integer(env.PORT, 8787, 1, 65535),
     SUPABASE_URL: supabaseUrl,
@@ -84,5 +93,7 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
       1000,
     ),
     AUTH_FEATURE_ENABLED: boolean(env.AUTH_FEATURE_ENABLED, false),
+    BINANCE_FUTURES_API_URL: binanceFuturesApiUrl.replace(/\/$/, ""),
+    TRADING_SYNC_MINUTES: integer(env.TRADING_SYNC_MINUTES, 15, 5, 1440),
   };
 }

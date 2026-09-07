@@ -29,12 +29,13 @@ function markdownFiles(directory) {
 }
 
 function parseFrontMatter(source, filePath) {
-  if (!source.startsWith("---\n")) throw new Error(`${filePath} is missing YAML front matter`);
-  const end = source.indexOf("\n---\n", 4);
+  const normalizedSource = source.replace(/\r\n/g, "\n");
+  if (!normalizedSource.startsWith("---\n")) throw new Error(`${filePath} is missing YAML front matter`);
+  const end = normalizedSource.indexOf("\n---\n", 4);
   if (end < 0) throw new Error(`${filePath} has unterminated YAML front matter`);
   const metadata = {};
   let listKey = null;
-  for (const line of source.slice(4, end).split(/\r?\n/)) {
+  for (const line of normalizedSource.slice(4, end).split("\n")) {
     const scalar = line.match(/^([a-zA-Z0-9_]+):(?:\s*(.*))?$/);
     if (scalar) {
       const [, key, rawValue = ""] = scalar;
@@ -49,7 +50,7 @@ function parseFrontMatter(source, filePath) {
     const item = line.match(/^\s+-\s+(.*)$/);
     if (item && listKey) metadata[listKey].push(item[1].replace(/^['"]|['"]$/g, ""));
   }
-  return { metadata, body: source.slice(end + 5).trim() };
+  return { metadata, body: normalizedSource.slice(end + 5).trim() };
 }
 
 function parseSections(body) {
@@ -177,7 +178,7 @@ const coverage = readJsonl(path.join(knowledgeRoot, "coverage/tenth-edition-page
 if (!library || !Array.isArray(library.books)) throw new Error("knowledge/source/library.json must contain a books array");
 const libraryBookIds = new Set();
 for (const book of library.books) {
-  for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "sha256"]) {
+  for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "text_path", "sha256"]) {
     if (!book?.[field]) throw new Error(`Knowledge library book is missing ${field}`);
   }
   if (libraryBookIds.has(book.id)) throw new Error(`Duplicate knowledge library book id: ${book.id}`);
@@ -186,6 +187,19 @@ for (const book of library.books) {
     if (!String(assetPath).startsWith("assets/books/") || String(assetPath).includes("..")) throw new Error(`Unsafe knowledge library asset path: ${assetPath}`);
     if (!fs.existsSync(path.join(repositoryRoot, assetPath))) throw new Error(`Missing knowledge library asset: ${assetPath}`);
   }
+  if (!String(book.text_path).startsWith("knowledge/source/book-text/") || String(book.text_path).includes("..")) {
+    throw new Error(`Unsafe knowledge library text path: ${book.text_path}`);
+  }
+  const textPath = path.join(repositoryRoot, book.text_path);
+  if (!fs.existsSync(textPath)) throw new Error(`Missing knowledge library text: ${book.text_path}`);
+  const textDocument = readJson(textPath);
+  if (textDocument.book_id !== book.id || textDocument.source_pdf !== book.pdf_path || !Array.isArray(textDocument.pages)) {
+    throw new Error(`Knowledge library text metadata does not match book: ${book.id}`);
+  }
+  if (textDocument.pages.length !== book.pdf_pages || textDocument.pages.some((page, index) => page.page !== index + 1 || !String(page.text || "").trim())) {
+    throw new Error(`Knowledge library text pages are incomplete: ${book.id}`);
+  }
+  book.text_pages = textDocument.pages;
   if (!Number.isInteger(book.pdf_pages) || book.pdf_pages < 1 || !Number.isInteger(book.source_page_count) || book.source_page_count < 1) {
     throw new Error(`Knowledge library book has invalid page counts: ${book.id}`);
   }

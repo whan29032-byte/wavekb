@@ -78,6 +78,27 @@ const api = {
   async getJob(_ownerId: string, jobId: string) {
     return { id: jobId, status: "queued" };
   },
+  async listTradingLeaderboard(period: string) {
+    return [{ rank_no: 1, public_uid: 583104, display_name: "Wave", return_rate: period === "7d" ? 0.12 : 0.2 }];
+  },
+  async getExchangeConnection() {
+    return { id: "e1", status: "active", secret_mask: "••••ABCD" };
+  },
+  async createExchangeConnection() {
+    return { id: "e1", status: "active", secret_mask: "••••ABCD" };
+  },
+  async syncExchangeConnection() {
+    return { id: "e1", status: "active", secret_mask: "••••ABCD" };
+  },
+  async disconnectExchangeConnection() {
+    return { id: "e1", status: "disabled", secret_mask: "••••ABCD" };
+  },
+  async listAdminExchangeConnections() {
+    return [{ id: "11111111-1111-4111-8111-111111111111", owner: { public_uid: 583104 }, status: "active", secret_mask: "••••ABCD" }];
+  },
+  async disableAdminExchangeConnection() {
+    return { id: "11111111-1111-4111-8111-111111111111", status: "disabled", secret_mask: "••••ABCD" };
+  },
 };
 
 const userAdministrationApi = {
@@ -218,6 +239,36 @@ test("users can manage only their own masked AI connections", async () => {
   assert.equal(created.statusCode, 201);
   assert.equal(created.body.includes("secret-value-5678"), false);
   assert.equal(created.body.includes("••••5678"), true);
+});
+
+test("trading leaderboard is public while exchange credentials remain owner-scoped and masked", async () => {
+  const server = buildServer({ config, api });
+  const board = await server.inject({ url: "/api/trading-leaderboard?period=7d" });
+  assert.equal(board.statusCode, 200);
+  assert.equal((board.json() as any).entries[0].return_rate, 0.12);
+
+  assert.equal((await server.inject({ url: "/v1/user/exchange-connection" })).statusCode, 401);
+  const created = await server.inject({
+    method: "POST",
+    url: "/v1/user/exchange-connection",
+    headers: { authorization: "Bearer user-token" },
+    payload: { api_key: "binance-api-key-super-secret", secret_key: "binance-secret-super-secret", read_only_ack: true },
+  });
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.body.includes("binance-api-key-super-secret"), false);
+  assert.equal(created.body.includes("binance-secret-super-secret"), false);
+  assert.equal(created.body.includes("••••ABCD"), true);
+});
+
+test("only admins can inspect or disable exchange connections", async () => {
+  const server = buildServer({ config, api });
+  assert.equal((await server.inject({ url: "/v1/admin/trading-connections", headers: { authorization: "Bearer user-token" } })).statusCode, 403);
+  const list = await server.inject({ url: "/v1/admin/trading-connections", headers: { authorization: "Bearer admin-token" } });
+  assert.equal(list.statusCode, 200);
+  assert.equal(list.body.includes("••••ABCD"), true);
+  const disabled = await server.inject({ method: "POST", url: "/v1/admin/trading-connections/11111111-1111-4111-8111-111111111111/disable", headers: { authorization: "Bearer admin-token" }, payload: { reason: "收益异常核验" } });
+  assert.equal(disabled.statusCode, 200);
+  assert.equal((disabled.json() as any).connection.status, "disabled");
 });
 
 test("user administration is isolated behind admin routes", async () => {

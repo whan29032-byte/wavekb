@@ -28,7 +28,7 @@ export type AdminUser = {
 
 export type AdminAuditEntry = {
   id: string;
-  action: "ban" | "unban" | "mute" | "unmute" | "grant_admin" | "revoke_admin" | "set_uid";
+  action: "ban" | "unban" | "mute" | "unmute" | "grant_admin" | "revoke_admin" | "set_uid" | "disable_exchange";
   reason: string;
   actor_id: string;
   actor_name: string;
@@ -38,6 +38,23 @@ export type AdminAuditEntry = {
   target_uid: number | null;
   before_state: Record<string, unknown>;
   after_state: Record<string, unknown>;
+  created_at: string;
+};
+
+export type AdminTradingConnection = {
+  id: string;
+  owner_id: string;
+  owner: { id: string; public_uid: number | null; display_name: string } | null;
+  label: string;
+  exchange: "binance";
+  market: "usdm_futures";
+  public_enabled: boolean;
+  status: "active" | "error" | "disabled";
+  secret_mask: string;
+  started_at: string;
+  last_synced_at: string | null;
+  last_error_code: string;
+  consecutive_failures: number;
   created_at: string;
 };
 
@@ -104,4 +121,9 @@ export async function listAdminAudit(): Promise<AdminAuditEntry[]> {
 export async function listAdminDirectory(): Promise<AdminDirectoryResource[]> {
   const value = await adminGatewayRequest<{ resources?: AdminDirectoryResource[] }>("directory");
   return (Array.isArray(value.resources) ? value.resources : []).map((item) => ({ ...item, sort_order: Number(item.sort_order || 0) }));
+}
+
+export async function listAdminTradingConnections(): Promise<AdminTradingConnection[]> {
+  const value = await adminGatewayRequest<{ connections?: AdminTradingConnection[] }>("trading-connections?limit=200");
+  return Array.isArray(value.connections) ? value.connections : [];
 }

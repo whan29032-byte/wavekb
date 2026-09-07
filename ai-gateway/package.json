@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts",
-    "worker": "node src/worker-main.ts"
+    "worker": "node src/worker-main.ts",
+    "trading:sync": "node src/trading-worker.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

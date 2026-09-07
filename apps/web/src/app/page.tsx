@@ -8,18 +8,18 @@ import { listPublicDirectory, type DirectoryResource } from "@/lib/directory/ser
 function DirectoryGroup({ platform, resources }: { platform: "x" | "discord"; resources: DirectoryResource[] }) {
   const isX = platform === "x";
   return (
-    <section className="grid gap-4" aria-labelledby={`directory-${platform}`}>
+    <section className="grid self-start content-start gap-4" aria-labelledby={`directory-${platform}`}>
       <header className="flex items-start gap-3 border-b pb-3">
-        <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-muted text-primary">{isX ? <XLogo aria-hidden size={18} /> : <DiscordLogo aria-hidden size={20} weight="fill" />}</span>
+        <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-md bg-muted text-primary">{isX ? <XLogo aria-hidden size={18} /> : <DiscordLogo aria-hidden size={20} weight="fill" />}</span>
         <div>
-          <h3 id={`directory-${platform}`} className="text-lg font-semibold">{isX ? "X 波浪理论博主推荐" : "Discord 波浪理论频道推荐"}</h3>
+          <h3 id={`directory-${platform}`} className="text-lg font-semibold">{isX ? "X 波浪理论研究者" : "Discord 波浪理论社区"}</h3>
           <p className="mt-1 text-sm text-muted-foreground">{isX ? "关注公开的波浪分析、研究观点与市场图表。" : "进入波浪理论学习、讨论与复盘社区。"}</p>
         </div>
       </header>
       {resources.length ? (
         <div className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2">
           {resources.map((resource) => (
-            <a key={resource.id} href={resource.url} target="_blank" rel="noopener noreferrer" className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 bg-surface p-4 transition-colors hover:bg-muted focus-visible:z-10">
+            <a key={resource.id} href={resource.url} target="_blank" rel="noopener noreferrer" className="group grid min-h-[6.5rem] grid-cols-[auto_1fr_auto] content-center items-center gap-3 bg-surface p-4 transition-colors hover:bg-muted focus-visible:z-10">
               <DirectoryAvatar src={resource.avatar_url} fallback={isX ? "X" : "D"} name={resource.name} />
               <span className="min-w-0">
                 <strong className="block truncate text-sm font-semibold">{resource.name}</strong>
@@ -71,11 +71,10 @@ export default async function HomePage() {
       <section className="border-t bg-surface/40" aria-labelledby="external-directory-title">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 md:px-6 md:py-16">
           <header className="max-w-2xl">
-            <p className="text-xs font-semibold tracking-[.14em] text-primary">外部观察</p>
-            <h2 id="external-directory-title" className="mt-2 text-2xl font-semibold tracking-[-.025em] md:text-3xl">波浪理论研究推荐</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">由后台现有推荐数据实时维护，仅作为外部研究入口，不代表本站背书。</p>
+            <h2 id="external-directory-title" className="text-2xl font-semibold tracking-[-.025em] md:text-3xl">外部研究与交流社区</h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">收录公开的波浪理论研究账号与交流社群，内容仅供参考，不代表本站观点。</p>
           </header>
-          <div className="grid gap-8 lg:grid-cols-2">
+          <div className="grid items-start gap-8 lg:grid-cols-2">
             <DirectoryGroup platform="x" resources={directory.filter((item) => item.platform === "x")} />
             <DirectoryGroup platform="discord" resources={directory.filter((item) => item.platform === "discord")} />
           </div>

@@ -11,7 +11,6 @@ export function Nameplate({ uid, style, compact = false, preview = false }: { ui
   const label = uid ?? (preview ? "•••••" : "未设置");
   return (
     <span className="identity-nameplate" data-nameplate={resolved} data-compact={compact || undefined} aria-label={preview && !uid ? "铭牌样式预览" : `UID ${label}`}>
-      {resolved !== "classic" ? <span className="identity-liang" aria-hidden>靓</span> : null}
       <span className="identity-uid">UID {label}</span>
       {resolved === "blackgold" ? <span className="identity-drive-wave" aria-hidden /> : null}
     </span>
@@ -22,7 +21,7 @@ export type IdentityPreviewProfile = Pick<PublicProfile, "public_uid" | "display
 
 export function IdentityPreview({ style, profile }: { style: string; profile?: IdentityPreviewProfile }) {
   const identity = { display_name: profile?.display_name || "效果预览", avatar_url: profile?.avatar_url ?? null, nameplate_style: style };
-  return <div className="flex min-w-0 items-center gap-3 rounded-lg border bg-surface p-3" aria-label="铭牌效果预览"><AvatarFrame profile={identity} /><div className="grid min-w-0 gap-1"><IdentityName profile={identity} className="truncate text-sm font-semibold" /><Nameplate uid={profile?.public_uid} style={style} preview /><span className="text-xs text-muted-foreground">头像框、昵称与 UID 同步效果</span></div></div>;
+  return <div className="flex min-w-0 items-center gap-3 rounded-lg border bg-surface p-3" aria-label="铭牌效果预览"><AvatarFrame profile={identity} /><div className="grid min-w-0 gap-1"><div className="identity-line"><IdentityName profile={identity} className="truncate text-sm font-semibold" /><Nameplate uid={profile?.public_uid} style={style} preview /></div><span className="text-xs text-muted-foreground">头像框、昵称与 UID 同步效果</span></div></div>;
 }
 
 export function IdentityName({ profile, as: Tag = "span", className = "" }: { profile: Pick<PublicProfile, "display_name" | "nameplate_style">; as?: "span" | "strong" | "h1" | "h2"; className?: string }) {

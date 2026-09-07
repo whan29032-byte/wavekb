@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, BookOpenText, FilePdf } from "@phosphor-icons/react/dist/ssr";
-import { knowledgeData } from "@wavekb/knowledge";
+import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
+import { getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
 
 export const metadata: Metadata = {
-  title: "扩展书架",
-  description: "阅读与核心规则库分离维护的专题蒸馏文献。",
+  title: "图书",
+  description: "阅读 WaveKB 的核心主书与扩展研究资料。",
 };
 
 function assetUrl(assetPath: string) {
@@ -15,30 +15,31 @@ function assetUrl(assetPath: string) {
 }
 
 export default function KnowledgeBooksPage() {
-  const library = knowledgeData().library;
+  const books = getKnowledgeBookCatalog();
 
   return (
-    <main className="mx-auto grid max-w-6xl gap-10 px-4 py-10 md:px-6 md:py-16">
-      <header className="grid gap-4 border-b pb-8 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+    <main className="mx-auto grid max-w-6xl gap-10 px-4 py-10 md:px-6 md:py-14">
+      <header className="grid gap-5 border-b pb-8">
+        <Link href="/knowledge" className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回知识库</Link>
         <div className="grid gap-3">
-          <span className="flex items-center gap-2 text-sm font-medium text-primary"><BookOpenText aria-hidden size={20} weight="duotone" />知识库 · 扩展书架</span>
-          <h1 className="max-w-[16ch] text-4xl font-semibold leading-tight tracking-[-0.04em] md:text-5xl">专题文献，和核心规则分开读。</h1>
-          <p className="max-w-[68ch] text-sm leading-6 text-muted-foreground md:text-base">{library.description}</p>
+          <h1 className="text-4xl font-semibold tracking-[-0.04em] md:text-5xl">三本图书</h1>
+          <p className="max-w-[68ch] text-base leading-7 text-muted-foreground">选择一本书进入独立目录和书内搜索。核心主书用于规则判断，扩展资料用于交叉阅读。</p>
         </div>
-        <span className="inline-flex w-fit items-center gap-2 rounded-xl border bg-surface px-4 py-3 text-sm text-muted-foreground"><FilePdf aria-hidden size={20} className="text-primary" />{library.books.length} 本完整蒸馏</span>
       </header>
 
-      <section className="grid gap-5" aria-label="扩展书架书目">
-        {library.books.map((book) => (
-          <article key={book.id} className="grid overflow-hidden rounded-2xl border bg-surface md:grid-cols-[11.5rem_minmax(0,1fr)]">
-            <div className="relative min-h-56 bg-muted md:min-h-full"><Image src={assetUrl(book.cover_path)} alt={`${book.title}封面`} fill sizes="(min-width: 768px) 11.5rem, 100vw" className="object-contain" /></div>
-            <div className="grid gap-5 p-5 md:p-7">
-              <div className="grid gap-2"><span className="text-xs font-semibold tracking-wide text-primary">{book.eyebrow}</span><h2 className="text-2xl font-semibold tracking-tight">{book.title}</h2><p className="max-w-[72ch] text-sm leading-6 text-muted-foreground">{book.description}</p></div>
-              <div className="flex flex-wrap gap-2">{book.topics.map((topic) => <span key={topic} className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">{topic}</span>)}</div>
-              <div className="grid gap-1 text-xs leading-5 text-muted-foreground"><span>{book.pdf_pages} 页蒸馏 · 覆盖 {book.source_page_count.toLocaleString("zh-CN")} 页/篇来源</span><span>{book.coverage_note}</span></div>
-              <Link href={`/knowledge/books/${book.id}`} className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-primary hover:underline">查看阅读导览与全文 <ArrowRight aria-hidden size={17} /></Link>
+      <section className="grid gap-8 lg:grid-cols-3" aria-label="知识库图书">
+        {books.map((book) => (
+          <Link key={book.id} href={book.href} className="group grid content-start gap-4 border-t pt-4 focus-visible:rounded-lg">
+            <div className="relative aspect-[.71] w-full max-w-[13rem] overflow-hidden rounded-lg border bg-muted">
+              <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="13rem" className="object-cover" />
             </div>
-          </article>
+            <span className="grid gap-2">
+              <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.kind === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>
+              <strong className="text-xl leading-7 group-hover:text-primary">{book.title}</strong>
+              <span className="text-sm leading-6 text-muted-foreground">{book.description}</span>
+              <span className="inline-flex items-center gap-1 text-sm font-semibold">进入图书<ArrowRight aria-hidden size={16} className="transition-transform group-hover:translate-x-0.5" /></span>
+            </span>
+          </Link>
         ))}
       </section>
     </main>

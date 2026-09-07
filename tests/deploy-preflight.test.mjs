@@ -15,6 +15,8 @@ test("explicit read-only approval skips posting without bypassing schema or gate
   assert.equal(api.planRelease({ ...input, readOnlyApproved: "true" }).postingRequired, true);
   assert.throws(() => api.planRelease({ ...input, readOnlyApproved: true, schemaVersion: "202608140005" }), /schema/);
   assert.throws(() => api.planRelease({ ...fixture(t, "ai-gateway/src/server.ts"), readOnlyApproved: true }), /gateway/);
+  assert.equal(api.planRelease({ ...fixture(t, "ai-gateway/src/server.ts"), gatewayReleaseApproved: true }).gatewayChanged, true);
+  assert.throws(() => api.planRelease({ ...fixture(t, "ai-gateway/src/server.ts"), gatewayReleaseApproved: "true" }), /gateway/);
 });
 function fixture(t, changedFile) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-preflight-test-"));
@@ -58,6 +60,9 @@ test("unknown base or incompatible schema aborts, without a migration fallback",
 test("gateway source changes require a separately approved deployment", (t) => {
   assert.equal(typeof api.planRelease, "function", "read-only preflight must exist");
   assert.throws(() => api.planRelease(fixture(t, "ai-gateway/src/server.ts")), /gateway.*separate/i);
+  const approved = api.planRelease({ ...fixture(t, "ai-gateway/src/server.ts"), gatewayReleaseApproved: true });
+  assert.equal(approved.gatewayChanged, true);
+  assert.equal(approved.gatewayReleaseApproved, true);
 });
 
 test("moving a community file out of its old path still triggers posting acceptance", (t) => {

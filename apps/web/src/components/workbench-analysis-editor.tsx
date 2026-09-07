@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { WorkbenchAnalysis } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
@@ -50,34 +50,65 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [draftStatus, setDraftStatus] = useState(initialAnalysis ? "服务器版本已加载。" : "正在检查本地草稿。");
   const [aiJob, setAiJob] = useState<{ id: string; status: string; output_payload?: unknown; error_message?: string } | null>(null);
   const currentData = useMemo(() => objectValue(draft.step_data[String(step)]), [draft.step_data, step]);
+  const draftKey = `wavekb:next:analysis:${actorId}${analysisId ? `:${analysisId}` : ""}`;
+  const restored = useRef(false);
 
   useEffect(() => {
-    if (initialAnalysis) return;
     const restore = window.setTimeout(() => {
       try {
-        const saved = localStorage.getItem(`wavekb:next:analysis:${actorId}`);
-        if (saved) setDraft(JSON.parse(saved) as WorkbenchAnalysisDraft);
-      } catch { localStorage.removeItem(`wavekb:next:analysis:${actorId}`); }
+        const saved = localStorage.getItem(draftKey);
+        if (!saved) {
+          setDraftStatus(initialAnalysis ? "服务器版本已加载；修改会自动暂存到本机。" : "文字和配置会自动暂存到本机。");
+          restored.current = true;
+          return;
+        }
+        const parsed = JSON.parse(saved) as WorkbenchAnalysisDraft | { draft?: WorkbenchAnalysisDraft; savedAt?: string };
+        const candidate = "draft" in parsed && parsed.draft ? parsed.draft : parsed as WorkbenchAnalysisDraft;
+        const savedAt = "savedAt" in parsed ? parsed.savedAt : undefined;
+        if (initialAnalysis && savedAt && Date.parse(savedAt) <= Date.parse(initialAnalysis.updated_at)) {
+          localStorage.removeItem(draftKey);
+          setDraftStatus("服务器版本已加载；修改会自动暂存到本机。");
+        } else {
+          setDraft(candidate);
+          setDirty(true);
+          setDraftStatus(savedAt ? `已恢复 ${new Date(savedAt).toLocaleString("zh-CN")} 的本地草稿。` : "已恢复本地草稿。");
+        }
+        restored.current = true;
+      } catch {
+        localStorage.removeItem(draftKey);
+        restored.current = true;
+        setDraftStatus("本地草稿无法读取，已从服务器版本继续。");
+      }
     }, 0);
     return () => window.clearTimeout(restore);
-  }, [actorId, initialAnalysis]);
+  }, [draftKey, initialAnalysis]);
 
   useEffect(() => {
-    if (analysisId) return;
+    if (!restored.current || !dirty) return;
     const timer = window.setTimeout(() => {
-      localStorage.setItem(`wavekb:next:analysis:${actorId}`, JSON.stringify(draft));
+      try {
+        const savedAt = new Date().toISOString();
+        localStorage.setItem(draftKey, JSON.stringify({ draft, savedAt }));
+        setDraftStatus(`本地草稿已暂存 · ${new Date(savedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`);
+      } catch {
+        setDraftStatus("本地草稿暂存失败，请立即保存到服务器。");
+      }
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [actorId, analysisId, draft]);
+  }, [dirty, draft, draftKey]);
 
   function patchDraft(value: Partial<WorkbenchAnalysisDraft>) {
     const contextChanged = ["instrument", "market", "primary_timeframe", "parent_timeframe", "child_timeframe", "holding_style"].some((key) => key in value);
+    setDirty(true);
     setDraft((current) => ({ ...current, ...(contextChanged ? { rule_result: {}, score_result: {}, risk_result: {}, drawdown_result: {} } : {}), ...value }));
   }
 
   function patchStep(value: Record<string, unknown>) {
+    setDirty(true);
     setDraft((current) => ({
       ...current,
       ...(step === 3 ? { drawdown_result: {} } : {}),
@@ -94,7 +125,9 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
     const saved = await saveWorkbenchAnalysis(createClient(), analysisId, draft);
     setAnalysisId(saved.id);
     setDraft(initialDraft(actorId, saved));
-    localStorage.removeItem(`wavekb:next:analysis:${actorId}`);
+    setDirty(false);
+    localStorage.removeItem(draftKey);
+    setDraftStatus("已保存到服务器，本地暂存已清除。");
     if (!analysisId) router.replace(`/workbench/analysis/${saved.id}?step=${step}`);
     return saved;
   }
@@ -177,13 +210,30 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const legacyRules = Object.keys(draft.rule_result).length > 0 && draft.rule_result.calculation_version !== 2;
   const ruleStatus = ({ valid: "已通过已实现规则", eliminated: "未通过规则", invalid_input: "输入无效", not_checked: "尚未检查" } as Record<string, string>)[String(ruleResult.status)] || "尚未检查";
   const calculationErrors = [ruleResult.error, draft.drawdown_result.error, draft.risk_result.error].filter(Boolean);
+  const hasValue = (value: unknown) => value !== null && value !== undefined && String(value).trim() !== "" && value !== "unknown";
+  const stepProgress = (index: number) => {
+    const value = objectValue(draft.step_data[String(index)]);
+    const started = Object.values(value).some(hasValue);
+    const complete = index === 0 ? Boolean(draft.market.trim() && draft.instrument.trim())
+      : index === 1 ? Boolean(draft.parent_timeframe && draft.primary_timeframe && draft.child_timeframe && draft.holding_style)
+      : index === 2 ? hasValue(value.mode) && hasValue(value.degree)
+      : index === 3 ? hasValue(value.equity_curve) && hasValue(draft.drawdown_result.max_drawdown)
+      : index === 4 || index === 5 ? hasValue(value.pattern)
+      : index === 6 ? ["valid", "eliminated"].includes(String(ruleResult.status))
+      : index === 7 ? hasValue(value.primary)
+      : index === 8 ? hasValue(draft.risk_result.max_loss) && hasValue(draft.risk_result.max_position)
+      : index === 9 ? hasValue(value.entry_condition) && hasValue(value.invalidation)
+      : hasValue(value.actual_result) && hasValue(value.lessons);
+    return complete ? "已完成" : started ? "已填写" : "未填写";
+  };
   return (
     <div className="grid gap-6">
-      <nav className="flex gap-2 overflow-x-auto pb-2" aria-label="分析步骤">{steps.map((label, index) => <button key={label} type="button" onClick={() => go(index)} aria-current={step === index ? "step" : undefined} className={`grid min-w-20 gap-1 rounded-lg border px-3 py-2 text-left ${step === index ? "border-primary bg-primary text-primary-foreground" : "bg-surface text-muted-foreground"}`}><span className="text-xs">第 {index} 步</span><span className="text-sm font-semibold">{label.slice(0, 4)}</span></button>)}</nav>
+      <nav className="flex gap-2 overflow-x-auto pb-2" aria-label="分析步骤">{steps.map((label, index) => { const progress = stepProgress(index); return <button key={label} type="button" onClick={() => go(index)} aria-current={step === index ? "step" : undefined} aria-label={`第 ${index + 1} 步：${label}，${step === index ? "进行中" : progress}`} className={`grid min-w-28 gap-1 rounded-lg border px-3 py-2 text-left ${step === index ? "border-primary bg-primary text-primary-foreground" : progress === "已完成" ? "border-primary/35 bg-surface text-foreground" : "bg-surface text-muted-foreground"}`}><span className="flex items-center justify-between gap-2 text-xs"><span>第 {index + 1} 步</span><span>{step === index ? "进行中" : progress}</span></span><span className="text-sm font-semibold">{label}</span></button>; })}</nav>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section className="grid gap-6 rounded-xl border bg-surface p-5 md:p-7">
-          <header><p className="text-sm font-semibold text-primary">第 {step} 步</p><h1 className="mt-1 text-3xl font-semibold tracking-[-0.035em]">{steps[step]}</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">{stepHints[step]}</p></header>
-          {step === 1 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="analysis-market">市场分类</Label><Input id="analysis-market" value={draft.market} onChange={(event) => patchDraft({ market: event.target.value })} maxLength={80} /></Field><Field><Label htmlFor="analysis-instrument">分析品种</Label><Input id="analysis-instrument" value={draft.instrument} onChange={(event) => patchDraft({ instrument: event.target.value })} required maxLength={80} placeholder="BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="analysis-parent">上一级周期</Label><select id="analysis-parent" className={selectClass} value={draft.parent_timeframe} onChange={(event) => patchDraft({ parent_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-primary">当前分析周期</Label><select id="analysis-primary" className={selectClass} value={draft.primary_timeframe} onChange={(event) => patchDraft({ primary_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-child">下一级周期</Label><select id="analysis-child" className={selectClass} value={draft.child_timeframe} onChange={(event) => patchDraft({ child_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-style">持有风格</Label><select id="analysis-style" className={selectClass} value={draft.holding_style} onChange={(event) => patchDraft({ holding_style: event.target.value })}>{["长线", "波段", "中线", "日内", "超短"].map((item) => <option key={item}>{item}</option>)}</select></Field></div> : null}
+          <header className="grid gap-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-primary">第 {step + 1} 步 · 共 {steps.length} 步</p><p className="text-xs text-muted-foreground" role="status">{dirty ? draftStatus : "已与服务器同步。"}</p></div><h1 className="text-3xl font-semibold tracking-[-0.035em]">{steps[step]}</h1><p className="text-sm leading-6 text-muted-foreground">{stepHints[step]}</p></header>
+          {step === 0 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="analysis-market">市场分类</Label><Input id="analysis-market" value={draft.market} onChange={(event) => patchDraft({ market: event.target.value })} maxLength={80} /></Field><Field><Label htmlFor="analysis-instrument">分析品种</Label><Input id="analysis-instrument" value={draft.instrument} onChange={(event) => patchDraft({ instrument: event.target.value })} required maxLength={80} placeholder="BINANCE:BTCUSDT" /></Field></div> : null}
+          {step === 1 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="analysis-parent">上一级周期</Label><select id="analysis-parent" className={selectClass} value={draft.parent_timeframe} onChange={(event) => patchDraft({ parent_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-primary">当前分析周期</Label><select id="analysis-primary" className={selectClass} value={draft.primary_timeframe} onChange={(event) => patchDraft({ primary_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-child">下一级周期</Label><select id="analysis-child" className={selectClass} value={draft.child_timeframe} onChange={(event) => patchDraft({ child_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-style">持有风格</Label><select id="analysis-style" className={selectClass} value={draft.holding_style} onChange={(event) => patchDraft({ holding_style: event.target.value })}>{["长线", "波段", "中线", "日内", "超短"].map((item) => <option key={item}>{item}</option>)}</select></Field></div> : null}
           {step === 2 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="analysis-mode">当前模式</Label><select id="analysis-mode" className={selectClass} value={String(currentData.mode || "unknown")} onChange={(event) => patchStep({ mode: event.target.value })}><option value="unknown">待确认</option><option value="motive">驱动</option><option value="corrective">调整</option></select></Field><Field><Label htmlFor="analysis-degree">当前浪级判断</Label><Input id="analysis-degree" value={String(currentData.degree || "")} onChange={(event) => patchStep({ degree: event.target.value })} placeholder="例如：分钟级浪3" /></Field></div> : null}
           {step === 3 ? <div className="grid gap-5"><Field><Label htmlFor="analysis-curve">价格或权益序列</Label><Textarea id="analysis-curve" value={String(currentData.equity_curve || "")} onChange={(event) => patchStep({ equity_curve: event.target.value })} placeholder="100, 112, 108, 125, 117" /></Field><label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={Boolean(currentData.same_degree_refresh)} onChange={(event) => patchStep({ same_degree_refresh: event.target.checked })} />同级别波段刷新</label><label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={Boolean(currentData.segment_complete)} onChange={(event) => patchStep({ segment_complete: event.target.checked })} />内部浪型已完成</label><Button type="button" className="w-fit" onClick={runDrawdown}>测量最大回撤</Button></div> : null}
           {step === 4 ? <Field><Label htmlFor="analysis-correction">调整结构候选</Label><select id="analysis-correction" className={selectClass} value={String(currentData.pattern || "unknown")} onChange={(event) => patchStep({ pattern: event.target.value })}><option value="unknown">待确认</option><option value="zigzag">锯齿</option><option value="flat">平台</option><option value="triangle">三角</option><option value="combination">联合形</option></select></Field> : null}

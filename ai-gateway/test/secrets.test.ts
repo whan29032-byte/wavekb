@@ -28,11 +28,15 @@ test("redactor removes authentication request secrets", () => {
     access_token: "access-token-value-abcdefghijklmnopqrstuvwxyz",
     refresh_token: "refresh-token-value-abcdefghijklmnopqrstuvwxyz",
     registration_token: "registration-token-value-abcdefghijklmnopqrstuvwxyz",
+    api_key: "binance-api-key-value-abcdefghijklmnopqrstuvwxyz",
+    secret_key: "binance-secret-key-value-abcdefghijklmnopqrstuvwxyz",
     email: "owner@example.com",
   });
   assert.equal(result.includes("correct horse battery staple"), false);
   assert.equal(result.includes("access-token-value"), false);
   assert.equal(result.includes("refresh-token-value"), false);
   assert.equal(result.includes("registration-token-value"), false);
+  assert.equal(result.includes("binance-api-key-value"), false);
+  assert.equal(result.includes("binance-secret-key-value"), false);
   assert.equal(result.includes("owner@example.com"), false);
 });

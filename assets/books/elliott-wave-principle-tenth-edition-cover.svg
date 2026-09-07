@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1016" role="img" aria-labelledby="title desc">
+  <title id="title">艾略特波浪理论第10版知识库封面</title>
+  <desc id="desc">深蓝色研究版封面，带有白色波浪结构线。</desc>
+  <rect width="720" height="1016" fill="#111827"/>
+  <rect x="42" y="42" width="636" height="932" fill="none" stroke="#94a3b8" stroke-width="2" opacity=".55"/>
+  <path d="M62 692 C140 610 194 640 248 520 C302 400 366 454 412 334 C458 214 536 300 658 164" fill="none" stroke="#f8fafc" stroke-width="9"/>
+  <path d="M62 742 C150 670 208 706 270 624 C332 542 390 578 448 498 C506 418 558 458 658 392" fill="none" stroke="#8b7cf6" stroke-width="5" opacity=".95"/>
+  <text x="74" y="112" fill="#a5b4fc" font-family="Arial, sans-serif" font-size="22" letter-spacing="5">WAVEKB · CORE EDITION</text>
+  <text x="74" y="804" fill="#f8fafc" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="54" font-weight="700">艾略特波浪理论</text>
+  <text x="74" y="866" fill="#cbd5e1" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="30">第10版核心知识库</text>
+  <line x1="74" y1="906" x2="646" y2="906" stroke="#64748b" stroke-width="2"/>
+  <text x="74" y="946" fill="#94a3b8" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="20">规则 · 指南 · 证据 · 失效边界</text>
+</svg>

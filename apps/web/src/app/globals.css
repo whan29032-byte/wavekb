@@ -199,7 +199,8 @@ a, button, input, textarea { -webkit-tap-highlight-color: transparent; }
 .identity-nameplate[data-compact], .identity-avatar-frame[data-size="small"] { animation-duration: 18s; }
 .identity-nameplate[data-compact]::before { opacity: .05; animation-duration: 18s; }
 .identity-nameplate[data-compact]::after { opacity: .35; animation-duration: 18s; }
-.identity-liang { display: grid; width: 1.08rem; height: 1.08rem; flex: none; place-items: center; border: 1px solid rgb(255 255 255 / 38%); border-radius: 50%; background: var(--identity-panel); color: var(--identity-ink, #ffe39b); font-size: .58rem; font-weight: 850; }
+.identity-line { display: flex; min-width: 0; max-width: 100%; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.identity-line > .identity-nameplate { flex: none; }
 .identity-drive-wave { position: absolute !important; inset: auto -8% -45% 26%; z-index: 0 !important; height: 1.8rem; background: url('/assets/blackgold-motive-wave.svg') center/100% 100% no-repeat; opacity: .58; }
 .identity-avatar-frame { --avatar-size: 3rem; display: grid; width: var(--avatar-size); height: var(--avatar-size); flex: none; place-items: center; overflow: hidden; border: 3px solid var(--surface); border-radius: .72rem; background: var(--muted); box-shadow: 0 0 0 1px var(--border); color: var(--foreground); font-size: calc(var(--avatar-size) * .3); font-weight: 700; }
 .identity-avatar-frame[data-size="small"] { --avatar-size: 2rem; border-width: 2px; border-radius: .55rem; }

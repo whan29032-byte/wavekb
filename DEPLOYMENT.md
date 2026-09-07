@@ -5,6 +5,13 @@
 > 下文静态/preview 迁移流程是历史说明，不可据此把生产当预览环境。
 > 研报持久目录、Node 22.18+ 预检、worker/timer 与精确回滚见 [研报运维说明](docs/tline-research.md)。
 
+涉及数据库或 `ai-gateway/` 的版本，先手动运行
+`deploy-backend-production.yml` 并输入 `DEPLOY_WAVEKB_BACKEND`。该工作流按已知
+schema marker 增量执行迁移、原子切换 Gateway、安装交易排行同步 timer，并在失败时
+恢复旧 Gateway 代码和 systemd 单元；数据库迁移为前向兼容、不会自动回滚。随后手动
+运行 `deploy-next-production.yml`，勾选 `gateway_release_approved` 后才允许发布同一提交的
+Next.js 站点。
+
 ## GitHub Actions 自动部署
 
 仓库包含 `deploy-static-production.yml`：拉取请求运行网站测试；`main` 更新后自动备份并同步静态站点，失败自动回滚，再检查公网首页和好友模块。

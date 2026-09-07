@@ -7,8 +7,8 @@ const read = (path) => fs.readFile(new URL(`../${path}`, import.meta.url), "utf8
 test("Next homepage reads the managed X and Discord directory without demo records", async () => {
   const [page, repository] = await Promise.all([read("apps/web/src/app/page.tsx"), read("apps/web/src/lib/directory/server-repository.ts")]);
   assert.match(page, /listPublicDirectory/);
-  assert.match(page, /X 波浪理论博主推荐/);
-  assert.match(page, /Discord 波浪理论频道推荐/);
+  assert.match(page, /X 波浪理论研究者/);
+  assert.match(page, /Discord 波浪理论社区/);
   assert.doesNotMatch(page, /Elliott Wave Forecast|fallbackResources/);
   assert.match(repository, /\/api\/directory/);
   assert.match(repository, /cache: "no-store"/);
@@ -33,8 +33,9 @@ test("knowledge images and extension books are locally published and audited", a
   assert.match(audit, /Missing .* referenced knowledge assets/);
   assert.match(audit, /content-type/);
   assert.match(audit, /application\/pdf/);
-  assert.match(books, /专题文献，和核心规则分开读/);
-  assert.match(detail, /打开完整蒸馏 PDF/);
+  assert.match(books, /三本图书/);
+  assert.match(detail, /开始网页阅读/);
+  assert.match(detail, /text_pages/);
   assert.match(detail, /noopener noreferrer/);
   const catalog = JSON.parse(library);
   assert.deepEqual(catalog.books.map((book) => book.id), ["elliott-wave-natural-law", "chan-theory-complete"]);
@@ -200,14 +201,15 @@ test("user points are managed with users rather than the reward catalog page", a
   assert.match(rewards, /用户积分调整已经归入/);
 });
 
-test("site-wide rewards and private workbench use distinct navigation levels", async () => {
+test("site-wide rewards, workbench and trading leaderboard remain directly discoverable", async () => {
   const [header, account, actions] = await Promise.all([
     read("apps/web/src/components/site-header.tsx"),
     read("apps/web/src/components/account-navigation.tsx"),
     read("apps/web/src/components/member-profile-actions.tsx"),
   ]);
   assert.match(header, /href="\/rewards"[\s\S]*?积分商城/);
-  assert.doesNotMatch(header, /href="\/workbench"/);
+  assert.match(header, /href="\/workbench"[\s\S]*?交易工作台/);
+  assert.match(header, /href="\/leaderboard"[\s\S]*?收益榜/);
   assert.doesNotMatch(account, /href="\/(?:rewards|workbench)"/);
   const ownActions = actions.slice(actions.indexOf("if (actorId === profileId)"), actions.indexOf("async function toggleFollow"));
   assert.match(ownActions, /编辑资料[\s\S]*?我的好友[\s\S]*?交易工作台/);
