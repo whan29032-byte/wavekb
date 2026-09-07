@@ -98,8 +98,8 @@ jobs:
           test "$gateway_state" = active
           test "$gateway_workdir" = /opt/elliott-wave-gateway/current
           test -d /opt/elliott-wave-gateway/current
-          test -f /etc/elliott-wave/gateway.env
           sudo -n true
+          sudo test -f /etc/elliott-wave/gateway.env
           /usr/bin/node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
           curl --fail --silent --show-error http://127.0.0.1:8787/health > /dev/null
           REMOTE
