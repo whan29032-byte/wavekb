@@ -48,6 +48,8 @@ test("backend deployment validates host before migration and rolls gateway code 
   assert.equal(backendSteps[migration].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
+  assert.match(backendSteps[activation].run, /legacy_layout/);
+  assert.match(backendSteps[activation].run, /sudo mv "\$current_link" "\$previous"/);
   assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
 });
 

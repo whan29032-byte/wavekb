@@ -85,10 +85,19 @@ jobs:
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<'REMOTE'
           set -Eeuo pipefail
-          test "$(sudo -n systemctl show elliott-wave-gateway.service -p ActiveState --value)" = active
-          test "$(sudo -n systemctl show elliott-wave-gateway.service -p WorkingDirectory --value)" = /opt/elliott-wave-gateway/current
-          test -L /opt/elliott-wave-gateway/current
-          test -d "$(readlink -f /opt/elliott-wave-gateway/current)"
+          gateway_state=$(sudo -n systemctl show elliott-wave-gateway.service -p ActiveState --value)
+          gateway_workdir=$(sudo -n systemctl show elliott-wave-gateway.service -p WorkingDirectory --value)
+          echo "Gateway state: ${gateway_state}"
+          echo "Gateway working directory: ${gateway_workdir}"
+          if test -L /opt/elliott-wave-gateway/current; then
+            echo "Gateway release layout: symlink"
+          else
+            echo "Gateway release layout: legacy directory"
+          fi
+          echo "Node version: $(/usr/bin/node --version)"
+          test "$gateway_state" = active
+          test "$gateway_workdir" = /opt/elliott-wave-gateway/current
+          test -d /opt/elliott-wave-gateway/current
           test -f /etc/elliott-wave/gateway.env
           sudo -n true
           /usr/bin/node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
@@ -159,13 +168,21 @@ jobs:
           backup_root="/var/backups/elliott-wave-gateway/${release_id}"
           archive="$HOME/wavekb-gateway-${release_id}.tar.gz"
           current_link="${release_root}/current"
-          previous=$(readlink -f "$current_link")
           units=(elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer)
 
-          test -d "$previous"
+          test -d "$current_link"
           sudo test ! -e "$release_dir"
           sudo install -d -m 0755 "${release_root}/releases"
           sudo install -d -m 0750 "$backup_root"
+          if test -L "$current_link"; then
+            previous=$(readlink -f "$current_link")
+            test -d "$previous"
+            legacy_layout=0
+          else
+            previous="${release_root}/releases/legacy-${release_id}"
+            sudo test ! -e "$previous"
+            legacy_layout=1
+          fi
           printf '%s\n' "$previous" | sudo tee "${backup_root}/previous-release" > /dev/null
           for unit in "${units[@]}"; do
             if sudo test -f "/etc/systemd/system/${unit}"; then
@@ -179,12 +196,15 @@ jobs:
           sudo chown -R root:root "$release_dir"
           sudo chmod -R a+rX "$release_dir"
 
+          rollback_ready=0
           rollback() {
             status=$?
             trap - ERR
-            rollback_link="${release_root}/.rollback-${release_id}"
-            sudo ln -sfn "$previous" "$rollback_link"
-            sudo mv -Tf "$rollback_link" "$current_link"
+            if test "$rollback_ready" -eq 1; then
+              rollback_link="${release_root}/.rollback-${release_id}"
+              sudo ln -sfn "$previous" "$rollback_link"
+              sudo mv -Tf "$rollback_link" "$current_link"
+            fi
             for unit in "${units[@]}"; do
               if sudo test -f "${backup_root}/${unit}.missing"; then
                 sudo systemctl disable --now "$unit" >/dev/null 2>&1 || true
@@ -200,6 +220,10 @@ jobs:
           }
           trap rollback ERR
 
+          if test "$legacy_layout" -eq 1; then
+            sudo mv "$current_link" "$previous"
+          fi
+          rollback_ready=1
           for unit in "${units[@]}"; do
             sudo install -m 0644 "$HOME/${unit}-${release_id}" "/etc/systemd/system/${unit}"
           done
