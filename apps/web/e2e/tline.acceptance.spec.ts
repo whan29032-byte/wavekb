@@ -152,7 +152,9 @@ test("live Tline research and detail render in-site without browser calls to the
   await page.locator("main article").first().getByRole("link", { name: "阅读研报", exact: true }).click();
   await expect(page).toHaveURL(/\/research\/[A-Za-z0-9_-]+$/);
   await expect(page.getByRole("heading", { name: "研报摘要" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole("heading", { name: "核心论点" })).toBeVisible();
+  // Core arguments are optional in the upstream schema; the selected report's
+  // title and summary prove that the stored detail rendered in-site.
+  await expect(page.getByRole("heading", { level: 1, name: firstTitles[0], exact: true })).toBeVisible();
   expect(upstream).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: test.info().outputPath("research-detail.png"), fullPage: true });
