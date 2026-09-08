@@ -1,29 +1,311 @@
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { buildKnowledgeIndex } from "../src/knowledge/index.ts";
+import {
+  normalizeAiRunRequest,
+  type KnowledgeScope,
+} from "../src/knowledge/contracts.ts";
+import {
+  buildKnowledgeIndex,
+  type KnowledgeChunk,
+  type KnowledgeIndex,
+} from "../src/knowledge/index.ts";
+import { buildKnowledgeQuery } from "../src/knowledge/query.ts";
 import { retrieveKnowledge } from "../src/knowledge/retrieve.ts";
 
-const unitsPath = fileURLToPath(
-  new URL("../../knowledge/units/all.jsonl", import.meta.url),
+const artifactPath = fileURLToPath(
+  new URL("../knowledge/retrieval-index.json", import.meta.url),
 );
+const BOOK_IDS = [
+  "elliott-wave-principle-tenth-edition",
+  "elliott-wave-natural-law",
+  "chan-theory-complete",
+] as const;
+const CLIENT_REQUEST_ID = "11111111-1111-4111-8111-111111111111";
 
-test("hard rules from the tenth edition precede guides and experience", () => {
-  const index = buildKnowledgeIndex(unitsPath);
-  assert.equal(
-    index.find((item) => item.knowledgeId === "ewp-guide-pattern-completion-confidence")?.type,
-    "guide",
-  );
-  const context = retrieveKnowledge(index, "wave_hypothesis", "推动浪 浪4 重叠", 3000);
-  assert.ok(context.items.length > 0);
-  assert.equal(context.items[0]?.sourceId, "ewp-10-zh-2016");
-  assert.equal(context.items[0]?.type, "rule");
-  assert.ok(context.items.every((item) => item.knowledgeId));
+function validRequest(overrides: Record<string, unknown> = {}) {
+  return {
+    request_version: 2,
+    client_request_id: CLIENT_REQUEST_ID,
+    task_type: "wave_analysis",
+    step: 5,
+    analysis_schema_version: "workbench-v1",
+    knowledge_scope: { mode: "all" },
+    ...overrides,
+  };
+}
+
+test("the committed retrieval artifact loads the exact published catalog", () => {
+  const index = buildKnowledgeIndex(artifactPath);
+  assert.equal(index.schemaVersion, "wavekb-ai-knowledge-v1");
+  assert.match(index.knowledgeVersion, /^[0-9a-f]{64}$/);
+  assert.deepEqual(index.books.map((book) => book.bookId), BOOK_IDS);
+  assert.ok(index.chunks.length > 0);
 });
 
-test("retrieval is deduplicated and honors a character budget", () => {
-  const index = buildKnowledgeIndex(unitsPath);
-  const context = retrieveKnowledge(index, "wave_hypothesis", "三角形 位置", 700);
-  assert.equal(new Set(context.items.map((item) => item.knowledgeId)).size, context.items.length);
-  assert.ok(context.totalCharacters <= 700);
+test("scope normalization accepts all and each published single book", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  assert.deepEqual(normalizeAiRunRequest(validRequest(), catalog).knowledge_scope, {
+    mode: "all",
+  });
+  for (const book_id of BOOK_IDS) {
+    assert.deepEqual(
+      normalizeAiRunRequest(validRequest({
+        knowledge_scope: { mode: "single", book_id },
+      }), catalog).knowledge_scope,
+      { mode: "single", book_id },
+    );
+  }
+});
+
+test("a request without a version keeps legacy all-books behavior", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  const { request_version: _version, knowledge_scope: _scope, ...legacy } = validRequest();
+  assert.deepEqual(normalizeAiRunRequest(legacy, catalog), {
+    request_version: 2,
+    client_request_id: CLIENT_REQUEST_ID,
+    task_type: "wave_analysis",
+    step: 5,
+    analysis_schema_version: "workbench-v1",
+    knowledge_scope: { mode: "all" },
+  });
+});
+
+test("scope normalization rejects malformed, ambiguous, and unpublished scopes", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  const invalid = [
+    validRequest({ request_version: 1 }),
+    validRequest({ knowledge_scope: { mode: "unknown" } }),
+    validRequest({ knowledge_scope: { mode: "single", book_id: "not-published" } }),
+    validRequest({ knowledge_scope: { mode: "single", book_ids: [BOOK_IDS[0]] } }),
+    validRequest({ knowledge_scope: { mode: "single" } }),
+    validRequest({ knowledge_scope: { mode: "all", book_id: BOOK_IDS[0] } }),
+    validRequest({ knowledge_scope: ["all"] }),
+    validRequest({ knowledge_scope: { mode: "all", extra: true } }),
+  ];
+  for (const input of invalid) {
+    assert.throws(() => normalizeAiRunRequest(input, catalog));
+  }
+});
+
+test("request normalization validates UUID, step, task, schema, arrays, and string bounds", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  const invalid = [
+    validRequest({ client_request_id: "not-a-uuid" }),
+    validRequest({ client_request_id: "a".repeat(10_000) }),
+    validRequest({ step: -1 }),
+    validRequest({ step: 11 }),
+    validRequest({ step: 1.5 }),
+    validRequest({ task_type: "chat" }),
+    validRequest({ task_type: ["wave_analysis"] }),
+    validRequest({ analysis_schema_version: "workbench-v2" }),
+    validRequest({ analysis_schema_version: ["workbench-v1"] }),
+    [] as unknown as Record<string, unknown>,
+  ];
+  for (const input of invalid) {
+    assert.throws(() => normalizeAiRunRequest(input, catalog));
+  }
+});
+
+test("request normalization rejects client retrieval controls", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  for (const control of ["query", "weights", "path", "character_budget"]) {
+    assert.throws(() => normalizeAiRunRequest(validRequest({ [control]: "attacker" }), catalog));
+  }
+});
+
+test("knowledge queries use only bounded server analysis fields for the requested step", () => {
+  const request = normalizeAiRunRequest(validRequest(), buildKnowledgeIndex(artifactPath).books);
+  const query = buildKnowledgeQuery({
+    owner_id: "must-not-leak",
+    instrument: "BTCUSDT",
+    market: "crypto",
+    primary_timeframe: "4h",
+    parent_timeframe: "1d",
+    child_timeframe: "1h",
+    holding_style: "swing",
+    step_data: {
+      "4": { notes: "wrong-step" },
+      "5": { pattern: "三角形", notes: `bounded-${"n".repeat(2_000)}`, query: "attacker-query" },
+    },
+  }, request);
+  assert.match(query, /BTCUSDT/);
+  assert.match(query, /三角形/);
+  assert.match(query, /bounded-/);
+  assert.doesNotMatch(query, /must-not-leak|wrong-step|attacker-query/);
+  assert.ok(query.length < 1_000);
+});
+
+function chunk(
+  chunkId: string,
+  bookId: typeof BOOK_IDS[number],
+  searchable: string,
+  options: Partial<KnowledgeChunk> = {},
+): KnowledgeChunk {
+  return {
+    chunkId,
+    bookId,
+    sourceId: `${bookId}::source`,
+    sequence: 1,
+    title: chunkId,
+    headingPath: [],
+    text: options.text ?? chunkId,
+    kind: "page",
+    authority: "contextual",
+    contentStatus: "generated",
+    pdfPages: [1],
+    href: `/knowledge/books/${bookId}#page-1`,
+    topics: [],
+    searchable,
+    contentSha256: options.contentSha256 ?? chunkId.padEnd(64, "0").slice(0, 64),
+    ...options,
+  };
+}
+
+function fixtureIndex(chunks: KnowledgeChunk[]): KnowledgeIndex {
+  return {
+    schemaVersion: "wavekb-ai-knowledge-v1",
+    knowledgeVersion: "a".repeat(64),
+    books: BOOK_IDS.map((bookId) => ({ bookId, title: bookId })),
+    chunks,
+  };
+}
+
+function retrieve(index: KnowledgeIndex, scope: KnowledgeScope, query = "target", budget = 100_000) {
+  return retrieveKnowledge(index, { scope, query, characterBudget: budget });
+}
+
+test("single-book retrieval filters scope before ranking and never leaks another book", () => {
+  const otherBook = Array.from({ length: 13 }, (_, index) => chunk(
+    `a-${String(index).padStart(2, "0")}`,
+    BOOK_IDS[0],
+    "target",
+    { authority: "primary", kind: "unit", topics: ["RULE"] },
+  ));
+  const wanted = chunk("wanted", BOOK_IDS[1], "target");
+  const context = retrieve(fixtureIndex([...otherBook, wanted]), {
+    mode: "single",
+    book_id: BOOK_IDS[1],
+  });
+  assert.deepEqual(context.items.map((item) => item.chunkId), ["wanted"]);
+  assert.ok(context.items.every((item) => item.bookId === BOOK_IDS[1]));
+});
+
+test("all-books retrieval caps every book at four and the merged context at twelve", () => {
+  const chunks = BOOK_IDS.flatMap((bookId) => Array.from({ length: 5 }, (_, index) =>
+    chunk(`${bookId}-${index}`, bookId, "target", { sequence: index + 1 })));
+  const context = retrieve(fixtureIndex(chunks), { mode: "all" });
+  assert.equal(context.items.length, 12);
+  for (const bookId of BOOK_IDS) {
+    assert.equal(context.items.filter((item) => item.bookId === bookId).length, 4);
+  }
+});
+
+test("single-book retrieval returns at most eight matching chunks", () => {
+  const chunks = Array.from({ length: 10 }, (_, index) =>
+    chunk(`single-${index}`, BOOK_IDS[2], "target", { sequence: index + 1 }));
+  assert.equal(retrieve(fixtureIndex(chunks), {
+    mode: "single",
+    book_id: BOOK_IDS[2],
+  }).items.length, 8);
+});
+
+test("equal scores use deterministic sequence and chunk-id tie ordering", () => {
+  const chunks = [
+    chunk("z", BOOK_IDS[0], "target", { sequence: 2 }),
+    chunk("b", BOOK_IDS[0], "target", { sequence: 1 }),
+    chunk("a", BOOK_IDS[0], "target", { sequence: 1 }),
+  ];
+  assert.deepEqual(
+    retrieve(fixtureIndex(chunks), { mode: "single", book_id: BOOK_IDS[0] })
+      .items.map((item) => item.chunkId),
+    ["a", "b", "z"],
+  );
+});
+
+test("retrieval honors the character budget and suppresses content duplicates", () => {
+  const duplicateHash = "d".repeat(64);
+  const chunks = [
+    chunk("first", BOOK_IDS[0], "target", { text: "12345", contentSha256: duplicateHash }),
+    chunk("duplicate", BOOK_IDS[0], "target", { text: "12345", contentSha256: duplicateHash, sequence: 2 }),
+    chunk("too-large", BOOK_IDS[0], "target", { text: "123456", sequence: 3 }),
+  ];
+  const context = retrieve(fixtureIndex(chunks), { mode: "single", book_id: BOOK_IDS[0] }, "target", 5);
+  assert.deepEqual(context.items.map((item) => item.chunkId), ["first"]);
+  assert.equal(context.totalCharacters, 5);
+});
+
+test("all-books duplicate suppression does not consume a book result slot", () => {
+  const duplicateHash = "d".repeat(64);
+  const chunks = [
+    chunk("one", BOOK_IDS[0], "target", { contentSha256: duplicateHash, sequence: 1 }),
+    chunk("duplicate", BOOK_IDS[0], "target", { contentSha256: duplicateHash, sequence: 2 }),
+    chunk("two", BOOK_IDS[0], "target", { sequence: 3 }),
+    chunk("three", BOOK_IDS[0], "target", { sequence: 4 }),
+    chunk("four", BOOK_IDS[0], "target", { sequence: 5 }),
+  ];
+  assert.deepEqual(
+    retrieve(fixtureIndex(chunks), { mode: "all" }).items.map((item) => item.chunkId),
+    ["one", "two", "three", "four"],
+  );
+});
+
+test("CJK query bigrams match normalized artifact bigrams", () => {
+  const index = fixtureIndex([chunk("triangle", BOOK_IDS[1], "三角 角形")]);
+  assert.deepEqual(
+    retrieve(index, { mode: "single", book_id: BOOK_IDS[1] }, "三角形")
+      .items.map((item) => item.chunkId),
+    ["triangle"],
+  );
+});
+
+test("title and heading matches rank above topics and body matches", () => {
+  const index = fixtureIndex([
+    chunk("body", BOOK_IDS[0], "target", { text: "target", sequence: 1 }),
+    chunk("topic", BOOK_IDS[0], "target", { topics: ["target"], sequence: 2 }),
+    chunk("heading", BOOK_IDS[0], "target", { headingPath: ["target"], sequence: 3 }),
+    chunk("title", BOOK_IDS[0], "target", { title: "target", sequence: 4 }),
+  ]);
+  assert.deepEqual(
+    retrieve(index, { mode: "single", book_id: BOOK_IDS[0] }).items.map((item) => item.chunkId),
+    ["title", "heading", "topic", "body"],
+  );
+});
+
+test("same-book authority and knowledge type break equal-field ties", () => {
+  const index = fixtureIndex([
+    chunk("context", BOOK_IDS[0], "target", { text: "target", sequence: 1 }),
+    chunk("guide", BOOK_IDS[0], "target", {
+      text: "target",
+      authority: "supplement",
+      topics: ["GUIDELINE"],
+      sequence: 2,
+    }),
+    chunk("rule", BOOK_IDS[0], "target", {
+      text: "target",
+      authority: "primary",
+      topics: ["RULE"],
+      sequence: 3,
+    }),
+  ]);
+  assert.deepEqual(
+    retrieve(index, { mode: "single", book_id: BOOK_IDS[0] }).items.map((item) => item.chunkId),
+    ["rule", "guide", "context"],
+  );
+});
+
+test("irrelevant books add no forced chunks and no matches are explicit", () => {
+  const index = fixtureIndex([
+    chunk("match", BOOK_IDS[0], "target"),
+    chunk("irrelevant-b", BOOK_IDS[1], "unrelated"),
+    chunk("irrelevant-c", BOOK_IDS[2], "unrelated"),
+  ]);
+  const matched = retrieve(index, { mode: "all" });
+  assert.deepEqual(matched.items.map((item) => item.chunkId), ["match"]);
+  assert.equal(matched.noMatch, false);
+  const empty = retrieve(index, { mode: "all" }, "absent");
+  assert.deepEqual(empty.items, []);
+  assert.equal(empty.totalCharacters, 0);
+  assert.equal(empty.noMatch, true);
+  assert.equal(empty.boundary, "UNTRUSTED_KNOWLEDGE");
 });

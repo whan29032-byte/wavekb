@@ -11,6 +11,8 @@ const config = loadConfig({
   AUTH_SITE_URL: "https://knowledge.example.com/",
 });
 
+let lastEnqueue: unknown[] = [];
+
 const api = {
   async authorize(token: string) {
     if (token === "admin-token") return { id: "admin-1", role: "admin" };
@@ -72,7 +74,8 @@ const api = {
   async rotateUserConnectionSecret(ownerId: string, connectionId: string) {
     return { id: connectionId, owner_id: ownerId, secret_mask: "••••9999", key_version: 2 };
   },
-  async enqueueJob(ownerId: string, analysisId: string) {
+  async enqueueJob(ownerId: string, analysisId: string, input: Record<string, unknown>) {
+    lastEnqueue = [ownerId, analysisId, input];
     return { id: "j1", owner_id: ownerId, analysis_id: analysisId, status: "queued" };
   },
   async getJob(_ownerId: string, jobId: string) {
@@ -187,15 +190,27 @@ test("external directory is public to read and admin-only to manage", async () =
 
 test("ordinary user can enqueue only through the site gateway", async () => {
   const server = buildServer({ config, api });
+  const input = {
+    request_version: 2,
+    client_request_id: "11111111-1111-4111-8111-111111111111",
+    task_type: "wave_analysis",
+    step: 5,
+    analysis_schema_version: "workbench-v1",
+    knowledge_scope: {
+      mode: "single",
+      book_id: "elliott-wave-natural-law",
+    },
+  };
   const response = await server.inject({
     method: "POST",
     url: "/v1/analyses/a1/ai-run",
     headers: { authorization: "Bearer user-token" },
-    payload: { task_type: "wave_analysis" },
+    payload: input,
   });
   assert.equal(response.statusCode, 202);
   assert.equal((response.json() as any).job.status, "queued");
   assert.equal(response.body.includes("moonshot"), false);
+  assert.deepEqual(lastEnqueue, ["user-1", "a1", input]);
 });
 
 test("authenticated users delete posts only through the owner-scoped gateway route", async () => {
