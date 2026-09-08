@@ -1,3 +1,4 @@
+
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
@@ -7,13 +8,14 @@ import { knowledgeData } from "@wavekb/knowledge";
 import { BookSearch } from "@/components/book-search";
 import { getKnowledgeBook, getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
 import { buildBookReadingModel } from "@/lib/knowledge/book-reading";
+import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ q?: string | string[] }> };
 export const dynamicParams = false;
 export function generateStaticParams() { return getKnowledgeBookCatalog().map((book) => ({ id: book.id })); }
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const book = getKnowledgeBook((await params).id);
-  return book ? { title: book.title, description: book.description } : {};
+  return book ? publicMetadata({ title: book.title, description: book.description, path: `/knowledge/books/${book.id}`, type: "article" }) : {};
 }
 
 function assetUrl(assetPath: string) {

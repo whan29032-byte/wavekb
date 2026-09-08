@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Images, SealCheck } from "@phosphor-icons/react/
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData, type KnowledgeAsset } from "@wavekb/knowledge";
 import { KnowledgeImageViewer } from "@/components/knowledge-image-viewer";
+import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -17,7 +18,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const page = getKnowledgePage((await params).id);
   if (!page) return {};
   const description = page.sections.flatMap((section) => section.paragraphs).find(Boolean)?.slice(0, 150);
-  return { title: page.title, description };
+  return publicMetadata({ title: page.title, description: description || "艾略特波浪理论知识条目。", path: `/knowledge/${page.id}`, type: "article" });
 }
 
 function assetUrl(assetPath: string) {

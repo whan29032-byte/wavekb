@@ -5,8 +5,9 @@ import { ResearchList } from "@/components/research-list";
 import { ResearchRefresh } from "@/components/research-refresh";
 import { researchView } from "@/lib/tline/presentation";
 import { readResearchDirectory } from "@/lib/tline/server";
+import { publicPageMetadata } from "@/lib/public-page-metadata";
 
-export const metadata: Metadata = { title: "机构研报", description: "在 WaveKB 阅读已同步保存的近期机构研报与研究摘要。" };
+export const metadata: Metadata = publicPageMetadata("research");
 export const dynamic = "force-dynamic";
 
 type Params = Record<string, string | string[] | undefined>;

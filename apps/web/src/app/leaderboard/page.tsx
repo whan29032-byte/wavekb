@@ -5,11 +5,9 @@ import { ExchangeConnectionPanel } from "@/components/exchange-connection";
 import { IdentityName, Nameplate } from "@/components/nameplate";
 import { getOptionalActiveMember } from "@/lib/auth/dal";
 import { listTradingLeaderboard } from "@/lib/trading/server-repository";
+import { publicPageMetadata } from "@/lib/public-page-metadata";
 
-export const metadata: Metadata = {
-  title: "交易收益排行榜",
-  description: "按币安 U 本位合约只读账户绑定以来的最新时间加权收益率排序。",
-};
+export const metadata: Metadata = publicPageMetadata("leaderboard");
 
 function percent(value: number) {
   return new Intl.NumberFormat("zh-CN", {
