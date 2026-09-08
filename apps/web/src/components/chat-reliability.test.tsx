@@ -10,6 +10,7 @@ import { playSocialTone, setSocialSound } from "@/hooks/use-social-sound";
 const fixture = vi.hoisted(() => ({ client: {} as Record<string, unknown>, uploads: [] as File[], reads: [] as number[], sends: [] as string[], rows: [] as DirectMessage[], connections: [] as FriendshipConnection[], conversations: [] as DirectConversation[], identities: [] as Record<string, unknown>[], audio: 0, tones: 0,
   students: [] as Record<string, unknown>[],
   actorId: "actor" as string | null, authChanged: (() => {}) as (event: string, session: { user: { id: string } } | null) => void, deferredFriends: null as (() => Promise<unknown>) | null,
+  deferredMessages: null as (() => Promise<unknown>) | null,
 }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => fixture.client }));
 vi.mock("@/hooks/use-member-presence", () => ({ useMemberPresence: () => new Set() }));
@@ -35,7 +36,7 @@ beforeEach(() => {
   installBrowserStorage(); localStorage.clear(); vi.useFakeTimers();
   setSocialSound(true);
   fixture.uploads = []; fixture.reads = []; fixture.sends = []; fixture.rows = [message(1)]; fixture.connections = []; fixture.conversations = []; fixture.identities = []; fixture.audio = 0;
-  fixture.actorId = "actor"; fixture.deferredFriends = null; fixture.students = []; fixture.tones = 0;
+  fixture.actorId = "actor"; fixture.deferredFriends = null; fixture.deferredMessages = null; fixture.students = []; fixture.tones = 0;
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   Element.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal("AudioContext", class { currentTime = 0; destination = {}; constructor() { fixture.audio++; } resume() { return Promise.resolve(); } createOscillator() { return { frequency: { value: 0 }, connect: () => ({ connect() {} }), start() { fixture.tones++; }, stop() {}, addEventListener() {} }; } createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; } });
@@ -47,6 +48,7 @@ beforeEach(() => {
       if (name === "list_my_mentor_students") return { data: fixture.students, error: null };
       if (name === "mark_conversation_read_v1") fixture.reads.push(Number(args.p_through_id));
       if (name === "send_direct_message") fixture.sends.push(String(args.p_body));
+      if (name.startsWith("list_conversation_messages") && fixture.deferredMessages) return fixture.deferredMessages();
       return { data: name.startsWith("list_conversation_messages") ? fixture.rows.filter((row) => row.id > Number(args.p_after_id || 0)) : [], error: null };
     },
   };
@@ -203,6 +205,37 @@ it("silently baselines unread conversations then tones once for a later unread i
   expect(fixture.tones).toBe(1);
   await tick(9000);
   expect(fixture.tones).toBe(1);
+});
+
+it("coordinates full-page and global pollers without muting other conversations", async () => {
+  const other = { ...conversation, conversation_id: "other-chat", other_id: "other-friend", unread_count: 0 };
+  fixture.conversations = [conversation, other];
+  render(<><SocialDesktop /><MessageThread actorId="actor" conversation={conversation} initialMessages={[message(1)]} initialCustomStickers={[]} /></>);
+  await tick();
+  fireEvent.pointerDown(window);
+
+  let finishThread!: (value: unknown) => void;
+  let finishGlobal!: (value: unknown) => void;
+  fixture.deferredMessages = () => new Promise((resolve) => { finishThread = resolve; });
+  fixture.deferredFriends = () => new Promise((resolve) => { finishGlobal = resolve; });
+  await tick(9000);
+
+  await act(async () => {
+    finishGlobal({ actor: { id: "actor", public_uid: 12345, display_name: "我", avatar_url: null, nameplate_style: "classic" }, connections: [], conversations: [{ ...conversation, unread_count: 2 }, other] });
+    await Promise.resolve();
+  });
+  await act(async () => {
+    finishThread({ data: [message(2)], error: null });
+    await Promise.resolve();
+  });
+  expect(fixture.tones).toBe(1);
+
+  fixture.deferredFriends = null;
+  fixture.deferredMessages = null;
+  fixture.rows = [message(1), message(2)];
+  fixture.conversations = [{ ...conversation, unread_count: 2 }, { ...other, unread_count: 1 }];
+  await tick(9000);
+  expect(fixture.tones).toBe(2);
 });
 
 it("does not tone global unread increases while muted", async () => {

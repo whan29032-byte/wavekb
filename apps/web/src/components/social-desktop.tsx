@@ -19,6 +19,7 @@ import { useMemberPresence } from "@/hooks/use-member-presence";
 import { playSocialTone, useSocialSound } from "@/hooks/use-social-sound";
 import { useChatIdentities } from "@/hooks/use-chat-identities";
 import { subscribeIdentityChanges } from "@/lib/member/identity-events";
+import { isConversationOpen } from "@/lib/member/open-conversation-registry";
 import { hasFileTransfer, imageFromTransfer } from "@/lib/member/chat-transfer";
 import styles from "./social-desktop.module.css";
 
@@ -226,7 +227,7 @@ export function SocialDesktop() {
       setConnections(core.connections);
       const rows = (core.conversations ?? []).map((item) => ({ ...item, unread_count: Number(item.unread_count || 0) }));
       const previousUnread = unreadBaseline.current;
-      const hasUnreadIncrease = previousUnread && rows.some((item) => Number(item.unread_count) > (previousUnread.get(item.conversation_id) ?? 0) && !openConversations.current.has(item.conversation_id));
+      const hasUnreadIncrease = previousUnread && rows.some((item) => Number(item.unread_count) > (previousUnread.get(item.conversation_id) ?? 0) && !openConversations.current.has(item.conversation_id) && !isConversationOpen(item.conversation_id));
       unreadBaseline.current = new Map(rows.map((item) => [item.conversation_id, Number(item.unread_count)]));
       if (hasUnreadIncrease && document.visibilityState === "visible") playSocialTone(560);
       setConversations(rows);

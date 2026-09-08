@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { readBuyerMentorClaims, readBuyerPendingMentorOrders, type BuyerMentorClaim, type BuyerPendingMentorOrder } from "@/lib/mentor/payment-status";
 
 export function useBuyerMentorClaims(actorId: string | null, mentorId?: string) {
-  const [state, setState] = useState<{ actorId: string | null; mentorId?: string; claims: BuyerMentorClaim[]; pendingOrders: BuyerPendingMentorOrder[]; loading: boolean; error: string; checkedAt: string | null }>({ actorId, mentorId, claims: [], pendingOrders: [], loading: true, error: "", checkedAt: null });
+  const [state, setState] = useState<{ actorId: string | null; mentorId?: string; claims: BuyerMentorClaim[]; pendingOrders: BuyerPendingMentorOrder[]; loading: boolean; error: string; checkedAt: string | null; revision: number }>({ actorId, mentorId, claims: [], pendingOrders: [], loading: true, error: "", checkedAt: null, revision: 0 });
   const generation = useRef(0);
   const busy = useRef(false);
   const refresh = useCallback(async () => {
@@ -19,9 +19,9 @@ export function useBuyerMentorClaims(actorId: string | null, mentorId?: string) 
       const client = createClient();
       const [claims, orders] = await Promise.all([readBuyerMentorClaims(client, actorId, mentorId), readBuyerPendingMentorOrders(client, actorId, mentorId)]);
       const pendingOrders = orders.filter((order) => !claims.some((claim) => claim.order_id === order.id));
-      if (current === generation.current) setState({ actorId, mentorId, claims, pendingOrders, loading: false, error: "", checkedAt: new Date().toISOString() });
+      if (current === generation.current) setState((previous) => ({ actorId, mentorId, claims, pendingOrders, loading: false, error: "", checkedAt: new Date().toISOString(), revision: previous.revision + 1 }));
     } catch {
-      if (current === generation.current) setState({ actorId, mentorId, claims: [], pendingOrders: [], checkedAt: null, loading: false, error: "暂时无法核对付款声明状态。请重试查询，不要重复转账或提交。" });
+      if (current === generation.current) setState((previous) => ({ actorId, mentorId, claims: [], pendingOrders: [], checkedAt: null, loading: false, error: "暂时无法核对付款声明状态。请重试查询，不要重复转账或提交。", revision: previous.revision }));
     } finally {
       if (current === generation.current) busy.current = false;
     }

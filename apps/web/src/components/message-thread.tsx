@@ -13,6 +13,7 @@ import { customStickerToken, deleteChatSticker, uploadChatSticker } from "@/lib/
 import { playSocialTone } from "@/hooks/use-social-sound";
 import { useChatIdentities } from "@/hooks/use-chat-identities";
 import { hasFileTransfer, imageFromTransfer } from "@/lib/member/chat-transfer";
+import { registerOpenConversation } from "@/lib/member/open-conversation-registry";
 import { MessageBody, chatStickers as stickers } from "@/components/chat-message-body";
 import { AvatarFrame, IdentityName, Nameplate } from "@/components/nameplate";
 
@@ -77,6 +78,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
 
   useEffect(() => {
     active.current = true;
+    const unregisterOpenConversation = registerOpenConversation(conversation.conversation_id);
     const newest = initialMessages.at(-1);
     if (newest) {
       queueMicrotask(() => { if (active.current && document.visibilityState === "visible") void createClient().rpc("mark_conversation_read_v1", {
@@ -89,7 +91,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
     }, 7000);
     const onVisible = () => { if (document.visibilityState === "visible") void refresh().catch(() => undefined); };
     document.addEventListener("visibilitychange", onVisible);
-    return () => { active.current = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
+    return () => { active.current = false; unregisterOpenConversation(); window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
     // The conversation id is immutable for the lifetime of this route.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.conversation_id]);

@@ -52,6 +52,7 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const [localChecked, setLocalChecked] = useState(false);
   const submissionLock = useRef(false);
+  const submittedAfterRevision = useRef<number | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const configurationIssue = paymentConfigurationIssue(selectedMethod);
   const pendingClaims = claims.claims.filter((claim) => claim.status === "submitted");
@@ -91,6 +92,13 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
     return () => window.clearTimeout(timer);
   }, [attempt, attemptKey, claims.loading, claims.error, claims.claims]);
 
+  useEffect(() => {
+    if (status !== "submitted" || submittedAfterRevision.current === null || claims.loading || claims.error || claims.revision <= submittedAfterRevision.current || pendingClaims.length || claims.pendingOrders.length) return;
+    submittedAfterRevision.current = null;
+    submissionLock.current = false;
+    setStatus("idle");
+  }, [status, claims.loading, claims.error, claims.revision, pendingClaims.length, claims.pendingOrders.length]);
+
   async function copyAccount() {
     if (!selectedMethod || configurationIssue) return;
     try {
@@ -120,6 +128,7 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
         setAttempt(checkpoint);
         localStorage.setItem(attemptKey, JSON.stringify(checkpoint));
       } });
+      submittedAfterRevision.current = claims.revision;
       setStatus("submitted");
       try { localStorage.removeItem(attemptKey); setAttempt(null); } catch { /* A known claim is still protected by the server read. */ }
       await claims.refresh();

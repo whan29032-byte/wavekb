@@ -218,6 +218,22 @@ describe("mentor payment reliability", () => {
     expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim"]);
   });
 
+  it("restores checkout in the same mount after the submitted claim is rejected", async () => {
+    checkout();
+    fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
+    await screen.findByRole("region", { name: "付款待核对摘要" });
+
+    claims = [{ ...claim, status: "rejected" }];
+    fireEvent.click(screen.getByRole("button", { name: "刷新付款状态" }));
+
+    const restoredCheckout = await screen.findByRole("button", { name: "我已付款，通知导师" });
+    expect(screen.queryByText("已通知导师核对付款")).toBeNull();
+
+    fireEvent.click(restoredCheckout);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
+    expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim", "create_manual_mentor_order", "submit_mentor_payment_claim"]);
+  });
+
   it("removes already loaded private claims when the authenticated session changes", async () => {
     claims = [claim];
     checkout();
