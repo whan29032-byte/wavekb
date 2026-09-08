@@ -214,3 +214,58 @@ test("a duplicate key never exposes a job owned by another account", async () =>
     (error: unknown) => (error as { statusCode?: number }).statusCode === 409,
   );
 });
+
+test("analysis UUID casing cannot create a second idempotency key", async () => {
+  const analysisId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const storedKeys = new Map<string, Record<string, unknown>>();
+  const analysisPaths: string[] = [];
+  const insertedAnalysisIds: string[] = [];
+  let nextJob = 1;
+  const database = {
+    async request(path: string, options?: Record<string, unknown>) {
+      if (path.startsWith("/rest/v1/workbench_analyses?")) {
+        analysisPaths.push(path);
+        return [{ ...ANALYSIS, id: analysisId }];
+      }
+      if (path.startsWith("/rest/v1/user_ai_connections?")) return [CONNECTION];
+      if (path === "/rest/v1/ai_jobs" && options?.method === "POST") {
+        const body = options.body as Record<string, unknown>;
+        insertedAnalysisIds.push(String(body.analysis_id));
+        const key = String(body.idempotency_key);
+        if (storedKeys.has(key)) {
+          throw Object.assign(new Error("duplicate key"), { status: 409, code: "23505" });
+        }
+        const job = { id: `job-${nextJob}`, owner_id: OWNER_ID, ...body };
+        nextJob += 1;
+        storedKeys.set(key, job);
+        return [job];
+      }
+      if (path.startsWith("/rest/v1/ai_jobs?idempotency_key=")) {
+        const encodedKey = path.match(/^\/rest\/v1\/ai_jobs\?idempotency_key=eq\.([^&]+)/)?.[1];
+        const key = encodedKey ? decodeURIComponent(encodedKey) : "";
+        return path.includes(`owner_id=eq.${OWNER_ID}`) && storedKeys.has(key)
+          ? [storedKeys.get(key)]
+          : [];
+      }
+      throw new Error(`unexpected database path: ${path}`);
+    },
+    async userForJwt() { return null; },
+  };
+  const gateway = new SupabaseGatewayApi(gatewayConfig, {
+    database,
+    knowledgePath: retrievalIndexPath,
+  });
+  const first = await gateway.enqueueJob(OWNER_ID, analysisId, runRequest()) as Record<string, unknown>;
+  const duplicate = await gateway.enqueueJob(
+    OWNER_ID,
+    analysisId.toUpperCase(),
+    runRequest(),
+  ) as Record<string, unknown>;
+  assert.equal(duplicate.id, first.id);
+  assert.deepEqual([...storedKeys.keys()], [
+    `${OWNER_ID}:${analysisId}:${CLIENT_REQUEST_ID}`,
+  ]);
+  assert.ok(analysisPaths.every((path) => path.includes(`id=eq.${analysisId}`)));
+  assert.deepEqual(insertedAnalysisIds, [analysisId, analysisId]);
+  assert.equal(duplicate.analysis_id, analysisId);
+});

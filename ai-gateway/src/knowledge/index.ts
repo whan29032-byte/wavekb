@@ -8,10 +8,21 @@ export const PUBLISHED_BOOK_IDS = [
 ] as const;
 
 export type PublishedBookId = typeof PUBLISHED_BOOK_IDS[number];
+export type KnowledgeKind = "unit" | "page";
+export type KnowledgeAuthority = "primary" | "supplement" | "contextual";
+export type KnowledgeContentStatus = "verified" | "generated";
+
+export type KnowledgeSourceArtifact = {
+  sourceId: string;
+  authority: KnowledgeAuthority;
+  [key: string]: unknown;
+};
 
 export type KnowledgeBook = {
   bookId: PublishedBookId;
   title: string;
+  role: "core" | "extension";
+  sourceArtifacts: KnowledgeSourceArtifact[];
   [key: string]: unknown;
 };
 
@@ -25,9 +36,9 @@ export type KnowledgeChunk = {
   title: string;
   headingPath: string[];
   text: string;
-  kind: string;
-  authority: string;
-  contentStatus: string;
+  kind: KnowledgeKind;
+  authority: KnowledgeAuthority;
+  contentStatus: KnowledgeContentStatus;
   pdfPages: number[];
   href: string;
   topics: string[];
@@ -47,6 +58,14 @@ export const DEFAULT_KNOWLEDGE_INDEX_PATH = fileURLToPath(
 );
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const KNOWLEDGE_KINDS = new Set<KnowledgeKind>(["unit", "page"]);
+const KNOWLEDGE_AUTHORITIES = new Set<KnowledgeAuthority>([
+  "primary",
+  "supplement",
+  "contextual",
+]);
+const KNOWLEDGE_CONTENT_STATUSES = new Set<KnowledgeContentStatus>(["verified", "generated"]);
+const BOOK_ROLES = new Set(["core", "extension"] as const);
 
 function invalidArtifact(): never {
   throw new Error("invalid knowledge index artifact");
@@ -68,8 +87,16 @@ function stringArray(value: unknown): string[] {
 }
 
 function numberArray(value: unknown): number[] {
-  if (!Array.isArray(value) || value.some((item) => !Number.isInteger(item))) invalidArtifact();
+  if (!Array.isArray(value)
+    || value.some((item) => !Number.isInteger(item) || Number(item) <= 0)) {
+    invalidArtifact();
+  }
   return value as number[];
+}
+
+function enumValue<T extends string>(value: unknown, allowed: Set<T>): T {
+  if (typeof value !== "string" || !allowed.has(value as T)) invalidArtifact();
+  return value as T;
 }
 
 function publishedBookId(value: unknown): PublishedBookId {
@@ -81,10 +108,21 @@ function publishedBookId(value: unknown): PublishedBookId {
 
 function parseBook(value: unknown): KnowledgeBook {
   if (!isRecord(value)) invalidArtifact();
+  if (!Array.isArray(value.sourceArtifacts)) invalidArtifact();
+  const sourceArtifacts = value.sourceArtifacts.map((source): KnowledgeSourceArtifact => {
+    if (!isRecord(source)) invalidArtifact();
+    return {
+      ...source,
+      sourceId: requiredString(source, "sourceId"),
+      authority: enumValue(source.authority, KNOWLEDGE_AUTHORITIES),
+    };
+  });
   return {
     ...value,
     bookId: publishedBookId(value.bookId),
     title: requiredString(value, "title"),
+    role: enumValue(value.role, BOOK_ROLES),
+    sourceArtifacts,
   };
 }
 
@@ -106,15 +144,47 @@ function parseChunk(value: unknown): KnowledgeChunk {
     title: requiredString(value, "title"),
     headingPath: stringArray(value.headingPath),
     text: requiredString(value, "text"),
-    kind: requiredString(value, "kind"),
-    authority: requiredString(value, "authority"),
-    contentStatus: requiredString(value, "contentStatus"),
+    kind: enumValue(value.kind, KNOWLEDGE_KINDS),
+    authority: enumValue(value.authority, KNOWLEDGE_AUTHORITIES),
+    contentStatus: enumValue(value.contentStatus, KNOWLEDGE_CONTENT_STATUSES),
     pdfPages: numberArray(value.pdfPages),
     href,
     topics: stringArray(value.topics),
     searchable: requiredString(value, "searchable"),
     contentSha256,
   };
+}
+
+function validateBookRoleCoherence(books: KnowledgeBook[], chunks: KnowledgeChunk[]): void {
+  for (const [index, book] of books.entries()) {
+    const core = index === 0;
+    if (book.role !== (core ? "core" : "extension")) invalidArtifact();
+    const sourceAuthorities = new Map<string, KnowledgeAuthority>();
+    for (const source of book.sourceArtifacts) {
+      if (sourceAuthorities.has(source.sourceId)) invalidArtifact();
+      if (core ? source.authority === "contextual" : source.authority !== "contextual") {
+        invalidArtifact();
+      }
+      sourceAuthorities.set(source.sourceId, source.authority);
+    }
+    if (!sourceAuthorities.size) invalidArtifact();
+    const bookChunks = chunks.filter((chunk) => chunk.bookId === book.bookId);
+    if (!bookChunks.length) invalidArtifact();
+    for (const chunk of bookChunks) {
+      if (sourceAuthorities.get(chunk.sourceId) !== chunk.authority) invalidArtifact();
+      if (core) {
+        if (chunk.kind !== "unit"
+          || chunk.contentStatus !== "verified"
+          || chunk.authority === "contextual") {
+          invalidArtifact();
+        }
+      } else if (chunk.kind !== "page"
+        || chunk.contentStatus !== "generated"
+        || chunk.authority !== "contextual") {
+        invalidArtifact();
+      }
+    }
+  }
 }
 
 export function buildKnowledgeIndex(path = DEFAULT_KNOWLEDGE_INDEX_PATH): KnowledgeIndex {
@@ -132,6 +202,7 @@ export function buildKnowledgeIndex(path = DEFAULT_KNOWLEDGE_INDEX_PATH): Knowle
   const chunks = parsed.chunks.map(parseChunk);
   const chunkIds = new Set(chunks.map((chunk) => chunk.chunkId));
   if (!chunks.length || chunkIds.size !== chunks.length) invalidArtifact();
+  validateBookRoleCoherence(books, chunks);
   return {
     schemaVersion: "wavekb-ai-knowledge-v1",
     knowledgeVersion: parsed.knowledgeVersion,

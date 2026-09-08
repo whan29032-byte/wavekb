@@ -34,11 +34,14 @@ function invalidRequest(message = "invalid ai run request"): never {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function exactKeys(input: Record<string, unknown>, allowed: Set<string>): void {
-  if (Object.keys(input).some((key) => !allowed.has(key))) invalidRequest();
+  const keys = Object.keys(input);
+  if (keys.length !== allowed.size || keys.some((key) => !allowed.has(key))) invalidRequest();
 }
 
 function normalizeScope(value: unknown, catalog: BookCatalog): KnowledgeScope {
@@ -63,7 +66,7 @@ export function normalizeAiRunRequest(
   catalog: BookCatalog,
 ): NormalizedAiRunRequest {
   if (!isRecord(input)) invalidRequest();
-  const legacy = input.request_version === undefined;
+  const legacy = !Object.hasOwn(input, "request_version");
   exactKeys(input, legacy ? LEGACY_KEYS : VERSIONED_KEYS);
   if (!legacy && input.request_version !== 2) invalidRequest("request_version is invalid");
   if (typeof input.client_request_id !== "string"

@@ -413,9 +413,10 @@ export class SupabaseGatewayApi implements GatewayApi {
     if (!UUID_PATTERN.test(analysisId)) {
       throw Object.assign(new Error("invalid analysis id"), { statusCode: 400 });
     }
+    const normalizedAnalysisId = analysisId.toLowerCase();
     const normalized = normalizeAiRunRequest(input, this.knowledgeIndex.books);
     const analysisRows = await this.database.request(
-      `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(analysisId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,owner_id,schema_version,input_source,instrument,market,primary_timeframe,parent_timeframe,child_timeframe,holding_style,step_data,rule_result,score_result,risk_result,execution_status,created_at,updated_at&limit=1`,
+      `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(normalizedAnalysisId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,owner_id,schema_version,input_source,instrument,market,primary_timeframe,parent_timeframe,child_timeframe,holding_style,step_data,rule_result,score_result,risk_result,execution_status,created_at,updated_at&limit=1`,
     );
     if (!analysisRows.length) throw Object.assign(new Error("analysis not found"), { statusCode: 404 });
     if (analysisRows[0].schema_version !== normalized.analysis_schema_version) {
@@ -427,14 +428,14 @@ export class SupabaseGatewayApi implements GatewayApi {
     if (!connections.length) {
       throw Object.assign(new Error("ai_connection_required"), { statusCode: 409 });
     }
-    const idempotencyKey = `${ownerId}:${analysisId}:${normalized.client_request_id}`;
+    const idempotencyKey = `${ownerId}:${normalizedAnalysisId}:${normalized.client_request_id}`;
     try {
       const rows = await this.database.request("/rest/v1/ai_jobs", {
         method: "POST",
         headers: { prefer: "return=representation" },
         body: {
           owner_id: ownerId,
-          analysis_id: analysisId,
+          analysis_id: normalizedAnalysisId,
           user_connection_id: connections[0].id,
           connection_snapshot: {
             id: connections[0].id,

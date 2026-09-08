@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
@@ -33,6 +36,22 @@ function validRequest(overrides: Record<string, unknown> = {}) {
     knowledge_scope: { mode: "all" },
     ...overrides,
   };
+}
+
+function withTemporaryArtifact(
+  mutate: (artifact: Record<string, any>) => void,
+  inspect: (path: string) => void,
+) {
+  const directory = mkdtempSync(join(tmpdir(), "wavekb-index-"));
+  const path = join(directory, "retrieval-index.json");
+  try {
+    const artifact = JSON.parse(readFileSync(artifactPath, "utf8")) as Record<string, any>;
+    mutate(artifact);
+    writeFileSync(path, JSON.stringify(artifact));
+    inspect(path);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 test("the committed retrieval artifact loads the exact published catalog", () => {
@@ -85,6 +104,76 @@ test("scope normalization rejects malformed, ambiguous, and unpublished scopes",
   ];
   for (const input of invalid) {
     assert.throws(() => normalizeAiRunRequest(input, catalog));
+  }
+});
+
+test("request and scope records reject prototype-backed contract fields", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  const customPrototype = Object.assign(
+    Object.create({ marker: true }),
+    validRequest(),
+  ) as Record<string, unknown>;
+  const { request_version: _requestVersion, ...withoutVersion } = validRequest();
+  const inheritedVersion = Object.assign(
+    Object.create({ request_version: 2 }),
+    withoutVersion,
+  ) as Record<string, unknown>;
+  const inheritedMode = Object.assign(
+    Object.create({ mode: "single" }),
+    { book_id: BOOK_IDS[0], junk: true },
+  );
+  assert.throws(() => normalizeAiRunRequest(customPrototype, catalog));
+  assert.throws(() => normalizeAiRunRequest(inheritedVersion, catalog));
+  assert.throws(() => normalizeAiRunRequest(validRequest({ knowledge_scope: inheritedMode }), catalog));
+});
+
+test("request and scope records accept exact null-prototype objects", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  const scope = Object.assign(Object.create(null), { mode: "single", book_id: BOOK_IDS[0] });
+  const input = Object.assign(Object.create(null), validRequest({ knowledge_scope: scope }));
+  assert.deepEqual(normalizeAiRunRequest(input, catalog).knowledge_scope, {
+    mode: "single",
+    book_id: BOOK_IDS[0],
+  });
+});
+
+test("artifact loading rejects unapproved chunk enums", () => {
+  for (const [field, value] of [
+    ["contentStatus", "invented"],
+    ["kind", "vector"],
+    ["authority", "superuser"],
+  ] as const) {
+    withTemporaryArtifact(
+      (artifact) => { artifact.chunks[0][field] = value; },
+      (path) => assert.throws(() => buildKnowledgeIndex(path)),
+    );
+  }
+});
+
+test("artifact loading rejects zero and negative PDF pages", () => {
+  for (const page of [0, -1]) {
+    withTemporaryArtifact(
+      (artifact) => { artifact.chunks[0].pdfPages = [page]; },
+      (path) => assert.throws(() => buildKnowledgeIndex(path)),
+    );
+  }
+});
+
+test("artifact loading enforces core and extension role coherence", () => {
+  const mutations = [
+    (artifact: Record<string, any>) => { artifact.books[0].role = "extension"; },
+    (artifact: Record<string, any>) => { artifact.books[1].role = "core"; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].authority = "contextual"; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].contentStatus = "generated"; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].kind = "page"; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].sourceId = "unapproved-source"; },
+    (artifact: Record<string, any>) => { artifact.books[0].sourceArtifacts[0].authority = "supplement"; },
+    (artifact: Record<string, any>) => { artifact.chunks.at(-1).authority = "primary"; },
+    (artifact: Record<string, any>) => { artifact.chunks.at(-1).contentStatus = "verified"; },
+    (artifact: Record<string, any>) => { artifact.chunks.at(-1).kind = "unit"; },
+  ];
+  for (const mutate of mutations) {
+    withTemporaryArtifact(mutate, (path) => assert.throws(() => buildKnowledgeIndex(path)));
   }
 });
 
@@ -166,7 +255,15 @@ function fixtureIndex(chunks: KnowledgeChunk[]): KnowledgeIndex {
   return {
     schemaVersion: "wavekb-ai-knowledge-v1",
     knowledgeVersion: "a".repeat(64),
-    books: BOOK_IDS.map((bookId) => ({ bookId, title: bookId })),
+    books: BOOK_IDS.map((bookId, index) => ({
+      bookId,
+      title: bookId,
+      role: index === 0 ? "core" as const : "extension" as const,
+      sourceArtifacts: [{
+        sourceId: `${bookId}::source`,
+        authority: index === 0 ? "primary" as const : "contextual" as const,
+      }],
+    })),
     chunks,
   };
 }
