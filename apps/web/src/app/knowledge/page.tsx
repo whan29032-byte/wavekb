@@ -82,7 +82,7 @@ export default function KnowledgePage() {
           {books.map((book) => (
             <Link key={book.id} href={book.href} className="group grid grid-cols-[7.25rem_minmax(0,1fr)] gap-4 border-t pt-4 focus-visible:rounded-lg">
               <div className="relative aspect-[.71] overflow-hidden rounded-lg border bg-muted">
-                <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="7.25rem" className="object-cover" />
+                <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="7.25rem" className="object-contain" />
               </div>
               <span className="grid min-w-0 content-start gap-2">
                 <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.kind === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>

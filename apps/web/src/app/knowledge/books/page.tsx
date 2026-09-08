@@ -31,7 +31,7 @@ export default function KnowledgeBooksPage() {
         {books.map((book) => (
           <Link key={book.id} href={book.href} className="group grid content-start gap-4 border-t pt-4 focus-visible:rounded-lg">
             <div className="relative aspect-[.71] w-full max-w-[13rem] overflow-hidden rounded-lg border bg-muted">
-              <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="13rem" className="object-cover" />
+              <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="13rem" className="object-contain" />
             </div>
             <span className="grid gap-2">
               <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.kind === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>

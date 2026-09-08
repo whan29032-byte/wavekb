@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("home exposes the knowledge and community paths", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚，也留下证据");
   await expect(page.getByRole("link", { name: "进入社区" })).toBeVisible();
   const mobileMenu = page.getByRole("button", { name: "展开主导航" });
   const isMobile = await mobileMenu.isVisible();
@@ -10,8 +10,8 @@ test("home exposes the knowledge and community paths", async ({ page }) => {
   const navigation = page.getByRole("navigation", { name: isMobile ? "移动主导航" : "主导航", exact: true });
   await expect(navigation).toBeVisible();
   await expect(navigation.getByRole("link", { name: "积分商城" })).toHaveAttribute("href", "/rewards");
-  await expect(page.getByRole("heading", { name: "X 波浪理论博主推荐" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Discord 波浪理论频道推荐" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "X 波浪理论研究者" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Discord 波浪理论社区" })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });
@@ -156,7 +156,7 @@ test("mentor catalog is public and degrades safely without preview credentials",
 
 test("knowledge search opens a fully migrated article", async ({ page }) => {
   await page.goto("/knowledge");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("规则、指南与原书证据");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("知识库");
   await page.getByLabel("搜索知识标题和正文").fill("购买力指数");
   await page.getByRole("link", { name: /名义价格与定值价格应并行检查/ }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("名义价格与定值价格应并行检查");
@@ -179,11 +179,10 @@ test("knowledge search opens a fully migrated article", async ({ page }) => {
 });
 
 test("extension shelf publishes the two supplied distillations with PDF MIME types", async ({ page }) => {
-  await page.goto("/knowledge");
-  await page.getByRole("link", { name: "查看全部书目" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("专题文献，和核心规则分开读。");
-  await expect(page.getByRole("heading", { name: "艾略特波浪理论：自然法则" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "缠中说禅 CHM 整本文集蒸馏" })).toBeVisible();
+  await page.goto("/knowledge/books");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("三本图书");
+  await expect(page.locator('a[href="/knowledge/books/elliott-wave-natural-law"]')).toBeVisible();
+  await expect(page.locator('a[href="/knowledge/books/chan-theory-complete"]')).toBeVisible();
   for (const title of ["艾略特波浪理论：自然法则", "缠中说禅 CHM 整本文集蒸馏"]) {
     const cover = page.getByRole("img", { name: `${title}封面`, exact: true });
     await cover.scrollIntoViewIfNeeded();
@@ -191,8 +190,8 @@ test("extension shelf publishes the two supplied distillations with PDF MIME typ
     await expect(cover).toHaveCSS("object-fit", "contain");
     await expect.poll(() => cover.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
   }
-  await page.getByRole("article").filter({ has: page.getByRole("heading", { name: "艾略特波浪理论：自然法则", exact: true }) }).getByRole("link", { name: "查看阅读导览与全文" }).click();
-  const naturalPdf = page.getByRole("link", { name: "打开完整蒸馏 PDF" });
+  await page.locator('a[href="/knowledge/books/elliott-wave-natural-law"]').click();
+  const naturalPdf = page.getByRole("link", { name: "查看原 PDF" });
   await expect(naturalPdf).toHaveAttribute("href", "/assets/books/elliott-wave-natural-law-distilled.pdf");
   await expect(naturalPdf).toHaveAttribute("target", "_blank");
   const naturalResponse = await page.request.get("/assets/books/elliott-wave-natural-law-distilled.pdf");
@@ -203,7 +202,7 @@ test("extension shelf publishes the two supplied distillations with PDF MIME typ
   expect(chanResponse.headers()["content-type"]).toMatch(/^application\/pdf/);
   await page.goto("/knowledge/books/chan-theory-complete");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("缠中说禅 CHM 整本文集蒸馏");
-  await expect(page.getByRole("link", { name: "打开完整蒸馏 PDF" })).toHaveAttribute("href", "/assets/books/chan-theory-complete-distilled.pdf");
+  await expect(page.getByRole("link", { name: "查看原 PDF" })).toHaveAttribute("href", "/assets/books/chan-theory-complete-distilled.pdf");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   await page.goto("/knowledge");
   await page.getByLabel("搜索知识标题和正文").fill("缠中说禅");
