@@ -39,6 +39,7 @@ it("allows public crawling while keeping private areas out of crawler traversal"
     expect.objectContaining({ allow: "/" }),
     expect.objectContaining({ disallow: expect.arrayContaining(["/api/", "/admin/", "/account/", "/messages/", "/workbench/"]) }),
   ]));
+  expect(robots?.rules[0]?.disallow).toEqual(expect.arrayContaining(["/community/*/new", "/community/post/*/edit"]));
 });
 
 it("lists every generated knowledge route and only canonical public URLs", async () => {
@@ -63,7 +64,7 @@ it("lists every generated knowledge route and only canonical public URLs", async
 });
 
 it("exposes Chinese Wave Theory metadata, social cards, Apple settings, and an accessible viewport", () => {
-  const { metadata, viewport } = rootLayout as typeof rootLayout & { viewport?: { userScalable?: boolean; maximumScale?: number; themeColor?: unknown } };
+  const { metadata, viewport } = rootLayout as typeof rootLayout & { viewport?: { userScalable?: boolean; maximumScale?: number; themeColor?: unknown; viewportFit?: string } };
   const description = String(metadata.description);
 
   expect(metadata.metadataBase?.toString()).toBe("https://wavekb.com/");
@@ -76,6 +77,7 @@ it("exposes Chinese Wave Theory metadata, social cards, Apple settings, and an a
   expect(viewport?.themeColor).toBeTruthy();
   expect(viewport?.userScalable).not.toBe(false);
   expect(viewport?.maximumScale).toBeUndefined();
+  expect(viewport?.viewportFit).toBe("cover");
 });
 
 it("publishes canonical metadata for generated knowledge pages", async () => {

@@ -20,7 +20,9 @@ export async function proxy(request: NextRequest) {
     }
   }
   const response = await updateSession(request);
-  if (/^\/(?:api|admin|account(?:\/|$)|account-restricted|activate-uid|friends(?:\/|$)|login(?:\/|$)|member(?:\/|$)|messages(?:\/|$)|mentor\/manage(?:\/|$)|payment(?:\/|$)|profile(?:\/|$)|recover(?:\/|$)|register(?:\/|$)|rewards(?:\/|$)|tutoring(?:\/|$)|workbench(?:\/|$))/.test(request.nextUrl.pathname)) {
+  if (/^\/(?:api|admin|account(?:\/|$)|account-restricted|activate-uid|friends(?:\/|$)|login(?:\/|$)|member(?:\/|$)|messages(?:\/|$)|mentor\/manage(?:\/|$)|payment(?:\/|$)|profile(?:\/|$)|recover(?:\/|$)|register(?:\/|$)|rewards(?:\/|$)|tutoring(?:\/|$)|workbench(?:\/|$))/.test(request.nextUrl.pathname)
+    || /^\/community\/[^/]+\/new\/?$/.test(request.nextUrl.pathname)
+    || /^\/community\/post\/[^/]+\/edit\/?$/.test(request.nextUrl.pathname)) {
     response.headers.set("x-robots-tag", "noindex, nofollow");
   }
   return response;

@@ -52,7 +52,7 @@ it.each([
 });
 
 it("uses network-first public knowledge navigation with the static offline fallback", async () => {
-  const { listeners, caches, networkFetch } = await bootServiceWorker();
+  const { listeners, caches, cache, networkFetch } = await bootServiceWorker();
   const respondWith = vi.fn();
   networkFetch.mockRejectedValueOnce(new Error("offline"));
   caches.match.mockImplementation(async (key: unknown) => key === "/offline.html" ? { status: 200 } : undefined);
@@ -63,6 +63,39 @@ it("uses network-first public knowledge navigation with the static offline fallb
   await expect(respondWith.mock.calls[0][0]).resolves.toMatchObject({ status: 200 });
   expect(networkFetch).toHaveBeenCalledOnce();
   expect(caches.match).toHaveBeenCalledWith("/offline.html");
+  expect(caches.match).toHaveBeenCalledOnce();
+  expect(cache.put).not.toHaveBeenCalled();
+});
+
+it.each(["https://wavekb.com/", "https://wavekb.com/knowledge/unit-ewp-rule-impulse-core"])("never writes navigation HTML for %s to Cache Storage", async (url) => {
+  const { listeners, caches, cache, networkFetch } = await bootServiceWorker();
+  const respondWith = vi.fn();
+
+  listeners.get("fetch")?.({ request: { url, method: "GET", mode: "navigate", destination: "document" }, respondWith });
+
+  expect(respondWith).toHaveBeenCalledOnce();
+  await expect(respondWith.mock.calls[0][0]).resolves.toMatchObject({ status: 200 });
+  expect(networkFetch).toHaveBeenCalledOnce();
+  expect(caches.open).not.toHaveBeenCalled();
+  expect(cache.put).not.toHaveBeenCalled();
+});
+
+it("does not cache an allowlisted asset response marked private or no-store", async () => {
+  const { listeners, cache, networkFetch } = await bootServiceWorker();
+  const respondWith = vi.fn();
+  networkFetch.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    type: "basic",
+    headers: { get: (name: string) => name === "cache-control" ? "private, no-store" : null },
+    clone: vi.fn(),
+  });
+
+  listeners.get("fetch")?.({ request: { url: "https://wavekb.com/assets/books/cover.png", method: "GET", mode: "no-cors", destination: "image" }, respondWith });
+
+  expect(respondWith).toHaveBeenCalledOnce();
+  await expect(respondWith.mock.calls[0][0]).resolves.toMatchObject({ status: 200 });
+  expect(cache.put).not.toHaveBeenCalled();
 });
 
 it("pre-caches only the account-free offline shell", async () => {

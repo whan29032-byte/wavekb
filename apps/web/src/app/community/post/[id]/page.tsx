@@ -1,7 +1,9 @@
+import type { Metadata } from "next";
+import { cache } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
-import { BOARDS } from "@wavekb/domain";
+import { BOARDS, plainTextExcerpt } from "@wavekb/domain";
 import { PostOwnerActions } from "@/components/post-owner-actions";
 import { PostComments } from "@/components/post-comments";
 import { Pagination } from "@/components/pagination";
@@ -16,6 +18,7 @@ import { publicPostImageUrl } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { getMyProfile } from "@/lib/member/server-repository";
 import { tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
+import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ page?: string | string[] }> };
 
@@ -28,11 +31,26 @@ const RESEARCH_GENRE = {
 } as const;
 
 export const dynamic = "force-dynamic";
+const getPostForRoute = cache(getPost);
+
+export async function generateMetadata({ params }: Pick<PageProps, "params">): Promise<Metadata> {
+  const { id } = await params;
+  const post = await getPostForRoute(id);
+  if (!post || post.status === "hidden") {
+    return { title: "帖子不可用", robots: { index: false, follow: false } };
+  }
+  return publicMetadata({
+    title: post.title,
+    description: plainTextExcerpt(post.body, 160) || `${BOARDS[post.board].title}公开帖子。`,
+    path: `/community/post/${encodeURIComponent(id)}`,
+    type: "article",
+  });
+}
 
 export default async function PostPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const page = parsePage((await searchParams)?.page);
-  const [post, comments] = await Promise.all([getPost(id), listPostComments(id, page)]);
+  const [post, comments] = await Promise.all([getPostForRoute(id), listPostComments(id, page)]);
   if (!post || post.status === "hidden") notFound();
   const user = await getCurrentUser();
   const actorProfile = user ? await getMyProfile(user.id).catch(() => null) : null;
