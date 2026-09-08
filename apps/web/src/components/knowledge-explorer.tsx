@@ -30,8 +30,8 @@ export function KnowledgeExplorer({ items }: { items: KnowledgeListItem[] }) {
         <h2 id="knowledge-explorer-title" className="text-xl font-semibold tracking-tight">搜索全部知识库</h2>
         <div className="relative max-w-2xl">
           <MagnifyingGlass aria-hidden size={19} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Label htmlFor="knowledge-search" className="sr-only">搜索知识标题和正文</Label>
-          <Input id="knowledge-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：锯齿、延长、失效条件" className="pl-10" />
+          <Label htmlFor="knowledge-search-input" className="sr-only">搜索知识标题和正文</Label>
+          <Input id="knowledge-search-input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：锯齿、延长、失效条件" className="pl-10" />
         </div>
       </div>
       {query.trim() ? results.length ? (
