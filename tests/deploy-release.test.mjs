@@ -208,6 +208,7 @@ test("failed backup and bounded old-writer drain leave web untouched and restore
 test("first install rollback removes only newly managed units and keeps catalogue and snapshot", async (t) => {
   const f = persistentFixture(t);
   const result = await api.activate(f.options);
+  assert.ok(!f.events.includes("reset-failed:service"), "a never-run unit has no failed state to reset");
   const state = JSON.parse(fs.readFileSync(path.join(f.options.backupRoot, result.releaseId, "rollback.json")));
   assert.equal(state.tline.preheatComplete, true);
   assert.ok(!fs.readFileSync(f.options.syncUnitFile, "utf8").includes(`EnvironmentFile=${f.options.environmentFile}`), "worker does not receive unrelated site secrets");

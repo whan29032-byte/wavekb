@@ -240,8 +240,12 @@ export async function activate(options) {
     markDiagnosticStage(state, p.metadata, "web-health");
     await requireHealth(options, options.sha);
     if (options.tline) {
-      markDiagnosticStage(state, p.metadata, "research-service-reset");
-      await options.syncService("reset-failed", "service");
+      // reset-failed is meaningful only for a previously failed managed unit.
+      // Some systemd versions reject it for a newly installed, never-run unit.
+      if (state.tline.units.service.active === "failed") {
+        markDiagnosticStage(state, p.metadata, "research-service-reset");
+        await options.syncService("reset-failed", "service");
+      }
       markDiagnosticStage(state, p.metadata, "research-timer-enable");
       await options.syncService("enable", "timer");
       markDiagnosticStage(state, p.metadata, "research-timer-start");
