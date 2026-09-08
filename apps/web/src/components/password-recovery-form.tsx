@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
 import { friendlyAuthError, validatePasswordUpdate } from "@/lib/auth/forms";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, onVerifiedAuthCallback } from "@/lib/supabase/client";
 
 type Mode = "request" | "checking" | "update" | "complete";
 
@@ -14,6 +14,11 @@ function recoveryMarker() {
     || search.get("auth") === "recovery"
     || search.get("type") === "recovery"
     || hash.get("type") === "recovery";
+}
+
+function recoveryTokenHash() {
+  const search = new URLSearchParams(window.location.search);
+  return search.get("type") === "recovery" ? search.get("token_hash") : null;
 }
 
 export function PasswordRecoveryForm() {
@@ -27,25 +32,44 @@ export function PasswordRecoveryForm() {
     const client = createClient();
     let active = true;
     const marked = recoveryMarker();
-    const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+    const tokenHash = recoveryTokenHash();
+    let failureTimer: number | undefined;
+    const stopWatchingCallback = onVerifiedAuthCallback("recovery", () => {
       if (!active) return;
-      if (event === "PASSWORD_RECOVERY" || (marked && session)) setMode("update");
+      if (failureTimer !== undefined) window.clearTimeout(failureTimer);
+      setMode("update");
     });
-    void client.auth.getSession().then(({ data }) => {
+    void (async () => {
+      if (tokenHash) {
+        const verified = await client.auth.verifyOtp({ token_hash: tokenHash, type: "recovery" });
+        if (!active) return;
+        window.history.replaceState(window.history.state, "", "/recover?mode=update");
+        if (verified.error) {
+          setMode("request");
+          setError("重置链接无效或已过期，请重新发送密码重置邮件。");
+          return;
+        }
+        if (verified.data.session) {
+          setMode("update");
+          return;
+        }
+      }
+
       if (!active) return;
-      setMode(marked && data.session ? "update" : marked ? "checking" : "request");
-      if (marked && !data.session) {
-        window.setTimeout(() => {
+      setMode(marked ? "checking" : "request");
+      if (marked) {
+        failureTimer = window.setTimeout(() => {
           if (active) {
             setMode("request");
             setError("重置链接无效或已过期，请重新发送密码重置邮件。");
           }
         }, 1200);
       }
-    });
+    })();
     return () => {
       active = false;
-      listener.subscription.unsubscribe();
+      if (failureTimer !== undefined) window.clearTimeout(failureTimer);
+      stopWatchingCallback();
     };
   }, []);
 
