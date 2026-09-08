@@ -206,6 +206,6 @@ test("extension shelf publishes the two supplied distillations with PDF MIME typ
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   await page.goto("/knowledge");
   await page.getByLabel("搜索知识标题和正文").fill("缠中说禅");
-  await page.getByRole("region", { name: "查找知识条目" }).getByRole("link", { name: /缠中说禅/ }).click();
+  await page.getByRole("region", { name: "搜索全部知识库" }).getByRole("link", { name: /缠中说禅/ }).click();
   await expect(page).toHaveURL(/\/knowledge\/books\/chan-theory-complete$/);
 });
