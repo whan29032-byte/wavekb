@@ -1,0 +1,50 @@
+name: Diagnose WaveKB Next.js production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: "Failed immutable release identity (SHA-run-attempt)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: next-preview
+    steps:
+      - name: Check out diagnostic script
+        uses: actions/checkout@v4
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Read allow-listed retained release state
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/node --input-type=module - '${RELEASE_ID}'" < scripts/diagnose-release.mjs
