@@ -36,8 +36,8 @@ let probe = { healthy: false, status: "not-started" };
 try {
   execFileSync("systemd-run", ["--quiet", "--collect", `--unit=${unit}`, `--uid=${serviceUser}`, `--working-directory=${candidate}`,
     "--property=Type=simple", "--property=NoNewPrivileges=true", "--property=PrivateTmp=true", "--property=ProtectSystem=strict", "--property=ProtectHome=true",
-    `--property=ReadWritePaths=${applicationRoot}`, "--property=UMask=0027", `--setenv=NODE_ENV=production`, `--setenv=PORT=${port}`, "--setenv=HOSTNAME=127.0.0.1",
-    `--setenv=DEPLOYMENT_VERSION=${sha}`, `--setenv=TLINE_RESEARCH_DB_PATH=${applicationRoot}/data/tline/research.sqlite`, "/usr/bin/node", "apps/web/server.js"],
+    `--property=ReadWritePaths=${applicationRoot}`, "--property=UMask=0027", "--property=EnvironmentFile=/etc/wavekb/next-preview.env", "--property=UnsetEnvironment=TLINE_API_KEY",
+    "/usr/bin/env", `PORT=${port}`, "HOSTNAME=127.0.0.1", path.join(candidate, "start-release.sh")],
   { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 });
   for (let index = 0; index < 20; index++) {
     try {
@@ -68,6 +68,11 @@ console.log(JSON.stringify({
     preheatComplete: state.tline.preheatComplete === true,
     hasLastSuccess: typeof state.tline.lastSuccess === "string" && Number.isFinite(Date.parse(state.tline.lastSuccess)),
     unitsInstalled: state.tline.unitsInstalled === true,
+    previousUnits: Object.fromEntries(Object.entries(state.tline.units ?? {}).map(([name, value]) => [name, {
+      exists: value?.exists === true,
+      active: ["active", "activating", "inactive", "failed"].includes(value?.active) ? value.active : "unknown",
+      enabled: ["enabled", "disabled", "static"].includes(value?.enabled) ? value.enabled : "unknown",
+    }])),
   } : null,
   candidate: {
     root: fileState(candidate),
