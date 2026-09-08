@@ -51,6 +51,7 @@ export type GatewayApi = {
   getExchangeConnection?(ownerId: string): Promise<unknown>;
   createExchangeConnection?(ownerId: string, input: Record<string, unknown>): Promise<unknown>;
   syncExchangeConnection?(ownerId: string): Promise<unknown>;
+  setExchangeConnectionPublic?(ownerId: string, enabled: boolean): Promise<unknown>;
   disconnectExchangeConnection?(ownerId: string): Promise<unknown>;
   listAdminExchangeConnections?(limit?: number): Promise<unknown[]>;
   disableAdminExchangeConnection?(actorId: string, connectionId: string, reason: string): Promise<unknown>;
@@ -412,7 +413,7 @@ async function route(
     return {
       statusCode: 200,
       body: { entries: await api.listTradingLeaderboard() },
-      headers: { "cache-control": "public, max-age=60, stale-while-revalidate=300" },
+      headers: { "cache-control": "no-store" },
     };
   }
   const actor = await actorFor(deps, headers);
@@ -542,6 +543,18 @@ async function route(
   if (method === "POST" && path === "/v1/user/exchange-connection/sync") {
     if (!api.syncExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return { statusCode: 200, body: { connection: await api.syncExchangeConnection(actor.id) } };
+  }
+  if (method === "POST" && path === "/v1/user/exchange-connection/public") {
+    if (!api.setExchangeConnectionPublic) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return {
+      statusCode: 200,
+      body: {
+        connection: await api.setExchangeConnectionPublic(
+          actor.id,
+          (payload as Record<string, unknown> | null)?.public_enabled === true,
+        ),
+      },
+    };
   }
   if (method === "POST" && path === "/v1/user/exchange-connection/disconnect") {
     if (!api.disconnectExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };

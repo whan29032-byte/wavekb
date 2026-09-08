@@ -8,6 +8,7 @@ type Connection = {
   owner_id: string;
   label: string;
   public_enabled: boolean;
+  public_amounts_consented_at: string | null;
   status: "active" | "error" | "disabled";
   api_key_last_four: string;
   started_at: string;
@@ -17,6 +18,23 @@ type Connection = {
 };
 
 type StoredCredentials = { apiKey: string; secretKey: string };
+
+function publicLeaderboardEntry(row: Record<string, unknown>) {
+  return {
+    rank_no: Number(row.rank_no || 0),
+    user_id: String(row.user_id || ""),
+    public_uid: Number(row.public_uid || 0),
+    display_name: String(row.display_name || ""),
+    avatar_url: row.avatar_url ? String(row.avatar_url) : null,
+    display_title: String(row.display_title || ""),
+    nameplate_style: String(row.nameplate_style || "classic"),
+    return_rate: Number(row.return_rate || 0),
+    current_equity_usdt: String(row.current_equity_usdt ?? "0"),
+    cumulative_profit_usdt: String(row.cumulative_profit_usdt ?? "0"),
+    tracking_started_at: String(row.tracking_started_at || ""),
+    last_synced_at: String(row.last_synced_at || ""),
+  };
+}
 
 function requiredCredential(input: Record<string, unknown>, key: "api_key" | "secret_key") {
   const value = String(input[key] || "").trim();
@@ -40,6 +58,7 @@ function safeConnection(connection: Connection | null) {
     exchange: "binance",
     market: "usdm_futures",
     public_enabled: connection.public_enabled,
+    public_amounts_consented: Boolean(connection.public_amounts_consented_at),
     status: connection.status,
     secret_mask: `••••${connection.api_key_last_four}`,
     started_at: connection.started_at,
@@ -68,7 +87,7 @@ export class BinanceLeaderboardService {
   }
 
   private async connection(ownerId: string): Promise<Connection | null> {
-    const rows = await this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&status=neq.disabled&select=id,owner_id,label,public_enabled,status,api_key_last_four,started_at,last_synced_at,last_error_code,consecutive_failures&order=created_at.desc&limit=1`);
+    const rows = await this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&status=neq.disabled&select=id,owner_id,label,public_enabled,public_amounts_consented_at,status,api_key_last_four,started_at,last_synced_at,last_error_code,consecutive_failures&order=created_at.desc&limit=1`);
     return rows[0] ?? null;
   }
 
@@ -81,11 +100,17 @@ export class BinanceLeaderboardService {
       method: "POST",
       body: { p_period: "realtime", p_limit: Math.min(Math.max(Number(limit || 50), 3), 100) },
     });
-    return Array.isArray(rows) ? rows : [];
+    return Array.isArray(rows)
+      ? rows.map((row) => publicLeaderboardEntry(row as Record<string, unknown>))
+      : [];
   }
 
   async connect(ownerId: string, input: Record<string, unknown>) {
     if (input.read_only_ack !== true) throw Object.assign(new Error("read_only_ack_required"), { statusCode: 400 });
+    const publicEnabled = input.public_enabled === true;
+    if (publicEnabled && input.public_amounts_consent !== true) {
+      throw Object.assign(new Error("public_amounts_consent_required"), { statusCode: 400 });
+    }
     const apiKey = requiredCredential(input, "api_key");
     const secretKey = requiredCredential(input, "secret_key");
     const label = String(input.label || "币安 U 本位合约").trim();
@@ -93,12 +118,13 @@ export class BinanceLeaderboardService {
     const snapshot = await this.client({ apiKey, secretKey }).accountSnapshot();
     const capturedAt = new Date().toISOString();
     const encrypted = encryptSecret(JSON.stringify({ apiKey, secretKey }), this.config.AI_SECRET_MASTER_KEY, 1);
-    const result = await this.database.request("/rest/v1/rpc/create_binance_exchange_connection", {
+    const result = await this.database.request("/rest/v1/rpc/create_binance_exchange_connection_v2", {
       method: "POST",
       body: {
         p_owner_id: ownerId,
         p_label: label,
-        p_public_enabled: input.public_enabled !== false,
+        p_public_enabled: publicEnabled,
+        p_public_amounts_consent: input.public_amounts_consent === true,
         p_api_key_last_four: apiKey.slice(-4),
         p_ciphertext: encrypted.ciphertext,
         p_iv: encrypted.iv,
@@ -155,23 +181,42 @@ export class BinanceLeaderboardService {
       });
       return safeConnection({ ...connection, status: "active", last_synced_at: capturedAt, last_error_code: "", consecutive_failures: 0 });
     } catch (error) {
-      await this.database.request(`/rest/v1/exchange_connections?id=eq.${encodeURIComponent(connection.id)}&owner_id=eq.${encodeURIComponent(ownerId)}`, {
-        method: "PATCH",
-        body: { status: "error", last_error_code: errorCode(error), consecutive_failures: Number(connection.consecutive_failures || 0) + 1 },
+      await this.database.request("/rest/v1/rpc/record_exchange_sync_failure", {
+        method: "POST",
+        body: {
+          p_connection_id: connection.id,
+          p_owner_id: ownerId,
+          p_error_code: errorCode(error),
+        },
       }).catch(() => undefined);
       throw error;
     }
+  }
+
+  async setPublic(ownerId: string, enabled: boolean) {
+    const connection = await this.connection(ownerId);
+    if (!connection) throw Object.assign(new Error("exchange_connection_not_found"), { statusCode: 404 });
+    const result = await this.database.request("/rest/v1/rpc/set_exchange_connection_public_amounts", {
+      method: "POST",
+      body: {
+        p_owner_id: ownerId,
+        p_connection_id: connection.id,
+        p_public_enabled: enabled,
+        p_public_amounts_consent: enabled,
+      },
+    });
+    return safeConnection(connectionValue(result));
   }
 
   async disconnect(ownerId: string) {
     const connection = await this.connection(ownerId);
     if (!connection) return null;
     await this.database.request("/rest/v1/rpc/disconnect_exchange_connection", { method: "POST", body: { p_owner_id: ownerId, p_connection_id: connection.id } });
-    return { ...safeConnection(connection), status: "disabled", public_enabled: false };
+    return { ...safeConnection(connection), status: "disabled", public_enabled: false, public_amounts_consented: false };
   }
 
   async adminList(limit = 100) {
-    const rows = await this.database.request(`/rest/v1/exchange_connections?select=id,owner_id,label,public_enabled,status,api_key_last_four,started_at,last_synced_at,last_error_code,consecutive_failures,created_at&order=created_at.desc&limit=${Math.min(Math.max(limit, 1), 500)}`) as Array<Connection & { created_at: string }>;
+    const rows = await this.database.request(`/rest/v1/exchange_connections?select=id,owner_id,label,public_enabled,public_amounts_consented_at,status,api_key_last_four,started_at,last_synced_at,last_error_code,consecutive_failures,created_at&order=created_at.desc&limit=${Math.min(Math.max(limit, 1), 500)}`) as Array<Connection & { created_at: string }>;
     const ownerIds = [...new Set(rows.map((row) => row.owner_id))];
     const profiles = ownerIds.length ? await this.database.request(`/rest/v1/profiles?id=in.(${ownerIds.map(encodeURIComponent).join(",")})&select=id,public_uid,display_name`) : [];
     const profileById = new Map(profiles.map((profile: { id: string }) => [profile.id, profile]));

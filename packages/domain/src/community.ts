@@ -483,7 +483,8 @@ export type TradingLeaderboardEntry = {
   display_title: string;
   nameplate_style: MemberProfile["nameplate_style"];
   return_rate: number;
-  sample_count: number;
+  current_equity_usdt: string;
+  cumulative_profit_usdt: string;
   tracking_started_at: string;
   last_synced_at: string;
 };
@@ -494,6 +495,7 @@ export type ExchangeConnection = {
   exchange: "binance";
   market: "usdm_futures";
   public_enabled: boolean;
+  public_amounts_consented: boolean;
   status: "active" | "error" | "disabled";
   secret_mask: string;
   started_at: string;

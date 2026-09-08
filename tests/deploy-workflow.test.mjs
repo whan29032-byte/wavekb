@@ -37,19 +37,23 @@ test("every emitted workflow shell program parses before a runner can execute it
 });
 
 test("backend deployment validates host before migration and rolls gateway code back on activation failure", () => {
+  const contractVerification = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
   const hostPreflight = backendSteps.findIndex((step) => /Verify gateway host/.test(step.name));
   const migration = backendSteps.findIndex((step) => /Apply the additive/.test(step.name));
   const upload = backendSteps.findIndex((step) => /Upload gateway archive/.test(step.name));
   const activation = backendSteps.findIndex((step) => /Activate gateway/.test(step.name));
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
   assert.ok(hostPreflight >= 0 && hostPreflight < migration && migration < upload && upload < activation && activation < publicSchemaCheck);
+  assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
   assert.match(backendSteps[migration].run, /schema_before/);
   assert.match(backendSteps[migration].run, /202608210002/);
   assert.match(backendSteps[migration].run, /202609080001/);
   assert.match(backendSteps[migration].run, /202609080002/);
   assert.match(backendSteps[migration].run, /202609080002_realtime_trading_leaderboard\.sql/);
+  assert.match(backendSteps[migration].run, /202609080003/);
+  assert.match(backendSteps[migration].run, /202609080003_public_trading_amounts\.sql/);
   assert.equal(backendSteps[migration].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /202609080002/);
+  assert.match(backendSteps[publicSchemaCheck].run, /202609080003/);
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
   assert.match(backendSteps[activation].run, /legacy_layout/);
@@ -93,7 +97,7 @@ test("the real workflow package excludes browser-generated cache while preservin
   assert.equal(result.status, 0, result.stderr);
   const archive = spawnSync("tar", ["-tzf", "wavekb-next-preview.tar.gz"], { cwd: directory, encoding: "utf8" });
   assert.equal(archive.status, 0);
-  const entries = archive.stdout.split("\n");
+  const entries = archive.stdout.split(/\r?\n/);
   assert.ok(entries.includes("./apps/web/server.js"));
   assert.ok(entries.includes("./apps/web/.next/static/app.js"));
   assert.ok(!entries.some((entry) => entry.startsWith("./apps/web/.next/cache")), "local acceptance cache must not enter immutable release package");

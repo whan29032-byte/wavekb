@@ -25,5 +25,8 @@
     "knowledge:sync-primary-refs": "node scripts/sync-reviewed-primary-refs.mjs",
     "knowledge:validate": "node scripts/validate-knowledge.mjs",
     "knowledge:assets:check": "pnpm --filter @wavekb/web assets:check"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
   }
 }

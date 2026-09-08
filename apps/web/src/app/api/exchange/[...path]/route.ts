@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 const ALLOWED = new Map<string, Set<string>>([
   ["connection", new Set(["GET", "POST"])],
   ["connection/sync", new Set(["POST"])],
+  ["connection/public", new Set(["POST"])],
   ["connection/disconnect", new Set(["POST"])],
 ]);
 

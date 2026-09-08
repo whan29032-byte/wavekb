@@ -454,6 +454,10 @@ export class SupabaseGatewayApi implements GatewayApi {
     return this.trading.sync(ownerId);
   }
 
+  async setExchangeConnectionPublic(ownerId: string, enabled: boolean): Promise<unknown> {
+    return this.trading.setPublic(ownerId, enabled);
+  }
+
   async disconnectExchangeConnection(ownerId: string): Promise<unknown> {
     return this.trading.disconnect(ownerId);
   }

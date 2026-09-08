@@ -79,7 +79,7 @@ const api = {
     return { id: jobId, status: "queued" };
   },
   async listTradingLeaderboard(...args: string[]) {
-    return [{ rank_no: 1, public_uid: 583104, display_name: "Wave", return_rate: args.length ? -1 : 0.2 }];
+    return [{ rank_no: 1, public_uid: 583104, display_name: "Wave", return_rate: args.length ? -1 : 0.2, current_equity_usdt: 1470, cumulative_profit_usdt: 170 }];
   },
   async getExchangeConnection() {
     return { id: "e1", status: "active", secret_mask: "••••ABCD" };
@@ -92,6 +92,9 @@ const api = {
   },
   async disconnectExchangeConnection() {
     return { id: "e1", status: "disabled", secret_mask: "••••ABCD" };
+  },
+  async setExchangeConnectionPublic(_ownerId: string, enabled: boolean) {
+    return { id: "e1", status: "active", public_enabled: enabled, public_amounts_consented: enabled, secret_mask: "••••ABCD" };
   },
   async listAdminExchangeConnections() {
     return [{ id: "11111111-1111-4111-8111-111111111111", owner: { public_uid: 583104 }, status: "active", secret_mask: "••••ABCD" }];
@@ -246,6 +249,9 @@ test("trading leaderboard is public while exchange credentials remain owner-scop
   const board = await server.inject({ url: "/api/trading-leaderboard?period=7d" });
   assert.equal(board.statusCode, 200);
   assert.equal((board.json() as any).entries[0].return_rate, 0.2);
+  assert.equal((board.json() as any).entries[0].current_equity_usdt, 1470);
+  assert.equal((board.json() as any).entries[0].cumulative_profit_usdt, 170);
+  assert.equal(board.headers["cache-control"], "no-store");
 
   assert.equal((await server.inject({ url: "/v1/user/exchange-connection" })).statusCode, 401);
   const created = await server.inject({
@@ -258,6 +264,14 @@ test("trading leaderboard is public while exchange credentials remain owner-scop
   assert.equal(created.body.includes("binance-api-key-super-secret"), false);
   assert.equal(created.body.includes("binance-secret-super-secret"), false);
   assert.equal(created.body.includes("••••ABCD"), true);
+  const publicConnection = await server.inject({
+    method: "POST",
+    url: "/v1/user/exchange-connection/public",
+    headers: { authorization: "Bearer user-token" },
+    payload: { public_enabled: true },
+  });
+  assert.equal(publicConnection.statusCode, 200);
+  assert.equal((publicConnection.json() as any).connection.public_amounts_consented, true);
 });
 
 test("only admins can inspect or disable exchange connections", async () => {
