@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MentorCheckout } from "./mentor-checkout";
 import { MentorThread } from "./mentor-thread";
@@ -176,6 +176,20 @@ describe("mentor payment reliability", () => {
     render(await MentorsPage());
     expect(screen.queryByText("100 USDT 起")).not.toBeNull();
     expect(screen.queryByText("500 USDT 起")).toBeNull();
+  });
+
+  it("presents service guarantees as one compact list", async () => {
+    render(await MentorsPage());
+    const guarantees = screen.getByRole("list", { name: "辅导服务保障" });
+    expect(within(guarantees).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.queryByRole("complementary", { name: "辅导服务说明" })).toBeNull();
+  });
+
+  it("presents the mentor directory as full-width profile rows", async () => {
+    render(await MentorsPage());
+    const directory = screen.getByRole("region", { name: "导师目录" });
+    const profiles = within(directory).getByRole("list", { name: "导师列表" });
+    expect(within(profiles).getAllByRole("listitem")).toHaveLength(1);
   });
 
   it("never submits twice on repeated clicks and restores the submitted result on status reads", async () => {
