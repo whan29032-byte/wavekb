@@ -4,12 +4,15 @@ import Link from "next/link";
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { childrenOf, knowledgeData, type KnowledgeTheme } from "@wavekb/knowledge";
 import { KnowledgeExplorer } from "@/components/knowledge-explorer";
-import { getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
+import { CORE_BOOK_ID, getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
+import { buildLibrarySearchDocuments } from "@/lib/knowledge/book-reading";
+import { publicMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicMetadata({
   title: "知识库",
   description: "按图书、主题、问题和章节阅读已核验的波浪理论知识。",
-};
+  path: "/knowledge",
+});
 
 function unitsInTheme(theme: KnowledgeTheme): string[] {
   return [...theme.unit_ids, ...theme.children.flatMap(unitsInTheme)];
@@ -58,6 +61,14 @@ export default function KnowledgePage() {
       parent: null,
       href: book.href,
       searchText: [book.edition, book.description, ...book.topics].join(" "),
+    })),
+    ...buildLibrarySearchDocuments(data).filter((document) => document.bookId !== CORE_BOOK_ID).map((document) => ({
+      id: document.id,
+      title: `${document.bookTitle} · ${document.title}`,
+      kind: "candidate" as const,
+      parent: null,
+      href: document.href,
+      searchText: document.text,
     })),
   ];
 

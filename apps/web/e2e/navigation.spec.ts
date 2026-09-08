@@ -191,7 +191,7 @@ test("extension shelf publishes the two supplied distillations with PDF MIME typ
     await expect.poll(() => cover.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
   }
   await page.locator('a[href="/knowledge/books/elliott-wave-natural-law"]').click();
-  const naturalPdf = page.getByRole("link", { name: "查看原 PDF" });
+  const naturalPdf = page.getByRole("link", { name: "查看 WaveKB 蒸馏 PDF" });
   await expect(naturalPdf).toHaveAttribute("href", "/assets/books/elliott-wave-natural-law-distilled.pdf");
   await expect(naturalPdf).toHaveAttribute("target", "_blank");
   const naturalResponse = await page.request.get("/assets/books/elliott-wave-natural-law-distilled.pdf");
@@ -202,7 +202,7 @@ test("extension shelf publishes the two supplied distillations with PDF MIME typ
   expect(chanResponse.headers()["content-type"]).toMatch(/^application\/pdf/);
   await page.goto("/knowledge/books/chan-theory-complete");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("缠中说禅 CHM 整本文集蒸馏");
-  await expect(page.getByRole("link", { name: "查看原 PDF" })).toHaveAttribute("href", "/assets/books/chan-theory-complete-distilled.pdf");
+  await expect(page.getByRole("link", { name: "查看 WaveKB 蒸馏 PDF" })).toHaveAttribute("href", "/assets/books/chan-theory-complete-distilled.pdf");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   await page.goto("/knowledge");
   await page.getByLabel("搜索知识标题和正文").fill("缠中说禅");
