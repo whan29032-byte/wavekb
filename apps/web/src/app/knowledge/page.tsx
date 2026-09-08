@@ -65,7 +65,7 @@ export default function KnowledgePage() {
     ...buildLibrarySearchDocuments(data).filter((document) => document.bookId !== CORE_BOOK_ID).map((document) => ({
       id: document.id,
       title: `${document.bookTitle} · ${document.title}`,
-      kind: "candidate" as const,
+      kind: "generated" as const,
       parent: null,
       href: document.href,
       searchText: document.text,

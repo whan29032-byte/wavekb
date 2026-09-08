@@ -8,7 +8,7 @@ import { Input, Label } from "@wavekb/ui";
 type KnowledgeListItem = {
   id: string;
   title: string;
-  kind: "core" | "candidate";
+  kind: "core" | "candidate" | "generated";
   parent: string | null;
   searchText: string;
   href?: string;
@@ -39,7 +39,7 @@ export function KnowledgeExplorer({ items }: { items: KnowledgeListItem[] }) {
           {results.map((item) => (
             <Link key={item.id} href={item.href || `/knowledge/${item.id}`} className="flex items-center justify-between gap-4 px-1 py-3 hover:text-primary">
               <strong className="text-sm font-semibold leading-6">{item.title}</strong>
-              <span className="text-xs text-muted-foreground">{item.kind === "core" ? "核心知识" : "已核验辅助资料"}</span>
+              <span className="text-xs text-muted-foreground">{item.kind === "core" ? "核心知识" : item.kind === "candidate" ? "已核验辅助资料" : "蒸馏生成页面"}</span>
             </Link>
           ))}
         </div>
