@@ -20,7 +20,7 @@ for (const mode of ["light", "dark"]) {
       const section = page.locator(`[data-tier="${style}"]`);
       // Content text must not disappear into bright gradient stops; motion lives in the material layers.
       expect(await section.locator(".identity-uid").first().evaluate((el) => getComputedStyle(el).webkitTextFillColor)).not.toBe("rgba(0, 0, 0, 0)");
-      expect(await section.locator(".identity-liang").first().evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(14);
+      await expect(section.locator(".identity-liang")).toHaveCount(0);
       expect(await section.locator(".identity-nameplate").first().evaluate((el) => getComputedStyle(el, "::after").animationName)).not.toBe("none");
     }
     await page.screenshot({ path: test.info().outputPath(`identity-${mode}.png`), fullPage: true });

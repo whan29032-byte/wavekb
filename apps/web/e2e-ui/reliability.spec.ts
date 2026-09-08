@@ -44,16 +44,16 @@ for (const width of [320, 375, 768]) {
   });
 }
 
-test("mobile navigation exposes all global destinations without a workbench duplicate", async ({ page }) => {
+test("mobile navigation exposes all global destinations without duplicates", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto("/iframe.html?id=shell-site-header--default&viewMode=story");
   await page.getByRole("button", { name: "展开主导航" }).click();
   const navigation = page.getByRole("navigation", { name: "移动主导航" });
-  for (const [name, href] of [["知识库", "/knowledge"], ["社区", "/community/idea_sharing"], ["导师", "/mentors"], ["积分商城", "/rewards"]]) {
+  for (const [name, href] of [["知识库", "/knowledge"], ["交易工作台", "/workbench"], ["交易收益榜", "/leaderboard"], ["社区", "/community/idea_sharing"], ["导师", "/mentors"], ["积分商城", "/rewards"]]) {
     await expect(navigation.getByRole("link", { name })).toBeVisible();
     await expect(navigation.getByRole("link", { name })).toHaveAttribute("href", href);
   }
-  await expect(navigation.getByRole("link", { name: /工作台|个人空间/ })).toHaveCount(0);
+  await expect(navigation.getByRole("link", { name: "交易工作台", exact: true })).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("mobile-navigation.png") });
   await page.keyboard.press("Escape");
   await expect(navigation).toBeHidden();
