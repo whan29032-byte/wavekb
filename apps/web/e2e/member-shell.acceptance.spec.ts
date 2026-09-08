@@ -53,7 +53,7 @@ test.describe("authenticated member shell acceptance", () => {
     await expect(actions.getByRole("link", { name: "积分商城" })).toHaveCount(0);
 
     const friends = page.locator('[data-floating-window="friends"]');
-    if (await friends.isVisible()) await friends.getByRole("button", { name: "关闭" }).click();
+    if (await friends.isVisible()) await friends.getByRole("button", { name: "关闭", exact: true }).click();
     await expect(friends).toHaveCount(0);
     const profileUrl = page.url();
     const friendsResponsePromise = page.waitForResponse((response) => {
