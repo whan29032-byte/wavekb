@@ -66,7 +66,7 @@ function coreChunks(units, sourceId) {
       headingPath,
       text,
       kind: "unit",
-      authority: unit.source?.authority === "supplement" ? "supplement" : "primary",
+      authority: citationRefs[0]?.authority === "supplement" ? "supplement" : "primary",
       contentStatus: "verified",
       pdfPages: unique(citationRefs.flatMap((source) => source.pdf_pages || [])).sort((left, right) => left - right),
       href: `/knowledge/unit-${unit.id}`,

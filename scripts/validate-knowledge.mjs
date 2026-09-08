@@ -267,7 +267,7 @@ const retrievalBookIds = uniqueValues(retrievalBooks.map((book) => book.bookId),
 expect(JSON.stringify([...retrievalBookIds]) === JSON.stringify(["elliott-wave-principle-tenth-edition", "elliott-wave-natural-law", "chan-theory-complete"]), "Retrieval book list is not the approved three-book catalog");
 uniqueValues(retrievalChunks.map((chunk) => chunk.chunkId), "Retrieval chunks");
 const retrievalSources = retrievalBooks.flatMap((book) => book.sourceArtifacts || []);
-const retrievalSourceIds = uniqueValues(retrievalSources.map((source) => source.sourceId), "Retrieval sources");
+uniqueValues(retrievalSources.map((source) => source.sourceId), "Retrieval sources");
 const retrievalBookById = new Map(retrievalBooks.map((book) => [book.bookId, book]));
 for (const source of retrievalSources) {
   expect(/^[a-f0-9]{64}$/.test(source.sha256 || ""), `${source.sourceId} has invalid retrieval SHA-256`);
@@ -280,15 +280,16 @@ for (const book of retrievalBooks) {
 }
 for (const chunk of retrievalChunks) {
   expect(retrievalBookIds.has(chunk.bookId), `${chunk.chunkId} references an unknown retrieval book`);
-  expect(retrievalSourceIds.has(chunk.sourceId), `${chunk.chunkId} references an unknown retrieval source`);
+  const book = retrievalBookById.get(chunk.bookId);
+  const source = book?.sourceArtifacts?.find((candidate) => candidate.sourceId === chunk.sourceId);
+  expect(Boolean(source), `${chunk.chunkId} references a retrieval source outside its book`);
+  expect(!source || chunk.authority === source.authority, `${chunk.chunkId} retrieval authority does not match its source`);
   expect(Boolean(String(chunk.title || "").trim() && String(chunk.text || "").trim() && String(chunk.searchable || "").trim()), `${chunk.chunkId} has missing retrieval text`);
   expect(["primary", "supplement", "contextual"].includes(chunk.authority), `${chunk.chunkId} has invalid retrieval authority`);
   expect(["verified", "generated", "needs_review"].includes(chunk.contentStatus), `${chunk.chunkId} has invalid retrieval content status`);
   expect(/^[a-f0-9]{64}$/.test(chunk.contentSha256 || ""), `${chunk.chunkId} has invalid content SHA-256`);
   expect(typeof chunk.href === "string" && /^\/knowledge\//.test(chunk.href) && !chunk.href.includes("..") && !chunk.href.includes("\\") && !chunk.href.includes("://"), `${chunk.chunkId} has unsafe href: ${chunk.href}`);
   expect(Array.isArray(chunk.pdfPages) && chunk.pdfPages.length > 0 && chunk.pdfPages.every((page) => Number.isInteger(page) && page > 0), `${chunk.chunkId} has invalid retrieval pages`);
-  const book = retrievalBookById.get(chunk.bookId);
-  const source = book?.sourceArtifacts?.find((candidate) => candidate.sourceId === chunk.sourceId);
   if (source?.pageCount !== null && source?.pageCount !== undefined) expect(chunk.pdfPages.every((page) => page <= source.pageCount), `${chunk.chunkId} exceeds its retrieval source page count`);
 }
 if (units.length && library.books?.length && Object.keys(pageSources).length === library.books.length && fs.existsSync(retrievalPath)) {

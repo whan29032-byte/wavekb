@@ -56,6 +56,15 @@ test("builds the deterministic three-book retrieval contract from canonical sour
   assert.equal(new Set(artifact.chunks.map((chunk) => chunk.chunkId)).size, artifact.chunks.length);
   const sourceIds = artifact.books.flatMap((book) => book.sourceArtifacts.map((source) => source.sourceId));
   assert.equal(new Set(sourceIds).size, sourceIds.length);
+  const sourcesByBook = new Map(artifact.books.map((book) => [
+    book.bookId,
+    new Map(book.sourceArtifacts.map((source) => [source.sourceId, source])),
+  ]));
+  for (const chunk of artifact.chunks) {
+    const source = sourcesByBook.get(chunk.bookId)?.get(chunk.sourceId);
+    assert.ok(source, `${chunk.chunkId} source must belong to its book`);
+    assert.equal(chunk.authority, source.authority, `${chunk.chunkId} authority must match its source`);
+  }
   assert.ok(artifact.books.every((book) => book.sourceArtifacts.length > 0));
   assert.ok(artifact.books.flatMap((book) => book.sourceArtifacts).every((source) => SHA256.test(source.sha256)));
   assert.ok(artifact.chunks.every((chunk) => chunk.text.trim() && chunk.searchable.trim()));
