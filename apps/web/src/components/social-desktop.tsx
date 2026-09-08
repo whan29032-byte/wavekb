@@ -262,11 +262,13 @@ export function SocialDesktop() {
     });
     const unsubscribeIdentity = subscribeIdentityChanges(() => void load());
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") void load(); }, 9000);
+    const rebaselineUnread = () => { if (document.visibilityState === "visible") { unreadBaseline.current = null; void load(); } };
     const customOpen = (event: Event) => { const detail = (event as CustomEvent<{ conversation?: DirectConversation }>).detail; if (detail?.conversation) openChat(detail.conversation); };
     const openFriends = () => { setAutoHidden(false); setPanel((value) => ({ ...value, open: true, minimized: false })); void load(); };
+    document.addEventListener("visibilitychange", rebaselineUnread);
     window.addEventListener("wavekb:open-chat", customOpen);
     window.addEventListener("wavekb:open-friends", openFriends);
-    return () => { mounted.current = false; invalidateLoads(); window.clearTimeout(initial); auth.data.subscription.unsubscribe(); unsubscribeIdentity(); window.clearInterval(timer); window.removeEventListener("wavekb:open-chat", customOpen); window.removeEventListener("wavekb:open-friends", openFriends); };
+    return () => { mounted.current = false; invalidateLoads(); window.clearTimeout(initial); auth.data.subscription.unsubscribe(); unsubscribeIdentity(); window.clearInterval(timer); document.removeEventListener("visibilitychange", rebaselineUnread); window.removeEventListener("wavekb:open-chat", customOpen); window.removeEventListener("wavekb:open-friends", openFriends); };
   }, [clearAccountState, invalidateLoads, load]);
 
   useEffect(() => { if (actor) localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized, pinned: item.pinned })) })); }, [actor, panel, chats]);

@@ -215,6 +215,22 @@ it("does not tone global unread increases while muted", async () => {
   expect(fixture.tones).toBe(0);
 });
 
+it("silently rebaselines unread conversations after returning from a hidden tab", async () => {
+  fixture.conversations = [conversation];
+  render(<SocialDesktop />); await tick();
+  fireEvent.pointerDown(window);
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  fixture.conversations = [{ ...conversation, unread_count: 2 }];
+  await tick(9000);
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+  await tick(9000);
+  expect(fixture.tones).toBe(0);
+  fixture.conversations = [{ ...conversation, unread_count: 3 }];
+  await tick(9000);
+  expect(fixture.tones).toBe(1);
+});
+
 it.each(["recent", "notification", "student"])("shows a readable sticker summary in the %s list", async (surface) => {
   fixture.conversations = [{ ...conversation, last_message: "[[sticker:diamond]]" }];
   if (surface === "student") { fixture.conversations = []; fixture.students = [{ thread_id: "student-thread", display_name: "学生", avatar_url: null, nameplate_style: "classic", last_message: "[[sticker:diamond]]" }]; }
