@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const releaseId = process.argv[2] ?? "";
 const releasePattern = /^[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$/;
@@ -25,8 +26,38 @@ const fileState = (file) => {
   }
 };
 
-// Only emit allow-listed operational state. Never print environment files,
-// commands, journal text, API payloads, or credential-bearing exceptions.
+const [, sha, runId, attempt] = releaseId.match(/^([0-9a-f]{40})-([1-9][0-9]*)-([1-9][0-9]*)$/) ?? [];
+const serviceUser = state.tline?.user;
+if (!/^[a-z_][a-z0-9_-]*$/.test(serviceUser ?? "")) throw new Error("Invalid retained service user");
+const unit = `wavekb-next-diagnostic-${runId}-${attempt}.service`;
+const port = 39000 + (Number(runId) % 1000);
+const properties = ["LoadState", "ActiveState", "SubState", "Result", "ExecMainCode", "ExecMainStatus"];
+let probe = { healthy: false, status: "not-started" };
+try {
+  execFileSync("systemd-run", ["--quiet", "--collect", `--unit=${unit}`, `--uid=${serviceUser}`, `--working-directory=${candidate}`,
+    "--property=Type=simple", "--property=NoNewPrivileges=true", "--property=PrivateTmp=true", "--property=ProtectSystem=strict", "--property=ProtectHome=true",
+    `--property=ReadWritePaths=${applicationRoot}`, "--property=UMask=0027", `--setenv=NODE_ENV=production`, `--setenv=PORT=${port}`, "--setenv=HOSTNAME=127.0.0.1",
+    `--setenv=DEPLOYMENT_VERSION=${sha}`, `--setenv=TLINE_RESEARCH_DB_PATH=${applicationRoot}/data/tline/research.sqlite`, "/usr/bin/node", "apps/web/server.js"],
+  { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 });
+  for (let index = 0; index < 20; index++) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
+      const health = response.ok ? await response.json() : null;
+      if (health?.ok === true && health.deployment === sha) { probe = { healthy: true, status: "version-matched" }; break; }
+    } catch { /* The isolated candidate can refuse connections while starting. */ }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!probe.healthy) {
+    const output = execFileSync("systemctl", ["show", unit, ...properties.flatMap((property) => ["-p", property])], { encoding: "utf8" });
+    probe = { healthy: false, status: "health-unavailable", unit: Object.fromEntries(output.trim().split("\n").map((line) => { const index = line.indexOf("="); return [line.slice(0, index), line.slice(index + 1)]; })) };
+  }
+} finally {
+  try { execFileSync("systemctl", ["stop", unit], { stdio: "ignore", timeout: 30_000 }); } catch { /* A completed transient unit needs no stop. */ }
+  try { execFileSync("systemctl", ["reset-failed", unit], { stdio: "ignore", timeout: 30_000 }); } catch { /* --collect may already have removed it. */ }
+}
+
+// Only emit allow-listed operational state. The isolated probe receives no
+// environment file or credential, and journal/application text is never read.
 console.log(JSON.stringify({
   releaseId,
   phase: typeof state.phase === "string" ? state.phase : "unknown",
@@ -45,4 +76,5 @@ console.log(JSON.stringify({
     cache: fileState(path.join(candidate, "apps/web/.next/cache")),
     launcher: fileState(path.join(candidate, "start-release.sh")),
   },
+  probe,
 }));
