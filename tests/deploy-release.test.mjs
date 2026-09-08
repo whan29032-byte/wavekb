@@ -151,7 +151,7 @@ test("an activating writer drains under a bounded wait before backup instead of 
   assert.ok(f.events.indexOf("wait-idle:service") < f.events.indexOf("backup"));
 });
 
-for (const phase of ["sync", "locked", "deferred", "enable:timer", "start:timer", "check:timer"]) {
+for (const phase of ["sync", "locked", "deferred", "enable:timer", "start:timer"]) {
   test(`persistent failure at ${phase} restores exact previous units and retains data`, async (t) => {
     const f = persistentFixture(t, true); f.fault(phase);
     await assert.rejects(api.activate(f.options));
@@ -170,6 +170,14 @@ for (const phase of ["sync", "locked", "deferred", "enable:timer", "start:timer"
     assert.ok(f.events.indexOf("stop:service") < f.events.indexOf("backup"));
   });
 }
+
+test("a transient post-start timer inspection failure does not roll back a healthy web release", async (t) => {
+  const f = persistentFixture(t); f.fault("check:timer");
+  const result = await api.activate(f.options);
+  assert.equal(fs.realpathSync(path.join(f.options.applicationRoot, "current")), result.releaseDir);
+  assert.ok(f.events.includes("enable:timer"));
+  assert.ok(f.events.includes("start:timer"));
+});
 
 for (const enabled of ["disabled", "static"]) {
   test(`rollback preserves previously ${enabled}, inactive sync units without starting them`, async (t) => {
