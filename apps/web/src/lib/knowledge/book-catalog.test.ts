@@ -20,4 +20,14 @@ describe("knowledge book catalog", () => {
     expect(getKnowledgeBook(CORE_BOOK_ID)?.source).toBeNull();
     expect(getKnowledgeBook("elliott-wave-natural-law")?.source?.pdf_pages).toBe(36);
   });
+
+  it("separates verified Units from reading views and labels derived PDFs truthfully", () => {
+    const core = getKnowledgeBook(CORE_BOOK_ID);
+    const extension = getKnowledgeBook("elliott-wave-natural-law");
+
+    expect(core?.verifiedUnitCount).toBe(117);
+    expect(core?.readingViewCount).toBe(146);
+    expect(core?.itemCount).toBe(117);
+    expect(extension?.sourceArtifactLabel).toBe("WaveKB 蒸馏 PDF");
+  });
 });

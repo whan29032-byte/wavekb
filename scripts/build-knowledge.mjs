@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildAiKnowledgeArtifact } from "./lib/ai-knowledge-artifact.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const knowledgeRoot = path.join(repositoryRoot, "knowledge");
 const outputPath = path.join(repositoryRoot, "packages/knowledge/src/knowledge.json");
+const retrievalOutputPath = path.join(repositoryRoot, "ai-gateway/knowledge/retrieval-index.json");
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -177,6 +179,7 @@ const coverage = readJsonl(path.join(knowledgeRoot, "coverage/tenth-edition-page
 
 if (!library || !Array.isArray(library.books)) throw new Error("knowledge/source/library.json must contain a books array");
 const libraryBookIds = new Set();
+const pageSources = {};
 for (const book of library.books) {
   for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "text_path", "sha256"]) {
     if (!book?.[field]) throw new Error(`Knowledge library book is missing ${field}`);
@@ -200,6 +203,7 @@ for (const book of library.books) {
     throw new Error(`Knowledge library text pages are incomplete: ${book.id}`);
   }
   book.text_pages = textDocument.pages;
+  pageSources[book.id] = textDocument;
   if (!Number.isInteger(book.pdf_pages) || book.pdf_pages < 1 || !Number.isInteger(book.source_page_count) || book.source_page_count < 1) {
     throw new Error(`Knowledge library book has invalid page counts: ${book.id}`);
   }
@@ -339,4 +343,7 @@ const data = {
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, `${JSON.stringify(data)}\n`);
-console.log(JSON.stringify({ output: path.relative(repositoryRoot, outputPath), pages: pages.length, units: units.length, relations: relations.length, questions: questions.length, library_books: library.books.length }, null, 2));
+const retrievalArtifact = buildAiKnowledgeArtifact({ units, library, pageSources });
+fs.mkdirSync(path.dirname(retrievalOutputPath), { recursive: true });
+fs.writeFileSync(retrievalOutputPath, `${JSON.stringify(retrievalArtifact, null, 2)}\n`);
+console.log(JSON.stringify({ output: path.relative(repositoryRoot, outputPath), retrieval_output: path.relative(repositoryRoot, retrievalOutputPath), pages: pages.length, units: units.length, relations: relations.length, questions: questions.length, library_books: library.books.length, retrieval_chunks: retrievalArtifact.chunks.length }, null, 2));

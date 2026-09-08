@@ -18,11 +18,17 @@ type CatalogBase = {
 export type CoreCatalogBook = CatalogBase & {
   kind: "core";
   source: null;
+  verifiedUnitCount: number;
+  readingViewCount: number;
+  sourceArtifactLabel: null;
 };
 
 export type ExtensionCatalogBook = CatalogBase & {
   kind: "extension";
   source: KnowledgeLibraryBook;
+  verifiedUnitCount: null;
+  readingViewCount: number;
+  sourceArtifactLabel: "WaveKB 蒸馏 PDF";
 };
 
 export type KnowledgeBookCatalogEntry = CoreCatalogBook | ExtensionCatalogBook;
@@ -39,9 +45,12 @@ export function getKnowledgeBookCatalog(data: KnowledgeData = knowledgeData()): 
     description: "按原书来源整理规则、指南、识别步骤与失效边界，是站内波浪理论判断的核心依据。",
     coverPath: "assets/books/elliott-wave-principle-tenth-edition-cover.svg",
     href: `/knowledge/books/${CORE_BOOK_ID}`,
-    itemCount: corePages.length,
-    itemLabel: "个已核验知识条目",
+    itemCount: 117,
+    itemLabel: "个已核验知识单元",
     topics: data.themes.map((theme) => theme.title.replace(/^\d+\s*/, "")),
+    verifiedUnitCount: 117,
+    readingViewCount: corePages.length,
+    sourceArtifactLabel: null,
   };
 
   const extensionBooks: ExtensionCatalogBook[] = data.library.books.map((book) => ({
@@ -57,6 +66,9 @@ export function getKnowledgeBookCatalog(data: KnowledgeData = knowledgeData()): 
     itemCount: book.pdf_pages,
     itemLabel: "页网页正文",
     topics: book.topics,
+    verifiedUnitCount: null,
+    readingViewCount: book.pdf_pages,
+    sourceArtifactLabel: "WaveKB 蒸馏 PDF",
   }));
 
   return [coreBook, ...extensionBooks];

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildAiKnowledgeArtifact } from "./lib/ai-knowledge-artifact.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const knowledgeRoot = path.join(repositoryRoot, "knowledge");
@@ -43,6 +44,12 @@ function uniqueIds(rows, label) {
   return new Set(ids);
 }
 
+function uniqueValues(values, label) {
+  expect(values.every(Boolean), `${label} contains a missing id`);
+  expect(new Set(values).size === values.length, `${label} contains duplicate ids`);
+  return new Set(values);
+}
+
 function sha256(filePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
@@ -61,6 +68,8 @@ const sourcePackets = readJson(path.join(knowledgeRoot, "source/packets.json"));
 const packetUnitMap = readJson(path.join(knowledgeRoot, "source/packet-unit-map.json"));
 const visualSampling = readJson(path.join(knowledgeRoot, "reports/visual-sampling.json"));
 const compiled = readJson(path.join(repositoryRoot, "packages/knowledge/src/knowledge.json"));
+const retrievalPath = path.join(repositoryRoot, "ai-gateway/knowledge/retrieval-index.json");
+const retrieval = readJson(retrievalPath);
 const chapterFiles = fs.readdirSync(path.join(knowledgeRoot, "chapters")).filter((name) => name.endsWith(".jsonl")).sort();
 const imageIds = new Set((imageRegistry.assets || []).map((asset) => asset.id));
 const assetById = new Map((imageRegistry.assets || []).map((asset) => [asset.id, asset]));
@@ -68,9 +77,12 @@ const assetById = new Map((imageRegistry.assets || []).map((asset) => [asset.id,
 expect(Array.isArray(library.books) && library.books.length > 0, "Knowledge library has no books");
 const libraryBookIds = uniqueIds(library.books || [], "Knowledge library books");
 for (const book of library.books || []) {
-  for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "sha256"]) {
+  for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "text_path", "sha256", "rights_status", "source_provenance"]) {
     expect(Boolean(book[field]), `${book.id || "library book"} is missing ${field}`);
   }
+  expect(["verified", "unknown", "restricted"].includes(book.rights_status), `${book.id} has invalid rights status`);
+  expect(typeof book.redistribution_allowed === "boolean" || book.redistribution_allowed === null, `${book.id} has invalid redistribution permission`);
+  expect(typeof book.derivative_of === "string" || book.derivative_of === null, `${book.id} has invalid derivative metadata`);
   expect(Number.isInteger(book.pdf_pages) && book.pdf_pages > 0, `${book.id} has invalid PDF page count`);
   expect(Number.isInteger(book.source_page_count) && book.source_page_count > 0, `${book.id} has invalid source page count`);
   expect(Array.isArray(book.topics) && book.topics.length > 0, `${book.id} has no topics`);
@@ -82,6 +94,19 @@ for (const book of library.books || []) {
   }
   if (book.pdf_path && fs.existsSync(path.join(repositoryRoot, book.pdf_path))) expect(sha256(path.join(repositoryRoot, book.pdf_path)) === book.sha256, `${book.id} PDF SHA-256 mismatch`);
 }
+
+const pageSources = Object.fromEntries((library.books || []).flatMap((book) => {
+  const textPath = path.join(repositoryRoot, book.text_path || "");
+  if (!book.text_path || !fs.existsSync(textPath)) {
+    errors.push(`${book.id} is missing library text: ${book.text_path}`);
+    return [];
+  }
+  const source = readJson(textPath);
+  expect(source.book_id === book.id && source.source_pdf === book.pdf_path, `${book.id} library text metadata does not match`);
+  expect(Array.isArray(source.pages) && source.pages.length === book.pdf_pages, `${book.id} library text page count does not match`);
+  expect((source.pages || []).every((page, index) => page.page === index + 1 && String(page.text || "").trim()), `${book.id} library text pages are incomplete`);
+  return [[book.id, source]];
+}));
 
 expect(units.length === 117, `Expected 117 Units, found ${units.length}`);
 expect(relations.length === 174, `Expected 174 Relations, found ${relations.length}`);
@@ -232,6 +257,43 @@ for (const page of compiled.pages || []) {
   expect(!(page.figures || []).length, `${page.id} uses deprecated mixed figures`);
   expect(!(page.source_images || []).length, `${page.id} uses deprecated mixed source_images`);
   if (page.kind === "core") expect(page.generation_source === "canonical_units", `${page.id} does not generate its body from canonical Units`);
+}
+
+expect(retrieval.schemaVersion === "wavekb-ai-knowledge-v1", `Unexpected retrieval schema: ${retrieval.schemaVersion}`);
+expect(/^[a-f0-9]{64}$/.test(retrieval.knowledgeVersion || ""), "Retrieval knowledgeVersion is not a SHA-256");
+const retrievalBooks = Array.isArray(retrieval.books) ? retrieval.books : [];
+const retrievalChunks = Array.isArray(retrieval.chunks) ? retrieval.chunks : [];
+const retrievalBookIds = uniqueValues(retrievalBooks.map((book) => book.bookId), "Retrieval books");
+expect(JSON.stringify([...retrievalBookIds]) === JSON.stringify(["elliott-wave-principle-tenth-edition", "elliott-wave-natural-law", "chan-theory-complete"]), "Retrieval book list is not the approved three-book catalog");
+uniqueValues(retrievalChunks.map((chunk) => chunk.chunkId), "Retrieval chunks");
+const retrievalSources = retrievalBooks.flatMap((book) => book.sourceArtifacts || []);
+const retrievalSourceIds = uniqueValues(retrievalSources.map((source) => source.sourceId), "Retrieval sources");
+const retrievalBookById = new Map(retrievalBooks.map((book) => [book.bookId, book]));
+for (const source of retrievalSources) {
+  expect(/^[a-f0-9]{64}$/.test(source.sha256 || ""), `${source.sourceId} has invalid retrieval SHA-256`);
+  expect(["primary", "supplement", "contextual"].includes(source.authority), `${source.sourceId} has invalid retrieval authority`);
+  expect(source.pageCount === null || (Number.isInteger(source.pageCount) && source.pageCount > 0), `${source.sourceId} has invalid retrieval page count`);
+}
+for (const book of retrievalBooks) {
+  expect((book.sourceArtifacts || []).length > 0, `${book.bookId} has no retrieval source artifact`);
+  expect(retrievalChunks.some((chunk) => chunk.bookId === book.bookId), `${book.bookId} has no retrieval chunks`);
+}
+for (const chunk of retrievalChunks) {
+  expect(retrievalBookIds.has(chunk.bookId), `${chunk.chunkId} references an unknown retrieval book`);
+  expect(retrievalSourceIds.has(chunk.sourceId), `${chunk.chunkId} references an unknown retrieval source`);
+  expect(Boolean(String(chunk.title || "").trim() && String(chunk.text || "").trim() && String(chunk.searchable || "").trim()), `${chunk.chunkId} has missing retrieval text`);
+  expect(["primary", "supplement", "contextual"].includes(chunk.authority), `${chunk.chunkId} has invalid retrieval authority`);
+  expect(["verified", "generated", "needs_review"].includes(chunk.contentStatus), `${chunk.chunkId} has invalid retrieval content status`);
+  expect(/^[a-f0-9]{64}$/.test(chunk.contentSha256 || ""), `${chunk.chunkId} has invalid content SHA-256`);
+  expect(typeof chunk.href === "string" && /^\/knowledge\//.test(chunk.href) && !chunk.href.includes("..") && !chunk.href.includes("\\") && !chunk.href.includes("://"), `${chunk.chunkId} has unsafe href: ${chunk.href}`);
+  expect(Array.isArray(chunk.pdfPages) && chunk.pdfPages.length > 0 && chunk.pdfPages.every((page) => Number.isInteger(page) && page > 0), `${chunk.chunkId} has invalid retrieval pages`);
+  const book = retrievalBookById.get(chunk.bookId);
+  const source = book?.sourceArtifacts?.find((candidate) => candidate.sourceId === chunk.sourceId);
+  if (source?.pageCount !== null && source?.pageCount !== undefined) expect(chunk.pdfPages.every((page) => page <= source.pageCount), `${chunk.chunkId} exceeds its retrieval source page count`);
+}
+if (units.length && library.books?.length && Object.keys(pageSources).length === library.books.length && fs.existsSync(retrievalPath)) {
+  const expectedRetrieval = `${JSON.stringify(buildAiKnowledgeArtifact({ units, library, pageSources }), null, 2)}\n`;
+  expect(fs.readFileSync(retrievalPath, "utf8") === expectedRetrieval, "Generated retrieval artifact is stale; run node scripts/build-knowledge.mjs");
 }
 
 const sourceFiles = [manifest, ...(supplements.sources || [])];

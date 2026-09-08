@@ -86,6 +86,10 @@ export type KnowledgeLibraryBook = {
   pdf_pages: number;
   source_page_count: number;
   sha256: string;
+  rights_status: "verified" | "unknown" | "restricted";
+  redistribution_allowed: boolean | null;
+  source_provenance: string;
+  derivative_of: string | null;
   topics: string[];
   reading_guide: Array<{ title: string; description: string }>;
   boundaries: string[];
