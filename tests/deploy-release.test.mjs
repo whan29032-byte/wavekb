@@ -219,6 +219,17 @@ test("first install rollback removes only newly managed units and keeps catalogu
   const db = new ResearchStore(f.database, { readOnly: true }); assert.ok(db.detail("new")); db.close();
 });
 
+test("first install accepts a scheduled timer before the oneshot has a Result", async (t) => {
+  const f = persistentFixture(t);
+  const control = f.options.syncService;
+  f.options.syncService = async (action, name) => {
+    const result = await control(action, name);
+    return action === "check" ? { next: result.next, result: "" } : result;
+  };
+  const result = await api.activate(f.options);
+  assert.equal(fs.realpathSync(path.join(f.options.applicationRoot, "current")), result.releaseDir);
+});
+
 test("production adapter bounds an active writer wait without stopping or clearing its lease", async () => {
   let elapsed = 0;
   const adapter = api.productionResearchAdapter({

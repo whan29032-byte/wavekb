@@ -61,6 +61,7 @@ try {
 console.log(JSON.stringify({
   releaseId,
   phase: typeof state.phase === "string" ? state.phase : "unknown",
+  diagnosticStage: typeof state.diagnosticStage === "string" ? state.diagnosticStage : "unrecorded",
   webMutated: state.webMutated === true,
   previousVersionMatchesShape: /^[0-9a-f]{40}$/.test(state.previousVersion ?? ""),
   tline: state.tline ? {

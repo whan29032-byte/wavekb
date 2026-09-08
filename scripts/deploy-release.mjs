@@ -136,9 +136,16 @@ function installSync(options, p, state, environmentFiles) {
 async function checkSync(options, state) {
   requireValue(state.tline?.preheatComplete && validSuccess(state.tline.lastSuccess), "Research preheat metadata is missing");
   const timer = await options.syncService("check", "timer");
-  requireValue(timer?.next && timer.result === "success", "Research timer or worker check failed");
+  // A newly installed oneshot has no previous Result yet. Its durable timer,
+  // next schedule and preheated catalogue are sufficient until the first run.
+  requireValue(timer?.next && [undefined, null, "", "success"].includes(timer.result), "Research timer or worker check failed");
   const status = await options.worker({ command: "status", worker: path.join(state.releaseDir, "apps/web/tline-worker/cli.mjs"), file: state.tline.file, user: state.tline.user });
   requireValue(validSuccess(status?.lastSuccess), "Research catalogue is not ready");
+}
+
+function markDiagnosticStage(state, metadata, stage) {
+  state.diagnosticStage = stage;
+  saveMetadata(metadata, state);
 }
 
 export async function activate(options) {
@@ -176,6 +183,7 @@ export async function activate(options) {
   saveMetadata(p.metadata, state);
 
   try {
+    markDiagnosticStage(state, p.metadata, "candidate-extraction");
     // GNU tar applies a non-root test runner's umask unless permissions are
     // explicit, and the archive's '.' entry can overwrite releaseDir's mode.
     execFileSync("tar", ["-xzf", options.archive, "-C", p.releaseDir, "--no-same-owner", "--same-permissions"]);
@@ -210,27 +218,45 @@ export async function activate(options) {
       supplementalEnvironment = `EnvironmentFile=${secretFile}\n`;
       environmentFiles.push(secretFile);
     }
-    if (options.tline) await prepareSync(options, p, state, environmentFiles);
+    if (options.tline) {
+      markDiagnosticStage(state, p.metadata, "research-preheat");
+      await prepareSync(options, p, state, environmentFiles);
+    }
     const unit = `[Unit]\nDescription=WaveKB Next.js production\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=${options.deployUser}\nWorkingDirectory=${p.current}\nEnvironmentFile=${options.environmentFile}\nExecStart=${p.current}/start-release.sh\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=20\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=${p.applicationRoot}\nUMask=0027\n\n[Install]\nWantedBy=multi-user.target\n`;
     // Arm durable rollback before changing the service file or current link.
     state.phase = "activating"; state.webMutated = true; saveMetadata(p.metadata, state);
     const webEnvironment = options.tline ? `Environment=TLINE_RESEARCH_DB_PATH=${state.tline.file}\nUnsetEnvironment=TLINE_API_KEY\n` : supplementalEnvironment;
     fs.writeFileSync(options.unitFile, unit.replace(`EnvironmentFile=${options.environmentFile}\n`, `EnvironmentFile=${options.environmentFile}\n${webEnvironment}`), { mode: 0o644 });
-    if (options.tline) { state.tline.unitsInstalled = true; saveMetadata(p.metadata, state); installSync(options, p, state, environmentFiles); }
+    if (options.tline) {
+      markDiagnosticStage(state, p.metadata, "research-unit-install");
+      state.tline.unitsInstalled = true; saveMetadata(p.metadata, state); installSync(options, p, state, environmentFiles);
+    }
+    markDiagnosticStage(state, p.metadata, "current-link-switch");
     replaceCurrent(p.current, p.releaseDir);
+    markDiagnosticStage(state, p.metadata, "systemd-reload");
     await options.service("daemon-reload");
+    markDiagnosticStage(state, p.metadata, "web-service-restart");
     await options.service("restart");
+    markDiagnosticStage(state, p.metadata, "web-health");
     await requireHealth(options, options.sha);
     if (options.tline) {
+      markDiagnosticStage(state, p.metadata, "research-service-reset");
       await options.syncService("reset-failed", "service");
+      markDiagnosticStage(state, p.metadata, "research-timer-enable");
       await options.syncService("enable", "timer");
+      markDiagnosticStage(state, p.metadata, "research-timer-start");
       await options.syncService("start", "timer");
+      markDiagnosticStage(state, p.metadata, "research-runtime-check");
       await checkSync(options, state);
     }
+    markDiagnosticStage(state, p.metadata, "awaiting-acceptance");
     state.phase = "awaiting-acceptance"; saveMetadata(p.metadata, state);
     return { releaseId, releaseDir: p.releaseDir };
   } catch (error) {
-    await rollback({ ...options, releaseId });
+    try { await rollback({ ...options, releaseId }); }
+    catch (rollbackError) {
+      if (error instanceof Error) error.cause = rollbackError;
+    }
     throw error;
   }
 }
