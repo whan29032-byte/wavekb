@@ -438,8 +438,8 @@ export class SupabaseGatewayApi implements GatewayApi {
     return rows[0];
   }
 
-  async listTradingLeaderboard(period: string): Promise<unknown[]> {
-    return this.trading.leaderboard(period);
+  async listTradingLeaderboard(): Promise<unknown[]> {
+    return this.trading.leaderboard();
   }
 
   async getExchangeConnection(ownerId: string): Promise<unknown> {

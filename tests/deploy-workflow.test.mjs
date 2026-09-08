@@ -41,11 +41,15 @@ test("backend deployment validates host before migration and rolls gateway code 
   const migration = backendSteps.findIndex((step) => /Apply the additive/.test(step.name));
   const upload = backendSteps.findIndex((step) => /Upload gateway archive/.test(step.name));
   const activation = backendSteps.findIndex((step) => /Activate gateway/.test(step.name));
-  assert.ok(hostPreflight >= 0 && hostPreflight < migration && migration < upload && upload < activation);
+  const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
+  assert.ok(hostPreflight >= 0 && hostPreflight < migration && migration < upload && upload < activation && activation < publicSchemaCheck);
   assert.match(backendSteps[migration].run, /schema_before/);
   assert.match(backendSteps[migration].run, /202608210002/);
   assert.match(backendSteps[migration].run, /202609080001/);
+  assert.match(backendSteps[migration].run, /202609080002/);
+  assert.match(backendSteps[migration].run, /202609080002_realtime_trading_leaderboard\.sql/);
   assert.equal(backendSteps[migration].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
+  assert.match(backendSteps[publicSchemaCheck].run, /202609080002/);
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
   assert.match(backendSteps[activation].run, /legacy_layout/);

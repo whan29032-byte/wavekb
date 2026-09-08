@@ -111,7 +111,7 @@ test.describe("authenticated member shell acceptance", () => {
 
     const navigation = page.getByRole("navigation", { name: "主导航" });
     await expect(navigation.getByRole("link", { name: "积分商城" })).toHaveAttribute("href", "/rewards");
-    await expect(navigation.getByRole("link", { name: "交易工作台", exact: true })).toHaveAttribute("href", "/workbench");
+    await expect(navigation.getByRole("link", { name: "交易工作台", exact: true })).toHaveCount(0);
 
     const friendsHandle = page.locator('[data-drag-handle="friends"]');
     await expect(friends).toBeVisible({ timeout: 20_000 });

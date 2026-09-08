@@ -51,7 +51,7 @@ node src/server.ts
 
 排行榜只接受币安 U 本位合约单资产保证金账户的 `USER_DATA` 观察 API。用户必须在币安后台关闭交易和提现权限；网关只能验证读取能力，不能替用户证明一把 Key 没有额外权限。API Key 与 Secret Key 作为一个 JSON 密文使用同一套 AES-256-GCM 主密钥保存，浏览器和公开 RPC 都不能读取密文。
 
-部署 `202609080001_binance_trading_leaderboard.sql` 后启用 `elliott-wave-trading-sync.timer`。定时任务执行 `node src/trading-worker.ts`，默认每 15 分钟同步一次账户权益和 `TRANSFER` 资金流水。多资产保证金、非 USDT 转账、连续同步异常或六小时未更新都会停止公开排名。
+依次部署 `202609080001_binance_trading_leaderboard.sql` 与 `202609080002_realtime_trading_leaderboard.sql` 后启用 `elliott-wave-trading-sync.timer`。绑定成功即以基准快照和 0% 收益加入实时榜；定时任务执行 `node src/trading-worker.ts`，默认每 15 分钟同步一次账户权益和 `TRANSFER` 资金流水。多资产保证金、非 USDT 转账、连续同步异常或六小时未更新都会停止公开排名。
 
 ## 复盘知识准入
 

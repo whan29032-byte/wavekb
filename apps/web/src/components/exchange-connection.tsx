@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ArrowsClockwise, CheckCircle, LinkBreak, LockKey } from "@phosphor-icons/react";
 import type { ExchangeConnection } from "@wavekb/domain";
@@ -24,6 +25,7 @@ function messageFor(error: string) {
 }
 
 export function ExchangeConnectionPanel({ actorId }: { actorId: string | null }) {
+  const router = useRouter();
   const [connection, setConnection] = useState<ExchangeConnection | null>(null);
   const [loading, setLoading] = useState(Boolean(actorId));
   const [pending, setPending] = useState(false);
@@ -61,7 +63,7 @@ export function ExchangeConnectionPanel({ actorId }: { actorId: string | null })
       });
       const payload = await response.json().catch(() => ({})) as { connection?: ExchangeConnection; error?: string };
       if (!response.ok || !payload.connection) throw new Error(payload.error || "request_failed");
-      setConnection(payload.connection); form.reset(); setStatus("连接已验证。排行榜将在满足 24 小时观察期和样本数量后显示。");
+      setConnection(payload.connection); form.reset(); setStatus("连接已验证，已加入实时排行榜。"); router.refresh();
     } catch (cause) {
       setError(messageFor(cause instanceof Error ? cause.message : "request_failed")); setStatus("");
     } finally { setPending(false); }
@@ -75,15 +77,15 @@ export function ExchangeConnectionPanel({ actorId }: { actorId: string | null })
       const payload = await response.json().catch(() => ({})) as { connection?: ExchangeConnection; error?: string };
       if (!response.ok) throw new Error(payload.error || "request_failed");
       setConnection(kind === "disconnect" ? null : payload.connection ?? connection);
-      setStatus(kind === "disconnect" ? "连接已断开。" : "同步完成。频繁点击不会突破服务器同步间隔。");
+      setStatus(kind === "disconnect" ? "连接已断开。" : "同步完成，排行榜已按最新快照刷新。"); router.refresh();
     } catch (cause) { setError(messageFor(cause instanceof Error ? cause.message : "request_failed")); setStatus(""); }
     finally { setPending(false); }
   }
 
-  if (!actorId) return <section className="grid gap-3 border-y py-5"><h2 className="font-semibold">绑定我的只读账户</h2><p className="text-sm leading-6 text-muted-foreground">登录后可绑定币安 U 本位合约观察 API。收益从绑定成功后开始计算。</p><Button asChild variant="secondary" className="w-fit"><Link href="/login?next=%2Fleaderboard">登录后绑定</Link></Button></section>;
+  if (!actorId) return <section className="grid gap-3 border-y py-5"><h2 className="font-semibold">绑定我的只读账户</h2><p className="text-sm leading-6 text-muted-foreground">登录后可绑定币安 U 本位合约观察 API。收益从绑定成功后开始计算，并按最新同步结果更新。</p><Button asChild variant="secondary" className="w-fit"><Link href="/login?next=%2Fleaderboard">登录后绑定</Link></Button></section>;
   if (loading) return <p role="status" className="border-y py-5 text-sm text-muted-foreground">正在读取交易所连接…</p>;
 
   if (connection) return <section className="grid gap-4 border-y py-5" aria-labelledby="exchange-status-title"><header className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="exchange-status-title" className="flex items-center gap-2 font-semibold"><CheckCircle aria-hidden size={19} className={connection.status === "active" ? "text-primary" : "text-destructive"} />{connection.label}</h2><p className="mt-1 text-xs text-muted-foreground">币安 U 本位合约 · Key {connection.secret_mask} · {connection.public_enabled ? "参与公开排行" : "仅自己可见"}</p></div><span className="text-xs font-medium">{connection.status === "active" ? "连接正常" : "同步异常"}</span></header><dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-xs text-muted-foreground">开始跟踪</dt><dd className="mt-1">{new Date(connection.started_at).toLocaleString("zh-CN")}</dd></div><div><dt className="text-xs text-muted-foreground">最近同步</dt><dd className="mt-1">{connection.last_synced_at ? new Date(connection.last_synced_at).toLocaleString("zh-CN") : "尚未同步"}</dd></div></dl>{connection.last_error_code ? <FieldMessage role="alert">{messageFor(connection.last_error_code)}</FieldMessage> : null}<div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={pending} onClick={() => void action("sync")}><ArrowsClockwise aria-hidden size={17} />立即同步</Button><Button type="button" variant="ghost" disabled={pending} onClick={() => void action("disconnect")}><LinkBreak aria-hidden size={17} />断开连接</Button></div>{status ? <p role="status" className="text-xs text-muted-foreground">{status}</p> : null}{error ? <FieldMessage role="alert">{error}</FieldMessage> : null}</section>;
 
-  return <form className="grid gap-5 border-y py-5" onSubmit={submit}><header><h2 className="flex items-center gap-2 font-semibold"><LockKey aria-hidden size={19} className="text-primary" />绑定币安观察 API</h2><p className="mt-1 max-w-[70ch] text-sm leading-6 text-muted-foreground">仅支持 U 本位合约的单资产保证金模式。请新建专用 API，关闭现货/合约交易与提现权限，并尽量设置服务器 IP 白名单。密钥由服务端 AES-256-GCM 加密，浏览器之后只能看到末四位。</p></header><div className="grid gap-4 sm:grid-cols-2"><Field><Label htmlFor="exchange-label">连接名称</Label><Input id="exchange-label" name="label" defaultValue="币安 U 本位合约" minLength={2} maxLength={60} required /></Field><Field><Label htmlFor="exchange-api-key">API Key</Label><Input id="exchange-api-key" name="apiKey" type="password" autoComplete="off" minLength={16} maxLength={512} required /></Field><Field className="sm:col-span-2"><Label htmlFor="exchange-secret-key">Secret Key</Label><Input id="exchange-secret-key" name="secretKey" type="password" autoComplete="new-password" minLength={16} maxLength={512} required /></Field></div><label className="flex items-start gap-3 text-sm leading-6"><input name="readOnlyAck" type="checkbox" required className="mt-1.5 accent-primary" /><span>我确认这是一组专用观察 API，已关闭交易和提现权限；如权限变化，我会立即撤销并重新绑定。</span></label><label className="flex items-start gap-3 text-sm leading-6"><input name="publicEnabled" type="checkbox" defaultChecked className="mt-1.5 accent-primary" /><span>满足观察期后，把收益率和站内身份加入公开排行榜（不公开账户金额、仓位或交易明细）。</span></label>{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : null}{error ? <FieldMessage role="alert">{error}</FieldMessage> : null}<Button type="submit" className="w-fit" disabled={pending}>{pending ? "正在验证" : "验证并开始跟踪"}</Button></form>;
+  return <form className="grid gap-5 border-y py-5" onSubmit={submit}><header><h2 className="flex items-center gap-2 font-semibold"><LockKey aria-hidden size={19} className="text-primary" />绑定币安观察 API</h2><p className="mt-1 max-w-[70ch] text-sm leading-6 text-muted-foreground">仅支持 U 本位合约的单资产保证金模式。请新建专用 API，关闭现货/合约交易与提现权限，并尽量设置服务器 IP 白名单。密钥由服务端 AES-256-GCM 加密，浏览器之后只能看到末四位。</p></header><div className="grid gap-4 sm:grid-cols-2"><Field><Label htmlFor="exchange-label">连接名称</Label><Input id="exchange-label" name="label" defaultValue="币安 U 本位合约" minLength={2} maxLength={60} required /></Field><Field><Label htmlFor="exchange-api-key">API Key</Label><Input id="exchange-api-key" name="apiKey" type="password" autoComplete="off" minLength={16} maxLength={512} required /></Field><Field className="sm:col-span-2"><Label htmlFor="exchange-secret-key">Secret Key</Label><Input id="exchange-secret-key" name="secretKey" type="password" autoComplete="new-password" minLength={16} maxLength={512} required /></Field></div><label className="flex items-start gap-3 text-sm leading-6"><input name="readOnlyAck" type="checkbox" required className="mt-1.5 accent-primary" /><span>我确认这是一组专用观察 API，已关闭交易和提现权限；如权限变化，我会立即撤销并重新绑定。</span></label><label className="flex items-start gap-3 text-sm leading-6"><input name="publicEnabled" type="checkbox" defaultChecked className="mt-1.5 accent-primary" /><span>绑定成功后，把实时收益率和站内身份加入公开排行榜（不公开账户金额、仓位或交易明细）。</span></label>{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : null}{error ? <FieldMessage role="alert">{error}</FieldMessage> : null}<Button type="submit" className="w-fit" disabled={pending}>{pending ? "正在验证" : "验证并开始跟踪"}</Button></form>;
 }

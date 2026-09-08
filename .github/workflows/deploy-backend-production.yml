@@ -104,7 +104,7 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:8787/health > /dev/null
           REMOTE
 
-      - name: Apply the additive trading leaderboard migration
+      - name: Apply the additive trading leaderboard migrations
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
@@ -116,9 +116,13 @@ jobs:
           case "$schema_before" in
             202608210002)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202609080001_binance_trading_leaderboard.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202609080002_realtime_trading_leaderboard.sql
               ;;
             202609080001)
-              echo "Trading leaderboard migration already applied; continuing idempotently."
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202609080002_realtime_trading_leaderboard.sql
+              ;;
+            202609080002)
+              echo "Realtime trading leaderboard migration already applied; continuing idempotently."
               ;;
             *)
               echo "Unexpected production schema marker; refusing migration."
@@ -126,7 +130,7 @@ jobs:
               ;;
           esac
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema_after" = 202609080001
+          test "$schema_after" = 202609080002
           rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('exchange_connections','exchange_connection_secrets','trading_equity_snapshots') and c.relrowsecurity;" | tr -d '[:space:]')
           test "$rls_tables" = 3
 
@@ -262,4 +266,4 @@ jobs:
             -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
             -H 'content-type: application/json' \
             -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]')
-          test "$schema" = 202609080001
+          test "$schema" = 202609080002

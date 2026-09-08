@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpenText, ChartLineUp, ChatsCircle, Coins, GraduationCap, Newspaper, Trophy } from "@phosphor-icons/react/dist/ssr";
+import { BookOpenText, ChatsCircle, Coins, GraduationCap, Newspaper, Trophy } from "@phosphor-icons/react/dist/ssr";
 import { AccountNavigation } from "@/components/account-navigation";
 import { AppearanceSettings } from "@/components/appearance-settings";
 import { MobileNavigation } from "@/components/mobile-navigation";
@@ -16,9 +16,6 @@ export function SiteHeader() {
           <MobileNavigation />
           <Link href="/knowledge" className="hidden min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground lg:flex">
             <BookOpenText aria-hidden size={18} weight="duotone" />知识库
-          </Link>
-          <Link href="/workbench" aria-label="交易工作台" className="hidden min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-2 py-2 text-muted-foreground hover:bg-muted hover:text-foreground lg:flex lg:px-3">
-            <ChartLineUp aria-hidden size={18} weight="duotone" /><span className="hidden lg:inline">交易工作台</span>
           </Link>
           <Link href="/community/idea_sharing" aria-label="社区" className="hidden min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg px-2 text-muted-foreground hover:bg-muted hover:text-foreground lg:flex lg:px-3">
             <ChatsCircle aria-hidden size={18} weight="duotone" /><span className="hidden sm:inline">社区</span>

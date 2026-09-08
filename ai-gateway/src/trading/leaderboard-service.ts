@@ -76,11 +76,10 @@ export class BinanceLeaderboardService {
     return safeConnection(await this.connection(ownerId));
   }
 
-  async leaderboard(period: string, limit = 50) {
-    const normalizedPeriod = ["7d", "30d", "90d", "all"].includes(period) ? period : "30d";
+  async leaderboard(limit = 50) {
     const rows = await this.database.request("/rest/v1/rpc/list_trading_leaderboard", {
       method: "POST",
-      body: { p_period: normalizedPeriod, p_limit: Math.min(Math.max(Number(limit || 50), 3), 100) },
+      body: { p_period: "realtime", p_limit: Math.min(Math.max(Number(limit || 50), 3), 100) },
     });
     return Array.isArray(rows) ? rows : [];
   }

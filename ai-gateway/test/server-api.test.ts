@@ -78,8 +78,8 @@ const api = {
   async getJob(_ownerId: string, jobId: string) {
     return { id: jobId, status: "queued" };
   },
-  async listTradingLeaderboard(period: string) {
-    return [{ rank_no: 1, public_uid: 583104, display_name: "Wave", return_rate: period === "7d" ? 0.12 : 0.2 }];
+  async listTradingLeaderboard(...args: string[]) {
+    return [{ rank_no: 1, public_uid: 583104, display_name: "Wave", return_rate: args.length ? -1 : 0.2 }];
   },
   async getExchangeConnection() {
     return { id: "e1", status: "active", secret_mask: "••••ABCD" };
@@ -245,7 +245,7 @@ test("trading leaderboard is public while exchange credentials remain owner-scop
   const server = buildServer({ config, api });
   const board = await server.inject({ url: "/api/trading-leaderboard?period=7d" });
   assert.equal(board.statusCode, 200);
-  assert.equal((board.json() as any).entries[0].return_rate, 0.12);
+  assert.equal((board.json() as any).entries[0].return_rate, 0.2);
 
   assert.equal((await server.inject({ url: "/v1/user/exchange-connection" })).statusCode, 401);
   const created = await server.inject({

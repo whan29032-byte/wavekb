@@ -47,7 +47,7 @@ export type GatewayApi = {
   ): Promise<unknown>;
   enqueueJob(ownerId: string, analysisId: string, input: Record<string, unknown>): Promise<unknown>;
   getJob(ownerId: string, jobId: string): Promise<unknown>;
-  listTradingLeaderboard?(period: string): Promise<unknown[]>;
+  listTradingLeaderboard?(): Promise<unknown[]>;
   getExchangeConnection?(ownerId: string): Promise<unknown>;
   createExchangeConnection?(ownerId: string, input: Record<string, unknown>): Promise<unknown>;
   syncExchangeConnection?(ownerId: string): Promise<unknown>;
@@ -411,7 +411,7 @@ async function route(
     if (!api.listTradingLeaderboard) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return {
       statusCode: 200,
-      body: { entries: await api.listTradingLeaderboard(String(query.period || "30d")) },
+      body: { entries: await api.listTradingLeaderboard() },
       headers: { "cache-control": "public, max-age=60, stale-while-revalidate=300" },
     };
   }

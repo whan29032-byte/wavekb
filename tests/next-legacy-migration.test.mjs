@@ -201,14 +201,14 @@ test("user points are managed with users rather than the reward catalog page", a
   assert.match(rewards, /用户积分调整已经归入/);
 });
 
-test("site-wide rewards, workbench and trading leaderboard remain directly discoverable", async () => {
+test("site-wide rewards and leaderboard remain discoverable while workbench stays profile-scoped", async () => {
   const [header, account, actions] = await Promise.all([
     read("apps/web/src/components/site-header.tsx"),
     read("apps/web/src/components/account-navigation.tsx"),
     read("apps/web/src/components/member-profile-actions.tsx"),
   ]);
   assert.match(header, /href="\/rewards"[\s\S]*?积分商城/);
-  assert.match(header, /href="\/workbench"[\s\S]*?交易工作台/);
+  assert.doesNotMatch(header, /href="\/workbench"/);
   assert.match(header, /href="\/leaderboard"[\s\S]*?收益榜/);
   assert.doesNotMatch(account, /href="\/(?:rewards|workbench)"/);
   const ownActions = actions.slice(actions.indexOf("if (actorId === profileId)"), actions.indexOf("async function toggleFollow"));
