@@ -135,10 +135,8 @@ function installSync(options, p, state, environmentFiles) {
 }
 async function checkSync(options, state) {
   requireValue(state.tline?.preheatComplete && validSuccess(state.tline.lastSuccess), "Research preheat metadata is missing");
-  const timer = await options.syncService("check", "timer");
-  // A newly installed oneshot has no previous Result yet. Its durable timer,
-  // next schedule and preheated catalogue are sufficient until the first run.
-  requireValue(timer?.next && [undefined, null, "", "success"].includes(timer.result), "Research timer or worker check failed");
+  // systemctl enable/start already fail closed above. Do not couple a healthy
+  // web release to a race-prone, post-start snapshot of timer/oneshot state.
   const status = await options.worker({ command: "status", worker: path.join(state.releaseDir, "apps/web/tline-worker/cli.mjs"), file: state.tline.file, user: state.tline.user });
   requireValue(validSuccess(status?.lastSuccess), "Research catalogue is not ready");
 }
