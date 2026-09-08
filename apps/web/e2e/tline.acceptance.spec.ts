@@ -14,7 +14,8 @@ test("research entry stays inside WaveKB and fits desktop/mobile navigation", as
   if ((page.viewportSize()?.width ?? 0) >= 768) {
     for (const width of [768, 1024]) {
       await page.setViewportSize({ width, height: 900 });
-      await expect(page.getByRole("link", { name: "机构研报", exact: true }).filter({ visible: true })).toBeVisible();
+      if (width < 1024) await page.getByRole("button", { name: "展开主导航" }).click();
+      await expect(page.getByRole("link", { name: "机构研报", exact: true }).filter({ visible: true })).toHaveAttribute("href", "/research");
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     }
   }
