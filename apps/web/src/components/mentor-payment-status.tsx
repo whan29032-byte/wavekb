@@ -53,6 +53,17 @@ export function MentorClaimList({ claims, pendingOrders = [], checkedAt, error, 
   </section>;
 }
 
+export function MentorPaymentSummary({ claims, pendingOrders = [], error, refresh }: { claims: BuyerMentorClaim[]; pendingOrders?: BuyerPendingMentorOrder[]; error: string; refresh: () => Promise<void> }) {
+  const unresolvedClaims = claims.filter((claim) => claim.status === "submitted");
+  const unresolvedCount = unresolvedClaims.length + pendingOrders.length;
+  return <section className="grid gap-3 rounded-xl border bg-surface p-5" aria-label="付款待核对摘要">
+    <h2 className="text-xl font-semibold">{error ? "付款状态暂时无法核实" : `${unresolvedCount} 项待核对付款`}</h2>
+    <p className="text-sm leading-6 text-muted-foreground">{error ? "请先重新查询付款状态；在核实前请勿重复转账或提交。" : "包含已提交的付款声明或尚未提交声明的待处理订单。完整状态和历史记录请在“我的辅导”中查看。"}</p>
+    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+    <div className="flex flex-wrap gap-3"><Button type="button" variant="secondary" className="w-fit" onClick={() => void refresh()}>{error ? "重试查询状态" : "刷新付款状态"}</Button><Link className="self-center text-sm font-medium text-primary hover:underline" href="/tutoring">查看完整付款记录</Link></div>
+  </section>;
+}
+
 export function MentorPaymentStatus({ actorId }: { actorId: string }) {
   const state = useBuyerMentorClaims(actorId);
   const router = useRouter();
