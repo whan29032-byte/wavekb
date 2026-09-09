@@ -171,7 +171,7 @@ export class AiJobWorker {
             cost_amount: 0,
             cost_confirmed: false,
           },
-        });
+        }).catch(() => undefined);
       }
       await this.patchJob(job.id, retry ? {
         status: "waiting_retry",

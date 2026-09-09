@@ -122,6 +122,7 @@ function workerFixture(options: {
   loadIndex?: () => KnowledgeIndex;
   previousAttempts?: number;
   contextTokens?: number;
+  usageLedgerFails?: boolean;
 } = {}) {
   const events: string[] = [];
   const calls: RecordedCall[] = [];
@@ -146,7 +147,10 @@ function workerFixture(options: {
         return [{ id: "retrieval-1" }];
       }
       if (path.startsWith("/rest/v1/ai_job_attempts?id=")) return null;
-      if (path === "/rest/v1/ai_usage_ledger") return null;
+      if (path === "/rest/v1/ai_usage_ledger") {
+        if (options.usageLedgerFails) throw new Error("usage ledger unavailable");
+        return null;
+      }
       if (path.startsWith("/rest/v1/ai_jobs?id=")) return null;
       throw new Error(`unexpected database path: ${path}`);
     },
@@ -410,6 +414,40 @@ test("invalid JSON gets one same-provider repair and never succeeds with the raw
     cost_amount: 0,
     cost_confirmed: false,
   });
+  assert.equal(fixture.calls.some((call) => call.path.startsWith("/rest/v1/workbench_analyses")
+    && call.method === "PATCH"), false);
+});
+
+test("a failed usage-ledger write cannot prevent invalid model output from terminalizing the job", async () => {
+  const fixture = workerFixture({
+    usageLedgerFails: true,
+    providerOutcomes: [{
+      text: "invalid initial output",
+      usage: { inputTokens: 2, outputTokens: 1 },
+      providerRequestId: "failed-ledger-1",
+      finishReason: "stop",
+    }, {
+      text: "invalid repair output",
+      usage: { inputTokens: 3, outputTokens: 2 },
+      providerRequestId: "failed-ledger-2",
+      finishReason: "stop",
+    }],
+  });
+
+  let rejection: unknown;
+  try {
+    await fixture.worker.runJob(baseJob);
+  } catch (error) {
+    rejection = error;
+  }
+
+  assert.equal(fixture.providerCalls(), 2);
+  assert.equal(fixture.calls.filter((call) => call.path === "/rest/v1/ai_usage_ledger").length, 1);
+  const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
+  assert.equal(patch?.body?.status, "failed");
+  assert.equal(patch?.body?.error_code, "invalid_model_output");
+  assert.equal(Object.hasOwn(patch?.body ?? {}, "available_at"), false);
+  assert.equal(rejection, undefined);
   assert.equal(fixture.calls.some((call) => call.path.startsWith("/rest/v1/workbench_analyses")
     && call.method === "PATCH"), false);
 });
