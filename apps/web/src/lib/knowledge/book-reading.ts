@@ -19,6 +19,7 @@ export type BookReadingModel = {
   navigationEntries: Array<{ title: string; href: string; generated?: boolean }>;
   content: {
     themes: Array<{ id: string; title: string; count: number }>;
+    questions: Array<{ id: string; question: string; requiredCount: number; optionalCount: number }>;
     chapters: Array<{ id: string; title: string; count: number }>;
     readingGuide: Array<{ title: string; description: string }>;
     topics: string[];
@@ -66,17 +67,24 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
       })),
       readingOptions: [
         { title: "规则与指引", description: "先检查强制规则，再使用指南排序候选。", href: "/knowledge/core-system" },
-        { title: "按问题查答案", description: `${data.questions.length} 条判断路径，连接规则、证据和失效管理。`, href: "/knowledge#question-routes" },
-        { title: "按原书章节", description: "沿第10版章节顺序阅读同一批知识条目。", href: "#core-chapters" },
+        { title: "按问题查答案", description: `${data.questions.length} 条判断路径，连接规则、证据和失效管理。`, href: `${book.href}?section=questions#core-questions` },
+        { title: "按原书章节", description: "沿第10版章节顺序阅读同一批知识条目。", href: `${book.href}?section=chapters#core-chapters` },
         { title: "术语表", description: "查看浪级、结构和比例相关术语。", href: "/knowledge/chapters/glossary" },
       ],
       navigationEntries: [
         { title: "规则与指引", href: "/knowledge/core-system" },
-        { title: "八大主题", href: "#core-themes" },
-        { title: "原书章节", href: "#core-chapters" },
+        { title: "八大主题", href: `${book.href}?section=themes#core-themes` },
+        { title: "问题解答", href: `${book.href}?section=questions#core-questions` },
+        { title: "原书章节", href: `${book.href}?section=chapters#core-chapters` },
       ],
       content: {
         themes: data.themes.map((theme) => ({ id: theme.id, title: theme.title, count: [...theme.unit_ids, ...theme.children.flatMap((child) => child.unit_ids)].length })),
+        questions: data.questions.map((question) => ({
+          id: question.id,
+          question: question.question,
+          requiredCount: question.required_unit_ids.length,
+          optionalCount: question.optional_unit_ids.length,
+        })),
         chapters: data.chapters.map((chapter) => ({ id: chapter.id, title: chapterTitle(chapter.id), count: chapter.unit_ids.length })),
         readingGuide: [], topics: [], pages: [],
       },
@@ -108,7 +116,7 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
       { title: "网页正文", href: "#book-text" }, { title: "使用边界", href: "#boundaries" },
       ...pages.map((page) => ({ title: `第 ${page.page} 页`, href: `#page-${page.page}`, generated: true })),
     ],
-    content: { themes: [], chapters: [], readingGuide: source.reading_guide, topics: source.topics, pages },
+    content: { themes: [], questions: [], chapters: [], readingGuide: source.reading_guide, topics: source.topics, pages },
     sourceArtifact: { label: "WaveKB 蒸馏 PDF", href: assetUrl(source.pdf_path) },
     boundaries: source.boundaries,
   };

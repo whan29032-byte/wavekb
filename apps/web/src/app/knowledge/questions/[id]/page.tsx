@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData } from "@wavekb/knowledge";
+import { CORE_BOOK_ID } from "@/lib/knowledge/book-catalog";
 import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -33,7 +34,7 @@ export default async function KnowledgeQuestionPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto grid max-w-4xl gap-8 px-4 py-10 md:px-6 md:py-14">
-      <Link href="/knowledge#question-routes" className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回问题路线</Link>
+      <Link href={`/knowledge/books/${CORE_BOOK_ID}?section=questions#core-questions`} className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回问题路线</Link>
       <header className="grid gap-3 border-b pb-7">
         <span className="text-sm font-medium text-primary">问题阅读路径</span>
         <h1 className="text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-5xl">{question.question}</h1>
