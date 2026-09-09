@@ -119,4 +119,32 @@ describe("AI knowledge selection", () => {
     expect(screen.getByText(/任务状态：/).textContent).toContain("queued");
     vi.unstubAllGlobals();
   });
+
+  it("keeps legacy diagnostics usable without exposing forged citation metadata", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "job-2", status: "queued" } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: {
+        id: "job-2", status: "completed", output_payload: {
+          legacy_note: "保留的旧输出", knowledge_citations: ["model-supplied-id"],
+          citations: [{ href: "https://example.test/forged", title: "伪造依据" }],
+        },
+      } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("11111111-1111-4111-8111-111111111111");
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={4} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" }));
+    await screen.findByText(/任务状态：/);
+    const refresh = screen.getByRole("button", { name: "刷新 AI 状态" }) as HTMLButtonElement;
+    await waitFor(() => expect(refresh.disabled).toBe(false));
+    fireEvent.click(refresh);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(await screen.findByText("原始 JSON 诊断"));
+    const diagnostics = await screen.findByText((_, element) => element?.tagName === "PRE" && element.textContent?.includes("保留的旧输出") === true);
+    expect(diagnostics.textContent).not.toContain("https://example.test/forged");
+    expect(diagnostics.textContent).not.toContain("model-supplied-id");
+    expect(screen.queryByRole("heading", { name: "本次知识依据" })).toBeNull();
+    vi.unstubAllGlobals();
+  });
 });

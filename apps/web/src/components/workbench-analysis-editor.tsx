@@ -214,7 +214,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const ruleStatus = ({ valid: "已通过已实现规则", eliminated: "未通过规则", invalid_input: "输入无效", not_checked: "尚未检查" } as Record<string, string>)[String(ruleResult.status)] || "尚未检查";
   const calculationErrors = [ruleResult.error, draft.drawdown_result.error, draft.risk_result.error].filter(Boolean);
   const aiOutput = objectValue(aiJob?.output_payload);
-  const aiDiagnostics = Object.fromEntries(Object.entries(aiOutput).filter(([key]) => key !== "knowledge_citations"));
+  const aiDiagnostics = Object.fromEntries(Object.entries(aiOutput).filter(([key]) => key !== "citations" && key !== "knowledge_citations"));
   const aiSummary = [
     ["品种", aiOutput.instrument], ["周期", aiOutput.timeframe], ["分析级别", aiOutput.analysis_level],
     ["当前结构", aiOutput.current_pattern], ["当前子浪", aiOutput.current_subwave],
