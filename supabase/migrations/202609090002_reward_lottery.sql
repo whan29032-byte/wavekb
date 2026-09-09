@@ -164,8 +164,9 @@ begin
   end if;
 
   select * into v_profile from public.profiles profile where profile.id = v_user;
-  select coalesce(wallet.balance, 0) into v_balance
-  from public.reward_wallets wallet where wallet.user_id = v_user;
+  select coalesce((
+    select wallet.balance from public.reward_wallets wallet where wallet.user_id = v_user
+  ), 0) into v_balance;
   select draw.id into v_draw_id
   from public.reward_lottery_draws draw
   where draw.campaign_id = v_campaign.id and draw.user_id = v_user;
@@ -282,13 +283,13 @@ begin
     v_prize.sort_order, v_prize.created_at, v_prize.updated_at, v_upper
   from (
     select prize.*,
-      sum(prize.probability_bps) over (order by prize.sort_order, prize.created_at, prize.id)::integer as upper_bound
+      sum(prize.probability_bps) over (order by prize.sort_order, prize.id)::integer as upper_bound
     from public.reward_lottery_prizes prize
     where prize.campaign_id = v_campaign.id
   ) candidate
   where v_bucket < candidate.upper_bound
     and v_bucket >= candidate.upper_bound - candidate.probability_bps
-  order by candidate.sort_order, candidate.created_at, candidate.id
+  order by candidate.sort_order, candidate.id
   limit 1;
 
   if v_prize.id is not null then

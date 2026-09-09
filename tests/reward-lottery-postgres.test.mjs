@@ -218,6 +218,14 @@ test("ineligible accounts and insufficient balances cannot create partial draws"
     assert.equal(draws.rows[0].count, 0);
     const ledger = await database.query("select count(*)::integer as count from public.reward_ledger");
     assert.equal(ledger.rows[0].count, 0);
+
+    await database.query("delete from public.reward_wallets where user_id = $1", [userTwo]);
+    await actor(database, userTwo, false);
+    const emptyWalletResult = await database.query("select public.get_my_reward_lottery() as value");
+    const emptyWalletState = value(emptyWalletResult.rows[0]);
+    assert.equal(emptyWalletState.balance, 0);
+    assert.equal(emptyWalletState.eligible, false);
+    assert.equal(emptyWalletState.eligibility_reason, "insufficient_balance");
   } finally {
     await database.close();
   }
