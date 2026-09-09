@@ -1,10 +1,10 @@
-name: Deploy WaveKB gateway production
+name: Deploy WaveKB database and gateway production
 
 on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: "Type DEPLOY_WAVEKB_BACKEND to verify the database schema and release the gateway"
+        description: "Type DEPLOY_WAVEKB_BACKEND to apply the exact database migration and release the gateway"
         required: true
         type: string
 
@@ -108,8 +108,7 @@ jobs:
           /usr/bin/node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
           curl --fail --silent --show-error http://127.0.0.1:8787/health > /dev/null
           REMOTE
-
-      - name: Verify exact production schema marker
+      - name: Apply exact mentor avatar migration and verify schema marker
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
@@ -117,10 +116,40 @@ jobs:
           test -n "$SUPABASE_DB_URL"
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
-          schema=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema" = 202609090001
+          schema_before=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
+          case "$schema_before" in
+            202609080003)
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202609090001_mentor_avatar_precedence.sql
+              ;;
+            202609090001)
+              echo "Mentor avatar migration already applied; continuing idempotently."
+              ;;
+            *)
+              echo "Unexpected production schema marker; refusing migration."
+              exit 1
+              ;;
+          esac
+          schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
+          test "$schema_after" = 202609090001
           rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('exchange_connections','exchange_connection_secrets','trading_equity_snapshots','trading_return_summaries') and c.relrowsecurity;" | tr -d '[:space:]')
           test "$rls_tables" = 4
+
+      - name: Verify the public schema marker before release upload
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
+        run: |
+          set -Eeuo pipefail
+          schema=""
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            schema=$(curl --fail --silent --show-error \
+              -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
+              -H 'content-type: application/json' \
+              -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]') || true
+            test "$schema" = 202609090001 && break
+            sleep 2
+          done
+          test "$schema" = 202609090001
 
       - name: Upload gateway archive and systemd units
         env:
@@ -244,14 +273,4 @@ jobs:
           for unit in "${units[@]}"; do rm -f -- "$HOME/${unit}-${release_id}"; done
           REMOTE
 
-      - name: Verify the public schema marker
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
-        run: |
-          set -Eeuo pipefail
-          schema=$(curl --fail --silent --show-error \
-            -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
-            -H 'content-type: application/json' \
-            -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]')
-          test "$schema" = 202609090001
+# The additive database migration stays forward-compatible if gateway activation rolls back.

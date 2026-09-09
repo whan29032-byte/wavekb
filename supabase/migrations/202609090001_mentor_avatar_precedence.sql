@@ -10,7 +10,7 @@ returns text
 language sql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
   select coalesce(
     (
@@ -38,7 +38,7 @@ returns table (
 language sql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
   select
     m.id,
@@ -89,7 +89,7 @@ returns table (
 language sql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
   select catalog.*
   from public.list_mentor_catalog() catalog
@@ -112,7 +112,7 @@ returns table (
 language sql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
   select
     e.id,
@@ -158,7 +158,7 @@ returns table (
 language sql
 stable
 security definer
-set search_path = public
+set search_path = ''
 as $$
   select
     t.id,
@@ -192,7 +192,21 @@ as $$
     );
 $$;
 
-revoke all on function public.mentor_display_avatar(uuid, text) from public;
-grant execute on function public.mentor_display_avatar(uuid, text) to anon, authenticated;
+revoke all on function public.mentor_display_avatar(uuid, text) from public, anon, authenticated;
+
+create or replace function public.wavekb_schema_version()
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select '202609090001'::text;
+$$;
+
+revoke all on function public.wavekb_schema_version() from public;
+grant execute on function public.wavekb_schema_version() to anon, authenticated;
+
+notify pgrst, 'reload schema';
 
 commit;

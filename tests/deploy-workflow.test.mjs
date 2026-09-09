@@ -37,19 +37,24 @@ test("every emitted workflow shell program parses before a runner can execute it
   }
 });
 
-test("backend deployment accepts only the current schema before upload and rolls gateway code back on activation failure", () => {
+test("backend deployment migrates only the exact predecessor schema before upload and rolls gateway code back on activation failure", () => {
   const contractVerification = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
   const hostPreflight = backendSteps.findIndex((step) => /Verify gateway host/.test(step.name));
   const schemaGate = backendSteps.findIndex((step) => /schema marker/.test(step.name));
   const upload = backendSteps.findIndex((step) => /Upload gateway archive/.test(step.name));
   const activation = backendSteps.findIndex((step) => /Activate gateway/.test(step.name));
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
-  assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < upload && upload < activation && activation < publicSchemaCheck);
+  assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < publicSchemaCheck && publicSchemaCheck < upload && upload < activation);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema" = 202609090001/);
-  assert.doesNotMatch(backendSteps[schemaGate].run, /psql[^\n]*-f|supabase\/migrations\//);
+  assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
+  assert.match(backendSteps[schemaGate].run, /202609080003\)[\s\S]*202609090001_mentor_avatar_precedence\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202609090001\)[\s\S]*already applied/);
+  assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202609090001/);
+  assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
   assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202609090001/);
+  assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
   assert.match(backendSteps[activation].run, /legacy_layout/);
