@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData } from "@wavekb/knowledge";
+import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -22,7 +23,7 @@ export function generateStaticParams() {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const id = (await params).id;
   const question = knowledgeData().questions.find((item) => item.id === id);
-  return question ? { title: question.question, description: "按规则、指南、证据与失效顺序回答的知识路线。" } : {};
+  return question ? publicMetadata({ title: question.question, description: "按规则、指南、证据与失效顺序回答的知识路线。", path: `/knowledge/questions/${question.id}` }) : {};
 }
 
 export default async function KnowledgeQuestionPage({ params }: PageProps) {

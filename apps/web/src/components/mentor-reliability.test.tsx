@@ -1,3 +1,4 @@
+
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MentorCheckout } from "./mentor-checkout";
@@ -67,22 +68,39 @@ function checkout(paymentMethod = method) {
 }
 
 describe("mentor payment reliability", () => {
+  it("shows only unresolved mentor-detail payment state without order identifiers", async () => {
+    claims = [
+      { ...claim, id: "submitted-claim", order_id: "submitted-order" },
+      { ...claim, id: "confirmed-claim", order_id: "confirmed-order", status: "confirmed" },
+      { ...claim, id: "rejected-claim", order_id: "rejected-order", status: "rejected" },
+      { ...claim, id: "cancelled-claim", order_id: "cancelled-order", status: "cancelled" },
+    ];
+    orders = [{ ...pendingOrder, id: "unclaimed-pending-order" }];
+
+    checkout();
+
+    const summary = await screen.findByRole("region", { name: "付款待核对摘要" });
+    expect(within(summary).getByText("2 项待核对付款")).toBeDefined();
+    expect(within(summary).getByRole("link", { name: "查看完整付款记录" }).getAttribute("href")).toBe("/tutoring");
+    expect(screen.queryByText(/submitted-order|confirmed-order|rejected-order|cancelled-order|unclaimed-pending-order/)).toBeNull();
+    expect(screen.queryByText(/导师已确认|导师未确认付款|已取消/)).toBeNull();
+  });
+
   it("restores a pending declaration after remount and blocks another payment submission", async () => {
     claims = [claim];
     const view = checkout();
-    await screen.findByText(/待导师核对/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull();
-    expect(document.querySelector(`time[datetime="${claim.submitted_at}"]`)).not.toBeNull();
     view.unmount();
     checkout();
-    await screen.findByText(/待导师核对/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     expect(writes).toEqual([]);
   });
 
   it("keeps pending declarations visible when the mentor withdraws all offers", async () => {
     claims = [claim];
     render(<MentorCheckout actorId="student" mentorName="导师" offers={[]} paymentMethods={[]} returnPath="/mentors/mentor" />);
-    await screen.findByText(/待导师核对/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     expect(writes).toEqual([]);
   });
 
@@ -93,7 +111,7 @@ describe("mentor payment reliability", () => {
     expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull();
     readError = false; claims = [claim];
     fireEvent.click(screen.getByRole("button", { name: /重试.*状态/ }));
-    await screen.findByText(/待导师核对/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     expect(writes).toEqual([]);
   });
 
@@ -196,18 +214,33 @@ describe("mentor payment reliability", () => {
     checkout();
     const button = await screen.findByRole("button", { name: "我已付款，通知导师" });
     fireEvent.click(button); fireEvent.click(button);
-    await screen.findByText(/待导师核对/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim"]);
+  });
+
+  it("restores checkout in the same mount after the submitted claim is rejected", async () => {
+    checkout();
+    fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
+    await screen.findByRole("region", { name: "付款待核对摘要" });
+
+    claims = [{ ...claim, status: "rejected" }];
+    fireEvent.click(screen.getByRole("button", { name: "刷新付款状态" }));
+
+    const restoredCheckout = await screen.findByRole("button", { name: "我已付款，通知导师" });
+    expect(screen.queryByText("已通知导师核对付款")).toBeNull();
+
+    fireEvent.click(restoredCheckout);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
+    expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim", "create_manual_mentor_order", "submit_mentor_payment_claim"]);
   });
 
   it("removes already loaded private claims when the authenticated session changes", async () => {
     claims = [claim];
     checkout();
-    await screen.findByText(/待导师核对/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     boundary.client.auth = { getUser: async () => ({ data: { user: null }, error: null }) };
     fireEvent.click(screen.getByRole("button", { name: "刷新付款状态" }));
     await screen.findByRole("button", { name: /重试.*状态/ });
-    expect(screen.queryByText(/待导师核对/)).toBeNull();
     expect(screen.queryByText("订单编号：order")).toBeNull();
   });
 
@@ -233,7 +266,7 @@ describe("mentor payment reliability", () => {
     view.unmount(); checkout();
     await screen.findByRole("button", { name: "刷新付款状态" });
     expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull();
-    expect(screen.getByText(/待核实订单编号：order/)).toBeDefined();
+    expect(screen.getByRole("region", { name: "付款待核对摘要" })).toBeDefined();
     expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim"]);
   });
 
@@ -251,7 +284,7 @@ describe("mentor payment reliability", () => {
   it("shows an authorized pending order without a declaration on a different device", async () => {
     orders = [pendingOrder, { ...pendingOrder, id: "other-owner-order", buyer_id: "other" }, { ...pendingOrder, id: "other-mentor-order", mentor_id: "other-mentor" }];
     checkout();
-    await screen.findByText(/待核实订单编号：order/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     expect(screen.queryByText(/other-owner-order|other-mentor-order/)).toBeNull();
     expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull();
     expect(writes).toEqual([]);
@@ -302,7 +335,7 @@ describe("mentor payment reliability", () => {
     boundary.client.rpc = async (name: string) => name === "create_manual_mentor_order" ? { data: "order", error: null } : { data: null, error: new Error("fetch failed") };
     const view = checkout();
     fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
-    await screen.findByText(/待核实订单编号：order/);
+    await screen.findByRole("region", { name: "付款待核对摘要" });
     view.unmount(); claims = [{ ...claim, status: "confirmed" }];
     checkout();
     await screen.findByRole("button", { name: "我已付款，通知导师" });

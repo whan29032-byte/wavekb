@@ -3,11 +3,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
+import { publicMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicMetadata({
   title: "图书",
   description: "阅读 WaveKB 的核心主书与扩展研究资料。",
-};
+  path: "/knowledge/books",
+});
 
 function assetUrl(assetPath: string) {
   const base = (process.env.NEXT_PUBLIC_KNOWLEDGE_ASSET_BASE_URL || "").replace(/\/$/, "");

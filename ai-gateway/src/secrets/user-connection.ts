@@ -10,20 +10,23 @@ export type ResolvedUserConnection = {
   modelName: string;
   timeoutMs: number;
   maxOutputTokens: number;
+  contextTokens: number;
   temperature: number;
   provider: ModelProvider;
 };
 
 export class UserConnectionResolver {
+  private readonly config: GatewayConfig;
   private readonly database: SupabaseRest;
 
-  constructor(private readonly config: GatewayConfig) {
+  constructor(config: GatewayConfig) {
+    this.config = config;
     this.database = new SupabaseRest(config);
   }
 
   async resolve(ownerId: string, connectionId: string): Promise<ResolvedUserConnection> {
     const connections = await this.database.request(
-      `/rest/v1/user_ai_connections?id=eq.${encodeURIComponent(connectionId)}&owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&select=id,owner_id,adapter,base_url,model_name,timeout_ms,max_output_tokens,temperature&limit=1`,
+      `/rest/v1/user_ai_connections?id=eq.${encodeURIComponent(connectionId)}&owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&select=id,owner_id,adapter,base_url,model_name,timeout_ms,max_output_tokens,context_tokens,temperature&limit=1`,
     );
     if (!connections.length) throw new Error("user connection not found");
     const connection = connections[0];
@@ -39,6 +42,7 @@ export class UserConnectionResolver {
       modelName: connection.model_name,
       timeoutMs: Number(connection.timeout_ms),
       maxOutputTokens: Number(connection.max_output_tokens),
+      contextTokens: Number(connection.context_tokens),
       temperature: Number(connection.temperature),
       provider: createProvider(connection.adapter as Adapter, {
         baseUrl: connection.base_url,

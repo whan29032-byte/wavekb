@@ -5,11 +5,12 @@ import { SocialDesktop } from "./social-desktop";
 import { MessageThread } from "./message-thread";
 import { installBrowserStorage } from "@/test/browser-storage";
 import { notifyIdentityChanged } from "@/lib/member/identity-events";
-import { setSocialSound } from "@/hooks/use-social-sound";
+import { playSocialTone, setSocialSound } from "@/hooks/use-social-sound";
 
-const fixture = vi.hoisted(() => ({ client: {} as Record<string, unknown>, uploads: [] as File[], reads: [] as number[], sends: [] as string[], rows: [] as DirectMessage[], connections: [] as FriendshipConnection[], conversations: [] as DirectConversation[], identities: [] as Record<string, unknown>[], audio: 0,
+const fixture = vi.hoisted(() => ({ client: {} as Record<string, unknown>, uploads: [] as File[], reads: [] as number[], sends: [] as string[], rows: [] as DirectMessage[], connections: [] as FriendshipConnection[], conversations: [] as DirectConversation[], identities: [] as Record<string, unknown>[], audio: 0, tones: 0,
   students: [] as Record<string, unknown>[],
   actorId: "actor" as string | null, authChanged: (() => {}) as (event: string, session: { user: { id: string } } | null) => void, deferredFriends: null as (() => Promise<unknown>) | null,
+  deferredMessages: null as (() => Promise<unknown>) | null,
 }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => fixture.client }));
 vi.mock("@/hooks/use-member-presence", () => ({ useMemberPresence: () => new Set() }));
@@ -35,10 +36,10 @@ beforeEach(() => {
   installBrowserStorage(); localStorage.clear(); vi.useFakeTimers();
   setSocialSound(true);
   fixture.uploads = []; fixture.reads = []; fixture.sends = []; fixture.rows = [message(1)]; fixture.connections = []; fixture.conversations = []; fixture.identities = []; fixture.audio = 0;
-  fixture.actorId = "actor"; fixture.deferredFriends = null; fixture.students = [];
+  fixture.actorId = "actor"; fixture.deferredFriends = null; fixture.deferredMessages = null; fixture.students = []; fixture.tones = 0;
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   Element.prototype.scrollIntoView = vi.fn();
-  vi.stubGlobal("AudioContext", class { constructor() { fixture.audio++; } createOscillator() { return { frequency: { value: 0 }, connect: () => ({ connect() {} }), start() {}, stop() {}, addEventListener() {} }; } createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} } }; } });
+  vi.stubGlobal("AudioContext", class { currentTime = 0; destination = {}; constructor() { fixture.audio++; } resume() { return Promise.resolve(); } createOscillator() { return { frequency: { value: 0 }, connect: () => ({ connect() {} }), start() { fixture.tones++; }, stop() {}, addEventListener() {} }; } createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; } });
   fixture.client = {
     auth: { getSession: async () => ({ data: { session: fixture.actorId ? { user: { id: fixture.actorId } } : null } }), onAuthStateChange: (callback: typeof fixture.authChanged) => { fixture.authChanged = callback; return { data: { subscription: { unsubscribe() {} } } }; } },
     from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: [] }) }) }) }),
@@ -47,11 +48,23 @@ beforeEach(() => {
       if (name === "list_my_mentor_students") return { data: fixture.students, error: null };
       if (name === "mark_conversation_read_v1") fixture.reads.push(Number(args.p_through_id));
       if (name === "send_direct_message") fixture.sends.push(String(args.p_body));
+      if (name.startsWith("list_conversation_messages") && fixture.deferredMessages) return fixture.deferredMessages();
       return { data: name.startsWith("list_conversation_messages") ? fixture.rows.filter((row) => row.id > Number(args.p_after_id || 0)) : [], error: null };
     },
   };
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it("requires interaction to unlock one reusable audio context", async () => {
+  render(<SocialDesktop />); await tick();
+  playSocialTone(560);
+  expect(fixture.audio).toBe(0);
+  fireEvent.pointerDown(window);
+  expect(fixture.audio).toBe(1);
+  playSocialTone(560);
+  expect(fixture.audio).toBe(1);
+  expect(fixture.tones).toBe(1);
+});
 
 it.each(["floating", "full-page"])("%s accepts a protected-mode file drag and stages the dropped image without sending", async (surface) => {
   const root = surface === "floating" ? await openDesktop() : render(<MessageThread actorId="actor" conversation={conversation} initialMessages={[]} initialCustomStickers={[]} />).container;
@@ -158,6 +171,97 @@ it("uses the member's nameplate in friend requests", async () => {
   render(<SocialDesktop />); await tick();
   fireEvent.click(screen.getByRole("button", { name: /^新朋友/ }));
   expect(screen.getByText("申请者").getAttribute("data-nameplate")).toBe("rainbow");
+});
+
+it("shows only incoming pending requests in the new-friends badge and list", async () => {
+  fixture.connections = [
+    { friendship_id: "outgoing", other_id: "outgoing-user", status: "pending", direction: "outgoing", display_name: "等待中的用户", public_uid: 12346, avatar_url: null, nameplate_style: "classic" },
+    { friendship_id: "incoming", other_id: "incoming-user", status: "pending", direction: "incoming", display_name: "申请者", public_uid: 12347, avatar_url: null, nameplate_style: "classic" },
+  ] as FriendshipConnection[];
+  render(<SocialDesktop />); await tick();
+  expect(screen.getByRole("button", { name: "新朋友1" })).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "新朋友1" }));
+  expect(screen.getByText("申请者")).toBeDefined();
+  expect(screen.queryByText("等待中的用户")).toBeNull();
+});
+
+it("keeps an outgoing pending request visible as waiting when its UID is searched", async () => {
+  fixture.connections = [{ friendship_id: "outgoing", other_id: "friend", status: "pending", direction: "outgoing", display_name: "好友", public_uid: 12346, avatar_url: null, nameplate_style: "classic" } as FriendshipConnection];
+  render(<SocialDesktop />); await tick();
+  expect(screen.queryByRole("button", { name: /^新朋友\d/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "新朋友" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "搜索好友 UID" }), { target: { value: "12346" } });
+  fireEvent.click(screen.getByRole("button", { name: "搜索" })); await tick();
+  expect(screen.getByText("等待对方接受")).toBeDefined();
+});
+
+it("silently baselines unread conversations then tones once for a later unread increase", async () => {
+  fixture.conversations = [conversation];
+  render(<SocialDesktop />); await tick();
+  expect(fixture.tones).toBe(0);
+  fireEvent.pointerDown(window);
+  fixture.conversations = [{ ...conversation, unread_count: 2 }];
+  await tick(9000);
+  expect(fixture.tones).toBe(1);
+  await tick(9000);
+  expect(fixture.tones).toBe(1);
+});
+
+it("coordinates full-page and global pollers without muting other conversations", async () => {
+  const other = { ...conversation, conversation_id: "other-chat", other_id: "other-friend", unread_count: 0 };
+  fixture.conversations = [conversation, other];
+  render(<><SocialDesktop /><MessageThread actorId="actor" conversation={conversation} initialMessages={[message(1)]} initialCustomStickers={[]} /></>);
+  await tick();
+  fireEvent.pointerDown(window);
+
+  let finishThread!: (value: unknown) => void;
+  let finishGlobal!: (value: unknown) => void;
+  fixture.deferredMessages = () => new Promise((resolve) => { finishThread = resolve; });
+  fixture.deferredFriends = () => new Promise((resolve) => { finishGlobal = resolve; });
+  await tick(9000);
+
+  await act(async () => {
+    finishGlobal({ actor: { id: "actor", public_uid: 12345, display_name: "我", avatar_url: null, nameplate_style: "classic" }, connections: [], conversations: [{ ...conversation, unread_count: 2 }, other] });
+    await Promise.resolve();
+  });
+  await act(async () => {
+    finishThread({ data: [message(2)], error: null });
+    await Promise.resolve();
+  });
+  expect(fixture.tones).toBe(1);
+
+  fixture.deferredFriends = null;
+  fixture.deferredMessages = null;
+  fixture.rows = [message(1), message(2)];
+  fixture.conversations = [{ ...conversation, unread_count: 2 }, { ...other, unread_count: 1 }];
+  await tick(9000);
+  expect(fixture.tones).toBe(2);
+});
+
+it("does not tone global unread increases while muted", async () => {
+  fixture.conversations = [conversation];
+  render(<SocialDesktop />); await tick();
+  fireEvent.pointerDown(window);
+  setSocialSound(false);
+  fixture.conversations = [{ ...conversation, unread_count: 2 }];
+  await tick(9000);
+  expect(fixture.tones).toBe(0);
+});
+
+it("silently rebaselines unread conversations after returning from a hidden tab", async () => {
+  fixture.conversations = [conversation];
+  render(<SocialDesktop />); await tick();
+  fireEvent.pointerDown(window);
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  fixture.conversations = [{ ...conversation, unread_count: 2 }];
+  await tick(9000);
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+  await tick(9000);
+  expect(fixture.tones).toBe(0);
+  fixture.conversations = [{ ...conversation, unread_count: 3 }];
+  await tick(9000);
+  expect(fixture.tones).toBe(1);
 });
 
 it.each(["recent", "notification", "student"])("shows a readable sticker summary in the %s list", async (surface) => {

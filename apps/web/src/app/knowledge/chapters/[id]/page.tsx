@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData } from "@wavekb/knowledge";
+import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -16,7 +17,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const id = (await params).id;
-  return chapterTitles[id] ? { title: `${chapterTitles[id]} · 按原书阅读`, description: "按原书顺序列出同一批 canonical Units。" } : {};
+  return chapterTitles[id] ? publicMetadata({ title: `${chapterTitles[id]} · 按原书阅读`, description: "按原书顺序列出同一批艾略特波浪理论知识条目。", path: `/knowledge/chapters/${id}` }) : {};
 }
 
 export default async function KnowledgeChapterPage({ params }: PageProps) {

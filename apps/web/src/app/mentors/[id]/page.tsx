@@ -8,11 +8,12 @@ import { MentorAvatar } from "@/components/mentor-avatar";
 import { MentorCheckout } from "@/components/mentor-checkout";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { getMentorDetail, listMentorPaymentMethods, listMyMentorAccess } from "@/lib/mentor/server-repository";
+import { publicMetadata } from "@/lib/seo";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const mentor = await getMentorDetail(id);
-  return { title: mentor ? `${mentor.display_name}导师` : "导师详情", description: mentor?.headline || "查看导师辅导方案。" };
+  return publicMetadata({ title: mentor ? `${mentor.display_name}导师` : "导师详情", description: mentor?.headline || "查看导师辅导方案。", path: `/mentors/${id}` });
 }
 
 export default async function MentorDetailPage({ params }: { params: Promise<{ id: string }> }) {

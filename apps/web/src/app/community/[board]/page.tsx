@@ -10,6 +10,7 @@ import { Pagination } from "@/components/pagination";
 import { parsePage } from "@/lib/pagination";
 import { publicSupabaseConfig } from "@/lib/env";
 import { listPosts } from "@/lib/community/server-repository";
+import { publicPageMetadata } from "@/lib/public-page-metadata";
 
 type PageProps = { params: Promise<{ board: string }>; searchParams?: Promise<{ page?: string | string[] }> };
 
@@ -21,7 +22,7 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { board } = await params;
-  return isBoardSlug(board) ? { title: BOARDS[board].title, description: BOARDS[board].description } : {};
+  return publicPageMetadata("community", board);
 }
 
 export default async function BoardPage({ params, searchParams }: PageProps) {

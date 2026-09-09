@@ -20,3 +20,15 @@ it.each(["/community/idea_sharing", "/community/idea_sharing/new", "/community/p
   await proxy(request);
   expect(boundary.session).toHaveBeenCalledWith(request);
 });
+
+it.each(["/admin/users", "/friends", "/messages/abc", "/member/profile", "/tutoring/abc", "/mentor/manage", "/workbench", "/login", "/register", "/recover", "/community/idea_sharing/new", "/community/post/abc/edit"])("marks private route %s noindex at the HTTP boundary", async (pathname) => {
+  const response = await proxy(new NextRequest(`https://wavekb.com${pathname}`));
+
+  expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+});
+
+it.each(["/knowledge", "/community/idea_sharing", "/community/post/abc"])("does not mark public route %s noindex", async (pathname) => {
+  const response = await proxy(new NextRequest(`https://wavekb.com${pathname}`));
+
+  expect(response.headers.get("x-robots-tag")).toBeNull();
+});

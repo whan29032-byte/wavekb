@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
 import type { GatewayConfig } from "../config.ts";
 import { normalizeDirectoryResource } from "../directory/external-directory.ts";
+import { normalizeAiRunRequest } from "../knowledge/contracts.ts";
+import { buildKnowledgeIndex, type KnowledgeIndex } from "../knowledge/index.ts";
 import { encryptSecret } from "../secrets/crypto.ts";
 import { validateProviderUrl, validateUserProviderUrl } from "../security/provider-url.ts";
 import type { GatewayApi, GatewayUser } from "../server.ts";
@@ -29,12 +30,28 @@ function optionalNumber(
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+type GatewayDatabase = {
+  request(path: string, options?: {
+    method?: string;
+    body?: unknown;
+    headers?: Record<string, string>;
+  }): Promise<any>;
+  userForJwt(jwt: string): Promise<{ id: string; email?: string } | null>;
+};
+
+type GatewayApiDependencies = {
+  database?: GatewayDatabase;
+  knowledgePath?: string;
+};
+
 export class SupabaseGatewayApi implements GatewayApi {
-  private readonly database: SupabaseRest;
+  private readonly database: GatewayDatabase;
   private readonly trading: BinanceLeaderboardService;
-  constructor(privateConfig: GatewayConfig) {
+  private readonly knowledgeIndex: KnowledgeIndex;
+  constructor(privateConfig: GatewayConfig, dependencies: GatewayApiDependencies = {}) {
     this.config = privateConfig;
-    this.database = new SupabaseRest(privateConfig);
+    this.database = dependencies.database ?? new SupabaseRest(privateConfig);
+    this.knowledgeIndex = buildKnowledgeIndex(dependencies.knowledgePath);
     this.trading = new BinanceLeaderboardService(privateConfig);
   }
   private readonly config: GatewayConfig;
@@ -393,41 +410,64 @@ export class SupabaseGatewayApi implements GatewayApi {
     analysisId: string,
     input: Record<string, unknown>,
   ): Promise<unknown> {
+    if (!UUID_PATTERN.test(analysisId)) {
+      throw Object.assign(new Error("invalid analysis id"), { statusCode: 400 });
+    }
+    const normalizedAnalysisId = analysisId.toLowerCase();
+    const normalized = normalizeAiRunRequest(input, this.knowledgeIndex.books, {
+      ownerId,
+      analysisId: normalizedAnalysisId,
+    });
     const analysisRows = await this.database.request(
-      `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(analysisId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id&limit=1`,
+      `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(normalizedAnalysisId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,owner_id,schema_version,input_source,instrument,market,primary_timeframe,parent_timeframe,child_timeframe,holding_style,step_data,rule_result,score_result,risk_result,execution_status,created_at,updated_at&limit=1`,
     );
     if (!analysisRows.length) throw Object.assign(new Error("analysis not found"), { statusCode: 404 });
+    if (analysisRows[0].schema_version !== normalized.analysis_schema_version) {
+      throw Object.assign(new Error("analysis schema mismatch"), { statusCode: 409 });
+    }
     const connections = await this.database.request(
       `/rest/v1/user_ai_connections?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&is_default=eq.true&select=id,label,adapter,base_url,model_name,max_output_tokens,context_tokens,temperature,timeout_ms&limit=1`,
     );
     if (!connections.length) {
       throw Object.assign(new Error("ai_connection_required"), { statusCode: 409 });
     }
-    const taskType = String(input.task_type || "wave_analysis");
-    const rows = await this.database.request("/rest/v1/ai_jobs", {
-      method: "POST",
-      headers: { prefer: "return=representation" },
-      body: {
-        owner_id: ownerId,
-        analysis_id: analysisId,
-        user_connection_id: connections[0].id,
-        connection_snapshot: {
-          id: connections[0].id,
-          label: connections[0].label,
-          adapter: connections[0].adapter,
-          base_url: connections[0].base_url,
-          model_name: connections[0].model_name,
-          max_output_tokens: connections[0].max_output_tokens,
-          context_tokens: connections[0].context_tokens,
-          temperature: connections[0].temperature,
-          timeout_ms: connections[0].timeout_ms,
+    const idempotencyKey = `${ownerId}:${normalizedAnalysisId}:${normalized.client_request_id}`;
+    try {
+      const rows = await this.database.request("/rest/v1/ai_jobs", {
+        method: "POST",
+        headers: { prefer: "return=representation" },
+        body: {
+          owner_id: ownerId,
+          analysis_id: normalizedAnalysisId,
+          user_connection_id: connections[0].id,
+          connection_snapshot: {
+            id: connections[0].id,
+            label: connections[0].label,
+            adapter: connections[0].adapter,
+            base_url: connections[0].base_url,
+            model_name: connections[0].model_name,
+            max_output_tokens: connections[0].max_output_tokens,
+            context_tokens: connections[0].context_tokens,
+            temperature: connections[0].temperature,
+            timeout_ms: connections[0].timeout_ms,
+          },
+          task_type: normalized.task_type,
+          idempotency_key: idempotencyKey,
+          input_payload: normalized,
+          knowledge_version: this.knowledgeIndex.knowledgeVersion,
         },
-        task_type: taskType,
-        idempotency_key: `${ownerId}:${analysisId}:${taskType}:${randomUUID()}`,
-        input_payload: input,
-      },
-    });
-    return rows[0];
+      });
+      return rows[0];
+    } catch (error) {
+      const duplicate = Number((error as { status?: number }).status) === 409
+        || (error as { code?: string }).code === "23505";
+      if (!duplicate) throw error;
+      const existing = await this.database.request(
+        `/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,owner_id,analysis_id,status,input_payload,knowledge_version,created_at&limit=1`,
+      );
+      if (existing.length) return existing[0];
+      throw Object.assign(new Error("job conflict"), { statusCode: 409 });
+    }
   }
 
   async getJob(ownerId: string, jobId: string): Promise<unknown> {

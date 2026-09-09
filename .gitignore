@@ -19,6 +19,7 @@ coverage/
 *.tar
 *.tar.gz
 .deploy/
+.worktrees/
 tmp/
 backups/
 uploads/

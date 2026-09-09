@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData, type KnowledgeTheme } from "@wavekb/knowledge";
+import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
 
@@ -22,7 +23,7 @@ function themeById(id: string) {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const theme = themeById((await params).id);
-  return theme ? { title: theme.title, description: `按主题阅读 ${unitsInTheme(theme).length} 个波浪理论知识条目。` } : {};
+  return theme ? publicMetadata({ title: theme.title, description: `按主题阅读 ${unitsInTheme(theme).length} 个波浪理论知识条目。`, path: `/knowledge/themes/${theme.id}` }) : {};
 }
 
 export default async function KnowledgeThemePage({ params }: PageProps) {

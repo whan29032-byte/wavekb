@@ -29,7 +29,11 @@ env:
   AUTH_GATEWAY_PUBLIC_ORIGIN: https://wavekb.com
 
 jobs:
+  verify-release:
+    uses: ./.github/workflows/verify-release.yml
+
   build-and-deploy:
+    needs: verify-release
     runs-on: ubuntu-latest
     timeout-minutes: 50
     environment: next-preview
@@ -58,6 +62,10 @@ jobs:
           pnpm test
           pnpm typecheck
           pnpm --filter @wavekb/web lint
+          node scripts/validate-knowledge.mjs
+          pnpm --dir ai-gateway typecheck
+          pnpm --dir ai-gateway test
+          node --test tests/ai-gateway-packaging.test.mjs
 
       - name: Build the standalone application
         env:

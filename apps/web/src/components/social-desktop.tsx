@@ -19,6 +19,7 @@ import { useMemberPresence } from "@/hooks/use-member-presence";
 import { playSocialTone, useSocialSound } from "@/hooks/use-social-sound";
 import { useChatIdentities } from "@/hooks/use-chat-identities";
 import { subscribeIdentityChanges } from "@/lib/member/identity-events";
+import { isConversationOpen } from "@/lib/member/open-conversation-registry";
 import { hasFileTransfer, imageFromTransfer } from "@/lib/member/chat-transfer";
 import styles from "./social-desktop.module.css";
 
@@ -181,6 +182,8 @@ export function SocialDesktop() {
   const loadRevision = useRef(0);
   const mounted = useRef(false);
   const sessionOwner = useRef<string | null>(null);
+  const unreadBaseline = useRef<Map<string, number> | null>(null);
+  const openConversations = useRef(new Set<string>());
   const z = useRef(50);
   const commitPanelPosition = useCallback((position: { x: number; y: number }, size: { width: number; height: number }) => {
     const distances = {
@@ -197,6 +200,7 @@ export function SocialDesktop() {
   const panelDrag = useFloatingWindowDrag({ windowRef: panelRef, onCommit: commitPanelPosition });
 
   const clearAccountState = useCallback(() => {
+    unreadBaseline.current = null; openConversations.current.clear();
     setActor(null); setConnections([]); setConversations([]); setTeachers([]); setStudents([]); setPaymentClaims([]); setChats([]);
     setSearchResult(null); setQuery(""); setContactQuery(""); setMessage("");
   }, []);
@@ -222,12 +226,16 @@ export function SocialDesktop() {
       setActor(profile);
       setConnections(core.connections);
       const rows = (core.conversations ?? []).map((item) => ({ ...item, unread_count: Number(item.unread_count || 0) }));
+      const previousUnread = unreadBaseline.current;
+      const hasUnreadIncrease = previousUnread && rows.some((item) => Number(item.unread_count) > (previousUnread.get(item.conversation_id) ?? 0) && !openConversations.current.has(item.conversation_id) && !isConversationOpen(item.conversation_id));
+      unreadBaseline.current = new Map(rows.map((item) => [item.conversation_id, Number(item.unread_count)]));
+      if (hasUnreadIncrease && document.visibilityState === "visible") playSocialTone(560);
       setConversations(rows);
       setChats((current) => current.map((chat) => { const fresh = rows.find((item) => item.conversation_id === chat.conversation_id); return fresh ? { ...chat, ...fresh } : chat; }));
       try {
         const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as { userId?: string; chats?: Array<{ conversation_id: string; minimized?: boolean; maximized?: boolean; pinned?: boolean }> } | null;
         const restored = (stored?.userId === profile.id ? stored.chats ?? [] : []).flatMap((saved, index) => { const value = rows.find((item) => item.conversation_id === saved.conversation_id); return value ? [{ ...value, minimized: saved.minimized, maximized: saved.maximized, pinned: saved.pinned, z: 51 + index }] : []; });
-        if (restored.length) setChats((current) => current.length ? current : restored);
+        if (restored.length) { restored.forEach((item) => openConversations.current.add(item.conversation_id)); setChats((current) => current.length ? current : restored); }
       } catch { /* Ignore malformed local window state. */ }
       if (!mentorAccess.error) setTeachers((mentorAccess.data ?? []) as MentorAccess[]);
       if (!mentorStudents.error) setStudents((mentorStudents.data ?? []) as MentorStudent[]);
@@ -255,16 +263,19 @@ export function SocialDesktop() {
     });
     const unsubscribeIdentity = subscribeIdentityChanges(() => void load());
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") void load(); }, 9000);
+    const rebaselineUnread = () => { if (document.visibilityState === "visible") { unreadBaseline.current = null; void load(); } };
     const customOpen = (event: Event) => { const detail = (event as CustomEvent<{ conversation?: DirectConversation }>).detail; if (detail?.conversation) openChat(detail.conversation); };
     const openFriends = () => { setAutoHidden(false); setPanel((value) => ({ ...value, open: true, minimized: false })); void load(); };
+    document.addEventListener("visibilitychange", rebaselineUnread);
     window.addEventListener("wavekb:open-chat", customOpen);
     window.addEventListener("wavekb:open-friends", openFriends);
-    return () => { mounted.current = false; invalidateLoads(); window.clearTimeout(initial); auth.data.subscription.unsubscribe(); unsubscribeIdentity(); window.clearInterval(timer); window.removeEventListener("wavekb:open-chat", customOpen); window.removeEventListener("wavekb:open-friends", openFriends); };
+    return () => { mounted.current = false; invalidateLoads(); window.clearTimeout(initial); auth.data.subscription.unsubscribe(); unsubscribeIdentity(); window.clearInterval(timer); document.removeEventListener("visibilitychange", rebaselineUnread); window.removeEventListener("wavekb:open-chat", customOpen); window.removeEventListener("wavekb:open-friends", openFriends); };
   }, [clearAccountState, invalidateLoads, load]);
 
   useEffect(() => { if (actor) localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized, pinned: item.pinned })) })); }, [actor, panel, chats]);
 
   function openChat(conversation: DirectConversation) {
+    openConversations.current.add(conversation.conversation_id);
     z.current += 1;
     setChats((current) => current.some((item) => item.conversation_id === conversation.conversation_id) ? current.map((item) => item.conversation_id === conversation.conversation_id ? { ...item, minimized: false, z: z.current } : item) : [...current, { ...conversation, z: z.current }]);
   }
@@ -274,7 +285,7 @@ export function SocialDesktop() {
   async function respond(item: FriendshipConnection, accept: boolean) { try { await runFriendAction({ action: "respond", friendshipId: item.friendship_id, accept }); playSocialTone(accept ? 760 : 420); await load(); } catch (cause) { setMessage(errorText(cause)); } }
   if (!actor) return null;
   const friends = connections.filter((item) => item.status === "accepted");
-  const requests = connections.filter((item) => item.status === "pending");
+  const requests = connections.filter((item) => item.status === "pending" && item.direction === "incoming");
   const searchConnection = searchResult ? connections.find((item) => item.other_id === searchResult.id) : undefined;
   const unread = conversations.reduce((sum, item) => sum + Number(item.unread_count || 0), 0);
   const contactNeedle = contactQuery.trim().toLocaleLowerCase("zh-CN");
@@ -299,6 +310,6 @@ export function SocialDesktop() {
         <button className={styles.recentHeading} type="button" aria-expanded={recentOpen} onClick={() => setRecentOpen((value) => !value)}><span>最近会话</span><span>{conversations.length}</span></button>{recentOpen ? <div className={styles.rows}>{conversations.map((item) => <button type="button" className={styles.conversationRow} data-conversation-row key={item.conversation_id} onClick={() => openChat(item)}><AvatarFrame profile={item} size="small" /><span><IdentityName profile={{ display_name: item.display_name || "用户", nameplate_style: item.nameplate_style }} as="strong" /><small>{chatPreview(item.last_message)}</small></span><time>{formatTime(item.last_message_at)}</time>{Number(item.unread_count || 0) ? <b>{item.unread_count}</b> : null}</button>)}</div> : null}
       </> : tab === "new" ? <><form className={styles.friendSearch} onSubmit={search}><input aria-label="搜索好友 UID" inputMode="numeric" placeholder="输入 5–6 位 UID" value={query} onChange={(event) => setQuery(event.target.value.replace(/\D/g, "").slice(0,6))} /><button type="submit" aria-label="搜索"><MagnifyingGlass /></button></form>{searchResult && searchResult.id !== actor.id ? <div className={styles.searchResult}><AvatarFrame profile={searchResult} size="small" /><span><IdentityName profile={searchResult} as="strong" /><Nameplate uid={searchResult.public_uid} style={searchResult.nameplate_style} compact /></span>{searchConnection?.status === "accepted" ? <button type="button" onClick={() => void chatWith(searchConnection)}><ChatCircleDots />聊天</button> : searchConnection?.status === "pending" ? <span>{searchConnection.direction === "incoming" ? "请在下方处理请求" : "等待对方接受"}</span> : <button type="button" onClick={() => void request(searchResult)}><UserPlus />添加</button>}</div> : null}<div className={styles.rows}>{requests.length ? requests.map((item) => <div key={item.friendship_id} className={styles.requestRow}><AvatarFrame profile={{ display_name: item.display_name || "用户", avatar_url: item.avatar_url ?? null, nameplate_style: item.nameplate_style }} size="small" /><span><IdentityName profile={{ display_name: item.display_name || "用户", nameplate_style: item.nameplate_style }} as="strong" /><small>{item.direction === "incoming" ? "请求添加你为好友" : "等待对方接受"}</small></span>{item.direction === "incoming" ? <div><button type="button" onClick={() => void respond(item,true)} aria-label="接受"><Check /></button><button type="button" onClick={() => void respond(item,false)} aria-label="拒绝"><X /></button></div> : null}</div>) : <p className={styles.empty}>没有待处理请求。</p>}</div></> : <div className={styles.rows}>{unreadConversations.map((item) => <button type="button" className={styles.notificationRow} key={item.conversation_id} onClick={() => openChat(item)}><Bell /><span><strong>{item.display_name} 发来新消息</strong><small>{chatPreview(item.last_message)}</small></span><b>{item.unread_count}</b></button>)}{submittedClaims.map((claim) => <Link href="/mentor/manage" className={styles.notificationRow} key={claim.claim_id}><Bell /><span><strong>{claim.display_name || "用户"} 已提交付款确认</strong><small>{claim.offer_name || "辅导服务"} · {formatMentorPrice(claim.amount_cents, claim.currency)}</small></span><b>待核对</b></Link>)}{notificationTotal ? null : <p className={styles.empty}>暂无新消息通知。</p>}</div>}{message ? <p className={styles.error} role="status">{message}</p> : null}<Link href="/friends" prefetch={false} className={styles.fullManagement}>完整管理 →</Link></div></> : null}
     </section> : null}
-    {chats.map((chat) => <FloatingChat key={chat.conversation_id} actorId={actor.id} chat={{ ...chat, ...chatIdentities[chat.other_id] }} onClose={() => setChats((current) => current.filter((item) => item.conversation_id !== chat.conversation_id))} onFocus={() => { z.current += 1; setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, z: z.current } : item)); }} onPatch={(value) => setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, ...value } : item))} onRead={() => { setConversations((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); }} />)}
+    {chats.map((chat) => <FloatingChat key={chat.conversation_id} actorId={actor.id} chat={{ ...chat, ...chatIdentities[chat.other_id] }} onClose={() => { openConversations.current.delete(chat.conversation_id); setChats((current) => current.filter((item) => item.conversation_id !== chat.conversation_id)); }} onFocus={() => { z.current += 1; setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, z: z.current } : item)); }} onPatch={(value) => setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, ...value } : item))} onRead={() => { setConversations((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); setChats((current) => current.map((item) => item.conversation_id === chat.conversation_id ? { ...item, unread_count: 0 } : item)); }} />)}
   </>;
 }

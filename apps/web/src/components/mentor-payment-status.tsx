@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { readBuyerMentorClaims, readBuyerPendingMentorOrders, type BuyerMentorClaim, type BuyerPendingMentorOrder } from "@/lib/mentor/payment-status";
 
 export function useBuyerMentorClaims(actorId: string | null, mentorId?: string) {
-  const [state, setState] = useState<{ actorId: string | null; mentorId?: string; claims: BuyerMentorClaim[]; pendingOrders: BuyerPendingMentorOrder[]; loading: boolean; error: string; checkedAt: string | null }>({ actorId, mentorId, claims: [], pendingOrders: [], loading: true, error: "", checkedAt: null });
+  const [state, setState] = useState<{ actorId: string | null; mentorId?: string; claims: BuyerMentorClaim[]; pendingOrders: BuyerPendingMentorOrder[]; loading: boolean; error: string; checkedAt: string | null; revision: number }>({ actorId, mentorId, claims: [], pendingOrders: [], loading: true, error: "", checkedAt: null, revision: 0 });
   const generation = useRef(0);
   const busy = useRef(false);
   const refresh = useCallback(async () => {
@@ -19,9 +19,9 @@ export function useBuyerMentorClaims(actorId: string | null, mentorId?: string) 
       const client = createClient();
       const [claims, orders] = await Promise.all([readBuyerMentorClaims(client, actorId, mentorId), readBuyerPendingMentorOrders(client, actorId, mentorId)]);
       const pendingOrders = orders.filter((order) => !claims.some((claim) => claim.order_id === order.id));
-      if (current === generation.current) setState({ actorId, mentorId, claims, pendingOrders, loading: false, error: "", checkedAt: new Date().toISOString() });
+      if (current === generation.current) setState((previous) => ({ actorId, mentorId, claims, pendingOrders, loading: false, error: "", checkedAt: new Date().toISOString(), revision: previous.revision + 1 }));
     } catch {
-      if (current === generation.current) setState({ actorId, mentorId, claims: [], pendingOrders: [], checkedAt: null, loading: false, error: "暂时无法核对付款声明状态。请重试查询，不要重复转账或提交。" });
+      if (current === generation.current) setState((previous) => ({ actorId, mentorId, claims: [], pendingOrders: [], checkedAt: null, loading: false, error: "暂时无法核对付款声明状态。请重试查询，不要重复转账或提交。", revision: previous.revision }));
     } finally {
       if (current === generation.current) busy.current = false;
     }
@@ -50,6 +50,17 @@ export function MentorClaimList({ claims, pendingOrders = [], checkedAt, error, 
     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     {checkedAt ? <p className="text-xs text-muted-foreground">上次查询：<time dateTime={checkedAt}>{new Date(checkedAt).toLocaleTimeString("zh-CN")}</time></p> : null}
     <Button type="button" variant="secondary" className="w-fit" onClick={() => void refresh()}>{error ? "重试查询状态" : "刷新付款状态"}</Button>
+  </section>;
+}
+
+export function MentorPaymentSummary({ claims, pendingOrders = [], error, refresh }: { claims: BuyerMentorClaim[]; pendingOrders?: BuyerPendingMentorOrder[]; error: string; refresh: () => Promise<void> }) {
+  const unresolvedClaims = claims.filter((claim) => claim.status === "submitted");
+  const unresolvedCount = unresolvedClaims.length + pendingOrders.length;
+  return <section className="grid gap-3 rounded-xl border bg-surface p-5" aria-label="付款待核对摘要">
+    <h2 className="text-xl font-semibold">{error ? "付款状态暂时无法核实" : `${unresolvedCount} 项待核对付款`}</h2>
+    <p className="text-sm leading-6 text-muted-foreground">{error ? "请先重新查询付款状态；在核实前请勿重复转账或提交。" : "包含已提交的付款声明或尚未提交声明的待处理订单。完整状态和历史记录请在“我的辅导”中查看。"}</p>
+    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+    <div className="flex flex-wrap gap-3"><Button type="button" variant="secondary" className="w-fit" onClick={() => void refresh()}>{error ? "重试查询状态" : "刷新付款状态"}</Button><Link className="self-center text-sm font-medium text-primary hover:underline" href="/tutoring">查看完整付款记录</Link></div>
   </section>;
 }
 

@@ -15,10 +15,11 @@ test("Next homepage reads the managed X and Discord directory without demo recor
 });
 
 test("knowledge images and extension books are locally published and audited", async () => {
-  const [page, books, detail, viewer, sync, audit, library] = await Promise.all([
+  const [page, books, detail, readingModel, viewer, sync, audit, library] = await Promise.all([
     read("apps/web/src/app/knowledge/[id]/page.tsx"),
     read("apps/web/src/app/knowledge/books/page.tsx"),
     read("apps/web/src/app/knowledge/books/[id]/page.tsx"),
+    read("apps/web/src/lib/knowledge/book-reading.ts"),
     read("apps/web/src/components/knowledge-image-viewer.tsx"),
     read("apps/web/scripts/sync-legacy-assets.mjs"),
     read("apps/web/scripts/check-knowledge-assets.mjs"),
@@ -34,8 +35,10 @@ test("knowledge images and extension books are locally published and audited", a
   assert.match(audit, /content-type/);
   assert.match(audit, /application\/pdf/);
   assert.match(books, /三本图书/);
-  assert.match(detail, /开始网页阅读/);
-  assert.match(detail, /text_pages/);
+  assert.match(detail, /buildBookReadingModel/);
+  assert.match(detail, /model\.hero\.primaryLabel/);
+  assert.match(readingModel, /开始网页阅读/);
+  assert.match(readingModel, /text_pages/);
   assert.match(detail, /noopener noreferrer/);
   const catalog = JSON.parse(library);
   assert.deepEqual(catalog.books.map((book) => book.id), ["elliott-wave-natural-law", "chan-theory-complete"]);

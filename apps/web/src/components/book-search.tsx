@@ -18,6 +18,8 @@ const numeralAliases: Record<string, string> = { 一: "1", 二: "2", 三: "3", �
 function normalizeForSearch(value: string) {
   return value
     .toLocaleLowerCase("zh-CN")
+    .replace(/\s+/g, " ")
+    .trim()
     .replace(/第([一二三四五六七八九])(?=[浪章节])/g, (_, numeral: string) => `第${numeralAliases[numeral] || numeral}`);
 }
 
@@ -57,7 +59,7 @@ export function BookSearch({ bookId, items, placeholder = "搜索本书章节、
   }
 
   return (
-    <section className="grid gap-3 border-y py-5" aria-labelledby={`${bookId}-search-title`}>
+    <section role="search" className="grid gap-3 border-y py-5" aria-labelledby={`${bookId}-search-title`}>
       <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
         <div className="grid gap-2">
           <Label id={`${bookId}-search-title`} htmlFor={`${bookId}-search`} className="text-sm font-semibold">搜索本书</Label>

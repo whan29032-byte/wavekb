@@ -6,8 +6,10 @@ import { useRouter } from "next/navigation";
 import type { WorkbenchAnalysis } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
-import { createReviewFromAnalysis, saveWorkbenchAnalysis, type WorkbenchAnalysisDraft } from "@/lib/workbench/analysis-client";
+import { createReviewFromAnalysis, saveWorkbenchAnalysis, submitAiRun, type KnowledgeScopeValue, type WorkbenchAnalysisDraft } from "@/lib/workbench/analysis-client";
 import { calculateMaxDrawdown, calculateRisk, evaluateImpulse } from "@/lib/workbench/analysis-calculators";
+import { KnowledgeScopeSelector } from "./knowledge-scope-selector";
+import { KnowledgeCitations } from "./knowledge-citations";
 
 const steps = ["市场环境过滤", "确认分析级别", "确认当前浪级", "回撤确认", "调整结构识别", "驱动结构检查", "规则检查", "方案选择", "风险收益评估", "执行计划", "复盘系统"];
 const stepHints = [
@@ -51,8 +53,9 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [knowledgeScope, setKnowledgeScope] = useState<KnowledgeScopeValue>("all");
   const [draftStatus, setDraftStatus] = useState(initialAnalysis ? "服务器版本已加载。" : "正在检查本地草稿。");
-  const [aiJob, setAiJob] = useState<{ id: string; status: string; output_payload?: unknown; error_message?: string } | null>(null);
+  const [aiJob, setAiJob] = useState<{ id: string; status: string; knowledge_version?: string | null; output_payload?: unknown; error_message?: string } | null>(null);
   const currentData = useMemo(() => objectValue(draft.step_data[String(step)]), [draft.step_data, step]);
   const draftKey = `wavekb:next:analysis:${actorId}${analysisId ? `:${analysisId}` : ""}`;
   const restored = useRef(false);
@@ -177,7 +180,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
     setPending(true); setError(""); setStatus("正在保存并提交 AI 候选分析。");
     try {
       const saved = await persist();
-      const response = await fetch(`/api/ai/analyses/${saved.id}/ai-run`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task_type: "wave_analysis", step, schema_version: "workbench-v1" }) });
+      const response = await submitAiRun(`/api/ai/analyses/${saved.id}/ai-run`, step, knowledgeScope);
       const payload = await response.json().catch(() => ({})) as { error?: string; job?: { id: string; status: string } };
       if (!response.ok || !payload.job) throw new Error(payload.error === "ai_connection_required" ? "请先在 AI 控制中心添加并选择一个模型。" : payload.error || "AI 任务提交失败。");
       setAiJob(payload.job); setStatus("AI 任务已进入服务器队列，将经过知识检索和规则闸门。");
@@ -210,6 +213,12 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const legacyRules = Object.keys(draft.rule_result).length > 0 && draft.rule_result.calculation_version !== 2;
   const ruleStatus = ({ valid: "已通过已实现规则", eliminated: "未通过规则", invalid_input: "输入无效", not_checked: "尚未检查" } as Record<string, string>)[String(ruleResult.status)] || "尚未检查";
   const calculationErrors = [ruleResult.error, draft.drawdown_result.error, draft.risk_result.error].filter(Boolean);
+  const aiOutput = objectValue(aiJob?.output_payload);
+  const aiDiagnostics = Object.fromEntries(Object.entries(aiOutput).filter(([key]) => key !== "citations" && key !== "knowledge_citations"));
+  const aiSummary = [
+    ["品种", aiOutput.instrument], ["周期", aiOutput.timeframe], ["分析级别", aiOutput.analysis_level],
+    ["当前结构", aiOutput.current_pattern], ["当前子浪", aiOutput.current_subwave],
+  ].filter(([, value]) => typeof value === "string" && value) as Array<[string, string]>;
   const hasValue = (value: unknown) => value !== null && value !== undefined && String(value).trim() !== "" && value !== "unknown";
   const stepProgress = (index: number) => {
     const value = objectValue(draft.step_data[String(index)]);
@@ -244,7 +253,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
           {step === 9 ? <div className="grid gap-5"><Field><Label htmlFor="execution-status">执行状态</Label><select id="execution-status" className={selectClass} value={draft.execution_status} onChange={(event) => patchDraft({ execution_status: event.target.value as WorkbenchAnalysisDraft["execution_status"] })}><option value="draft">草稿</option><option value="waiting">等待条件</option><option value="ready">可以执行</option><option value="executed">已执行</option><option value="closed">已结束</option></select></Field><Field><Label htmlFor="entry-condition">入场条件</Label><Textarea id="entry-condition" value={String(currentData.entry_condition || "")} onChange={(event) => patchStep({ entry_condition: event.target.value })} /></Field><Field><Label htmlFor="invalidation">结构失效条件</Label><Textarea id="invalidation" value={String(currentData.invalidation || "")} onChange={(event) => patchStep({ invalidation: event.target.value })} /></Field></div> : null}
           {step === 10 ? <div className="grid gap-5"><Field><Label htmlFor="actual-result">实际走势与执行结果</Label><Textarea id="actual-result" value={String(currentData.actual_result || "")} onChange={(event) => patchStep({ actual_result: event.target.value })} /></Field><Field><Label htmlFor="lessons">经验与改进</Label><Textarea id="lessons" value={String(currentData.lessons || "")} onChange={(event) => patchStep({ lessons: event.target.value })} /></Field><Button type="button" variant="secondary" className="w-fit" disabled={pending} onClick={() => void createReview()}>生成完整私人复盘记录</Button></div> : null}
           <Field><Label htmlFor="analysis-notes">分析记录</Label><Textarea id="analysis-notes" rows={8} value={notes} onChange={(event) => patchStep({ notes: event.target.value })} placeholder="记录判断、证据、未知项和下一步确认条件" /></Field>
-          {step >= 2 && step <= 7 ? <div className="grid gap-3 rounded-xl bg-muted p-4"><Button type="button" className="w-fit" disabled={pending} onClick={() => void startAi()}>启动 AI 候选分析</Button><p className="text-xs leading-5 text-muted-foreground">使用 AI 控制中心中选定的模型，知识检索和硬规则闸门仍由服务器处理。</p>{aiJob ? <div className="grid gap-2 text-sm"><p>任务状态：<strong>{aiJob.status}</strong></p><Button type="button" variant="secondary" size="small" className="w-fit" disabled={pending} onClick={() => void refreshAi()}>刷新 AI 状态</Button>{aiJob.output_payload ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-background p-3 text-xs">{JSON.stringify(aiJob.output_payload, null, 2)}</pre> : null}{aiJob.error_message ? <FieldMessage>{aiJob.error_message}</FieldMessage> : null}</div> : null}</div> : null}
+          {step >= 2 && step <= 7 ? <div className="grid gap-3 rounded-xl bg-muted p-4"><KnowledgeScopeSelector value={knowledgeScope} onChange={setKnowledgeScope} disabled={pending} /><Button type="button" className="w-fit" disabled={pending} onClick={() => void startAi()}>启动 AI 候选分析</Button><p className="text-xs leading-5 text-muted-foreground">使用 AI 控制中心中选定的模型，知识检索和硬规则闸门仍由服务器处理。</p>{aiJob ? <div className="grid gap-2 text-sm"><p>任务状态：<strong>{aiJob.status}</strong></p><Button type="button" variant="secondary" size="small" className="w-fit" disabled={pending} onClick={() => void refreshAi()}>刷新 AI 状态</Button>{aiJob.output_payload ? <><section className="grid gap-2 rounded-lg bg-background p-3" aria-label="AI 分析摘要">{aiSummary.map(([label, value]) => <p key={label}><span className="text-muted-foreground">{label}：</span>{value}</p>)}{Array.isArray(aiOutput.valid_scenarios) ? <p><span className="text-muted-foreground">有效候选：</span>{aiOutput.valid_scenarios.length}</p> : null}</section><KnowledgeCitations citations={aiOutput.citations} jobKnowledgeVersion={aiJob.knowledge_version} outputKnowledgeVersion={aiOutput.knowledge_version} /><details><summary className="cursor-pointer text-xs text-muted-foreground">原始 JSON 诊断</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-background p-3 text-xs">{JSON.stringify(aiDiagnostics, null, 2)}</pre></details></> : null}{aiJob.error_message ? <FieldMessage>{aiJob.error_message}</FieldMessage> : null}</div> : null}</div> : null}
           {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t pt-5"><Button type="button" variant="secondary" disabled={step === 0} onClick={() => go(step - 1)}>上一步</Button><div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={pending} onClick={() => void save()}>{pending ? "正在处理" : "保存分析"}</Button>{step < 10 ? <Button type="button" onClick={() => go(step + 1)}>下一步</Button> : null}</div></footer>
         </section>

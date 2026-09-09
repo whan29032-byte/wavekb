@@ -7,7 +7,7 @@ import { formatMentorPrice, type MentorOffer, type MentorPaymentMethod } from "@
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { submitManualMentorPayment } from "@/lib/mentor/client-repository";
-import { MentorClaimList, useBuyerMentorClaims } from "@/components/mentor-payment-status";
+import { MentorPaymentSummary, useBuyerMentorClaims } from "@/components/mentor-payment-status";
 
 function paymentConfigurationIssue(method: MentorPaymentMethod | null) {
   if (!method || method.active === false || !method.account_value.trim()) return true;
@@ -52,6 +52,7 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const [localChecked, setLocalChecked] = useState(false);
   const submissionLock = useRef(false);
+  const submittedAfterRevision = useRef<number | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const configurationIssue = paymentConfigurationIssue(selectedMethod);
   const pendingClaims = claims.claims.filter((claim) => claim.status === "submitted");
@@ -91,6 +92,13 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
     return () => window.clearTimeout(timer);
   }, [attempt, attemptKey, claims.loading, claims.error, claims.claims]);
 
+  useEffect(() => {
+    if (status !== "submitted" || submittedAfterRevision.current === null || claims.loading || claims.error || claims.revision <= submittedAfterRevision.current || pendingClaims.length || claims.pendingOrders.length) return;
+    submittedAfterRevision.current = null;
+    submissionLock.current = false;
+    setStatus("idle");
+  }, [status, claims.loading, claims.error, claims.revision, pendingClaims.length, claims.pendingOrders.length]);
+
   async function copyAccount() {
     if (!selectedMethod || configurationIssue) return;
     try {
@@ -120,6 +128,7 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
         setAttempt(checkpoint);
         localStorage.setItem(attemptKey, JSON.stringify(checkpoint));
       } });
+      submittedAfterRevision.current = claims.revision;
       setStatus("submitted");
       try { localStorage.removeItem(attemptKey); setAttempt(null); } catch { /* A known claim is still protected by the server read. */ }
       await claims.refresh();
@@ -133,7 +142,7 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
 
   if (!actorId) return <section className="grid gap-4 rounded-xl border bg-surface p-5"><div><h2 className="text-xl font-semibold">登录后查看付款信息</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">登录用于把订单、付款声明和后续辅导权益绑定到同一账户。</p></div><Button asChild className="w-fit"><Link href={`/login?next=${encodeURIComponent(returnPath)}`}>登录账户</Link></Button></section>;
   if (claims.loading || !localChecked) return <p role="status" className="text-sm text-muted-foreground">正在查询付款声明状态…</p>;
-  if (pendingClaims.length || claims.pendingOrders.length || claims.error || uncertain) return <div className="grid gap-4">{uncertain ? <p role="alert" className="text-sm text-destructive">{error} 如果查询后仍没有记录，请联系导师核实这次提交。</p> : null}{attempt?.orderId && !claims.error && !claims.pendingOrders.some((order) => order.id === attempt.orderId) ? <p className="break-all text-sm">待核实订单编号：{attempt.orderId}</p> : null}<MentorClaimList {...claims} /><Button asChild variant="secondary" className="w-fit"><Link href="/tutoring">查看我的辅导</Link></Button></div>;
+  if (pendingClaims.length || claims.pendingOrders.length || claims.error || uncertain) return <div className="grid gap-4">{uncertain ? <p role="alert" className="text-sm text-destructive">{error} 如果查询后仍没有记录，请联系导师核实这次提交。</p> : null}<MentorPaymentSummary claims={claims.claims} pendingOrders={claims.pendingOrders} error={claims.error} refresh={claims.refresh} /></div>;
   if (!activeOffers.length) return <section className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">这位导师暂未开放可购买方案。</section>;
   if (!paymentMethods.length) return <section className="rounded-xl border border-dashed p-6"><h2 className="font-semibold">尚未配置收款方式</h2><p className="mt-1 text-sm text-muted-foreground">导师需要先添加有效收款信息，当前不会创建订单。</p></section>;
   if (status === "submitted") return <section className="grid gap-4 rounded-xl border border-primary/30 bg-primary/8 p-6"><CheckCircle aria-hidden size={30} weight="duotone" className="text-primary" /><div><h2 className="text-xl font-semibold">已通知导师核对付款</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">导师确认收款后，服务器会自动发放权益并创建专属会话。确认前请勿重复提交。</p></div><Button asChild variant="secondary" className="w-fit"><Link href="/tutoring">查看我的辅导</Link></Button></section>;

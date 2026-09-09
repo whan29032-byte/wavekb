@@ -1,3 +1,4 @@
+
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, ChatsCircle, CheckCircle, ShieldCheck } from "@phosphor-icons/react/dist/ssr";
@@ -7,8 +8,9 @@ import { MentorAvatar } from "@/components/mentor-avatar";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { publicSupabaseConfig } from "@/lib/env";
 import { getMyMentorSettings, listMentorCatalog, listMyMentorAccess } from "@/lib/mentor/server-repository";
+import { publicPageMetadata } from "@/lib/public-page-metadata";
 
-export const metadata: Metadata = { title: "导师辅导", description: "查看 WaveKB 平台导师、透明方案和专属辅导权益。" };
+export const metadata: Metadata = publicPageMetadata("mentors");
 
 export default async function MentorsPage() {
   if (!publicSupabaseConfig().configured) {

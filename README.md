@@ -48,4 +48,13 @@ cp ai-gateway/.env.example ai-gateway/.env
 - 数据库变更：`supabase/migrations/`，在应用切换前执行。
 - 不包含：生产数据库、用户上传内容、用户账户资料、服务器密钥、API Key、历史部署包或缓存。
 
+涉及 Gateway 与 Web 的版本必须在同一提交上按 Backend-first 顺序发布：先等待非部署型 Ubuntu
+`Verify WaveKB release` 门禁通过，再以显式生产确认发布 Backend；验收 all/single 检索、审计记录和精确
+health SHA 后，才可审批并发布 Next。Gateway 兼容旧 Web 的无版本请求并按 all scope 处理。本流程只接受
+生产 schema marker `202609090001`，未知 marker 一律关闭发布；多书检索不新增数据库迁移。Gateway 归档只带
+代码、`package.json`、`knowledge/retrieval-index.json` 与 `DEPLOYMENT_VERSION`，不带 PDF 或密钥。
+
+完整的 smoke、审计查询、SHA 核验和 previous-symlink 回滚步骤见
+[`ai-gateway/docs/operations.md`](ai-gateway/docs/operations.md)。
+
 详细步骤见 [DEPLOYMENT.md](DEPLOYMENT.md)。

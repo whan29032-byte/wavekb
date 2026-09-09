@@ -4,8 +4,8 @@
 
 网关是浏览器与外部模型之间唯一允许的中转层。每个用户可以连接自己的模型接口，但 API Key 只在网关内加密处理；数据库 service role 和主加密密钥只能存在于服务器环境变量。静态网站只能保存 Supabase publishable key 和网关公开地址。
 
-知识库属于网站本身。每次任务先由服务器从 `knowledge/units/all.jsonl`
-检索第10版规则、指南和核验记录，再将最小必要上下文发送到该用户选择的模型。
+知识库属于网站本身。每次任务由服务器从随 Gateway 发布的
+`knowledge/retrieval-index.json` 检索三本已发布图书的最小必要上下文，再发送到该用户选择的模型。
 外部模型不能直接修改正式知识库。
 
 ## 必需环境变量
@@ -46,6 +46,80 @@ node src/server.ts
 - 超时、429 和 5xx 可按路由设置切换备用模型。
 - 每次尝试记录实际模型、延迟、错误分类、Token 与费用。
 - 单次费用或月度预算达到上限时停止调用。
+
+## 多书 AI 发布与验收
+
+必须对同一个 `main` 提交按“Backend → Next”顺序发布。先等待该 SHA 的 Ubuntu
+`Verify WaveKB release` 工作流通过，再手动运行 `deploy-backend-production.yml`，输入
+`DEPLOY_WAVEKB_BACKEND` 并通过 `production` 环境审批。Backend 成功后，才可手动运行
+`deploy-next-production.yml`，将 `gateway_release_approved` 设为 `true` 并完成 Next 环境审批。
+任何一步失败都停止后续发布。
+
+Backend 必须先发布，因为新 Gateway 同时接受版本 2 请求和未携带 `request_version` 的旧 Web
+请求；旧请求会规范化为 `knowledge_scope: { "mode": "all" }`。因此 Backend-first 窗口兼容旧 Web，
+Next-first 则没有这个保证。本次多书检索复用现有 AI 表和字段，不新增或执行数据库迁移；发布门禁只接受
+精确 schema marker `202609090001`，任何更旧或更新的未知 marker 都应 fail closed。
+
+Backend 归档只包含 `package.json`、`src/`、`knowledge/retrieval-index.json` 和
+`DEPLOYMENT_VERSION`。上传前必须通过知识 artifact freshness、Gateway test/typecheck 和脱离源码 checkout
+的归档 smoke；不得把原始 PDF、`.env`、service-role key、模型 API key 或其他 secret 放入归档。
+
+设置已授权的测试用户、已有分析和同一发布 SHA 后，分别提交 all 与 strict single smoke。每次人工请求使用
+新的 UUID；下面的 Bearer token 不得写入 shell history 或日志：
+
+```sh
+export RELEASE_SHA='<40-char-main-sha>'
+export TEST_ANALYSIS_ID='<owned-workbench-analysis-uuid>'
+export GATEWAY_BEARER_TOKEN='<short-lived-test-user-token>'
+
+curl --fail --silent --show-error \
+  -H "authorization: Bearer ${GATEWAY_BEARER_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d "{\"request_version\":2,\"client_request_id\":\"$(uuidgen)\",\"task_type\":\"wave_analysis\",\"step\":5,\"analysis_schema_version\":\"workbench-v1\",\"knowledge_scope\":{\"mode\":\"all\"}}" \
+  "https://wavekb.com/api/ai/analyses/${TEST_ANALYSIS_ID}/ai-run"
+
+curl --fail --silent --show-error \
+  -H "authorization: Bearer ${GATEWAY_BEARER_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d "{\"request_version\":2,\"client_request_id\":\"$(uuidgen)\",\"task_type\":\"wave_analysis\",\"step\":5,\"analysis_schema_version\":\"workbench-v1\",\"knowledge_scope\":{\"mode\":\"single\",\"book_id\":\"chan-theory-complete\"}}" \
+  "https://wavekb.com/api/ai/analyses/${TEST_ANALYSIS_ID}/ai-run"
+```
+
+轮询每个响应中的 job ID，直到状态终结。all 必须返回服务器展开的引用；single 的每条 citation
+`book_id` 必须严格等于 `chan-theory-complete`，不能出现跨书引用。随后用只读审计查询核对 scope、发布的
+知识版本、服务器生成的 query、命中的 knowledge/source IDs；将两个 job UUID 作为参数传入，不要放宽到全表：
+
+```sql
+select
+  j.id,
+  j.status,
+  j.input_payload -> 'knowledge_scope' as knowledge_scope,
+  j.knowledge_version,
+  r.query,
+  r.knowledge_ids,
+  r.source_ids,
+  r.context_hash,
+  r.created_at
+from public.ai_jobs as j
+join public.knowledge_retrievals as r on r.job_id = j.id
+where j.id in ('<all-job-uuid>', '<single-job-uuid>')
+order by r.created_at;
+```
+
+必须同时精确核验 Gateway 和公开 Next health 的 SHA，不能只检查 HTTP 200：
+
+```sh
+curl --fail --silent --show-error http://127.0.0.1:8787/health |
+  RELEASE_SHA="$RELEASE_SHA" node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const h=JSON.parse(s);if(h.ok!==true||h.deployment!==process.env.RELEASE_SHA)process.exit(1)})'
+curl --fail --silent --show-error https://wavekb.com/api/health |
+  RELEASE_SHA="$RELEASE_SHA" node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const h=JSON.parse(s);if(h.ok!==true||h.deployment!==process.env.RELEASE_SHA)process.exit(1)})'
+```
+
+Gateway 激活失败时工作流会读取该 release 的
+`/var/backups/elliott-wave-gateway/<release-id>/previous-release`，用临时 symlink 原子替换
+`/opt/elliott-wave-gateway/current`，恢复备份的 systemd units 并重启服务。人工回滚也必须使用这个已记录的
+previous 路径，先确认目录和 `DEPLOYMENT_VERSION`，再以 `ln -sfn` + `mv -Tf` 原子切换；禁止猜测
+`releases/` 中“最新”的目录。Next 验收失败则使用其不可变 release/current-symlink 自动回滚。
 
 ## 交易收益排行榜同步
 
