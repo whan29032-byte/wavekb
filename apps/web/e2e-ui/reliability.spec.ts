@@ -58,3 +58,23 @@ test("mobile navigation exposes all global destinations without duplicates", asy
   await page.keyboard.press("Escape");
   await expect(navigation).toBeHidden();
 });
+
+for (const width of [320, 375, 768, 1440]) {
+  test(`reward lottery remains usable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/iframe.html?id=rewards-lottery--ready-to-draw&viewMode=story");
+    const lottery = page.getByRole("region", { name: "九月研究抽奖" });
+    await expect(lottery).toBeVisible();
+    await expect(lottery.getByText("未中奖概率 87.50%")).toBeVisible();
+    await expect(lottery.getByRole("button", { name: "使用 100 积分翻牌" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath(`reward-lottery-${width}.png`), fullPage: true });
+  });
+}
+
+test("reward lottery removes flip motion when reduced motion is requested", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/iframe.html?id=rewards-lottery--ready-to-draw&viewMode=story");
+  const duration = await page.locator('[class*="flipInner"]').evaluate((element) => getComputedStyle(element).transitionDuration);
+  expect(Number.parseFloat(duration)).toBeLessThanOrEqual(0.001);
+});

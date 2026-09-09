@@ -6,12 +6,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarCheck, Check, Coins, Medal, Notebook, Receipt, Storefront, Trophy } from "@phosphor-icons/react";
-import { canRedeemReward, formatRewardPoints, rewardActionLabel, type RewardCenter as RewardCenterValue, type RewardLeaderboardEntry, type RewardProduct } from "@wavekb/domain";
+import { canRedeemReward, formatRewardPoints, rewardActionLabel, type RewardCenter as RewardCenterValue, type RewardLeaderboardEntry, type RewardLotteryState, type RewardProduct } from "@wavekb/domain";
 import { Button, FieldMessage } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
 import { IdentityName, IdentityPreview, Nameplate, type IdentityPreviewProfile } from "@/components/nameplate";
 import { notifyIdentityChanged, subscribeIdentityChanges } from "@/lib/member/identity-events";
 import { loadRewardCenter, rewardMutations } from "@/lib/rewards/client-repository";
+import { RewardLottery } from "@/components/reward-lottery";
 
 const categoryLabels: Record<RewardProduct["category"], string> = { identity: "身份装扮", digital: "数字权益", service: "服务权益", physical: "实体商品" };
 
@@ -24,13 +25,13 @@ function friendlyError(error: unknown): string {
   return message || "操作没有完成，请稍后重试。";
 }
 
-type RewardCenterProps = { actorId: string; initialCenter: RewardCenterValue; leaderboard: RewardLeaderboardEntry[]; profile?: IdentityPreviewProfile };
+type RewardCenterProps = { actorId: string; initialCenter: RewardCenterValue; leaderboard: RewardLeaderboardEntry[]; lottery?: RewardLotteryState | null; profile?: IdentityPreviewProfile };
 
 export function RewardCenter(props: RewardCenterProps) {
   return <RewardCenterContent key={props.actorId} {...props} />;
 }
 
-function RewardCenterContent({ actorId, initialCenter, leaderboard, profile }: RewardCenterProps) {
+function RewardCenterContent({ actorId, initialCenter, leaderboard, lottery, profile }: RewardCenterProps) {
   const router = useRouter();
   const [center, setCenter] = useState(initialCenter);
   const [centerSource, setCenterSource] = useState(initialCenter);
@@ -123,6 +124,8 @@ function RewardCenterContent({ actorId, initialCenter, leaderboard, profile }: R
         <div className="grid content-center gap-4"><span className="flex items-center gap-2 text-sm font-semibold text-primary"><Medal aria-hidden size={19} weight="duotone" />积分权益</span><h1 className="max-w-[18ch] text-3xl font-semibold tracking-[-0.04em] md:text-5xl">把认真研究积累成长期权益</h1><p className="max-w-[64ch] text-sm leading-7 text-muted-foreground">签到、首次保存复盘和发布可核验内容都会写入服务端积分账本。兑换时由数据库锁定余额与库存，页面不会自行判定成交。</p><div className="flex flex-wrap gap-2"><Button asChild variant="secondary"><Link href="/workbench/entries/new?kind=review"><Notebook aria-hidden size={18} />去写复盘</Link></Button><Button asChild variant="ghost"><Link href="/member/profile">管理已拥有铭牌</Link></Button></div></div>
         <aside className="grid content-center gap-4 rounded-xl bg-muted p-5" aria-label="积分余额"><span className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><Coins aria-hidden size={19} className="text-primary" />可用积分</span><strong className="text-4xl tabular-nums">{new Intl.NumberFormat("zh-CN").format(center.wallet.balance)}</strong><span className="text-xs text-muted-foreground">累计获得 {formatRewardPoints(center.wallet.lifetime_earned)}</span><Button type="button" disabled={center.checked_today || pending === "checkin"} onClick={checkIn}><CalendarCheck aria-hidden size={18} />{center.checked_today ? "今日已签到" : pending === "checkin" ? "正在签到" : "立即签到"}</Button><span className="text-center text-xs text-muted-foreground">当前连续 {center.streak} 天</span></aside>
       </section>
+
+      {lottery ? <RewardLottery actorId={actorId} initialState={lottery} /> : null}
 
       <div aria-live="polite" className="min-h-6">{error ? <FieldMessage role="alert">{error}</FieldMessage> : status ? <p className="text-sm font-medium text-primary">{status}</p> : null}</div>
 

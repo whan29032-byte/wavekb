@@ -1,0 +1,203 @@
+.section {
+  display: grid;
+  gap: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.header {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.header h2 {
+  margin-top: 0.35rem;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+.header p {
+  margin-top: 0.45rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+}
+
+.summary div {
+  padding: 0.75rem;
+}
+
+.summary div + div {
+  border-left: 1px solid var(--border);
+}
+
+.summary dt,
+.summary dd {
+  font-size: 0.75rem;
+}
+
+.summary dt {
+  color: var(--muted-foreground);
+}
+
+.summary dd {
+  margin-top: 0.25rem;
+  font-weight: 650;
+}
+
+.layout {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.flipCard {
+  min-height: 19rem;
+  perspective: 900px;
+}
+
+.flipInner {
+  position: relative;
+  width: 100%;
+  min-height: 19rem;
+  transform-style: preserve-3d;
+  transition: transform 520ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.revealed .flipInner {
+  transform: rotateY(180deg);
+}
+
+.cardFace {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 32%, var(--border));
+  border-radius: 0.75rem;
+  background: var(--muted);
+  padding: 1.5rem;
+  text-align: center;
+  backface-visibility: hidden;
+}
+
+.cardFace > strong {
+  font-size: 1.25rem;
+}
+
+.cardFace > span {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+.cardBack {
+  transform: rotateY(180deg);
+  background: var(--surface);
+}
+
+.resultLabel {
+  color: var(--primary) !important;
+  font-weight: 650;
+}
+
+.odds {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.oddsHeader,
+.prizeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+}
+
+.oddsHeader {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.oddsHeader div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.oddsHeader strong {
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+
+.prizeRow + .prizeRow {
+  border-top: 1px solid var(--border);
+}
+
+.prizeRow > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.prizeRow span,
+.rule {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.prizeMeta {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.rule {
+  border-top: 1px solid var(--border);
+  padding: 0.8rem 1rem;
+  line-height: 1.6;
+}
+
+@media (min-width: 800px) {
+  .header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .summary {
+    min-width: 21rem;
+  }
+
+  .layout {
+    grid-template-columns: minmax(16rem, 0.72fr) minmax(0, 1.28fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flipInner {
+    transition: none;
+  }
+}
