@@ -140,6 +140,7 @@ export class AiJobWorker {
       const classification = classifyProviderError(error);
       const retry = classification === "retryable" && attemptNumber < 3;
       const runtimeCode = (error as { code?: unknown })?.code;
+      const provider = (error as { provider?: KnowledgeRuntimeResult["provider"] })?.provider;
       const errorCode = runtimeCode === "knowledge_unavailable" || runtimeCode === "invalid_model_output"
         ? runtimeCode
         : classification;
@@ -148,8 +149,29 @@ export class AiJobWorker {
         await this.database.request(`/rest/v1/ai_job_attempts?id=eq.${encodeURIComponent(attemptId)}`, {
           method: "PATCH",
           headers: { prefer: "return=minimal" },
-          body: { status: "failed", error_class: classification, latency_ms: this.now() - started, finished_at: finishedAt },
+          body: {
+            status: "failed",
+            error_class: classification,
+            provider_request_id: provider?.providerRequestId ?? null,
+            latency_ms: this.now() - started,
+            finished_at: finishedAt,
+          },
         }).catch(() => undefined);
+      }
+      if (provider) {
+        await this.database.request("/rest/v1/ai_usage_ledger", {
+          method: "POST",
+          headers: { prefer: "return=minimal" },
+          body: {
+            job_id: job.id,
+            attempt_id: attemptId ?? null,
+            owner_id: job.owner_id,
+            input_tokens: Math.max(0, Number(provider.usage.inputTokens || 0)),
+            output_tokens: Math.max(0, Number(provider.usage.outputTokens || 0)),
+            cost_amount: 0,
+            cost_confirmed: false,
+          },
+        });
       }
       await this.patchJob(job.id, retry ? {
         status: "waiting_retry",

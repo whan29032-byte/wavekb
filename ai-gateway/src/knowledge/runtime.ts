@@ -56,18 +56,24 @@ export type InsufficientEvidenceOutput = KnowledgeRunMetadata & {
 
 export type ValidatedKnowledgeOutput = AnalysisResult & KnowledgeRunMetadata;
 
+export type ProviderAccounting = {
+  usage: ProviderResult["usage"];
+  providerRequestId?: string;
+};
+
 export type KnowledgeRuntimeResult = {
   output: InsufficientEvidenceOutput | ValidatedKnowledgeOutput;
   normalizedRequest: NormalizedAiRunRequest;
   knowledgeVersion: string;
-  provider: {
-    usage: ProviderResult["usage"];
-    providerRequestId?: string;
-  } | null;
+  provider: ProviderAccounting | null;
 };
 
-function runtimeError(code: "knowledge_unavailable" | "invalid_model_output", cause?: unknown): Error {
-  return Object.assign(new Error(code, { cause }), { code });
+function runtimeError(
+  code: "knowledge_unavailable" | "invalid_model_output",
+  cause?: unknown,
+  provider?: ProviderAccounting,
+): Error & { code: typeof code; provider?: ProviderAccounting } {
+  return Object.assign(new Error(code, { cause }), { code, ...(provider ? { provider } : {}) });
 }
 
 function characterBudget(connection: ResolvedUserConnection): { characters: number; tokens: number } {
@@ -269,7 +275,12 @@ export class KnowledgeRuntime {
           new Set(context.items.map((item) => item.chunkId)),
         );
       } catch (repairError) {
-        throw runtimeError("invalid_model_output", repairError ?? firstError);
+        throw runtimeError("invalid_model_output", repairError ?? firstError, {
+          usage,
+          ...(providerResult.providerRequestId
+            ? { providerRequestId: providerResult.providerRequestId }
+            : {}),
+        });
       }
     }
     const gated = applyRuleGate(validated, scenarioInputsFromAnalysis(input.analysis));

@@ -320,6 +320,16 @@ test("extension-only retrieval excludes core prose while the tenth-edition hard-
         direction: "up",
         w1_start: 100,
         w1_end: 120,
+        w2_end: 110,
+        w3_end: 160,
+        w4_end: 140,
+        w5_end: 175,
+      },
+      "6": {
+        pattern: "impulse",
+        direction: "up",
+        w1_start: 100,
+        w1_end: 120,
         w2_end: 90,
         w3_end: 140,
         w4_end: 125,
@@ -363,14 +373,18 @@ test("extension-only retrieval excludes core prose while the tenth-edition hard-
 });
 
 test("invalid JSON gets one same-provider repair and never succeeds with the raw output", async () => {
-  const invalid = (providerRequestId: string): ProviderResult => ({
-    text: "this is not JSON",
-    usage: { inputTokens: 3, outputTokens: 2 },
-    providerRequestId,
-    finishReason: "stop",
-  });
   const fixture = workerFixture({
-    providerOutcomes: [invalid("bad-1"), invalid("bad-2")],
+    providerOutcomes: [{
+      text: "this is not JSON",
+      usage: { inputTokens: 3, outputTokens: 2 },
+      providerRequestId: "bad-1",
+      finishReason: "stop",
+    }, {
+      text: "this is still not JSON",
+      usage: { inputTokens: 5, outputTokens: 7 },
+      providerRequestId: "bad-2",
+      finishReason: "stop",
+    }],
   });
   await fixture.worker.runJob(baseJob);
 
@@ -384,21 +398,37 @@ test("invalid JSON gets one same-provider repair and never succeeds with the raw
   assert.equal(patch?.body?.status, "failed");
   assert.equal(patch?.body?.error_code, "invalid_model_output");
   assert.equal(Object.hasOwn(patch?.body ?? {}, "output_payload"), false);
+  const attemptPatch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_job_attempts?id="));
+  assert.equal(attemptPatch?.body?.provider_request_id, "bad-2");
+  const usage = fixture.calls.find((call) => call.path === "/rest/v1/ai_usage_ledger");
+  assert.deepEqual(usage?.body, {
+    job_id: baseJob.id,
+    attempt_id: "attempt-1",
+    owner_id: baseJob.owner_id,
+    input_tokens: 8,
+    output_tokens: 9,
+    cost_amount: 0,
+    cost_confirmed: false,
+  });
   assert.equal(fixture.calls.some((call) => call.path.startsWith("/rest/v1/workbench_analyses")
     && call.method === "PATCH"), false);
 });
 
 test("a forged citation cannot succeed after the single format repair", async () => {
-  const forged = (providerRequestId: string): ProviderResult => ({
-    text: JSON.stringify(validModelResult({ knowledge_citations: ["forged-core-id"] })),
-    usage: { inputTokens: 4, outputTokens: 3 },
-    providerRequestId,
-    finishReason: "stop",
-  });
   const fixture = workerFixture({
     currentAnalysis: { ...analysis, instrument: "target" },
     loadIndex: () => fixtureIndex([chunk()]),
-    providerOutcomes: [forged("forged-1"), forged("forged-2")],
+    providerOutcomes: [{
+      text: JSON.stringify(validModelResult({ knowledge_citations: ["forged-core-id"] })),
+      usage: { inputTokens: 4, outputTokens: 3 },
+      providerRequestId: "forged-1",
+      finishReason: "stop",
+    }, {
+      text: JSON.stringify(validModelResult({ knowledge_citations: ["forged-core-id"] })),
+      usage: { inputTokens: 6, outputTokens: 5 },
+      providerRequestId: "forged-2",
+      finishReason: "stop",
+    }],
   });
   await fixture.worker.runJob(baseJob);
 
@@ -407,6 +437,18 @@ test("a forged citation cannot succeed after the single format repair", async ()
   assert.equal(patch?.body?.status, "failed");
   assert.equal(patch?.body?.error_code, "invalid_model_output");
   assert.equal(Object.hasOwn(patch?.body ?? {}, "output_payload"), false);
+  const attemptPatch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_job_attempts?id="));
+  assert.equal(attemptPatch?.body?.provider_request_id, "forged-2");
+  const usage = fixture.calls.find((call) => call.path === "/rest/v1/ai_usage_ledger");
+  assert.deepEqual(usage?.body, {
+    job_id: baseJob.id,
+    attempt_id: "attempt-1",
+    owner_id: baseJob.owner_id,
+    input_tokens: 10,
+    output_tokens: 8,
+    cost_amount: 0,
+    cost_confirmed: false,
+  });
   assert.equal(fixture.calls.some((call) => call.path.startsWith("/rest/v1/workbench_analyses")
     && call.method === "PATCH"), false);
 });

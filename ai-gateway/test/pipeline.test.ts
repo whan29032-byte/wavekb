@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { finalizeResult, validateAnalysisResult } from "../src/pipeline/validate-result.ts";
-import { applyRuleGate } from "../src/pipeline/rule-gate.ts";
+import { applyRuleGate, scenarioInputsFromAnalysis } from "../src/pipeline/rule-gate.ts";
 
 const validResult = {
   instrument: "BTCUSDT",
@@ -97,4 +97,35 @@ test("hard-rule violation moves a scenario out of the valid list", () => {
     output.eliminated_scenarios[0]?.violations?.[0]?.rule_id,
     "ewp-rule-impulse-core",
   );
+});
+
+test("persisted step 6 pivots drive the rule gate even when step 5 is misleading", () => {
+  const output = applyRuleGate(validResult, scenarioInputsFromAnalysis({
+    step_data: {
+      "5": {
+        pattern: "impulse",
+        direction: "up",
+        w1_start: 100,
+        w1_end: 120,
+        w2_end: 110,
+        w3_end: 160,
+        w4_end: 140,
+        w5_end: 175,
+      },
+      "6": {
+        pattern: "impulse",
+        direction: "up",
+        w1_start: 100,
+        w1_end: 120,
+        w2_end: 90,
+        w3_end: 140,
+        w4_end: 125,
+        w5_end: 150,
+      },
+    },
+  }));
+
+  assert.equal(output.valid_scenarios.length, 0);
+  assert.equal(output.eliminated_scenarios[0]?.key, "primary");
+  assert.equal(output.eliminated_scenarios[0]?.violations?.[0]?.rule_id, "ewp-rule-impulse-core");
 });
