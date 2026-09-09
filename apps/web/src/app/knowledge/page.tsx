@@ -6,13 +6,11 @@ import { childrenOf, knowledgeData, type KnowledgeTheme } from "@wavekb/knowledg
 import { KnowledgeExplorer } from "@/components/knowledge-explorer";
 import { CORE_BOOK_ID, getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
 import { buildLibrarySearchDocuments } from "@/lib/knowledge/book-reading";
-import { publicMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = publicMetadata({
+export const metadata: Metadata = {
   title: "知识库",
   description: "按图书、主题、问题和章节阅读已核验的波浪理论知识。",
-  path: "/knowledge",
-});
+};
 
 function unitsInTheme(theme: KnowledgeTheme): string[] {
   return [...theme.unit_ids, ...theme.children.flatMap(unitsInTheme)];
