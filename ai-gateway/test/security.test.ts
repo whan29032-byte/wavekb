@@ -60,6 +60,10 @@ function runRequest() {
   };
 }
 
+function legacyRunRequest(step = 5) {
+  return { task_type: "wave_analysis", step, schema_version: "workbench-v1" };
+}
+
 test("custom provider rejects insecure public address and loopback unless allowlisted", () => {
   assert.throws(() => validateProviderUrl("http://example.com/v1", [], []));
   assert.throws(() => validateProviderUrl("http://127.0.0.1:11434/v1", [], []));
@@ -268,4 +272,46 @@ test("analysis UUID casing cannot create a second idempotency key", async () => 
   assert.ok(analysisPaths.every((path) => path.includes(`id=eq.${analysisId}`)));
   assert.deepEqual(insertedAnalysisIds, [analysisId, analysisId]);
   assert.equal(duplicate.analysis_id, analysisId);
+});
+
+test("the deployed legacy payload retries idempotently without colliding with another semantic request", async () => {
+  const storedKeys = new Map<string, Record<string, unknown>>();
+  const insertedPayloads: Record<string, unknown>[] = [];
+  let nextJob = 1;
+  const database = {
+    async request(path: string, options?: Record<string, unknown>) {
+      if (path.startsWith("/rest/v1/workbench_analyses?")) return [ANALYSIS];
+      if (path.startsWith("/rest/v1/user_ai_connections?")) return [CONNECTION];
+      if (path === "/rest/v1/ai_jobs" && options?.method === "POST") {
+        const body = options.body as Record<string, unknown>;
+        const key = String(body.idempotency_key);
+        insertedPayloads.push(body.input_payload as Record<string, unknown>);
+        if (storedKeys.has(key)) throw Object.assign(new Error("duplicate key"), { status: 409, code: "23505" });
+        const job = { id: `legacy-job-${nextJob}`, owner_id: OWNER_ID, ...body };
+        nextJob += 1;
+        storedKeys.set(key, job);
+        return [job];
+      }
+      if (path.startsWith("/rest/v1/ai_jobs?idempotency_key=")) {
+        const encodedKey = path.match(/^\/rest\/v1\/ai_jobs\?idempotency_key=eq\.([^&]+)/)?.[1];
+        const key = encodedKey ? decodeURIComponent(encodedKey) : "";
+        return storedKeys.has(key) ? [storedKeys.get(key)] : [];
+      }
+      throw new Error(`unexpected database path: ${path}`);
+    },
+    async userForJwt() { return null; },
+  };
+  const gateway = new SupabaseGatewayApi(gatewayConfig, { database, knowledgePath: retrievalIndexPath });
+
+  const first = await gateway.enqueueJob(OWNER_ID, ANALYSIS_ID, legacyRunRequest()) as Record<string, unknown>;
+  const retry = await gateway.enqueueJob(OWNER_ID, ANALYSIS_ID, legacyRunRequest()) as Record<string, unknown>;
+  const differentStep = await gateway.enqueueJob(OWNER_ID, ANALYSIS_ID, legacyRunRequest(6)) as Record<string, unknown>;
+
+  assert.equal(retry.id, first.id);
+  assert.notEqual(differentStep.id, first.id);
+  assert.equal(storedKeys.size, 2);
+  assert.deepEqual(insertedPayloads[0], insertedPayloads[1]);
+  assert.match(String(insertedPayloads[0]?.client_request_id), /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.deepEqual(insertedPayloads[0]?.knowledge_scope, { mode: "all" });
+  assert.equal(insertedPayloads[0]?.analysis_schema_version, "workbench-v1");
 });

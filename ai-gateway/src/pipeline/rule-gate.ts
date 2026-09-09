@@ -47,11 +47,15 @@ export function scenarioInputsFromAnalysis(
   analysis: Record<string, unknown>,
 ): Record<string, ScenarioInput> {
   const stepData = isRecord(analysis.step_data) ? analysis.step_data : {};
+  const pattern = isRecord(stepData["5"]) ? stepData["5"].pattern : undefined;
   const structural = isRecord(stepData["6"]) ? stepData["6"] : {};
-  const shared = scenarioInput(structural);
+  const shared = scenarioInput({ ...structural, pattern });
   const result: Record<string, ScenarioInput> = {};
   for (const key of ["primary", "alternative_a", "alternative_b"]) {
-    const specific = scenarioInput(structural[key]);
+    const specificValue = isRecord(structural[key])
+      ? { ...structural[key], pattern }
+      : structural[key];
+    const specific = scenarioInput(specificValue);
     if (specific ?? shared) result[key] = (specific ?? shared) as ScenarioInput;
   }
   return result;

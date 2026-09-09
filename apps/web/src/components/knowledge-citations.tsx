@@ -32,7 +32,17 @@ function isSafeCitation(value: unknown): value is KnowledgeCitation {
   return Boolean(match && pages.includes(Number(match[1])));
 }
 
-export function KnowledgeCitations({ citations }: { citations?: unknown }) {
+export function KnowledgeCitations({
+  citations,
+  jobKnowledgeVersion,
+  outputKnowledgeVersion,
+}: {
+  citations?: unknown;
+  jobKnowledgeVersion?: unknown;
+  outputKnowledgeVersion?: unknown;
+}) {
+  if (typeof jobKnowledgeVersion !== "string" || !jobKnowledgeVersion
+    || jobKnowledgeVersion !== outputKnowledgeVersion) return null;
   const trusted = Array.isArray(citations) ? citations.filter(isSafeCitation) : [];
   if (!trusted.length) return null;
 

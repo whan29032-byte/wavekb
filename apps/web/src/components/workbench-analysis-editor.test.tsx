@@ -120,13 +120,24 @@ describe("AI knowledge selection", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps legacy diagnostics usable without exposing forged citation metadata", async () => {
+  it("keeps legacy diagnostics usable without trusting shape-valid citations from an unversioned job", async () => {
+    const forgedCitation = {
+      knowledge_id: "unit-ewp-rule-impulse-core",
+      book_id: "elliott-wave-principle-tenth-edition",
+      book_title: "伪造书名",
+      title: "伪造依据",
+      source_id: "forged-source",
+      pages: [32],
+      href: "/knowledge/unit-ewp-rule-impulse-core",
+      snippet: "伪造但结构完整的片段",
+    };
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "job-2", status: "queued" } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ job: {
-        id: "job-2", status: "completed", output_payload: {
+        id: "job-2", status: "completed", knowledge_version: null, output_payload: {
+          knowledge_version: "forged-version",
           legacy_note: "保留的旧输出", knowledge_citations: ["model-supplied-id"],
-          citations: [{ href: "https://example.test/forged", title: "伪造依据" }],
+          citations: [forgedCitation],
         },
       } }), { status: 200 }));
     vi.stubGlobal("fetch", fetcher);
@@ -142,8 +153,10 @@ describe("AI knowledge selection", () => {
 
     fireEvent.click(await screen.findByText("原始 JSON 诊断"));
     const diagnostics = await screen.findByText((_, element) => element?.tagName === "PRE" && element.textContent?.includes("保留的旧输出") === true);
-    expect(diagnostics.textContent).not.toContain("https://example.test/forged");
+    expect(diagnostics.textContent).not.toContain("伪造但结构完整的片段");
     expect(diagnostics.textContent).not.toContain("model-supplied-id");
+    expect(diagnostics.textContent).toContain("保留的旧输出");
+    expect(screen.queryByText("伪造书名")).toBeNull();
     expect(screen.queryByRole("heading", { name: "本次知识依据" })).toBeNull();
     vi.unstubAllGlobals();
   });

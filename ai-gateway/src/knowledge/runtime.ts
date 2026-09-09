@@ -255,14 +255,29 @@ export class KnowledgeRuntime {
         new Set(context.items.map((item) => item.chunkId)),
       );
     } catch (firstError) {
-      const repair = await input.connection.provider.invoke({
-        ...providerRequest,
-        temperature: 0,
-        messages: [
-          ...providerRequest.messages,
-          { role: "user", content: "The preceding output was invalid. Return one corrected JSON object only; do not add facts or citation IDs." },
-        ],
-      });
+      let repair: ProviderResult;
+      try {
+        repair = await input.connection.provider.invoke({
+          ...providerRequest,
+          temperature: 0,
+          messages: [
+            ...providerRequest.messages,
+            { role: "user", content: "The preceding output was invalid. Return one corrected JSON object only; do not add facts or citation IDs." },
+          ],
+        });
+      } catch (repairError) {
+        const error = repairError instanceof Error
+          ? repairError
+          : new Error("repair invoke failed", { cause: repairError });
+        throw Object.assign(error, {
+          provider: {
+            usage,
+            ...(providerResult.providerRequestId
+              ? { providerRequestId: providerResult.providerRequestId }
+              : {}),
+          },
+        });
+      }
       usage = {
         inputTokens: usage.inputTokens + repair.usage.inputTokens,
         outputTokens: usage.outputTokens + repair.usage.outputTokens,

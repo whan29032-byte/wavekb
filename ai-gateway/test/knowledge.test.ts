@@ -77,17 +77,46 @@ test("scope normalization accepts all and each published single book", () => {
   }
 });
 
-test("a request without a version keeps legacy all-books behavior", () => {
+test("the exact deployed legacy request normalizes to a deterministic all-books v2 request", () => {
   const catalog = buildKnowledgeIndex(artifactPath).books;
-  const { request_version: _version, knowledge_scope: _scope, ...legacy } = validRequest();
-  assert.deepEqual(normalizeAiRunRequest(legacy, catalog), {
+  const legacy = {
+    task_type: "wave_analysis",
+    step: 5,
+    schema_version: "workbench-v1",
+  };
+  const context = {
+    ownerId: "22222222-2222-4222-8222-222222222222",
+    analysisId: "33333333-3333-4333-8333-333333333333",
+  };
+  const normalized = normalizeAiRunRequest(legacy, catalog, context);
+  assert.deepEqual(normalized, {
     request_version: 2,
-    client_request_id: CLIENT_REQUEST_ID,
+    client_request_id: normalized.client_request_id,
     task_type: "wave_analysis",
     step: 5,
     analysis_schema_version: "workbench-v1",
     knowledge_scope: { mode: "all" },
   });
+  assert.match(normalized.client_request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(normalizeAiRunRequest(legacy, catalog, context).client_request_id, normalized.client_request_id);
+  assert.notEqual(
+    normalizeAiRunRequest({ ...legacy, step: 6 }, catalog, context).client_request_id,
+    normalized.client_request_id,
+  );
+});
+
+test("legacy compatibility accepts only the exact historical own-key shape", () => {
+  const catalog = buildKnowledgeIndex(artifactPath).books;
+  const context = { ownerId: "owner", analysisId: "analysis" };
+  const legacy = { task_type: "wave_analysis", step: 5, schema_version: "workbench-v1" };
+  const inherited = Object.assign(Object.create({ marker: true }), legacy);
+  const extra = { ...legacy, client_request_id: CLIENT_REQUEST_ID };
+  const symbol = Object.assign({ ...legacy }, { [Symbol("query")]: "hidden" });
+  const nonEnumerable = { ...legacy };
+  Object.defineProperty(nonEnumerable, "query", { value: "hidden", enumerable: false });
+  for (const input of [inherited, extra, symbol, nonEnumerable]) {
+    assert.throws(() => normalizeAiRunRequest(input, catalog, context));
+  }
 });
 
 test("scope normalization rejects malformed, ambiguous, and unpublished scopes", () => {

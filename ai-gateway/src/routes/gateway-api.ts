@@ -414,7 +414,10 @@ export class SupabaseGatewayApi implements GatewayApi {
       throw Object.assign(new Error("invalid analysis id"), { statusCode: 400 });
     }
     const normalizedAnalysisId = analysisId.toLowerCase();
-    const normalized = normalizeAiRunRequest(input, this.knowledgeIndex.books);
+    const normalized = normalizeAiRunRequest(input, this.knowledgeIndex.books, {
+      ownerId,
+      analysisId: normalizedAnalysisId,
+    });
     const analysisRows = await this.database.request(
       `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(normalizedAnalysisId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,owner_id,schema_version,input_source,instrument,market,primary_timeframe,parent_timeframe,child_timeframe,holding_style,step_data,rule_result,score_result,risk_result,execution_status,created_at,updated_at&limit=1`,
     );

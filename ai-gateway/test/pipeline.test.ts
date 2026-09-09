@@ -129,3 +129,24 @@ test("persisted step 6 pivots drive the rule gate even when step 5 is misleading
   assert.equal(output.eliminated_scenarios[0]?.key, "primary");
   assert.equal(output.eliminated_scenarios[0]?.violations?.[0]?.rule_id, "ewp-rule-impulse-core");
 });
+
+test("the rule gate combines the pattern and pivots exactly as the workbench persists them", () => {
+  const output = applyRuleGate(validResult, scenarioInputsFromAnalysis({
+    step_data: {
+      "5": { pattern: "impulse" },
+      "6": {
+        direction: "up",
+        w1_start: "100",
+        w1_end: "120",
+        w2_end: "90",
+        w3_end: "140",
+        w4_end: "125",
+        w5_end: "150",
+      },
+    },
+  }));
+
+  assert.equal(output.valid_scenarios.length, 0);
+  assert.equal(output.eliminated_scenarios[0]?.key, "primary");
+  assert.equal(output.eliminated_scenarios[0]?.violations?.[0]?.rule_id, "ewp-rule-impulse-core");
+});

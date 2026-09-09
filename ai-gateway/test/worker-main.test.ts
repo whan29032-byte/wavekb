@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadConfig } from "../src/config.ts";
 import { KnowledgeRuntime } from "../src/knowledge/runtime.ts";
+import { classifyProviderError } from "../src/jobs/router.ts";
 import type { KnowledgeChunk, KnowledgeIndex } from "../src/knowledge/index.ts";
 import type { ProviderRequest, ProviderResult } from "../src/providers/types.ts";
 import { AiJobWorker, type ClaimedJob } from "../src/worker-main.ts";
@@ -416,6 +417,88 @@ test("invalid JSON gets one same-provider repair and never succeeds with the raw
   });
   assert.equal(fixture.calls.some((call) => call.path.startsWith("/rest/v1/workbench_analyses")
     && call.method === "PATCH"), false);
+});
+
+test("the runtime preserves first-call accounting while retaining a thrown repair error classification", async () => {
+  for (const repairError of [
+    Object.assign(new Error("repair timeout"), { code: "TIMEOUT" }),
+    Object.assign(new Error("repair rate limited"), { status: 429 }),
+    Object.assign(new Error("repair upstream"), { status: 503 }),
+    Object.assign(new Error("repair auth"), { status: 401 }),
+  ]) {
+    let calls = 0;
+    const runtime = new KnowledgeRuntime({
+      database: { async request() { return [{ id: "retrieval-1" }]; } },
+      loadIndex: () => fixtureIndex([chunk()]),
+    });
+    const connection = {
+      id: CONNECTION_ID,
+      ownerId: baseJob.owner_id,
+      modelName: "model-a",
+      timeoutMs: 60_000,
+      maxOutputTokens: 4096,
+      contextTokens: 32768,
+      temperature: 0.2,
+      provider: {
+        async invoke() {
+          calls += 1;
+          if (calls === 1) return {
+            text: "invalid first response",
+            usage: { inputTokens: 13, outputTokens: 8 },
+            providerRequestId: "billable-first",
+            finishReason: "stop",
+          };
+          throw repairError;
+        },
+      },
+    };
+
+    await assert.rejects(
+      () => runtime.run({ job: baseJob, analysis: { ...analysis, instrument: "target" }, connection }),
+      (error: unknown) => {
+        assert.equal(classifyProviderError(error), classifyProviderError(repairError));
+        assert.deepEqual((error as { provider?: unknown }).provider, {
+          usage: { inputTokens: 13, outputTokens: 8 },
+          providerRequestId: "billable-first",
+        });
+        return true;
+      },
+    );
+  }
+});
+
+test("the worker ledgers the first billable response before retrying or terminalizing a thrown repair failure", async () => {
+  for (const [repairError, expectedStatus] of [
+    [Object.assign(new Error("repair timeout"), { code: "TIMEOUT" }), "waiting_retry"],
+    [Object.assign(new Error("repair auth"), { status: 401 }), "failed"],
+  ] as const) {
+    const fixture = workerFixture({
+      currentAnalysis: { ...analysis, instrument: "target" },
+      loadIndex: () => fixtureIndex([chunk()]),
+      providerOutcomes: [{
+        text: "invalid first response",
+        usage: { inputTokens: 13, outputTokens: 8 },
+        providerRequestId: "billable-first",
+        finishReason: "stop",
+      }, repairError],
+    });
+    await fixture.worker.runJob(baseJob);
+
+    const usage = fixture.calls.find((call) => call.path === "/rest/v1/ai_usage_ledger");
+    assert.deepEqual(usage?.body, {
+      job_id: baseJob.id,
+      attempt_id: "attempt-1",
+      owner_id: baseJob.owner_id,
+      input_tokens: 13,
+      output_tokens: 8,
+      cost_amount: 0,
+      cost_confirmed: false,
+    });
+    const attempt = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_job_attempts?id="));
+    assert.equal(attempt?.body?.provider_request_id, "billable-first");
+    const job = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
+    assert.equal(job?.body?.status, expectedStatus);
+  }
 });
 
 test("a failed usage-ledger write cannot prevent invalid model output from terminalizing the job", async () => {
