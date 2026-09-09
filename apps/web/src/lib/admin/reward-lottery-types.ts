@@ -20,8 +20,8 @@ export type AdminRewardLotteryPrize = {
   probability_bps: number;
   stock_total: number;
   stock_remaining: number;
-  fulfillment_type: "points" | "manual";
-  reward_points: number | null;
+  fulfillment_type: "manual";
+  reward_points: null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -65,7 +65,5 @@ export type RewardLotteryPrizeInput = {
   imageUrl?: string | null;
   probabilityBps: number;
   stockTotal: number;
-  fulfillmentType: "points" | "manual";
-  rewardPoints: number | null;
   sortOrder: number;
 };

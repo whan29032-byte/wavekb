@@ -4,6 +4,7 @@ import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 
 const migrationUrl = new URL("../supabase/migrations/202609090002_reward_lottery.sql", import.meta.url);
+const manualFulfillmentMigrationUrl = new URL("../supabase/migrations/202609100001_reward_lottery_manual_fulfillment.sql", import.meta.url);
 const adminId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const userOne = "11111111-1111-4111-8111-111111111111";
 const userTwo = "22222222-2222-4222-8222-222222222222";
@@ -78,6 +79,7 @@ async function createDatabase() {
       ('${noUidUser}', 1000, 1000);
   `);
   await database.exec(await readFile(migrationUrl, "utf8"));
+  await database.exec(await readFile(manualFulfillmentMigrationUrl, "utf8"));
   return database;
 }
 
@@ -103,8 +105,8 @@ async function createPrize(database, campaignId, {
   name = "研究积分 50",
   probability = 10000,
   stock = 10,
-  fulfillment = "points",
-  rewardPoints = 50,
+  fulfillment = "manual",
+  rewardPoints = null,
   sortOrder = 10,
 } = {}) {
   const result = await database.query(
@@ -135,7 +137,7 @@ async function draw(database, userId, campaignId, requestId) {
   return value(result.rows[0]);
 }
 
-test("points prizes debit once, credit once, and retries return the immutable draw", async () => {
+test("manual prizes debit once, stay pending, and retries return the immutable draw", async () => {
   const database = await createDatabase();
   try {
     await actor(database, adminId, true);
@@ -148,21 +150,21 @@ test("points prizes debit once, credit once, and retries return the immutable dr
     const retry = await draw(database, userOne, campaignId, "20202020-2020-4020-8020-202020202020");
 
     assert.equal(first.outcome, "won");
-    assert.equal(first.prize.fulfillment_type, "points");
-    assert.equal(first.balance, 950);
+    assert.equal(first.prize.fulfillment_type, "manual");
+    assert.equal(first.fulfillment_status, "pending");
+    assert.equal(first.balance, 900);
     assert.equal(retry.draw_id, first.draw_id);
     const wallet = await database.query("select balance, lifetime_earned from public.reward_wallets where user_id = $1", [userOne]);
-    assert.deepEqual(wallet.rows[0], { balance: 950, lifetime_earned: 1050 });
+    assert.deepEqual(wallet.rows[0], { balance: 900, lifetime_earned: 1000 });
     const ledger = await database.query("select action_key, points, balance_after from public.reward_ledger where user_id = $1 order by id", [userOne]);
     assert.deepEqual(ledger.rows, [
       { action_key: "lottery_entry", points: -100, balance_after: 900 },
-      { action_key: "lottery_prize", points: 50, balance_after: 950 },
     ]);
     const draws = await database.query("select count(*)::integer as count from public.reward_lottery_draws where campaign_id = $1 and user_id = $2", [campaignId, userOne]);
     assert.equal(draws.rows[0].count, 1);
 
     const marker = await database.query("select public.wavekb_schema_version() as version");
-    assert.equal(marker.rows[0].version, "202609090002");
+    assert.equal(marker.rows[0].version, "202609100001");
     const privileges = await database.query("select has_function_privilege('authenticated', 'public.draw_reward_lottery(uuid, uuid)', 'execute') as member, has_function_privilege('anon', 'public.draw_reward_lottery(uuid, uuid)', 'execute') as anonymous");
     assert.deepEqual(privileges.rows[0], { member: true, anonymous: false });
   } finally {
@@ -238,6 +240,12 @@ test("only administrators can configure a valid single active campaign", async (
     await assert.rejects(createCampaign(database), /admin_required/);
 
     await actor(database, adminId, true);
+    const manualOnlyCampaign = await createCampaign(database, { title: "仅人工发放" });
+    await assert.rejects(
+      createPrize(database, manualOnlyCampaign, { fulfillment: "points", rewardPoints: 50 }),
+      /manual_fulfillment|lottery_prize_invalid/,
+    );
+
     const invalidCampaign = await createCampaign(database, { title: "无效概率活动" });
     await createPrize(database, invalidCampaign, { name: "奖品 A", probability: 6000 });
     await createPrize(database, invalidCampaign, { name: "奖品 B", probability: 5000, sortOrder: 20 });

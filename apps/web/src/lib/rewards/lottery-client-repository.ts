@@ -36,8 +36,8 @@ function normalizePrize(value: unknown): RewardLotteryPrize {
     probability_bps: Number(item.probability_bps ?? 0),
     stock_total: Number(item.stock_total ?? 0),
     stock_remaining: Number(item.stock_remaining ?? 0),
-    fulfillment_type: item.fulfillment_type === "points" ? "points" : "manual",
-    reward_points: item.reward_points == null ? null : Number(item.reward_points),
+    fulfillment_type: "manual",
+    reward_points: null,
   };
 }
 

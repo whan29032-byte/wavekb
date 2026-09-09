@@ -7,15 +7,15 @@ describe("admin reward lottery repository", () => {
     const actions = adminRewardLotteryMutations({ rpc } as never);
 
     await actions.upsertCampaign({ id: null, title: "九月抽奖", description: "公开概率", imageUrl: null, entryCostPoints: 100, startsAt: "2026-09-01T00:00:00.000Z", endsAt: "2026-09-30T00:00:00.000Z" });
-    await actions.upsertPrize({ id: null, campaignId: "campaign-id", name: "积分奖励", summary: "自动到账", imageUrl: null, probabilityBps: 250, stockTotal: 10, fulfillmentType: "points", rewardPoints: 50, sortOrder: 10 });
+    await actions.upsertPrize({ id: null, campaignId: "campaign-id", name: "研究称号", summary: "管理员人工发放", imageUrl: null, probabilityBps: 250, stockTotal: 10, sortOrder: 10 });
 
     expect(rpc).toHaveBeenNthCalledWith(1, "admin_upsert_reward_lottery_campaign", {
       p_id: null, p_title: "九月抽奖", p_description: "公开概率", p_image_url: null,
       p_entry_cost_points: 100, p_starts_at: "2026-09-01T00:00:00.000Z", p_ends_at: "2026-09-30T00:00:00.000Z",
     });
     expect(rpc).toHaveBeenNthCalledWith(2, "admin_upsert_reward_lottery_prize", {
-      p_id: null, p_campaign_id: "campaign-id", p_name: "积分奖励", p_summary: "自动到账", p_image_url: null,
-      p_probability_bps: 250, p_stock_total: 10, p_fulfillment_type: "points", p_reward_points: 50, p_sort_order: 10,
+      p_id: null, p_campaign_id: "campaign-id", p_name: "研究称号", p_summary: "管理员人工发放", p_image_url: null,
+      p_probability_bps: 250, p_stock_total: 10, p_fulfillment_type: "manual", p_reward_points: null, p_sort_order: 10,
     });
   });
 
