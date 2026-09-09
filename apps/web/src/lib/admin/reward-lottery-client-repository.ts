@@ -19,7 +19,8 @@ function normalizePrize(value: unknown): AdminRewardLotteryPrize {
     probability_bps: Number(item.probability_bps ?? 0),
     stock_total: Number(item.stock_total ?? 0),
     stock_remaining: Number(item.stock_remaining ?? 0),
-    reward_points: item.reward_points == null ? null : Number(item.reward_points),
+    fulfillment_type: "manual",
+    reward_points: null,
     sort_order: Number(item.sort_order ?? 0),
   } as AdminRewardLotteryPrize;
 }
@@ -74,8 +75,8 @@ function defaultGateway(client: SupabaseClient): AdminRewardLotteryMutationGatew
         p_image_url: input.imageUrl?.trim() || null,
         p_probability_bps: input.probabilityBps,
         p_stock_total: input.stockTotal,
-        p_fulfillment_type: input.fulfillmentType,
-        p_reward_points: input.rewardPoints,
+        p_fulfillment_type: "manual",
+        p_reward_points: null,
         p_sort_order: input.sortOrder,
       });
       if (result.error) throw result.error;

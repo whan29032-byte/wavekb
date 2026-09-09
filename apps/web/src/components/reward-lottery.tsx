@@ -112,7 +112,7 @@ export function RewardLottery({ actorId, initialState }: RewardLotteryProps) {
                 <>
                   <span className={styles.resultLabel}>开奖结果</span>
                   <strong>抽中：{result.prize.name}</strong>
-                  <span>{result.fulfillment_status === "pending" ? "等待管理员发放" : "奖励已自动到账"}</span>
+                  <span>等待管理员发放</span>
                 </>
               ) : result ? (
                 <>
