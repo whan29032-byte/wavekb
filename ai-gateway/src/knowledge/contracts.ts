@@ -28,6 +28,8 @@ const LEGACY_KEYS = new Set([
   "step",
   "analysis_schema_version",
 ]);
+const ALL_SCOPE_KEYS = new Set(["mode"]);
+const SINGLE_SCOPE_KEYS = new Set(["mode", "book_id"]);
 
 function invalidRequest(message = "invalid ai run request"): never {
   throw Object.assign(new Error(message), { statusCode: 400 });
@@ -40,18 +42,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function exactKeys(input: Record<string, unknown>, allowed: Set<string>): void {
-  const keys = Object.keys(input);
-  if (keys.length !== allowed.size || keys.some((key) => !allowed.has(key))) invalidRequest();
+  const keys = Reflect.ownKeys(input);
+  if (keys.length !== allowed.size
+    || keys.some((key) => typeof key !== "string" || !allowed.has(key))) {
+    invalidRequest();
+  }
 }
 
 function normalizeScope(value: unknown, catalog: BookCatalog): KnowledgeScope {
   if (!isRecord(value)) invalidRequest("knowledge_scope is invalid");
   if (value.mode === "all") {
-    if (Object.keys(value).length !== 1) invalidRequest("knowledge_scope is ambiguous");
+    exactKeys(value, ALL_SCOPE_KEYS);
     return { mode: "all" };
   }
   if (value.mode === "single") {
-    if (Object.keys(value).length !== 2 || typeof value.book_id !== "string") {
+    exactKeys(value, SINGLE_SCOPE_KEYS);
+    if (typeof value.book_id !== "string") {
       invalidRequest("knowledge_scope is ambiguous");
     }
     const match = catalog.find((book) => book.bookId === value.book_id);

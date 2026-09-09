@@ -137,6 +137,34 @@ test("request and scope records accept exact null-prototype objects", () => {
   });
 });
 
+test("request normalization rejects non-enumerable extra own keys", () => {
+  const input = validRequest();
+  Object.defineProperty(input, "query", { value: "hidden-query", enumerable: false });
+  assert.throws(() => normalizeAiRunRequest(input, buildKnowledgeIndex(artifactPath).books));
+});
+
+test("scope normalization rejects non-enumerable extra own keys", () => {
+  const scope = { mode: "all" };
+  Object.defineProperty(scope, "query", { value: "hidden-query", enumerable: false });
+  assert.throws(() => normalizeAiRunRequest(
+    validRequest({ knowledge_scope: scope }),
+    buildKnowledgeIndex(artifactPath).books,
+  ));
+});
+
+test("request normalization rejects symbol own keys", () => {
+  const input = Object.assign(validRequest(), { [Symbol("query")]: "hidden-query" });
+  assert.throws(() => normalizeAiRunRequest(input, buildKnowledgeIndex(artifactPath).books));
+});
+
+test("scope normalization rejects symbol own keys", () => {
+  const scope = Object.assign({ mode: "all" }, { [Symbol("query")]: "hidden-query" });
+  assert.throws(() => normalizeAiRunRequest(
+    validRequest({ knowledge_scope: scope }),
+    buildKnowledgeIndex(artifactPath).books,
+  ));
+});
+
 test("artifact loading rejects unapproved chunk enums", () => {
   for (const [field, value] of [
     ["contentStatus", "invented"],
