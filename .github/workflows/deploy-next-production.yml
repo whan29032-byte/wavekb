@@ -58,6 +58,10 @@ jobs:
           pnpm test
           pnpm typecheck
           pnpm --filter @wavekb/web lint
+          node scripts/validate-knowledge.mjs
+          pnpm --dir ai-gateway typecheck
+          pnpm --dir ai-gateway test
+          node --test tests/ai-gateway-packaging.test.mjs
 
       - name: Build the standalone application
         env:

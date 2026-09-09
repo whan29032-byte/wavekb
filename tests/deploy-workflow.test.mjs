@@ -13,6 +13,7 @@ const workflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-
 const steps = workflow.jobs["build-and-deploy"].steps;
 const backendWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-backend-production.yml", import.meta.url), "utf8"));
 const backendSteps = backendWorkflow.jobs["migrate-and-deploy"].steps;
+const releaseVerificationWorkflowPath = new URL("../.github/workflows/verify-release.yml", import.meta.url);
 
 test("persistent candidate runs owned standalone SQLite browser and worker gates before upload", () => {
   const upload = steps.findIndex((step) => step.id === "upload");
@@ -36,29 +37,68 @@ test("every emitted workflow shell program parses before a runner can execute it
   }
 });
 
-test("backend deployment validates host before migration and rolls gateway code back on activation failure", () => {
+test("backend deployment accepts only the current schema before upload and rolls gateway code back on activation failure", () => {
   const contractVerification = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
   const hostPreflight = backendSteps.findIndex((step) => /Verify gateway host/.test(step.name));
-  const migration = backendSteps.findIndex((step) => /Apply the additive/.test(step.name));
+  const schemaGate = backendSteps.findIndex((step) => /schema marker/.test(step.name));
   const upload = backendSteps.findIndex((step) => /Upload gateway archive/.test(step.name));
   const activation = backendSteps.findIndex((step) => /Activate gateway/.test(step.name));
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
-  assert.ok(hostPreflight >= 0 && hostPreflight < migration && migration < upload && upload < activation && activation < publicSchemaCheck);
+  assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < upload && upload < activation && activation < publicSchemaCheck);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
-  assert.match(backendSteps[migration].run, /schema_before/);
-  assert.match(backendSteps[migration].run, /202608210002/);
-  assert.match(backendSteps[migration].run, /202609080001/);
-  assert.match(backendSteps[migration].run, /202609080002/);
-  assert.match(backendSteps[migration].run, /202609080002_realtime_trading_leaderboard\.sql/);
-  assert.match(backendSteps[migration].run, /202609080003/);
-  assert.match(backendSteps[migration].run, /202609080003_public_trading_amounts\.sql/);
-  assert.equal(backendSteps[migration].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /202609080003/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema" = 202609090001/);
+  assert.doesNotMatch(backendSteps[schemaGate].run, /psql[^\n]*-f|supabase\/migrations\//);
+  assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202609090001/);
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
   assert.match(backendSteps[activation].run, /legacy_layout/);
   assert.match(backendSteps[activation].run, /sudo mv "\$current_link" "\$previous"/);
   assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
+});
+
+test("backend artifact, gateway, and packaging checks all precede the first upload", () => {
+  const upload = backendSteps.findIndex((step) => /Upload gateway archive/.test(step.name));
+  assert.ok(upload > 0);
+  for (const command of [
+    /node scripts\/validate-knowledge\.mjs/,
+    /pnpm --dir ai-gateway test/,
+    /pnpm --dir ai-gateway typecheck/,
+    /node --test tests\/ai-gateway-packaging\.test\.mjs/,
+  ]) {
+    const index = backendSteps.findIndex((step) => command.test(step.run ?? ""));
+    assert.ok(index >= 0 && index < upload, `${command} must gate the first backend upload`);
+  }
+});
+
+test("release verification runs on Ubuntu for pull requests and pushes without deployment access", () => {
+  assert.ok(fs.existsSync(releaseVerificationWorkflowPath), "verify-release.yml must exist");
+  const verification = yaml.load(fs.readFileSync(releaseVerificationWorkflowPath, "utf8"));
+  const triggers = verification.on ?? verification.true;
+  assert.ok(triggers.pull_request !== undefined);
+  assert.ok(triggers.push !== undefined);
+  const jobs = Object.values(verification.jobs);
+  assert.ok(jobs.length > 0 && jobs.every((job) => job["runs-on"] === "ubuntu-latest"));
+  const serialized = JSON.stringify(verification);
+  for (const command of [
+    /pnpm test/,
+    /pnpm --filter @wavekb\/web test/,
+    /pnpm --dir ai-gateway test/,
+    /pnpm --filter @wavekb\/knowledge test/,
+    /node scripts\/validate-knowledge\.mjs/,
+  ]) assert.match(serialized, command);
+  assert.doesNotMatch(serialized, /environment|secrets\.|\bssh\b|\bscp\b|workflow_dispatch/);
+});
+
+test("backend and Next production releases retain explicit operator approval gates", () => {
+  const backendTriggers = backendWorkflow.on ?? backendWorkflow.true;
+  const nextTriggers = workflow.on ?? workflow.true;
+  assert.ok(backendTriggers.workflow_dispatch.inputs.confirmation.required);
+  assert.ok(backendWorkflow.jobs["migrate-and-deploy"].environment);
+  assert.match(JSON.stringify(backendSteps), /DEPLOY_WAVEKB_BACKEND/);
+  assert.ok(nextTriggers.workflow_dispatch.inputs.gateway_release_approved);
+  assert.match(JSON.stringify(steps), /GATEWAY_RELEASE_APPROVED/);
+  assert.ok(workflow.jobs["build-and-deploy"].environment);
 });
 
 test("build, local browser gates and read-only compatibility precede every remote write", () => {
