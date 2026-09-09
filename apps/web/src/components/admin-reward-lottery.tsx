@@ -13,7 +13,8 @@ type LotteryActions = ReturnType<typeof adminRewardLotteryMutations>;
 const selectClass = "h-11 w-full rounded-lg border border-input bg-surface px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-60";
 
 function inputDate(value?: string): string {
-  const date = value ? new Date(value) : new Date();
+  if (!value) return "";
+  const date = new Date(value);
   const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return shifted.toISOString().slice(0, 16);
 }
@@ -28,13 +29,12 @@ function friendlyError(error: unknown): string {
 }
 
 function CampaignEditor({ campaign, pending, onSave }: { campaign?: AdminRewardLotteryCampaign; pending: boolean; onSave: (input: RewardLotteryCampaignInput) => Promise<boolean> }) {
-  const defaultEnd = new Date(Date.now() + 30 * 86_400_000).toISOString();
   const [title, setTitle] = useState(campaign?.title ?? "");
   const [description, setDescription] = useState(campaign?.description ?? "");
   const [imageUrl, setImageUrl] = useState(campaign?.image_url ?? "");
   const [cost, setCost] = useState(String(campaign?.entry_cost_points ?? 100));
   const [startsAt, setStartsAt] = useState(inputDate(campaign?.starts_at));
-  const [endsAt, setEndsAt] = useState(inputDate(campaign?.ends_at ?? defaultEnd));
+  const [endsAt, setEndsAt] = useState(inputDate(campaign?.ends_at));
   const [error, setError] = useState("");
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
