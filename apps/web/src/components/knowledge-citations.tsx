@@ -11,6 +11,7 @@ export type KnowledgeCitation = {
 
 const CORE_BOOK_ID = "elliott-wave-principle-tenth-edition";
 const EXTENSION_BOOK_IDS = new Set(["elliott-wave-natural-law", "chan-theory-complete"]);
+const ARTIFACT_VERSION_PATTERN = /^[0-9a-f]{64}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -42,6 +43,7 @@ export function KnowledgeCitations({
   outputKnowledgeVersion?: unknown;
 }) {
   if (typeof jobKnowledgeVersion !== "string" || !jobKnowledgeVersion
+    || !ARTIFACT_VERSION_PATTERN.test(jobKnowledgeVersion)
     || jobKnowledgeVersion !== outputKnowledgeVersion) return null;
   const trusted = Array.isArray(citations) ? citations.filter(isSafeCitation) : [];
   if (!trusted.length) return null;

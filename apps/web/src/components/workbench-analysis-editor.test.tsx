@@ -120,7 +120,7 @@ describe("AI knowledge selection", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps legacy diagnostics usable without trusting shape-valid citations from an unversioned job", async () => {
+  it("keeps legacy diagnostics usable without trusting shape-valid citations from a matching legacy version", async () => {
     const forgedCitation = {
       knowledge_id: "unit-ewp-rule-impulse-core",
       book_id: "elliott-wave-principle-tenth-edition",
@@ -134,8 +134,8 @@ describe("AI knowledge selection", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "job-2", status: "queued" } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ job: {
-        id: "job-2", status: "completed", knowledge_version: null, output_payload: {
-          knowledge_version: "forged-version",
+        id: "job-2", status: "completed", knowledge_version: "ewp-10-zh-2016", output_payload: {
+          knowledge_version: "ewp-10-zh-2016",
           legacy_note: "保留的旧输出", knowledge_citations: ["model-supplied-id"],
           citations: [forgedCitation],
         },
@@ -158,6 +158,7 @@ describe("AI knowledge selection", () => {
     expect(diagnostics.textContent).toContain("保留的旧输出");
     expect(screen.queryByText("伪造书名")).toBeNull();
     expect(screen.queryByRole("heading", { name: "本次知识依据" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "打开知识原文" })).toBeNull();
     vi.unstubAllGlobals();
   });
 });
