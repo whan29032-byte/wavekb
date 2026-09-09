@@ -3,6 +3,31 @@ import type { WorkbenchAnalysis } from "@wavekb/domain";
 
 export type WorkbenchAnalysisDraft = Omit<WorkbenchAnalysis, "id" | "created_at" | "updated_at">;
 
+export type KnowledgeScopeValue = "all" | "elliott-wave-principle-tenth-edition" | "elliott-wave-natural-law" | "chan-theory-complete";
+
+export function createAiRunRequest(step: number, scope: KnowledgeScopeValue, clientRequestId: string) {
+  return {
+    request_version: 2 as const,
+    client_request_id: clientRequestId,
+    task_type: "wave_analysis" as const,
+    step,
+    analysis_schema_version: "workbench-v1" as const,
+    knowledge_scope: scope === "all" ? { mode: "all" as const } : { mode: "single" as const, book_id: scope },
+  };
+}
+
+type AiRunFetcher = (input: string, init: RequestInit) => Promise<Response>;
+
+export async function submitAiRun(url: string, step: number, scope: KnowledgeScopeValue, fetcher: AiRunFetcher = fetch) {
+  const payload = createAiRunRequest(step, scope, crypto.randomUUID());
+  const request = () => fetcher(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  try {
+    return await request();
+  } catch {
+    return request();
+  }
+}
+
 export async function saveWorkbenchAnalysis(client: SupabaseClient, id: string | null, value: WorkbenchAnalysisDraft) {
   if (id) {
     const result = await client.from("workbench_analyses").update(value).eq("id", id).eq("owner_id", value.owner_id).select("*").single();

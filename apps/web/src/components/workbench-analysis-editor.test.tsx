@@ -1,10 +1,12 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchAnalysisEditor } from "./workbench-analysis-editor";
 import type { WorkbenchAnalysis } from "@wavekb/domain";
 import { installBrowserStorage } from "@/test/browser-storage";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
+const { supabase } = vi.hoisted(() => ({ supabase: { from: vi.fn() } }));
+vi.mock("@/lib/supabase/client", () => ({ createClient: () => supabase }));
 beforeEach(installBrowserStorage);
 afterEach(cleanup);
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -79,5 +81,42 @@ describe("analysis results", () => {
     expect(results.queryByText("已通过已实现规则")).toBeNull();
     expect(results.queryByText("旧普通推动浪规则")).toBeNull();
     expect(results.queryByText("66")).toBeNull();
+  });
+});
+
+describe("AI knowledge selection", () => {
+  const saved: WorkbenchAnalysis = {
+    id: "saved-analysis", owner_id: "local-test", schema_version: "workbench-v1", input_source: "manual", instrument: "BTCUSDT", market: "crypto",
+    primary_timeframe: "4小时", parent_timeframe: "日线", child_timeframe: "1小时", holding_style: "波段", execution_status: "draft",
+    step_data: {}, rule_result: {}, score_result: {}, risk_result: {}, drawdown_result: {}, created_at: "2026-01-01", updated_at: "2026-01-01",
+  };
+
+  beforeEach(() => {
+    supabase.from.mockImplementation(() => ({ update: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: saved, error: null }) }) }) }) }) }));
+  });
+
+  it("keeps one selected scope for this editor mount and sends its strict v2 payload without replacing saved analysis on refresh failure", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "job-1", status: "queued" } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "temporary failure" }), { status: 503 }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.spyOn(crypto, "randomUUID").mockReturnValue("11111111-1111-4111-8111-111111111111");
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={4} />);
+
+    fireEvent.click(screen.getByRole("radio", { name: /自然法则/ }));
+    expect((screen.getByRole("radio", { name: /自然法则/ }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" }));
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(String(fetcher.mock.calls[0][1].body))).toEqual({
+      request_version: 2, client_request_id: "11111111-1111-4111-8111-111111111111", task_type: "wave_analysis", step: 4,
+      analysis_schema_version: "workbench-v1", knowledge_scope: { mode: "single", book_id: "elliott-wave-natural-law" },
+    });
+    await screen.findByText(/任务状态：/);
+    fireEvent.click(screen.getByRole("button", { name: "刷新 AI 状态" }));
+    await screen.findByRole("alert");
+    expect((screen.getByRole("radio", { name: /自然法则/ }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText(/任务状态：/).textContent).toContain("queued");
+    vi.unstubAllGlobals();
   });
 });
