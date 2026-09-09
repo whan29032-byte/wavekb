@@ -474,6 +474,53 @@ export type RewardLeaderboardEntry = {
   lifetime_earned: number;
 };
 
+export type RewardLotteryCampaign = {
+  id: string;
+  title: string;
+  description: string;
+  image_url: string | null;
+  entry_cost_points: number;
+  starts_at: string;
+  ends_at: string;
+  status: "draft" | "active" | "closed";
+};
+
+export type RewardLotteryPrize = {
+  id: string;
+  name: string;
+  summary: string;
+  image_url: string | null;
+  probability_bps: number;
+  stock_total: number;
+  stock_remaining: number;
+  fulfillment_type: "points" | "manual";
+  reward_points: number | null;
+};
+
+export type RewardLotteryDraw = {
+  draw_id: string;
+  campaign_id: string;
+  outcome: "won" | "miss";
+  prize: RewardLotteryPrize | null;
+  entry_cost_points: number;
+  random_bucket: number;
+  fulfillment_status: "not_required" | "pending" | "fulfilled";
+  fulfillment_note: string;
+  balance: number;
+  created_at: string;
+};
+
+export type RewardLotteryState = {
+  campaign: RewardLotteryCampaign;
+  availability: "scheduled" | "open" | "ended";
+  eligible: boolean;
+  eligibility_reason: "account_ineligible" | "already_drawn" | "not_open" | "insufficient_balance" | "eligible";
+  balance: number;
+  effective_miss_probability_bps: number;
+  prizes: RewardLotteryPrize[];
+  draw: RewardLotteryDraw | null;
+};
+
 export type TradingLeaderboardEntry = {
   rank_no: number;
   user_id: string;
@@ -726,6 +773,11 @@ export function validateMentorQuestion(rawValue: string): { ok: boolean; value: 
 
 export function formatRewardPoints(value: number): string {
   return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(Math.max(0, Number(value || 0)))} 积分`;
+}
+
+export function formatLotteryProbability(basisPoints: number): string {
+  const normalized = Math.min(10000, Math.max(0, Math.round(Number(basisPoints) || 0)));
+  return `${(normalized / 100).toFixed(2)}%`;
 }
 
 export function rewardActionLabel(action: string): string {

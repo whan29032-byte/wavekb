@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canRedeemReward, formatMentorPrice, formatRewardPoints, parseExternalReference, parseExternalReferences, remainingMentorQuota, rewardActionLabel, splitEntryTags, splitProfileTags, validateMemberProfile, validateMentorQuestion, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
+import { canRedeemReward, formatLotteryProbability, formatMentorPrice, formatRewardPoints, parseExternalReference, parseExternalReferences, remainingMentorQuota, rewardActionLabel, splitEntryTags, splitProfileTags, validateMemberProfile, validateMentorQuestion, validatePost, validatePrivateEntry, validateProfileImage } from "./community";
 
 describe("community post validation", () => {
   it("accepts a complete public post", () => {
@@ -112,6 +112,12 @@ describe("mentor tutoring domain rules", () => {
 });
 
 describe("reward center domain rules", () => {
+  it("formats lottery basis points without losing precision", () => {
+    expect(formatLotteryProbability(1)).toBe("0.01%");
+    expect(formatLotteryProbability(250)).toBe("2.50%");
+    expect(formatLotteryProbability(10000)).toBe("100.00%");
+  });
+
   it("formats point balances and known ledger actions", () => {
     expect(formatRewardPoints(12340)).toBe("12,340 积分");
     expect(rewardActionLabel("review_saved")).toBe("完成复盘");
