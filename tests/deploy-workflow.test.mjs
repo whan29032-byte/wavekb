@@ -77,6 +77,7 @@ test("release verification runs on Ubuntu for pull requests and pushes without d
   const triggers = verification.on ?? verification.true;
   assert.ok(triggers.pull_request !== undefined);
   assert.ok(triggers.push !== undefined);
+  assert.ok(triggers.workflow_call !== undefined);
   const jobs = Object.values(verification.jobs);
   assert.ok(jobs.length > 0 && jobs.every((job) => job["runs-on"] === "ubuntu-latest"));
   const serialized = JSON.stringify(verification);
@@ -88,6 +89,25 @@ test("release verification runs on Ubuntu for pull requests and pushes without d
     /node scripts\/validate-knowledge\.mjs/,
   ]) assert.match(serialized, command);
   assert.doesNotMatch(serialized, /environment|secrets\.|\bssh\b|\bscp\b|workflow_dispatch/);
+});
+
+test("both production workflows require reusable exact-ref verification before deployment", () => {
+  const expectedUses = "./.github/workflows/verify-release.yml";
+  for (const [candidate, deployJobId] of [
+    [backendWorkflow, "migrate-and-deploy"],
+    [workflow, "build-and-deploy"],
+  ]) {
+    const prerequisite = candidate.jobs["verify-release"];
+    assert.equal(prerequisite?.uses, expectedUses);
+    assert.equal(Object.hasOwn(prerequisite ?? {}, "runs-on"), false, "a reusable workflow caller cannot set runs-on");
+    assert.equal(Object.hasOwn(prerequisite ?? {}, "steps"), false, "a reusable workflow caller cannot set steps");
+    const needs = candidate.jobs[deployJobId].needs;
+    assert.ok(needs === "verify-release" || (Array.isArray(needs) && needs.includes("verify-release")));
+  }
+
+  const verification = yaml.load(fs.readFileSync(releaseVerificationWorkflowPath, "utf8"));
+  const checkout = verification.jobs.verify.steps.find((step) => step.uses?.startsWith("actions/checkout"));
+  assert.equal(checkout?.with?.ref, "${{ github.sha }}");
 });
 
 test("backend and Next production releases retain explicit operator approval gates", () => {

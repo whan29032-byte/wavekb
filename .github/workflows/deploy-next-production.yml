@@ -29,7 +29,11 @@ env:
   AUTH_GATEWAY_PUBLIC_ORIGIN: https://wavekb.com
 
 jobs:
+  verify-release:
+    uses: ./.github/workflows/verify-release.yml
+
   build-and-deploy:
+    needs: verify-release
     runs-on: ubuntu-latest
     timeout-minutes: 50
     environment: next-preview

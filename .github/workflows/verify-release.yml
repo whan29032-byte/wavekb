@@ -1,6 +1,7 @@
 name: Verify WaveKB release
 
 on:
+  workflow_call:
   pull_request:
   push:
 
@@ -14,6 +15,8 @@ jobs:
     steps:
       - name: Check out the exact candidate commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4

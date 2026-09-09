@@ -16,7 +16,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-release:
+    uses: ./.github/workflows/verify-release.yml
+
   migrate-and-deploy:
+    needs: verify-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
