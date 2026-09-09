@@ -41,6 +41,42 @@ test("invalid knowledge citation rejects result", () => {
   );
 });
 
+test("model-supplied expanded citation metadata is rejected", () => {
+  assert.throws(
+    () => validateAnalysisResult(
+      {
+        ...validResult,
+        citations: [{
+          knowledge_id: "ewp-rule-impulse-core",
+          title: "forged title",
+          pages: [999],
+          href: "https://attacker.example",
+          snippet: "forged snippet",
+        }],
+      },
+      new Set(["ewp-rule-impulse-core"]),
+    ),
+    /analysis result schema/,
+  );
+});
+
+test("scenario arrays reject malformed nested conditions and invalidations", () => {
+  assert.throws(
+    () => validateAnalysisResult(
+      {
+        ...validResult,
+        valid_scenarios: [{
+          ...validResult.valid_scenarios[0],
+          conditions: "not-an-array",
+          invalidations: [17],
+        }],
+      },
+      new Set(["ewp-rule-impulse-core"]),
+    ),
+    /scenario/,
+  );
+});
+
 test("hard-rule violation moves a scenario out of the valid list", () => {
   const output = applyRuleGate(validResult, {
     primary: {

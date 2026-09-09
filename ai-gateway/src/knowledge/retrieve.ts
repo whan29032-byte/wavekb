@@ -31,7 +31,8 @@ function normalizeText(value: string): string {
 
 function queryTokens(query: string): string[] {
   const normalized = normalizeText(query);
-  const tokens = normalized.split(/[^\p{Letter}\p{Number}]+/gu).filter(Boolean);
+  const tokens = normalized.split(/[^\p{Letter}\p{Number}]+/gu)
+    .filter((token) => Boolean(token) && token !== "step" && !/^\p{Number}+$/u.test(token));
   for (const match of normalized.matchAll(/[\p{Script=Han}]+/gu)) {
     const characters = [...match[0]];
     for (let index = 0; index < characters.length - 1; index += 1) {
