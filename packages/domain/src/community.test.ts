@@ -121,6 +121,8 @@ describe("reward center domain rules", () => {
   it("formats point balances and known ledger actions", () => {
     expect(formatRewardPoints(12340)).toBe("12,340 积分");
     expect(rewardActionLabel("review_saved")).toBe("完成复盘");
+    expect(rewardActionLabel("lottery_entry")).toBe("抽奖参与");
+    expect(rewardActionLabel("lottery_prize")).toBe("抽奖奖励");
     expect(rewardActionLabel("future_action")).toBe("积分变动");
   });
 

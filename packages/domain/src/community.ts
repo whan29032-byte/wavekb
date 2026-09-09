@@ -788,6 +788,8 @@ export function rewardActionLabel(action: string): string {
     product_redeemed: "商城兑换",
     redemption_refund: "兑换退款",
     admin_adjustment: "人工调整",
+    lottery_entry: "抽奖参与",
+    lottery_prize: "抽奖奖励",
   } as Record<string, string>)[action] || "积分变动";
 }
 
