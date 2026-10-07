@@ -509,4 +509,8 @@ export class SupabaseGatewayApi implements GatewayApi {
   async disableAdminExchangeConnection(actorId: string, connectionId: string, reason: string): Promise<unknown> {
     return this.trading.adminDisable(actorId, connectionId, reason);
   }
+
+  async setAdminExchangeDisplayEquity(actorId: string, connectionId: string, displayEquity: string | null, reason: string): Promise<unknown> {
+    return this.trading.adminSetDisplayEquity(actorId, connectionId, displayEquity, reason);
+  }
 }
