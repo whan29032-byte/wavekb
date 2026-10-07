@@ -2,12 +2,21 @@ import { expect, test } from "@playwright/test";
 
 const identifier = process.env.E2E_POSTING_IDENTIFIER;
 const password = process.env.E2E_POSTING_PASSWORD;
+const cleanupPosts = JSON.parse(process.env.E2E_POSTING_CLEANUP_POSTS || "[]") as Array<{ id: string; title: string }>;
+if (!Array.isArray(cleanupPosts) || cleanupPosts.length > 9 || cleanupPosts.some((post) =>
+  !post || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(post.id) || !/^验收发帖 \d{13}$/.test(post.title))) {
+  throw new Error("Cleanup requires a bounded manifest of exact disposable acceptance post IDs and titles.");
+}
 
 test.describe("authenticated posting acceptance", () => {
   test.skip(!identifier || !password, "Dedicated acceptance account is not configured.");
 
   test("complete posting lifecycle with research media and a timeline update", async ({ page }) => {
     test.setTimeout(150_000);
+    // A missing control should fail with its locator, not consume the entire
+    // lifecycle budget and hide the original error behind teardown.
+    page.setDefaultTimeout(15_000);
+    page.setDefaultNavigationTimeout(30_000);
     page.on("console", (message) => {
       if (message.type() === "error" && message.text().includes("wavekb:post-save-failed")) {
         console.log("Browser post-save diagnostic", message.text());
@@ -45,8 +54,23 @@ test.describe("authenticated posting acceptance", () => {
     await expect(socialPanel).toBeVisible();
     await page.goto("/community/idea_sharing/new");
 
+    // Optional one-time cleanup for a failed prior run. Never discover/delete
+    // by prefix: every target must be explicitly listed and title-verified.
+    for (const post of cleanupPosts) {
+      const response = await page.goto(`/community/post/${post.id}`, { waitUntil: "domcontentloaded" });
+      if (response?.status() === 404) continue;
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(post.title);
+      page.once("dialog", (dialog) => dialog.accept());
+      await page.getByRole("button", { name: "删除帖子", exact: true }).click();
+      await expect(page).toHaveURL(/\/community\/idea_sharing$/, { timeout: 20_000 });
+    }
+    if (cleanupPosts.length) await page.goto("/community/idea_sharing/new", { waitUntil: "domcontentloaded" });
+
     const marker = `验收发帖 ${Date.now()}`;
     let published = false;
+    let publishedUrl = "";
+    let lifecycleFailed = false;
+    let stage = "compose";
     try {
       await expect(page.getByRole("button", { name: "发布内容" })).toBeEnabled();
       await page.getByLabel("标题").fill(marker);
@@ -73,6 +97,8 @@ test.describe("authenticated posting acceptance", () => {
         throw error;
       }
       published = true;
+      publishedUrl = page.url();
+      stage = "published detail and image viewer";
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByRole("img", { name: `${marker}，图片 1` })).toBeVisible();
       await expect(page.getByText("图 1 · Playwright 研究图表快照")).toBeVisible();
@@ -85,6 +111,7 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByRole("button", { name: "关闭图片查看器" }).click();
 
       const commentMarker = `验收评论 ${Date.now()}`;
+      stage = "publish comment";
       await page.getByLabel("发表评论").fill(`${commentMarker}，用于确认评论写入、详情刷新和级联清理。`);
       await page.getByRole("button", { name: "发表评论" }).click();
       const publishedComment = page.getByText(commentMarker, { exact: false });
@@ -98,24 +125,28 @@ test.describe("authenticated posting acceptance", () => {
       await expect(publishedComment).toBeVisible({ timeout: 20_000 });
 
       const timelineMarker = `观点验证 ${Date.now()}`;
+      stage = "publish timeline update";
       await page.getByLabel("节点类型").selectOption("confirmed");
       await page.getByLabel("更新内容").fill(`${timelineMarker}，服务器应记录当前时间并保留历史节点。`);
       await page.getByRole("button", { name: "发布更新" }).click();
       await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible({ timeout: 30_000 });
       await expect(page.getByRole("heading", { name: "判断验证" })).toBeVisible();
 
-      await page.reload();
+      stage = "reload published detail";
+      await page.reload({ waitUntil: "domcontentloaded" });
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByText(commentMarker, { exact: false })).toBeVisible();
       await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible();
 
       const authorProfileLink = page.locator("main > article").locator('header a[href^="/member/"]');
+      stage = "author profile and return";
       await expect(authorProfileLink).toHaveCount(1);
       await authorProfileLink.click();
       await expect(page).toHaveURL(/\/member\/\d{5,6}$/);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-      await page.goBack();
+      await page.goBack({ waitUntil: "domcontentloaded" });
 
+      stage = "edit structured analysis";
       await page.getByRole("link", { name: "编辑帖子" }).click();
       const professionalMode = page.getByRole("button", { name: "专业分析", exact: true });
       await professionalMode.click();
@@ -130,7 +161,7 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByRole("button", { name: "移除现有图片 1" }).click();
       await page.getByLabel("媒体引用 1", { exact: true }).fill("https://x.com/wavekb/status/1");
       await page.getByRole("button", { name: "保存修改" }).click();
-      await expect(page).toHaveURL(/\/community\/post\//, { timeout: 20_000 });
+      await expect(page).toHaveURL(publishedUrl, { timeout: 20_000 });
       const postArticle = page.locator("main > article");
       try {
         await expect(postArticle).toContainText("这篇验收帖子已经完成编辑", { timeout: 20_000 });
@@ -151,24 +182,36 @@ test.describe("authenticated posting acceptance", () => {
       await expect(page.getByRole("region", { name: /帖子图片/ })).toHaveCount(0);
       await expect(page.getByRole("link", { name: /查看原帖/ })).toHaveAttribute("href", "https://x.com/wavekb/status/1");
       await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible();
+    } catch (error) {
+      lifecycleFailed = true;
+      console.log("Posting lifecycle failed", JSON.stringify({
+        stage,
+        path: new URL(page.url()).pathname,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      throw error;
     } finally {
+      try {
       if (!published) {
-        await page.goto("/community/idea_sharing").catch(() => undefined);
+        await page.goto("/community/idea_sharing", { waitUntil: "domcontentloaded" }).catch(() => undefined);
         const recoveredPost = page.getByRole("link", { name: marker, exact: true }).first();
         if (await recoveredPost.isVisible().catch(() => false)) {
           await recoveredPost.click();
           published = true;
+          publishedUrl = page.url();
         }
       }
       if (published) {
+        // Always return to the exact disposable post and verify ownership of
+        // the test marker before deleting; browser history may end in /edit.
+        await page.goto(publishedUrl, { waitUntil: "domcontentloaded" });
+        await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
         const deletionResponses: Array<{ status: number; body: string }> = [];
         const recordDeletionResponse = async (response: import("@playwright/test").Response) => {
           if (response.request().method() !== "POST" || !new URL(response.url()).pathname.endsWith("/delete")) return;
           deletionResponses.push({ status: response.status(), body: (await response.text().catch(() => "")).slice(0, 500) });
         };
         page.on("response", recordDeletionResponse);
-        const deleteButton = page.getByRole("button", { name: "删除帖子" });
-        if (!await deleteButton.isVisible().catch(() => false)) await page.goBack().catch(() => undefined);
         page.once("dialog", (dialog) => dialog.accept());
         await page.getByRole("button", { name: "删除帖子" }).click();
         try {
@@ -189,6 +232,10 @@ test.describe("authenticated posting acceptance", () => {
       await page.getByRole("button", { name: "退出登录" }).click();
       await expect(page).toHaveURL("/");
       await expect(page.getByRole("link", { name: "登录" })).toBeVisible();
+      } catch (cleanupError) {
+        console.log("Posting cleanup failed", cleanupError instanceof Error ? cleanupError.message : String(cleanupError));
+        if (!lifecycleFailed) throw cleanupError;
+      }
     }
   });
 });

@@ -237,6 +237,7 @@ jobs:
         env:
           E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
           E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
+          E2E_POSTING_CLEANUP_POSTS: ${{ vars.E2E_POSTING_CLEANUP_POSTS }}
           PLAYWRIGHT_BASE_URL: https://wavekb.com
         run: |
           pnpm --filter @wavekb/web exec playwright test \
