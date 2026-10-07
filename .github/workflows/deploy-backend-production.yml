@@ -108,7 +108,7 @@ jobs:
           /usr/bin/node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
           curl --fail --silent --show-error http://127.0.0.1:8787/health > /dev/null
           REMOTE
-      - name: Apply exact production migration and verify schema marker
+      - name: Apply exact production migrations and verify schema marker
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
@@ -119,10 +119,14 @@ jobs:
           schema_before=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
           case "$schema_before" in
             202609090002)
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202609100001_reward_lottery_manual_fulfillment.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080001_admin_custom_trading_display.sql
+              ;;
+            202609100001)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080001_admin_custom_trading_display.sql
               ;;
             202610080001)
-              echo "Custom trading display migration already applied; continuing idempotently."
+              echo "Production migrations already applied; continuing idempotently."
               ;;
             *)
               echo "Unexpected production schema marker; refusing migration."

@@ -493,8 +493,8 @@ export type RewardLotteryPrize = {
   probability_bps: number;
   stock_total: number;
   stock_remaining: number;
-  fulfillment_type: "points" | "manual";
-  reward_points: number | null;
+  fulfillment_type: "manual";
+  reward_points: null;
 };
 
 export type RewardLotteryDraw = {

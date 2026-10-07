@@ -9,7 +9,7 @@ vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({ auth: { getUser
 
 const store: AdminRewardLotteryStore = {
   campaigns: [{ id: "campaign-id", title: "九月抽奖", description: "公开概率", image_url: null, entry_cost_points: 100, starts_at: "2026-09-01T00:00:00.000Z", ends_at: "2026-09-30T00:00:00.000Z", status: "draft", created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z" }],
-  prizes: [{ id: "prize-id", campaign_id: "campaign-id", name: "积分奖励", summary: "自动到账", image_url: null, probability_bps: 250, stock_total: 10, stock_remaining: 10, fulfillment_type: "points", reward_points: 50, sort_order: 10, created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z" }],
+  prizes: [{ id: "prize-id", campaign_id: "campaign-id", name: "研究称号", summary: "管理员人工发放", image_url: null, probability_bps: 250, stock_total: 10, stock_remaining: 10, fulfillment_type: "manual", reward_points: null, sort_order: 10, created_at: "2026-09-01T00:00:00.000Z", updated_at: "2026-09-01T00:00:00.000Z" }],
   draws: [{ id: "draw-id", campaign_id: "campaign-id", user_id: "user-id", public_uid: 12345, outcome: "won", prize: { name: "导师答疑券" }, entry_cost_points: 100, fulfillment_status: "pending", fulfillment_note: "", created_at: "2026-09-09T00:00:00.000Z", fulfilled_at: null }],
 };
 
@@ -24,10 +24,10 @@ describe("admin reward lottery", () => {
     fireEvent.change(screen.getByLabelText("奖品名称"), { target: { value: "人工研究券" } });
     fireEvent.change(screen.getByLabelText("中奖概率（%）"), { target: { value: "2.50" } });
     fireEvent.change(screen.getByLabelText("奖品库存"), { target: { value: "3" } });
-    fireEvent.change(screen.getByLabelText("发放方式"), { target: { value: "manual" } });
     fireEvent.click(screen.getByRole("button", { name: "添加奖品" }));
 
-    await waitFor(() => expect(rpc).toHaveBeenCalledWith("admin_upsert_reward_lottery_prize", expect.objectContaining({ p_probability_bps: 250, p_stock_total: 3, p_fulfillment_type: "manual" })));
+    expect(screen.queryByLabelText("发放方式")).toBeNull();
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith("admin_upsert_reward_lottery_prize", expect.objectContaining({ p_probability_bps: 250, p_stock_total: 3, p_fulfillment_type: "manual", p_reward_points: null })));
   });
 
   it("rejects invalid probability and non-integer inventory locally", () => {

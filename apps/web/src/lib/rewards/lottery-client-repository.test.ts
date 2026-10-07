@@ -26,7 +26,7 @@ describe("reward lottery repository", () => {
         campaign: { id: "campaign-id", entry_cost_points: "100" },
         balance: "900",
         effective_miss_probability_bps: "2500",
-        prizes: [{ id: "prize-id", probability_bps: "7500", stock_total: "4", stock_remaining: "3", reward_points: "50" }],
+        prizes: [{ id: "prize-id", probability_bps: "7500", stock_total: "4", stock_remaining: "3", fulfillment_type: "manual", reward_points: null }],
         draw: null,
       },
       error: null,
@@ -35,7 +35,7 @@ describe("reward lottery repository", () => {
     const state = await loadRewardLottery({ rpc } as never);
 
     expect(state?.campaign.entry_cost_points).toBe(100);
-    expect(state?.prizes[0]).toMatchObject({ probability_bps: 7500, stock_total: 4, stock_remaining: 3, reward_points: 50 });
+    expect(state?.prizes[0]).toMatchObject({ probability_bps: 7500, stock_total: 4, stock_remaining: 3, fulfillment_type: "manual", reward_points: null });
     expect(state?.effective_miss_probability_bps).toBe(2500);
   });
 });

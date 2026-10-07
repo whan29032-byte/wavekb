@@ -31,23 +31,23 @@ const state: RewardLotteryState = {
   balance: 900,
   effective_miss_probability_bps: 8750,
   prizes: [
-    { id: "prize-a", name: "研究积分 50", summary: "自动到账", image_url: null, probability_bps: 250, stock_total: 10, stock_remaining: 8, fulfillment_type: "points", reward_points: 50 },
+    { id: "prize-a", name: "研究称号", summary: "管理员人工发放", image_url: null, probability_bps: 250, stock_total: 10, stock_remaining: 8, fulfillment_type: "manual", reward_points: null },
     { id: "prize-b", name: "导师答疑券", summary: "后台人工发放", image_url: null, probability_bps: 1000, stock_total: 2, stock_remaining: 0, fulfillment_type: "manual", reward_points: null },
   ],
   draw: null,
 };
 
-function drawResult(outcome: "won" | "miss", fulfillment: "points" | "manual" = "manual"): RewardLotteryDraw {
+function drawResult(outcome: "won" | "miss"): RewardLotteryDraw {
   const prize = outcome === "won" ? {
-    id: fulfillment === "points" ? "prize-a" : "prize-b",
-    name: fulfillment === "points" ? "研究积分 50" : "导师答疑券",
-    summary: fulfillment === "points" ? "自动到账" : "后台人工发放",
+    id: "prize-b",
+    name: "导师答疑券",
+    summary: "后台人工发放",
     image_url: null,
-    probability_bps: fulfillment === "points" ? 250 : 1000,
+    probability_bps: 1000,
     stock_total: 10,
     stock_remaining: 7,
-    fulfillment_type: fulfillment,
-    reward_points: fulfillment === "points" ? 50 : null,
+    fulfillment_type: "manual",
+    reward_points: null,
   } as const : null;
   return {
     draw_id: "draw-id",
@@ -56,9 +56,9 @@ function drawResult(outcome: "won" | "miss", fulfillment: "points" | "manual" = 
     prize,
     entry_cost_points: 100,
     random_bucket: 8000,
-    fulfillment_status: outcome === "miss" ? "not_required" : fulfillment === "points" ? "fulfilled" : "pending",
+    fulfillment_status: outcome === "miss" ? "not_required" : "pending",
     fulfillment_note: "",
-    balance: outcome === "won" && fulfillment === "points" ? 850 : 800,
+    balance: 800,
     created_at: "2026-09-09T00:00:00.000Z",
   };
 }
@@ -95,10 +95,9 @@ describe("member reward lottery", () => {
 
   it.each([
     ["manual", "抽中：导师答疑券", "等待管理员发放"],
-    ["points", "抽中：研究积分 50", "奖励已自动到账"],
     ["miss", "本次未中奖", "感谢参与"],
   ] as const)("reveals an authoritative %s result", async (kind, heading, note) => {
-    const result = kind === "miss" ? drawResult("miss") : drawResult("won", kind);
+    const result = kind === "miss" ? drawResult("miss") : drawResult("won");
     rpc.mockResolvedValueOnce({ data: result, error: null });
     rpc.mockRejectedValueOnce(new Error("refresh unavailable"));
     render(<RewardLottery actorId="actor-id" initialState={state} />);

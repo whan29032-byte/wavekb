@@ -9,8 +9,9 @@ test("the lottery schema, member UI, admin UI and deployment marker ship togethe
   const migrations = (await readdir(new URL("supabase/migrations/", root))).filter((name) => name.endsWith(".sql")).sort();
   assert.equal(migrations.at(-1), "202610080001_admin_custom_trading_display.sql");
 
-  const [migration, customDisplayMigration, workflow, memberPage, memberRepository, memberComponent, adminPage, adminRepository, e2e] = await Promise.all([
+  const [migration, manualMigration, customDisplayMigration, workflow, memberPage, memberRepository, memberComponent, adminPage, adminRepository, e2e] = await Promise.all([
     source("supabase/migrations/202609090002_reward_lottery.sql"),
+    source("supabase/migrations/202609100001_reward_lottery_manual_fulfillment.sql"),
     source("supabase/migrations/202610080001_admin_custom_trading_display.sql"),
     source(".github/workflows/deploy-backend-production.yml"),
     source("apps/web/src/app/rewards/page.tsx"),
@@ -22,9 +23,10 @@ test("the lottery schema, member UI, admin UI and deployment marker ship togethe
   ]);
 
   assert.match(migration, /select '202609090002'::text/);
-  assert.match(workflow, /202609090002\)[\s\S]*202610080001_admin_custom_trading_display\.sql/);
+  assert.match(manualMigration, /fulfillment_type = 'manual' and reward_points is null/);
+  assert.match(manualMigration, /select '202609100001'::text/);
   assert.match(customDisplayMigration, /select '202610080001'::text/);
-  assert.match(workflow, /202610080001_admin_custom_trading_display\.sql/);
+  assert.match(workflow, /202609090002\)[\s\S]*202609100001_reward_lottery_manual_fulfillment\.sql[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(workflow, /test "\$schema" = 202610080001/);
   for (const table of ["reward_lottery_campaigns", "reward_lottery_prizes", "reward_lottery_draws", "reward_lottery_admin_audit"]) {
     assert.match(migration, new RegExp(`alter table public\\.${table} enable row level security`));
@@ -36,7 +38,10 @@ test("the lottery schema, member UI, admin UI and deployment marker ship togethe
   assert.match(memberPage, /getMyRewardLottery\(\)/);
   assert.match(memberRepository, /draw_reward_lottery/);
   assert.match(memberComponent, /crypto\.randomUUID\(\)/);
+  assert.doesNotMatch(memberComponent, /奖励已自动到账/);
   assert.match(adminPage, /getAdminRewardLottery\(\)/);
   assert.match(adminRepository, /admin_get_reward_lottery/);
+  assert.match(adminRepository, /p_fulfillment_type: "manual"/);
+  assert.match(adminRepository, /p_reward_points: null/);
   assert.match(e2e, /rewards-lottery--ready-to-draw/);
 });

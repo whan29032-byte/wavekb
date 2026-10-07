@@ -47,7 +47,8 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < publicSchemaCheck && publicSchemaCheck < upload && upload < activation);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
   assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
-  assert.match(backendSteps[schemaGate].run, /202609090002\)[\s\S]*202610080001_admin_custom_trading_display\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202609090002\)[\s\S]*202609100001_reward_lottery_manual_fulfillment\.sql[\s\S]*202610080001_admin_custom_trading_display\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202609100001\)[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610080001\)[\s\S]*already applied/);
   assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
   assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610080001/);
