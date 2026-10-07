@@ -90,7 +90,7 @@ async function createCampaign(database, {
   title = "九月研究抽奖",
   cost = 100,
   startsAt = "2026-09-09T00:00:00.000Z",
-  endsAt = "2026-09-30T00:00:00.000Z",
+  endsAt = "2027-09-30T00:00:00.000Z",
 } = {}) {
   const result = await database.query(
     "select public.admin_upsert_reward_lottery_campaign(null, $1, '完成研究任务后参与一次。', null, $2, $3, $4) as value",

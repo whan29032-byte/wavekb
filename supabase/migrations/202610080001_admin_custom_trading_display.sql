@@ -147,6 +147,19 @@ $$;
 revoke all on function public.list_trading_leaderboard(text, integer) from public;
 grant execute on function public.list_trading_leaderboard(text, integer) to anon, authenticated;
 
+create or replace function public.wavekb_schema_version()
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select '202610080001'::text;
+$$;
+
+revoke all on function public.wavekb_schema_version() from public;
+grant execute on function public.wavekb_schema_version() to anon, authenticated;
+
 notify pgrst, 'reload schema';
 
 commit;
