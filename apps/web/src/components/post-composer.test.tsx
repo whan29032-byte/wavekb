@@ -43,8 +43,9 @@ const chart = {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -55,6 +56,20 @@ async function restored() {
 }
 function fillSimple() { change("标题", title); change("正文", body); }
 function submit() { fireEvent.submit(screen.getByLabelText("标题").closest("form")!); }
+type Attachment = "links" | "chart";
+function disclosure(attachment: Attachment) {
+  return screen.getByRole("button", { name: attachment === "links" ? /^添加链接/ : /^添加图表/ });
+}
+function attachmentPanel(attachment: Attachment) {
+  const id = disclosure(attachment).getAttribute("aria-controls");
+  expect(id).toBe(attachment === "links" ? "post-media-fields" : "post-chart-fields");
+  return document.getElementById(id!)!;
+}
+function setAttachmentOpen(attachment: Attachment, open: boolean) {
+  if (disclosure(attachment).getAttribute("aria-expanded") !== String(open)) fireEvent.click(disclosure(attachment));
+  expect(disclosure(attachment).getAttribute("aria-expanded")).toBe(String(open));
+  expect(attachmentPanel(attachment).hidden).toBe(!open);
+}
 function selectImage() {
   const file = new File(["offline screenshot"], "wave.png", { type: "image/png" });
   fireEvent.change(document.querySelector<HTMLInputElement>("#post-images")!, { target: { files: [file] } });
@@ -99,12 +114,15 @@ describe("PostComposer offline draft protection", () => {
   it("restores text and multiple media references for the same account", async () => {
     const mounted = render(<PostComposer board="idea_sharing" userId={actor} />);
     await restored(); fillSimple();
+    setAttachmentOpen("links", true);
     change("媒体引用 1", "https://youtu.be/abcdefgh");
     fireEvent.click(screen.getByRole("button", { name: "添加引用" }));
     change("媒体引用 2", "https://x.com/wavekb/status/123");
     await waitFor(() => expect(localStorage.getItem(draftKey)).toContain("status/123"));
     mounted.unmount(); render(<PostComposer board="idea_sharing" userId={actor} />);
     await restored();
+    expect(disclosure("links").getAttribute("aria-expanded")).toBe("true");
+    expect(attachmentPanel("links").hidden).toBe(false);
     expect(valueOf("标题")).toBe(title); expect(valueOf("正文")).toBe(body);
     expect(valueOf("媒体引用 1")).toBe("https://youtu.be/abcdefgh");
     expect(valueOf("媒体引用 2")).toBe("https://x.com/wavekb/status/123");
@@ -339,6 +357,7 @@ describe("PostComposer editing and submission", () => {
     mocks.createPost.mockRejectedValue(error);
     render(<PostComposer board="idea_sharing" userId={actor} />);
     await restored(); fillSimple(); const file = selectImage();
+    setAttachmentOpen("links", true);
     change("待发布图片 1 说明", "浪型截图说明"); change("媒体引用 1", "https://youtu.be/abcdefgh"); submit();
     expect((await screen.findByRole("alert")).textContent).toMatch(/图片.*(?:上传|保存)/);
     expect(screen.getByAltText("待发布图片 1")).toBeDefined();
@@ -374,14 +393,156 @@ describe("PostComposer keyboard access", () => {
     fireEvent.click(button); expect(chooseFile).toHaveBeenCalledTimes(1);
   });
 
-  it("moves mode selection and focus with arrow keys and Home", async () => {
+  it("exposes a native professional-mode button with pressed state and stable focus", async () => {
     render(<PostComposer board="idea_sharing" userId={actor} />); await restored();
-    const simple = screen.getByRole("tab", { name: "简易发布" });
-    const professional = screen.getByRole("tab", { name: "专业分析" });
-    simple.focus(); fireEvent.keyDown(simple, { key: "ArrowRight" });
-    expect(professional.getAttribute("aria-selected")).toBe("true"); expect(document.activeElement).toBe(professional);
-    expect(simple.tabIndex).toBe(-1); expect(professional.tabIndex).toBe(0);
-    fireEvent.keyDown(professional, { key: "Home" });
-    expect(simple.getAttribute("aria-selected")).toBe("true"); expect(document.activeElement).toBe(simple);
+    const mode = screen.getByRole("button", { name: "专业分析" });
+    expect(mode.tagName).toBe("BUTTON"); expect(mode.tabIndex).toBeGreaterThanOrEqual(0);
+    expect(mode.getAttribute("aria-pressed")).toBe("false"); mode.focus(); fireEvent.click(mode);
+    expect(screen.getByRole("button", { name: "专业分析" })).toBe(mode);
+    expect(mode.getAttribute("aria-pressed")).toBe("true"); expect(document.activeElement).toBe(mode);
+    expect(document.getElementById(mode.getAttribute("aria-controls")!)).not.toBeNull();
+    fireEvent.click(mode);
+    expect(mode.getAttribute("aria-pressed")).toBe("false"); expect(document.activeElement).toBe(mode);
+    expect(screen.queryByRole("tab")).toBeNull();
+  });
+});
+
+describe("PostComposer progressive attachment controls", () => {
+  it("keeps optional attachments out of the initial accessible form while retaining the image and publish buttons", async () => {
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored();
+    for (const attachment of ["links", "chart"] as const) {
+      const button = disclosure(attachment);
+      expect(button.tagName).toBe("BUTTON"); expect(button.tabIndex).toBeGreaterThanOrEqual(0);
+      expect(button.getAttribute("aria-expanded")).toBe("false"); expect(attachmentPanel(attachment).hidden).toBe(true);
+    }
+    expect(screen.queryByRole("textbox", { name: "媒体引用 1" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "公开图表链接或品种代码" })).toBeNull();
+    expect((screen.getByRole("textbox", { name: "正文" }) as HTMLTextAreaElement).rows).toBe(6);
+    expect(screen.getByRole("button", { name: "选择图片" }).matches(":disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "发布内容" }).matches(":disabled")).toBe(false);
+  });
+
+  it("reveals professional research fields without expanding empty optional attachments", async () => {
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored();
+    fireEvent.click(screen.getByRole("button", { name: "专业分析" }));
+    expect(screen.getByRole("heading", { name: "分析坐标" })).toBeDefined();
+    expect(screen.getByRole("textbox", { name: "核心观点" })).toBeDefined();
+    expect(disclosure("links").getAttribute("aria-expanded")).toBe("false");
+    expect(disclosure("chart").getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("textbox", { name: "媒体引用 1" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "公开图表链接或品种代码" })).toBeNull();
+  });
+
+  it("preserves closed attachment values in both the local draft and publication payload", async () => {
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored(); fillSimple();
+    setAttachmentOpen("links", true); change("媒体引用 1", "https://youtu.be/abcdefgh");
+    setAttachmentOpen("chart", true); change("公开图表链接或品种代码", "BINANCE:BTCUSDT");
+    change("周期", "240"); change("主题", "dark");
+    setAttachmentOpen("links", false); setAttachmentOpen("chart", false);
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(JSON.parse(localStorage.getItem(draftKey)!)).toMatchObject({
+      externalUrls: ["https://youtu.be/abcdefgh"], chartSource: "BINANCE:BTCUSDT", chartInterval: "240", chartTheme: "dark",
+    });
+    expect(screen.queryByRole("textbox", { name: "媒体引用 1" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "公开图表链接或品种代码" })).toBeNull();
+    submit(); await waitFor(() => expect(mocks.createPost).toHaveBeenCalledTimes(1));
+    expect(mocks.createPost.mock.calls[0][1]).toMatchObject({
+      title, body, externalReferences: [{ url: "https://youtu.be/abcdefgh", kind: "youtube", sort_order: 0 }],
+      chartPackage: { symbol: "BINANCE:BTCUSDT", interval: "240", theme: "dark" },
+    });
+  });
+
+  it.each(["post", "legacy post", "draft", "legacy draft"])("automatically reveals existing attachment data from a %s without loading a chart iframe", async (origin) => {
+    const url = "https://youtu.be/abcdefgh";
+    if (origin.includes("draft")) {
+      localStorage.setItem(draftKey, JSON.stringify({ title, body, chartSource: chart.symbol, ...(origin === "legacy draft" ? { externalUrl: url } : { externalUrls: [url] }) }));
+      render(<PostComposer board="idea_sharing" userId={actor} />);
+    } else {
+      const existing = origin === "legacy post"
+        ? { ...post, chart_package: chart, external_url: url, external_kind: "youtube" as const }
+        : { ...post, chart_package: chart, external_references: [{ url, kind: "youtube" as const, sort_order: 0 }] };
+      render(<PostComposer board="idea_sharing" userId={actor} post={existing} />);
+    }
+    await restored();
+    expect(disclosure("links").getAttribute("aria-expanded")).toBe("true");
+    expect(disclosure("chart").getAttribute("aria-expanded")).toBe("true");
+    expect(attachmentPanel("links").hidden).toBe(false); expect(attachmentPanel("chart").hidden).toBe(false);
+    expect((screen.getByRole("textbox", { name: "媒体引用 1" }) as HTMLInputElement).value).toBe(url);
+    expect((screen.getByRole("textbox", { name: "公开图表链接或品种代码" }) as HTMLInputElement).value).toBe(origin.includes("draft") ? chart.symbol : chart.chart_url);
+    expect(screen.queryByTitle(/TradingView 图表预览/)).toBeNull();
+  });
+
+  it("restores an empty reference array as one editable blank field without expanding it", async () => {
+    localStorage.setItem(draftKey, JSON.stringify({ title, body, externalUrls: [] }));
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored();
+    expect(disclosure("links").getAttribute("aria-expanded")).toBe("false"); expect(attachmentPanel("links").hidden).toBe(true);
+    setAttachmentOpen("links", true);
+    expect((screen.getByRole("textbox", { name: "媒体引用 1" }) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("textbox", { name: "媒体引用 2" })).toBeNull();
+    submit(); await waitFor(() => expect(mocks.createPost).toHaveBeenCalledTimes(1));
+    expect(mocks.createPost.mock.calls[0][1].externalReferences).toEqual([]);
+  });
+
+  it("reopens closed media fields and focuses the first invalid reference instead of an earlier valid link", async () => {
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored(); fillSimple();
+    setAttachmentOpen("links", true); change("媒体引用 1", "https://youtu.be/abcdefgh");
+    fireEvent.click(screen.getByRole("button", { name: "添加引用" })); change("媒体引用 2", "https://example.com/unsupported");
+    setAttachmentOpen("links", false); submit();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "媒体引用 2" })));
+    expect(disclosure("links").getAttribute("aria-expanded")).toBe("true"); expect(attachmentPanel("links").hidden).toBe(false);
+    const invalid = screen.getByRole("textbox", { name: "媒体引用 2" });
+    expect(invalid.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(invalid.getAttribute("aria-describedby")!)?.textContent).toMatch(/YouTube|X/);
+    expect(mocks.getUser).not.toHaveBeenCalled(); expect(mocks.createPost).not.toHaveBeenCalled();
+    expect(valueOf("正文")).toBe(body); expect(valueOf("媒体引用 1")).toBe("https://youtu.be/abcdefgh");
+  });
+
+  it("reopens closed chart fields and focuses an invalid chart source before contacting authentication", async () => {
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored(); fillSimple();
+    setAttachmentOpen("chart", true); change("公开图表链接或品种代码", "https://example.com/unsupported-chart");
+    setAttachmentOpen("chart", false); submit();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "公开图表链接或品种代码" })));
+    expect(disclosure("chart").getAttribute("aria-expanded")).toBe("true"); expect(attachmentPanel("chart").hidden).toBe(false);
+    const input = screen.getByRole("textbox", { name: "公开图表链接或品种代码" });
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent).toContain("TradingView");
+    expect(mocks.getUser).not.toHaveBeenCalled(); expect(mocks.createPost).not.toHaveBeenCalled(); expect(mocks.updatePost).not.toHaveBeenCalled();
+    expect(valueOf("标题")).toBe(title); expect(valueOf("正文")).toBe(body);
+  });
+
+  it("retains attachment values, disclosure state and compiled content across simple and professional switches", async () => {
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored(); fillSimple();
+    setAttachmentOpen("links", true); change("媒体引用 1", "https://youtu.be/abcdefgh");
+    setAttachmentOpen("chart", true); change("公开图表链接或品种代码", "BINANCE:BTCUSDT");
+    setAttachmentOpen("links", false); setAttachmentOpen("chart", false);
+    fireEvent.click(screen.getByRole("button", { name: "专业分析" }));
+    expect(valueOf("核心观点")).toBe(body);
+    expect(disclosure("links").getAttribute("aria-expanded")).toBe("false"); expect(disclosure("chart").getAttribute("aria-expanded")).toBe("false");
+    setAttachmentOpen("links", true);
+    fireEvent.click(screen.getByRole("button", { name: "专业分析" }));
+    const compiled = valueOf("正文"); expect(compiled).toContain(body);
+    fireEvent.click(screen.getByRole("button", { name: "专业分析" }));
+    expect(valueOf("核心观点")).toBe(body); expect(disclosure("links").getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "专业分析" }));
+    expect(valueOf("正文")).toBe(compiled); expect(disclosure("chart").getAttribute("aria-expanded")).toBe("false");
+    expect(valueOf("媒体引用 1")).toBe("https://youtu.be/abcdefgh"); expect(valueOf("公开图表链接或品种代码")).toBe("BINANCE:BTCUSDT");
+  });
+
+  it("disables disclosure buttons during publication and restores them with attachments intact after failure", async () => {
+    const publication = deferred<string>(); mocks.createPost.mockReturnValue(publication.promise);
+    render(<PostComposer board="idea_sharing" userId={actor} />); await restored(); fillSimple(); selectImage();
+    setAttachmentOpen("links", true); change("媒体引用 1", "https://youtu.be/abcdefgh");
+    setAttachmentOpen("chart", true); change("公开图表链接或品种代码", "BINANCE:BTCUSDT"); submit();
+    await waitFor(() => expect(mocks.createPost).toHaveBeenCalledTimes(1));
+    for (const attachment of ["links", "chart"] as const) expect(disclosure(attachment).matches(":disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "专业分析" }).matches(":disabled")).toBe(true);
+    expect(screen.getByRole("textbox", { name: "媒体引用 1" }).matches(":disabled")).toBe(true);
+    await act(async () => { publication.reject(new Error("upload failed")); });
+    await screen.findByRole("alert");
+    for (const attachment of ["links", "chart"] as const) {
+      expect(disclosure(attachment).matches(":disabled")).toBe(false); expect(disclosure(attachment).getAttribute("aria-expanded")).toBe("true");
+    }
+    expect(valueOf("媒体引用 1")).toBe("https://youtu.be/abcdefgh"); expect(valueOf("公开图表链接或品种代码")).toBe("BINANCE:BTCUSDT");
+    expect(screen.getByAltText("待发布图片 1")).toBeDefined(); expect(valueOf("正文")).toBe(body);
   });
 });
