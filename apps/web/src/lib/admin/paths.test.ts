@@ -25,7 +25,8 @@ describe("admin proxy path allowlist", () => {
     expect(isAllowedAdminPath(`directory/${userId}/delete`, "POST")).toBe(true);
     expect(isAllowedAdminPath("directory/not-a-uuid/delete", "POST")).toBe(false);
     expect(isAllowedAdminPath("providers", "POST")).toBe(true);
-    expect(isAllowedAdminPath(`trading-connections/${userId}/disable`, "POST")).toBe(true);
+  expect(isAllowedAdminPath(`trading-connections/${userId}/disable`, "POST")).toBe(true);
+  expect(isAllowedAdminPath(`trading-connections/${userId}/display-equity`, "POST")).toBe(true);
     expect(isAllowedAdminPath("trading-connections/not-a-uuid/disable", "POST")).toBe(false);
   });
 

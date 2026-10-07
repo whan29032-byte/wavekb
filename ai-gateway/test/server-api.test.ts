@@ -105,6 +105,9 @@ const api = {
   async disableAdminExchangeConnection() {
     return { id: "11111111-1111-4111-8111-111111111111", status: "disabled", secret_mask: "••••ABCD" };
   },
+  async setAdminExchangeDisplayEquity(_actorId: string, _connectionId: string, displayEquity: string | null) {
+    return { id: "11111111-1111-4111-8111-111111111111", status: "active", public_display_equity_usdt: displayEquity, secret_mask: "••••ABCD" };
+  },
 };
 
 const userAdministrationApi = {
@@ -298,6 +301,9 @@ test("only admins can inspect or disable exchange connections", async () => {
   const disabled = await server.inject({ method: "POST", url: "/v1/admin/trading-connections/11111111-1111-4111-8111-111111111111/disable", headers: { authorization: "Bearer admin-token" }, payload: { reason: "收益异常核验" } });
   assert.equal(disabled.statusCode, 200);
   assert.equal((disabled.json() as any).connection.status, "disabled");
+  const display = await server.inject({ method: "POST", url: "/v1/admin/trading-connections/11111111-1111-4111-8111-111111111111/display-equity", headers: { authorization: "Bearer admin-token" }, payload: { display_equity_usdt: "12345.67", reason: "统一榜单展示口径" } });
+  assert.equal(display.statusCode, 200);
+  assert.equal((display.json() as any).connection.public_display_equity_usdt, "12345.67");
 });
 
 test("user administration is isolated behind admin routes", async () => {

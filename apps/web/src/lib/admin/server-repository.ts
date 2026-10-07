@@ -49,6 +49,7 @@ export type AdminTradingConnection = {
   exchange: "binance";
   market: "usdm_futures";
   public_enabled: boolean;
+  public_display_equity_usdt: string | null;
   status: "active" | "error" | "disabled";
   secret_mask: string;
   started_at: string;

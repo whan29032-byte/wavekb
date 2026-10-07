@@ -5,10 +5,11 @@ import test from "node:test";
 const read = (path) => fs.readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("Binance leaderboard keeps secrets server-only and publishes only approved live account totals", async () => {
-  const [migration, realtimeMigration, amountsMigration, gateway, page] = await Promise.all([
+  const [migration, realtimeMigration, amountsMigration, customDisplayMigration, gateway, page] = await Promise.all([
     read("supabase/migrations/202609080001_binance_trading_leaderboard.sql"),
     read("supabase/migrations/202609080002_realtime_trading_leaderboard.sql"),
     read("supabase/migrations/202609080003_public_trading_amounts.sql"),
+    read("supabase/migrations/202610080001_admin_custom_trading_display.sql"),
     read("ai-gateway/src/trading/leaderboard-service.ts"),
     read("apps/web/src/app/leaderboard/page.tsx"),
   ]);
@@ -34,6 +35,10 @@ test("Binance leaderboard keeps secrets server-only and publishes only approved 
   assert.match(amountsMigration, /create_binance_exchange_connection_v2/);
   assert.match(amountsMigration, /set_exchange_connection_public_amounts/);
   assert.match(amountsMigration, /record_exchange_sync_failure/);
+  assert.match(customDisplayMigration, /public_display_equity_usdt/);
+  assert.match(customDisplayMigration, /admin_set_exchange_display_equity/);
+  assert.match(customDisplayMigration, /set_display_equity/);
+  assert.match(customDisplayMigration, /coalesce\(connection\.public_display_equity_usdt, summary\.current_equity_usdt\)/);
   assert.match(amountsMigration, /drop function public\.list_trading_leaderboard\(text, integer\)/);
   assert.match(amountsMigration, /lock table public\.trading_equity_snapshots in share row exclusive mode/);
   const publicAmountsRpc = amountsMigration.slice(amountsMigration.indexOf("create function public.list_trading_leaderboard"));

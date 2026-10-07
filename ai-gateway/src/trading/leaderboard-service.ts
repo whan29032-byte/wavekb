@@ -9,6 +9,7 @@ type Connection = {
   label: string;
   public_enabled: boolean;
   public_amounts_consented_at: string | null;
+  public_display_equity_usdt: string | null;
   status: "active" | "error" | "disabled";
   api_key_last_four: string;
   started_at: string;
@@ -216,11 +217,22 @@ export class BinanceLeaderboardService {
   }
 
   async adminList(limit = 100) {
-    const rows = await this.database.request(`/rest/v1/exchange_connections?select=id,owner_id,label,public_enabled,public_amounts_consented_at,status,api_key_last_four,started_at,last_synced_at,last_error_code,consecutive_failures,created_at&order=created_at.desc&limit=${Math.min(Math.max(limit, 1), 500)}`) as Array<Connection & { created_at: string }>;
+    const rows = await this.database.request(`/rest/v1/exchange_connections?select=id,owner_id,label,public_enabled,public_amounts_consented_at,public_display_equity_usdt,status,api_key_last_four,started_at,last_synced_at,last_error_code,consecutive_failures,created_at&order=created_at.desc&limit=${Math.min(Math.max(limit, 1), 500)}`) as Array<Connection & { created_at: string }>;
     const ownerIds = [...new Set(rows.map((row) => row.owner_id))];
     const profiles = ownerIds.length ? await this.database.request(`/rest/v1/profiles?id=in.(${ownerIds.map(encodeURIComponent).join(",")})&select=id,public_uid,display_name`) : [];
     const profileById = new Map(profiles.map((profile: { id: string }) => [profile.id, profile]));
-    return rows.map((row) => ({ ...safeConnection(row), owner_id: row.owner_id, owner: profileById.get(row.owner_id) ?? null, created_at: row.created_at }));
+    return rows.map((row) => ({ ...safeConnection(row), public_display_equity_usdt: row.public_display_equity_usdt, owner_id: row.owner_id, owner: profileById.get(row.owner_id) ?? null, created_at: row.created_at }));
+  }
+
+  async adminSetDisplayEquity(actorId: string, connectionId: string, displayEquity: string | null, reason: string) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(connectionId)) throw Object.assign(new Error("invalid_request"), { statusCode: 400 });
+    const note = String(reason || "").trim();
+    if (note.length < 2 || note.length > 500) throw Object.assign(new Error("reason_required"), { statusCode: 400 });
+    const value = displayEquity == null || String(displayEquity).trim() === "" ? null : String(displayEquity).trim();
+    if (value !== null && !/^(?:0|[1-9]\d{0,21})(?:\.\d{1,8})?$/.test(value)) throw Object.assign(new Error("invalid_display_equity"), { statusCode: 400 });
+    const result = await this.database.request("/rest/v1/rpc/admin_set_exchange_display_equity", { method: "POST", body: { p_actor: actorId, p_connection_id: connectionId, p_display_equity_usdt: value, p_reason: note } });
+    const connection = connectionValue(result);
+    return { ...safeConnection(connection), public_display_equity_usdt: connection.public_display_equity_usdt };
   }
 
   async adminDisable(actorId: string, connectionId: string, reason: string) {

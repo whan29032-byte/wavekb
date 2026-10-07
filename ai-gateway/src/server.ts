@@ -55,6 +55,7 @@ export type GatewayApi = {
   disconnectExchangeConnection?(ownerId: string): Promise<unknown>;
   listAdminExchangeConnections?(limit?: number): Promise<unknown[]>;
   disableAdminExchangeConnection?(actorId: string, connectionId: string, reason: string): Promise<unknown>;
+  setAdminExchangeDisplayEquity?(actorId: string, connectionId: string, displayEquity: string | null, reason: string): Promise<unknown>;
 };
 
 export type AuthRouteApi = {
@@ -531,6 +532,13 @@ async function route(
   if (method === "POST" && adminExchangeMatch?.[1]) {
     if (!api.disableAdminExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return { statusCode: 200, body: { connection: await api.disableAdminExchangeConnection(actor.id, decodeURIComponent(adminExchangeMatch[1]), String((payload as Record<string, unknown> | null)?.reason || "")) } };
+  }
+  const adminDisplayEquityMatch = path.match(/^\/v1\/admin\/trading-connections\/([^/]+)\/display-equity$/);
+  if (method === "POST" && adminDisplayEquityMatch?.[1]) {
+    if (!api.setAdminExchangeDisplayEquity) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    const input = (payload ?? {}) as Record<string, unknown>;
+    const displayEquity = input.display_equity_usdt == null || String(input.display_equity_usdt).trim() === "" ? null : String(input.display_equity_usdt).trim();
+    return { statusCode: 200, body: { connection: await api.setAdminExchangeDisplayEquity(actor.id, decodeURIComponent(adminDisplayEquityMatch[1]), displayEquity, String(input.reason || "")) } };
   }
   if (method === "GET" && path === "/v1/user/exchange-connection") {
     if (!api.getExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
