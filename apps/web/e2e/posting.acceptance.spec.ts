@@ -57,6 +57,8 @@ test.describe("authenticated posting acceptance", () => {
         buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
       });
       await page.getByLabel("待发布图片 1 说明").fill("Playwright 研究图表快照");
+      await page.getByRole("button", { name: /^添加链接/ }).click();
+      await expect(page.getByLabel("媒体引用 1", { exact: true })).toBeVisible();
       await page.getByLabel("媒体引用 1", { exact: true }).fill("https://www.youtube.com/watch?v=posting-acceptance");
       await page.getByRole("button", { name: "发布内容" }).click();
       try {
@@ -115,10 +117,14 @@ test.describe("authenticated posting acceptance", () => {
       await page.goBack();
 
       await page.getByRole("link", { name: "编辑帖子" }).click();
-      await page.getByRole("tab", { name: "专业分析" }).click();
+      const professionalMode = page.getByRole("button", { name: "专业分析", exact: true });
+      await professionalMode.click();
+      await expect(professionalMode).toHaveAttribute("aria-pressed", "true");
       await page.getByLabel("品种", { exact: true }).fill("BINANCE:BTCUSDT");
       await page.getByLabel("核心观点").fill("当前结构仍需等待同级别确认。 ");
       await page.getByLabel("规则与指南依据").fill("硬规则先淘汰，比例关系只用于排序。 ");
+      await page.getByRole("button", { name: /^添加图表/ }).click();
+      await expect(page.getByLabel("公开图表链接或品种代码")).toBeVisible();
       await page.getByLabel("公开图表链接或品种代码").fill("BINANCE:BTCUSDT");
       await page.getByLabel("正文").fill("这篇验收帖子已经完成编辑，用于确认作者修改链路和详情页刷新。 ");
       await page.getByRole("button", { name: "移除现有图片 1" }).click();
