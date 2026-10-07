@@ -3,6 +3,13 @@ import type { BoardSlug, CommunityPost, ExternalKind, ExternalReference, Timelin
 import type { TradingViewPackage } from "@/lib/workbench/tradingview";
 import { mapWithConcurrency } from "../uploads";
 
+export type PostPublishingProgress = {
+  phase: "preparing" | "uploading" | "publishing";
+  /** Successfully uploaded files; this is not byte progress. */
+  completed: number;
+  total: number;
+};
+
 type CreatePostInput = {
   userId: string;
   board: BoardSlug;
@@ -15,6 +22,7 @@ type CreatePostInput = {
   imageCaptions?: string[];
   privateEntryId?: string;
   chartPackage?: TradingViewPackage | null;
+  onProgress?: (progress: PostPublishingProgress) => void;
 };
 
 type PublishingGateway = {
@@ -41,7 +49,23 @@ type UpdatePostInput = {
   files: File[];
   newImageCaptions?: string[];
   chartPackage?: TradingViewPackage | null;
+  onProgress?: (progress: PostPublishingProgress) => void;
 };
+
+function reportProgress(
+  onProgress: CreatePostInput["onProgress"],
+  phase: PostPublishingProgress["phase"],
+  completed: number,
+  total: number,
+) {
+  if (!onProgress) return;
+  try {
+    // Progress observers must not interrupt persistence, including async observers.
+    void Promise.resolve(onProgress({ phase, completed, total })).catch(() => undefined);
+  } catch {
+    // A broken UI observer does not change the result of publishing.
+  }
+}
 
 function unwrap(result: { error: unknown }) {
   if (result.error) throw result.error;
@@ -92,6 +116,7 @@ export async function createPost(
   input: CreatePostInput,
   injectedGateway?: PublishingGateway,
 ): Promise<string> {
+  reportProgress(input.onProgress, "preparing", 0, input.files.length);
   const gateway = injectedGateway ?? defaultGateway(client);
   const postId = gateway.makeId();
   const uploadedPaths: string[] = [];
@@ -131,7 +156,13 @@ export async function createPost(
         file,
       };
     });
-    await mapWithConcurrency(imageRows, 3, (row) => gateway.uploadImage(String(row.storage_path), row.file));
+    let completed = 0;
+    if (imageRows.length) reportProgress(input.onProgress, "uploading", completed, imageRows.length);
+    await mapWithConcurrency(imageRows, 3, async (row) => {
+      await gateway.uploadImage(String(row.storage_path), row.file);
+      reportProgress(input.onProgress, "uploading", ++completed, imageRows.length);
+    });
+    reportProgress(input.onProgress, "publishing", completed, imageRows.length);
     const persistedImageRows = imageRows.map((row) => ({
       post_id: row.post_id,
       owner_id: row.owner_id,
@@ -161,6 +192,7 @@ export async function createPost(
 
 export async function updatePost(client: SupabaseClient, post: CommunityPost, input: UpdatePostInput) {
   if (post.author_id !== input.userId || post.status === "hidden") throw new Error("你不能编辑这篇帖子。");
+  reportProgress(input.onProgress, "preparing", 0, input.files.length);
   const keptIds = new Set(input.keptImageIds);
   const kept = post.post_images.filter((image) => keptIds.has(image.id));
   const removed = post.post_images.filter((image) => !keptIds.has(image.id));
@@ -174,14 +206,18 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
       uploadedPaths.push(path);
       return { file, path };
     });
+    let completed = 0;
+    if (uploads.length) reportProgress(input.onProgress, "uploading", completed, uploads.length);
     await mapWithConcurrency(uploads, 3, async ({ file, path }) => {
       const upload = await client.storage.from("post-images").upload(path, file, {
         upsert: false,
         contentType: file.type,
       });
       if (upload.error) throw upload.error;
+      reportProgress(input.onProgress, "uploading", ++completed, uploads.length);
     });
 
+    reportProgress(input.onProgress, "publishing", completed, uploads.length);
     let updateError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const references = input.externalReferences ?? (input.externalUrl && input.externalKind
@@ -210,8 +246,13 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
 
   const removedPaths = removed.map((image) => image.storage_path);
   if (!removedPaths.length) return { cleanupPending: false };
-  const cleanup = await client.storage.from("post-images").remove(removedPaths);
-  return { cleanupPending: Boolean(cleanup.error) };
+  try {
+    const cleanup = await client.storage.from("post-images").remove(removedPaths);
+    return { cleanupPending: Boolean(cleanup.error) };
+  } catch {
+    // The atomic update already committed; storage cleanup cannot undo that success.
+    return { cleanupPending: true };
+  }
 }
 
 export async function appendPostTimelineNode(client: SupabaseClient, input: {

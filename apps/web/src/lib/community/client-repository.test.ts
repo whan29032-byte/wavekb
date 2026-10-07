@@ -1,7 +1,55 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addPostComment, appendPostTimelineNode, createPost, deletePost, updatePost } from "./client-repository";
+import type { PostPublishingProgress } from "./client-repository";
 
 afterEach(() => vi.unstubAllGlobals());
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function imageFiles(count: number) {
+  return Array.from({ length: count }, (_, index) => new File([`image-${index}`], `wave-${index}.png`, { type: "image/png" }));
+}
+
+function publishingGateway(overrides: Partial<NonNullable<Parameters<typeof createPost>[2]>> = {}) {
+  let nextImageId = 0;
+  return {
+    makeId: vi.fn().mockReturnValueOnce("post-id").mockImplementation(() => `image-${nextImageId++}`),
+    insertDraft: vi.fn(async () => undefined),
+    uploadImage: vi.fn<(path: string, file: File) => Promise<void>>(async () => undefined),
+    insertImages: vi.fn<(rows: Record<string, unknown>[]) => Promise<void>>(async () => undefined),
+    publish: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+    removeFiles: vi.fn<(paths: string[]) => Promise<void>>(async () => undefined),
+    removePost: vi.fn<(id: string) => Promise<void>>(async () => undefined),
+    ...overrides,
+  };
+}
+
+function createInput(files: File[], onProgress?: (progress: PostPublishingProgress) => void): Parameters<typeof createPost>[1] {
+  return {
+    userId: "user-id",
+    board: "idea_sharing",
+    title: "上传流程回归测试",
+    body: "所有图片上传完成以后才能保存图片顺序并公开帖子。",
+    files,
+    onProgress,
+  };
+}
+
+function editingPost(postImages: { id: string; storage_path: string; caption?: string }[] = []): Parameters<typeof updatePost>[1] {
+  return { id: "post-id", author_id: "user-id", status: "published", post_images: postImages } as never;
+}
+
+function updateInput(files: File[], onProgress?: (progress: PostPublishingProgress) => void): Parameters<typeof updatePost>[2] {
+  return { userId: "user-id", title: "编辑上传回归测试", body: "原子保存更新以后再清理已移除的旧图片。", keptImageIds: [], files, onProgress };
+}
 
 describe("posting transaction", () => {
   it("publishes only after every image row is saved", async () => {
@@ -109,6 +157,100 @@ describe("posting transaction", () => {
       expect.objectContaining({ post_id: "post-id", kind: "x", sort_order: 1 }),
     ]);
   });
+
+  it("limits uploads to three, preserves image order and reports completed file counts", async () => {
+    const files = imageFiles(5);
+    const uploads = files.map(() => deferred<void>());
+    const progress: PostPublishingProgress[] = [];
+    let active = 0;
+    let maximum = 0;
+    const uploadImage = vi.fn(async (_path: string, file: File) => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      try { await uploads[files.indexOf(file)]!.promise; }
+      finally { active -= 1; }
+    });
+    const gateway = publishingGateway({ uploadImage });
+    const pending = createPost({} as never, createInput(files, (event) => { progress.push(event); }), gateway);
+
+    await vi.waitFor(() => expect(uploadImage).toHaveBeenCalledTimes(3));
+    expect(progress).toEqual([
+      { phase: "preparing", completed: 0, total: 5 },
+      { phase: "uploading", completed: 0, total: 5 },
+    ]);
+    uploads[2]!.resolve(undefined);
+    await vi.waitFor(() => expect(uploadImage).toHaveBeenCalledTimes(4));
+    uploads[3]!.resolve(undefined);
+    await vi.waitFor(() => expect(uploadImage).toHaveBeenCalledTimes(5));
+    uploads[4]!.resolve(undefined);
+    uploads[0]!.resolve(undefined);
+    expect(gateway.publish).not.toHaveBeenCalled();
+    uploads[1]!.resolve(undefined);
+
+    await expect(pending).resolves.toBe("post-id");
+    expect(maximum).toBe(3);
+    expect(gateway.insertImages).toHaveBeenCalledWith(files.map((_, index) => expect.objectContaining({
+      storage_path: `user-id/post-id/image-${index}.png`,
+      sort_order: index,
+    })));
+    expect(progress).toEqual([
+      { phase: "preparing", completed: 0, total: 5 },
+      ...Array.from({ length: 6 }, (_, completed) => ({ phase: "uploading", completed, total: 5 })),
+      { phase: "publishing", completed: 5, total: 5 },
+    ]);
+  });
+
+  it("waits for every in-flight upload before removing failed-post files and draft", async () => {
+    const files = imageFiles(3);
+    const uploads = files.map(() => deferred<void>());
+    const events: string[] = [];
+    const progress: PostPublishingProgress[] = [];
+    const uploadImage = vi.fn(async (_path: string, file: File) => {
+      const index = files.indexOf(file);
+      try { await uploads[index]!.promise; }
+      finally { events.push(`settled-${index}`); }
+    });
+    const removeFiles = vi.fn<(paths: string[]) => Promise<void>>(async () => { events.push("remove-files"); });
+    const removePost = vi.fn<(id: string) => Promise<void>>(async () => { events.push("remove-draft"); });
+    const gateway = publishingGateway({ uploadImage, removeFiles, removePost });
+    const pending = createPost({} as never, createInput(files, (event) => { progress.push(event); }), gateway);
+    const rejected = expect(pending).rejects.toThrow("first upload failed");
+    await vi.waitFor(() => expect(uploadImage).toHaveBeenCalledTimes(3));
+
+    uploads[0]!.reject(new Error("first upload failed"));
+    await vi.waitFor(() => expect(events).toContain("settled-0"));
+    expect(removeFiles).not.toHaveBeenCalled();
+    expect(removePost).not.toHaveBeenCalled();
+    uploads[1]!.resolve(undefined);
+    await vi.waitFor(() => expect(events).toContain("settled-1"));
+    expect(removeFiles).not.toHaveBeenCalled();
+    uploads[2]!.reject(new Error("another upload failed"));
+
+    await rejected;
+    expect(events).toEqual(["settled-0", "settled-1", "settled-2", "remove-files", "remove-draft"]);
+    expect(removeFiles).toHaveBeenCalledWith(files.map((_, index) => `user-id/post-id/image-${index}.png`));
+    expect(gateway.insertImages).not.toHaveBeenCalled();
+    expect(gateway.publish).not.toHaveBeenCalled();
+    expect(progress.some((event) => event.phase === "publishing")).toBe(false);
+  });
+
+  it.each(["throw", "reject"])("publishes without images even when the progress observer can %s", async (failure) => {
+    const progress: PostPublishingProgress[] = [];
+    const gateway = publishingGateway();
+    const onProgress = (event: PostPublishingProgress) => {
+      progress.push(event);
+      if (failure === "throw") throw new Error("observer failed");
+      return Promise.reject(new Error("async observer failed"));
+    };
+
+    await expect(createPost({} as never, createInput([], onProgress), gateway)).resolves.toBe("post-id");
+    expect(progress).toEqual([
+      { phase: "preparing", completed: 0, total: 0 },
+      { phase: "publishing", completed: 0, total: 0 },
+    ]);
+    expect(gateway.publish).toHaveBeenCalledWith("post-id");
+    expect(gateway.removePost).not.toHaveBeenCalled();
+  });
 });
 
 describe("post editing transaction", () => {
@@ -135,6 +277,102 @@ describe("post editing transaction", () => {
       p_images: [],
       p_external_references: [],
     }));
+  });
+
+  it("bounds new-image uploads, keeps RPC image order and reports phases before the atomic update", async () => {
+    const files = imageFiles(4);
+    const uploads = files.map(() => deferred<{ error: null }>());
+    const progress: PostPublishingProgress[] = [];
+    let active = 0;
+    let maximum = 0;
+    const upload = vi.fn(async (_path: string, file: File) => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      try { return await uploads[files.indexOf(file)]!.promise; }
+      finally { active -= 1; }
+    });
+    const rpc = vi.fn(async () => ({ error: null }));
+    const remove = vi.fn(async () => ({ error: null }));
+    const client = { rpc, storage: { from: vi.fn(() => ({ upload, remove })) } } as never;
+    const post = editingPost([{ id: "kept", storage_path: "user-id/post-id/kept.png", caption: "原始图" }]);
+    const input = { ...updateInput(files, (event) => { progress.push(event); }), keptImageIds: ["kept"], newImageCaptions: ["零", "一", "二", "三"] };
+    const pending = updatePost(client, post, input);
+
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
+    uploads[2]!.resolve({ error: null });
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(4));
+    uploads[3]!.resolve({ error: null });
+    uploads[0]!.resolve({ error: null });
+    expect(rpc).not.toHaveBeenCalled();
+    uploads[1]!.resolve({ error: null });
+
+    await expect(pending).resolves.toEqual({ cleanupPending: false });
+    expect(maximum).toBe(3);
+    expect(rpc).toHaveBeenCalledWith("update_my_post_v4", expect.objectContaining({
+      p_images: [
+        { storage_path: "user-id/post-id/kept.png", caption: "原始图" },
+        ...upload.mock.calls.map(([storagePath], index) => ({ storage_path: storagePath, caption: input.newImageCaptions[index] })),
+      ],
+    }));
+    expect(progress).toEqual([
+      { phase: "preparing", completed: 0, total: 4 },
+      ...Array.from({ length: 5 }, (_, completed) => ({ phase: "uploading", completed, total: 4 })),
+      { phase: "publishing", completed: 4, total: 4 },
+    ]);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("waits for in-flight edit uploads before cleanup and never calls the RPC after an upload failure", async () => {
+    const files = imageFiles(3);
+    const uploads = files.map(() => deferred<{ error: null }>());
+    const events: string[] = [];
+    const upload = vi.fn(async (_path: string, file: File) => {
+      const index = files.indexOf(file);
+      try { return await uploads[index]!.promise; }
+      finally { events.push(`settled-${index}`); }
+    });
+    const remove = vi.fn<(paths: string[]) => Promise<{ error: null }>>(async () => { events.push("cleanup"); return { error: null }; });
+    const rpc = vi.fn(async () => ({ error: null }));
+    const client = { rpc, storage: { from: vi.fn(() => ({ upload, remove })) } } as never;
+    const pending = updatePost(client, editingPost(), updateInput(files));
+    const rejected = expect(pending).rejects.toThrow("edit upload failed");
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
+
+    uploads[0]!.reject(new Error("edit upload failed"));
+    await vi.waitFor(() => expect(events).toContain("settled-0"));
+    expect(remove).not.toHaveBeenCalled();
+    uploads[1]!.resolve({ error: null });
+    await vi.waitFor(() => expect(events).toContain("settled-1"));
+    expect(remove).not.toHaveBeenCalled();
+    uploads[2]!.resolve({ error: null });
+
+    await rejected;
+    expect(events).toEqual(["settled-0", "settled-1", "settled-2", "cleanup"]);
+    expect(remove).toHaveBeenCalledWith(upload.mock.calls.map(([path]) => path));
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it.each(["returned", "thrown"])("keeps the committed update successful when old-image cleanup errors are %s", async (failure) => {
+    const events: string[] = [];
+    const progress: PostPublishingProgress[] = [];
+    const rpc = vi.fn(async () => { events.push("commit"); return { error: null }; });
+    const remove = vi.fn<(paths: string[]) => Promise<{ error: { message: string } }>>(async () => {
+      events.push("cleanup");
+      if (failure === "thrown") throw new Error("storage request failed");
+      return { error: { message: "storage cleanup failed" } };
+    });
+    const client = { rpc, storage: { from: vi.fn(() => ({ remove })) } } as never;
+    const onProgress = (event: PostPublishingProgress) => { progress.push(event); throw new Error("observer failed"); };
+
+    await expect(updatePost(client, editingPost([{ id: "removed", storage_path: "user-id/post-id/old.png" }]), updateInput([], onProgress)))
+      .resolves.toEqual({ cleanupPending: true });
+    expect(events).toEqual(["commit", "cleanup"]);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith(["user-id/post-id/old.png"]);
+    expect(progress).toEqual([
+      { phase: "preparing", completed: 0, total: 0 },
+      { phase: "publishing", completed: 0, total: 0 },
+    ]);
   });
 });
 

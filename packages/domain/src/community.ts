@@ -586,6 +586,15 @@ export function isBoardSlug(value: string): value is BoardSlug {
   return Object.prototype.hasOwnProperty.call(BOARDS, value);
 }
 
+// Match external_media_kind and the URL limit in 202608210001_research_timelines_media.sql.
+const youtubeReferencePatterns = [
+  /^https:\/\/(www\.|m\.)?youtube\.com\/watch\?([^#]*&)?v=[A-Za-z0-9_-]{6,64}(&[^#]*)?(#.*)?$/,
+  /^https:\/\/(www\.)?youtube\.com\/(shorts|embed)\/[A-Za-z0-9_-]{6,64}\/?([?#].*)?$/,
+  /^https:\/\/youtu\.be\/[A-Za-z0-9_-]{6,64}\/?([?#].*)?$/,
+  /^https:\/\/(www\.)?youtube-nocookie\.com\/embed\/[A-Za-z0-9_-]{6,64}\/?([?#].*)?$/,
+];
+const xReferencePattern = /^https:\/\/(www\.|mobile\.)?(x\.com|twitter\.com)\/[^/?#]+\/status\/[0-9]+\/?([?#].*)?$/;
+
 export function parseExternalReference(rawUrl: string | undefined): {
   ok: boolean;
   url: string;
@@ -605,19 +614,15 @@ export function parseExternalReference(rawUrl: string | undefined): {
     return { ok: false, url: "", kind: null, error: "外部引用只支持 https 链接。" };
   }
 
-  const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-  const youtubeId = host === "youtu.be"
-    ? parsed.pathname.match(/^\/([^/]+)\/?$/)?.[1]
-    : ["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(host)
-      ? parsed.pathname === "/watch"
-        ? parsed.searchParams.get("v")
-        : parsed.pathname.match(/^\/(?:shorts|embed)\/([^/]+)\/?$/)?.[1]
-      : null;
-  if (youtubeId && /^[A-Za-z0-9_-]{6,64}$/.test(youtubeId)) {
-    return { ok: true, url: parsed.toString(), kind: "youtube" };
+  const url = parsed.toString();
+  if (url.length > 1000) {
+    return { ok: false, url: "", kind: null, error: "媒体引用链接不能超过 1000 个字符。" };
   }
-  if (["x.com", "twitter.com", "mobile.twitter.com"].includes(host) && /^\/[^/]+\/status\/\d+\/?$/.test(parsed.pathname)) {
-    return { ok: true, url: parsed.toString(), kind: "x" };
+  if (youtubeReferencePatterns.some((pattern) => pattern.test(url))) {
+    return { ok: true, url, kind: "youtube" };
+  }
+  if (xReferencePattern.test(url)) {
+    return { ok: true, url, kind: "x" };
   }
   return { ok: false, url: "", kind: null, error: "目前只支持引用 YouTube 视频或 X 帖子。" };
 }
@@ -648,15 +653,14 @@ export function validatePost(input: PostInput): PostValidation {
   const title = String(input.title ?? "").trim();
   const body = String(input.body ?? "").trim();
   const board = isBoardSlug(input.board) ? input.board : null;
+  const titleLength = Array.from(title).length;
+  const bodyLength = Array.from(body).length;
 
   if (!board) fields.board = "请选择有效板块。";
-  if (title.length < 5 || title.length > 120) fields.title = "标题需要 5-120 个字符。";
+  if (titleLength < 5 || titleLength > 120) fields.title = "标题需要 5-120 个字符。";
 
-  const minimumBodyLength = input.mode === "simple" && Number(input.imageCount ?? 0) > 0 ? 2 : 20;
-  if (body.length < minimumBodyLength || body.length > 20_000) {
-    fields.body = minimumBodyLength === 2
-      ? "简易发布附图时，正文至少需要 2 个字符。"
-      : "正文需要 20-20000 个字符。";
+  if (bodyLength < 20 || bodyLength > 20_000) {
+    fields.body = "正文需要 20-20000 个字符。";
   }
 
   const external = parseExternalReferences(input.externalUrls ?? [input.externalUrl ?? ""]);

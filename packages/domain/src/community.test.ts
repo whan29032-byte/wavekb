@@ -14,14 +14,74 @@ describe("community post validation", () => {
     expect(result.value.externalKind).toBe("youtube");
   });
 
-  it("allows short copy only when the simple post includes an image", () => {
-    expect(validatePost({
+  it.each(["simple", "professional"] as const)("requires the database minimum body length in %s mode, including attached images", (mode) => {
+    const input = {
       board: "case_submission",
       title: "附图案例判断",
-      body: "看图",
       imageCount: 1,
-      mode: "simple",
-    }).ok).toBe(true);
+      mode,
+    };
+    expect(validatePost({ ...input, body: "看图" })).toMatchObject({ ok: false, fields: { body: "正文需要 20-20000 个字符。" } });
+    expect(validatePost({ ...input, body: "字".repeat(19) }).ok).toBe(false);
+    expect(validatePost({ ...input, body: "字".repeat(20) }).ok).toBe(true);
+  });
+
+  it("counts title and body characters like PostgreSQL, including supplementary Unicode characters", () => {
+    const input = { board: "idea_sharing", title: "😀😀研究稿", body: "😀".repeat(20) };
+    expect(validatePost(input).ok).toBe(true);
+    expect(validatePost({ ...input, title: "😀😀字" })).toMatchObject({ ok: false, fields: { title: "标题需要 5-120 个字符。" } });
+    expect(validatePost({ ...input, body: "😀".repeat(19) })).toMatchObject({ ok: false, fields: { body: "正文需要 20-20000 个字符。" } });
+    expect(validatePost({ ...input, title: "😀".repeat(120) }).ok).toBe(true);
+    expect(validatePost({ ...input, title: "😀".repeat(121) }).ok).toBe(false);
+  });
+
+  it.each([
+    "https://youtube.com/watch?v=abc12345",
+    "https://www.youtube.com/watch?v=abc12345&t=1#chart",
+    "https://m.youtube.com/watch?feature=share&v=abc12345&t=1",
+    "https://youtube.com/shorts/abc12345",
+    "https://www.youtube.com/embed/abc12345/",
+    "https://youtu.be/abc12345?si=share",
+    "https://youtube-nocookie.com/embed/abc12345",
+    "https://www.youtube-nocookie.com/embed/abc12345/",
+  ])("accepts database-supported YouTube links: %s", (url) => {
+    expect(parseExternalReference(url)).toMatchObject({ ok: true, kind: "youtube", url });
+  });
+
+  it.each([
+    "https://x.com/wavekb/status/123",
+    "https://www.x.com/wavekb/status/123/?s=20#chart",
+    "https://mobile.x.com/wavekb/status/123",
+    "https://twitter.com/wavekb/status/123",
+    "https://www.twitter.com/wavekb/status/123",
+    "https://mobile.twitter.com/wavekb/status/123",
+  ])("accepts database-supported X links: %s", (url) => {
+    expect(parseExternalReference(url)).toMatchObject({ ok: true, kind: "x", url });
+  });
+
+  it.each([
+    "https://m.youtube.com/shorts/abc12345",
+    "https://m.youtube.com/embed/abc12345",
+    "https://youtube-nocookie.com/watch?v=abc12345",
+    "https://youtube-nocookie.com/shorts/abc12345",
+    "https://www.youtu.be/abc12345",
+    "https://www.m.youtube.com/watch?v=abc12345",
+    "https://x.com:8443/wavekb/status/123",
+    "https://username:password@x.com/wavekb/status/123",
+    "https://youtube.com/watch?v=%61bc12345",
+  ])("rejects link formats rejected by the database: %s", (url) => {
+    expect(parseExternalReference(url)).toMatchObject({ ok: false });
+  });
+
+  it("enforces the database limit on the normalized media URL", () => {
+    const prefix = "https://x.com/wavekb/status/123?note=";
+    const atLimit = prefix + "a".repeat(1000 - prefix.length);
+    expect(parseExternalReference(atLimit)).toMatchObject({ ok: true, url: atLimit });
+    expect(parseExternalReference(`${atLimit}a`)).toMatchObject({ ok: false, error: "媒体引用链接不能超过 1000 个字符。" });
+    const expanded = prefix + "中".repeat(110);
+    expect(expanded.length).toBeLessThan(1000);
+    expect(new URL(expanded).toString().length).toBeGreaterThan(1000);
+    expect(parseExternalReference(expanded)).toMatchObject({ ok: false, error: "媒体引用链接不能超过 1000 个字符。" });
   });
 
   it("rejects unsupported external links", () => {

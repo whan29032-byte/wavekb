@@ -3,6 +3,7 @@ import { test } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 import { ResearchStore } from "../apps/web/src/lib/tline/store.ts";
 
@@ -21,7 +22,7 @@ test("prepared worker runs independently of the source checkout without shipping
   const stale = path.join(worker, "legacy/unlisted.txt");
   fs.mkdirSync(path.dirname(stale), { recursive: true });
   fs.writeFileSync(stale, "stale incremental-build file must not ship");
-  execFileSync(process.execPath, [new URL("../apps/web/scripts/prepare-standalone.mjs", import.meta.url).pathname], { cwd: app });
+  execFileSync(process.execPath, [fileURLToPath(new URL("../apps/web/scripts/prepare-standalone.mjs", import.meta.url))], { cwd: app });
   assert.ok(!fs.existsSync(stale), "repackaging must remove stale files outside the worker allowlist");
   assert.equal(fs.readFileSync(path.join(output, "server.js"), "utf8"), "server", "cleanup must preserve the sibling standalone server");
   assert.ok(fs.existsSync(path.join(worker, "cli.mjs")), "portable worker launcher must be packaged");

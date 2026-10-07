@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent } from "react";
 import { ImageSquare, LinkSimple, Plus, Trash, UploadSimple } from "@phosphor-icons/react";
 import { MAX_EXTERNAL_REFERENCES, MAX_IMAGES, parseExternalReference, validateImages, validatePost, type BoardSlug, type CommunityPost, type PrivateEntry } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
-import { createPost, updatePost } from "@/lib/community/client-repository";
-import { compileStructuredPost, DIRECTIONS, MARKET_GROUPS, parseStructuredPost, RESEARCH_TIMEFRAMES, WAVE_PATTERNS, WAVE_POSITIONS, type StructuredPost } from "@/lib/community/research-catalog";
+import { createPost, updatePost, type PostPublishingProgress } from "@/lib/community/client-repository";
+import { compileStructuredPost, DIRECTIONS, MARKET_GROUPS, parseEditableStructuredPost, RESEARCH_TIMEFRAMES, WAVE_PATTERNS, WAVE_POSITIONS, type StructuredPost } from "@/lib/community/research-catalog";
+import { useComposerDraft } from "@/hooks/use-composer-draft";
 import { createClient } from "@/lib/supabase/client";
 import { publicPostImageUrl } from "@/lib/env";
 import { buildTradingViewPackage, tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
@@ -14,6 +15,7 @@ type SelectedImage = { key: string; file: File; previewUrl: string; caption: str
 type MediaDraft = { key: string; url: string };
 type ComposerErrors = Partial<Record<"title" | "body" | "externalUrl" | "images" | "form", string>>;
 type EditorMode = "simple" | "professional";
+type ComposerProps = { board: BoardSlug; userId: string; post?: CommunityPost; source?: PrivateEntry };
 
 const blankStructured: StructuredPost = { market: "crypto", instrument: "", timeframe: "4小时", pattern: "unknown", position: "unknown", direction: "unknown", thesis: "", evidence: "", invalidation: "", question: "", primaryCount: "", alternateCount: "", confirmation: "", application: "", notes: "" };
 const selectClass = "h-11 w-full rounded-lg border border-input bg-surface px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -23,10 +25,10 @@ function imageFiles(files: FileList | File[]): File[] {
 }
 
 function friendlyError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  if (/row-level security|permission denied|not authorized|jwt/i.test(message)) return "登录状态已失效，刷新页面并重新登录后再试。";
-  if (/storage|upload|network|fetch/i.test(message)) return "图片上传没有完成。草稿仍在本机，请检查网络后重试。";
-  return "发布没有完成。草稿仍在本机，请稍后重试。";
+  const message = error instanceof Error ? error.message : String((error as { message?: unknown } | null)?.message ?? "");
+  if (/row-level security|permission denied|not authorized|jwt|登录状态已失效/i.test(message)) return "登录状态已失效，请重新登录后再试。当前输入仍保留在本页。";
+  if (/storage|upload|network|fetch/i.test(message)) return "网络或图片上传没有完成。当前输入和已选图片仍保留在本页，请检查网络后重试。";
+  return "保存没有完成。当前输入仍保留在本页，请稍后重试。";
 }
 
 function safeErrorDiagnostic(error: unknown) {
@@ -40,101 +42,120 @@ function safeErrorDiagnostic(error: unknown) {
   };
 }
 
-export function PostComposer({ board, userId, post, source }: { board: BoardSlug; userId: string; post?: CommunityPost; source?: PrivateEntry }) {
-  const draftKey = `wavekb:next:composer:${userId}:${board}:${post?.id || "new"}`;
-  const restoredPost = post ? parseStructuredPost(post.body) : null;
+export function PostComposer(props: ComposerProps) {
+  // App Router can reuse this page when the private source or edited post changes.
+  return <PostComposerForm key={`${props.userId}:${props.board}:${props.post?.id || props.source?.id || "new"}:${props.post?.updated_at || props.source?.updated_at || "new"}`} {...props} />;
+}
+
+function PostComposerForm({ board, userId, post, source }: ComposerProps) {
+  const draftKey = `wavekb:next:composer:${userId}:${board}:${post?.id || (source ? `source:${source.id}` : "new")}`;
+  const restoredPost = useMemo(() => post ? parseEditableStructuredPost(post.body, board) : null, [post, board]);
   const [title, setTitle] = useState(post?.title || source?.title || "");
-  const [body, setBody] = useState(restoredPost?.notes || post?.body || source?.body || "");
+  const [body, setBody] = useState(restoredPost ? restoredPost.notes : post?.body || source?.body || "");
   const [references, setReferences] = useState<MediaDraft[]>(() => {
     const existing = post?.external_references?.length
       ? post.external_references.map((reference) => reference.url)
       : post?.external_url ? [post.external_url] : [""];
     return existing.map((url) => ({ key: crypto.randomUUID(), url }));
   });
-  const [mode, setMode] = useState<EditorMode>(post?.chart_package || restoredPost ? "professional" : "simple");
+  const [mode, setMode] = useState<EditorMode>(restoredPost ? "professional" : "simple");
   const [structured, setStructured] = useState<StructuredPost>(restoredPost || blankStructured);
   const initialChart = post?.chart_package as TradingViewPackage | null;
   const [chartSource, setChartSource] = useState(initialChart?.chart_url || initialChart?.symbol || "");
   const [chartSymbol, setChartSymbol] = useState(initialChart?.symbol || "");
   const [chartInterval, setChartInterval] = useState(initialChart?.interval || "D");
   const [chartTheme, setChartTheme] = useState(initialChart?.theme || "auto");
-  const [chartPreview, setChartPreview] = useState<TradingViewPackage | null>(initialChart);
+  const [chartPreview, setChartPreview] = useState<TradingViewPackage | null>(null);
   const [existingImages, setExistingImages] = useState(() => [...(post?.post_images || [])].sort((a, b) => a.sort_order - b.sort_order));
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [errors, setErrors] = useState<ComposerErrors>({});
-  const [hydrated, setHydrated] = useState(false);
   const [pending, setPending] = useState(false);
-  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [progress, setProgress] = useState<PostPublishingProgress | null>(null);
+  const [savedPostId, setSavedPostId] = useState<string | null>(null);
+  const [restoreImageNotice, setRestoreImageNotice] = useState(false);
   const imagesRef = useRef(images);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const submittingRef = useRef(false);
+  const publishedRef = useRef(false);
 
-  useEffect(() => {
-    setHydrated(true);
-  }, []);
+  const draftValue = useMemo(() => ({
+    title, body, externalUrls: references.map((reference) => reference.url), mode, structured,
+    chartSource, chartSymbol, chartInterval, chartTheme,
+    keptImageIds: existingImages.map((image) => image.id),
+    imageCaptionsById: Object.fromEntries(existingImages.map((image) => [image.id, image.caption ?? ""])),
+    newImageCount: images.length, baseUpdatedAt: post?.updated_at ?? source?.updated_at ?? null,
+  }), [title, body, references, mode, structured, chartSource, chartSymbol, chartInterval, chartTheme, existingImages, images.length, post?.updated_at, source?.updated_at]);
 
-  useEffect(() => {
-    if (post) return;
-    const restoreDraft = window.setTimeout(() => {
-      try {
-        const stored = JSON.parse(localStorage.getItem(draftKey) || "null") as { title?: string; body?: string; externalUrl?: string; externalUrls?: string[]; mode?: EditorMode; structured?: StructuredPost; chartSource?: string; chartSymbol?: string; chartInterval?: string; chartTheme?: "auto" | "light" | "dark" } | null;
-        if (stored) {
-          setTitle(stored.title || "");
-          setBody(stored.body || "");
-          const storedReferences = stored.externalUrls?.length ? stored.externalUrls : stored.externalUrl ? [stored.externalUrl] : [""];
-          setReferences(storedReferences.slice(0, MAX_EXTERNAL_REFERENCES).map((url) => ({ key: crypto.randomUUID(), url })));
-          setMode(stored.mode === "professional" ? "professional" : "simple");
-          if (stored.structured) setStructured({ ...blankStructured, ...stored.structured });
-          setChartSource(stored.chartSource || "");
-          setChartSymbol(stored.chartSymbol || "");
-          setChartInterval(stored.chartInterval || "D");
-          setChartTheme(stored.chartTheme || "auto");
-        }
-      } catch {
-        localStorage.removeItem(draftKey);
-      }
-      setDraftLoaded(true);
-    }, 0);
-    return () => window.clearTimeout(restoreDraft);
-  }, [draftKey, post]);
+  function restoreDraft(value: unknown): boolean {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const stored = value as Record<string, unknown>;
+    if (typeof stored.title !== "string" || typeof stored.body !== "string") return false;
+    setTitle(stored.title.slice(0, 120));
+    setBody(stored.body.slice(0, 20_000));
+    const urls = Array.isArray(stored.externalUrls) ? stored.externalUrls : typeof stored.externalUrl === "string" ? [stored.externalUrl] : [""];
+    setReferences(urls.filter((url): url is string => typeof url === "string").slice(0, MAX_EXTERNAL_REFERENCES).map((url) => ({ key: crypto.randomUUID(), url })));
+    setMode(stored.mode === "professional" ? "professional" : "simple");
+    if (stored.structured && typeof stored.structured === "object") {
+      const fields = stored.structured as Record<string, unknown>;
+      setStructured(Object.fromEntries(Object.entries(blankStructured).map(([key, fallback]) => [key, typeof fields[key] === "string" ? fields[key].slice(0, 20_000) : fallback])) as StructuredPost);
+    }
+    for (const [key, setter] of [["chartSource", setChartSource], ["chartSymbol", setChartSymbol], ["chartInterval", setChartInterval]] as const) {
+      if (typeof stored[key] === "string") setter(stored[key]);
+    }
+    if (stored.chartTheme === "auto" || stored.chartTheme === "dark" || stored.chartTheme === "light") setChartTheme(stored.chartTheme);
+    if (post && Array.isArray(stored.keptImageIds)) {
+      const captions = stored.imageCaptionsById as Record<string, unknown> | undefined;
+      setExistingImages(post.post_images.filter((image) => (stored.keptImageIds as unknown[]).includes(image.id)).sort((a, b) => a.sort_order - b.sort_order).map((image) => ({ ...image, caption: typeof captions?.[image.id] === "string" ? String(captions[image.id]).slice(0, 240) : image.caption })));
+    }
+    setRestoreImageNotice(Number(stored.newImageCount ?? 0) > 0);
+    return true;
+  }
+  const draft = useComposerDraft(draftKey, draftValue, restoreDraft);
 
   useEffect(() => {
     imagesRef.current = images;
   }, [images]);
 
-  useEffect(() => {
-    if (!draftLoaded || post) return;
-    const timer = window.setTimeout(() => {
-      const externalUrls = references.map((reference) => reference.url);
-      const draft = { title, body, externalUrls, mode, structured, chartSource, chartSymbol, chartInterval, chartTheme, savedAt: new Date().toISOString() };
-      if (title.trim() || body.trim() || externalUrls.some((url) => url.trim()) || mode === "professional" && Object.values(structured).some((value) => value.trim()) || chartSource.trim() || chartSymbol.trim()) localStorage.setItem(draftKey, JSON.stringify(draft));
-      else localStorage.removeItem(draftKey);
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [body, chartInterval, chartSource, chartSymbol, chartTheme, draftKey, draftLoaded, mode, post, references, structured, title]);
-
   useEffect(() => () => {
     imagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
   }, []);
 
+  useEffect(() => {
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      if (!publishedRef.current && (imagesRef.current.length || submittingRef.current)) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, []);
+
   function addImages(files: File[]) {
-    const combined = [...images.map((image) => image.file), ...files];
+    if (submittingRef.current || publishedRef.current || !draft.loaded || draft.conflict) return;
+    const combined = [...imagesRef.current.map((image) => image.file), ...files];
     const imageError = combined.length + existingImages.length > MAX_IMAGES ? "每篇帖子最多上传 9 张图片。" : validateImages(combined);
     if (imageError) {
       setErrors((current) => ({ ...current, images: imageError }));
       return;
     }
     setErrors((current) => ({ ...current, images: undefined }));
-    setImages((current) => [
-      ...current,
+    const next = [
+      ...imagesRef.current,
       ...files.map((file) => ({ key: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file), caption: "" })),
-    ]);
+    ];
+    imagesRef.current = next;
+    setImages(next);
   }
 
   function removeImage(key: string) {
-    setImages((current) => {
-      const target = current.find((image) => image.key === key);
-      if (target) URL.revokeObjectURL(target.previewUrl);
-      return current.filter((image) => image.key !== key);
-    });
+    if (submittingRef.current || publishedRef.current) return;
+    const target = imagesRef.current.find((image) => image.key === key);
+    if (target) URL.revokeObjectURL(target.previewUrl);
+    const next = imagesRef.current.filter((image) => image.key !== key);
+    imagesRef.current = next;
+    setImages(next);
   }
 
   function handlePaste(event: ClipboardEvent<HTMLFormElement>) {
@@ -143,22 +164,28 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file)));
     if (files.length) {
-      event.preventDefault();
+      if (!event.clipboardData.getData("text/plain")) event.preventDefault();
       addImages(files);
     }
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    addImages(imageFiles(event.dataTransfer.files));
+    const files = imageFiles(event.dataTransfer.files);
+    if (event.dataTransfer.files.length && !files.length) {
+      setErrors((current) => ({ ...current, images: "图片只支持 JPG、PNG 或 WebP。" }));
+      return;
+    }
+    if (files.length) addImages(files);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current || publishedRef.current || !draft.loaded || draft.conflict) return;
     const finalBody = mode === "professional" ? compileStructuredPost({ ...structured, notes: body }, board) : body;
     let chartPackage: TradingViewPackage | null = null;
     try {
-      if (mode === "professional") chartPackage = buildTradingViewPackage({ source: chartSource, symbol: chartSymbol, interval: chartInterval, theme: chartTheme });
+      chartPackage = buildTradingViewPackage({ source: chartSource, symbol: chartSymbol, interval: chartInterval, theme: chartTheme, layout: initialChart?.layout });
     } catch (cause) {
       setErrors({ form: cause instanceof Error ? cause.message : "TradingView 图表配置无效。" });
       return;
@@ -167,11 +194,16 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
     const imageError = validateImages(images.map((image) => image.file));
     if (!validation.ok || imageError) {
       setErrors({ ...validation.fields, images: imageError || undefined });
+      const field = validation.fields.title ? "#post-title" : validation.fields.body ? "#post-body" : validation.fields.externalUrl ? 'input[type="url"][aria-invalid="true"]' : '[data-image-picker]';
+      (formRef.current?.querySelector<HTMLElement>(field) || formRef.current?.querySelector<HTMLElement>('input[type="url"]'))?.focus();
       return;
     }
     if (!validation.value.board) return;
 
+    submittingRef.current = true;
+    draft.flush();
     setPending(true);
+    setProgress({ phase: "preparing", completed: 0, total: images.length });
     setErrors({});
     try {
       const client = createClient();
@@ -187,6 +219,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
           imageCaptions: images.map((image) => image.caption),
           privateEntryId: source?.id,
           chartPackage,
+          onProgress: setProgress,
         });
       if (post) {
         await updatePost(client, post, {
@@ -199,14 +232,22 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
           files: images.map((image) => image.file),
           newImageCaptions: images.map((image) => image.caption),
           chartPackage,
+          onProgress: setProgress,
         });
       }
-      localStorage.removeItem(draftKey);
-      window.location.assign(new URL(`/community/post/${postId}`, window.location.origin));
+      publishedRef.current = true;
+      draft.complete();
+      setSavedPostId(postId);
+      // Server writes have succeeded. Navigation/local storage are not part of
+      // that transaction and must never turn success into a retryable failure.
+      try { window.location.assign(new URL(`/community/post/${postId}`, window.location.origin)); }
+      catch { /* Keep the explicit success link below if navigation is blocked. */ }
     } catch (error) {
       console.error("wavekb:post-save-failed", JSON.stringify(safeErrorDiagnostic(error)));
       setErrors({ form: friendlyError(error) });
       setPending(false);
+      submittingRef.current = false;
+      setProgress(null);
     }
   }
 
@@ -217,7 +258,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
   function changeMode(value: EditorMode) {
     if (value === mode) return;
     if (value === "professional") {
-      const parsed = parseStructuredPost(body);
+      const parsed = parseEditableStructuredPost(body, board);
       if (parsed) {
         setStructured(parsed);
         setBody(parsed.notes);
@@ -245,15 +286,28 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
   }
 
   return (
-    <form className="grid gap-7 rounded-xl border bg-surface p-5 md:p-8" onSubmit={submit} onPaste={handlePaste}>
+    <form ref={formRef} className="grid gap-5 rounded-xl border bg-surface p-5 md:p-8 [&_select]:text-base sm:[&_select]:text-sm" onSubmit={submit} onPaste={handlePaste} onBlur={draft.flush} aria-busy={pending} noValidate>
+      <div className="text-sm leading-6" role="status" aria-live="polite" aria-atomic="true">
+        {savedPostId ? <>内容已保存。<a className="ml-2 font-semibold text-primary underline underline-offset-4" href={`/community/post/${savedPostId}`}>查看帖子</a></> : pending ? progress?.phase === "uploading" ? `正在上传图片 ${progress.completed}/${progress.total}，请保持本页打开。` : progress?.phase === "publishing" ? progress.total ? "图片已上传，正在保存内容…" : "正在保存内容…" : "正在检查登录并准备保存…" : draft.status === "unavailable" ? "本地存储不可用，草稿无法保存。请保持本页打开，并及时发布或复制正文。" : draft.status === "saved" ? "上次本机草稿已保存。" : draft.status === "restored" ? "已恢复当前账号的本机草稿。" : draft.status === "checking" ? "正在检查本机草稿…" : draft.status === "stale" ? "服务器内容已有新版本，请先选择如何处理旧草稿。" : "文字与配置会自动保存在这台设备。"}
+      </div>
+      {draft.conflict ? <div className="grid gap-3 rounded-lg border border-primary/25 bg-primary/8 p-4 text-sm"><p>旧草稿不会自动覆盖最新内容。选择保留服务器内容，或明确恢复本机草稿后继续编辑。</p><div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" className="min-h-11" onClick={() => draft.resolveConflict(false)}>保留服务器内容</Button><Button type="button" variant="secondary" className="min-h-11" onClick={() => draft.resolveConflict(true)}>恢复本机草稿</Button></div></div> : null}
+      {restoreImageNotice ? <p className="rounded-lg border bg-muted p-3 text-sm">文字已恢复，之前选择的本机图片需要重新添加；图片文件不会保存在草稿中。</p> : null}
+      <fieldset disabled={!draft.loaded || draft.conflict || pending || Boolean(savedPostId)} className="grid min-w-0 gap-7">
       {source ? <div className="rounded-lg border border-primary/25 bg-primary/8 p-3 text-sm leading-6"><strong>正在整理私人记录的公开副本。</strong><span className="text-muted-foreground"> 只有标题、正文和本页新增的公开图片会进入帖子，复盘核验字段与私密图片不会公开。</span></div> : null}
       <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-1" role="tablist" aria-label="发布模式">
-        {([ ["simple", "简易发布"], ["professional", "专业分析"] ] as const).map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={mode === value} className={`min-h-10 rounded-lg px-3 text-sm font-semibold ${mode === value ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground"}`} onClick={() => changeMode(value)}>{label}</button>)}
+        {([ ["simple", "简易发布"], ["professional", "专业分析"] ] as const).map(([value, label]) => <button key={value} id={`mode-${value}`} type="button" role="tab" aria-selected={mode === value} aria-controls="post-editor-panel" tabIndex={mode === value ? 0 : -1} className={`min-h-11 rounded-lg px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring ${mode === value ? "bg-surface text-foreground shadow-sm" : "text-muted-foreground"}`} onClick={() => changeMode(value)} onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? "simple" : event.key === "End" ? "professional" : value === "simple" ? "professional" : "simple";
+          changeMode(next);
+          formRef.current?.querySelector<HTMLElement>(`#mode-${next}`)?.focus();
+        }}>{label}</button>)}
       </div>
+      <div id="post-editor-panel" role="tabpanel" aria-labelledby={`mode-${mode}`} className="grid min-w-0 gap-7">
       <Field>
         <Label htmlFor="post-title">标题</Label>
-        <Input id="post-title" value={title} onChange={(event) => setTitle(event.target.value)} minLength={5} maxLength={120} required aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? "post-title-error" : "post-title-help"} />
-        {errors.title ? <FieldMessage id="post-title-error">{errors.title}</FieldMessage> : <p id="post-title-help" className="text-xs text-muted-foreground">5-120 个字符，直接说明研究对象和判断。</p>}
+        <Input id="post-title" value={title} onChange={(event) => { setTitle(event.target.value); setErrors((current) => ({ ...current, title: undefined })); }} minLength={5} maxLength={120} required aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? "post-title-error" : "post-title-help"} />
+        {errors.title ? <FieldMessage id="post-title-error" role="alert">{errors.title}</FieldMessage> : <p id="post-title-help" className="text-xs text-muted-foreground">5-120 个字符，直接说明研究对象和判断。<span className="ml-2 tabular-nums">{Array.from(title).length}/120</span></p>}
       </Field>
 
       {mode === "professional" ? <>
@@ -277,18 +331,18 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
           {!(["case_submission", "question_answers", "review_answers"] as string[]).includes(board) ? <Field><Label htmlFor="research-application">实际应用</Label><Textarea id="research-application" rows={3} value={structured.application} onChange={(event) => patchStructured("application", event.target.value)} /></Field> : null}
           <Field><Label htmlFor="research-question">{board === "question_answers" || board === "review_answers" ? "希望得到的回答" : "希望讨论的问题"}</Label><Textarea id="research-question" rows={3} value={structured.question} onChange={(event) => patchStructured("question", event.target.value)} /></Field>
         </section>
-        <section className="grid gap-5 rounded-xl border bg-muted/35 p-4 md:p-6" aria-labelledby="public-chart-title">
-          <header><h2 id="public-chart-title" className="text-xl font-semibold">TradingView 图表</h2><p className="mt-1 text-sm text-muted-foreground">图表只在读者打开详情页时加载；本站不会读取 TradingView 密码。</p></header>
-          <div className="grid gap-5 sm:grid-cols-2"><Field className="sm:col-span-2"><Label htmlFor="public-chart-source">公开图表链接或品种代码</Label><Input id="public-chart-source" value={chartSource} onChange={(event) => setChartSource(event.target.value)} placeholder="https://www.tradingview.com/chart/... 或 BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="public-chart-symbol">品种代码</Label><Input id="public-chart-symbol" value={chartSymbol} onChange={(event) => setChartSymbol(event.target.value)} /></Field><Field><Label htmlFor="public-chart-interval">周期</Label><Input id="public-chart-interval" value={chartInterval} onChange={(event) => setChartInterval(event.target.value)} placeholder="4小时、D、60" /></Field><Field><Label htmlFor="public-chart-theme">主题</Label><select id="public-chart-theme" className={selectClass} value={chartTheme} onChange={(event) => setChartTheme(event.target.value as "auto" | "light" | "dark")}><option value="auto">跟随网站</option><option value="dark">深色</option><option value="light">浅色</option></select></Field></div>
-          <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={refreshChart}>识别并预览</Button><Button asChild type="button" variant="ghost"><a href="https://www.tradingview.com/accounts/signin/" target="_blank" rel="noreferrer">打开 TradingView 官方登录</a></Button></div>
-          {chartPreview ? <iframe title={`${chartPreview.symbol} TradingView 图表预览`} src={tradingViewEmbedUrl(chartPreview)} className="h-[420px] w-full rounded-xl border bg-background" loading="lazy" referrerPolicy="no-referrer" /> : null}
-        </section>
       </> : null}
+      {mode === "professional" || initialChart || chartSource || chartSymbol ? <section className="grid gap-5 rounded-xl border bg-muted/35 p-4 md:p-6" aria-labelledby="public-chart-title">
+          <header><h2 id="public-chart-title" className="text-xl font-semibold">TradingView 图表</h2><p className="mt-1 text-sm text-muted-foreground">点击「识别并预览」后才加载图表；本站不会读取 TradingView 密码。</p></header>
+          <div className="grid gap-5 sm:grid-cols-2"><Field className="sm:col-span-2"><Label htmlFor="public-chart-source">公开图表链接或品种代码</Label><Input id="public-chart-source" value={chartSource} onChange={(event) => setChartSource(event.target.value)} placeholder="https://www.tradingview.com/chart/... 或 BINANCE:BTCUSDT" /></Field><Field><Label htmlFor="public-chart-symbol">品种代码</Label><Input id="public-chart-symbol" value={chartSymbol} onChange={(event) => setChartSymbol(event.target.value)} /></Field><Field><Label htmlFor="public-chart-interval">周期</Label><Input id="public-chart-interval" value={chartInterval} onChange={(event) => setChartInterval(event.target.value)} placeholder="4小时、D、60" /></Field><Field><Label htmlFor="public-chart-theme">主题</Label><select id="public-chart-theme" className={selectClass} value={chartTheme} onChange={(event) => setChartTheme(event.target.value as "auto" | "light" | "dark")}><option value="auto">跟随网站</option><option value="dark">深色</option><option value="light">浅色</option></select></Field></div>
+          <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" className="min-h-11" onClick={refreshChart}>识别并预览</Button><Button asChild type="button" variant="ghost" className="min-h-11"><a href="https://www.tradingview.com/accounts/signin/" target="_blank" rel="noreferrer">打开 TradingView 官方登录</a></Button></div>
+          {chartPreview ? <iframe title={`${chartPreview.symbol} TradingView 图表预览`} src={tradingViewEmbedUrl(chartPreview)} className="h-[420px] w-full rounded-xl border bg-background" loading="lazy" referrerPolicy="no-referrer" /> : null}
+      </section> : null}
 
       <Field>
         <Label htmlFor="post-body">正文</Label>
-        <Textarea id="post-body" value={body} onChange={(event) => setBody(event.target.value)} rows={14} maxLength={20_000} aria-invalid={Boolean(errors.body)} aria-describedby={errors.body ? "post-body-error" : "post-body-help"} />
-        {errors.body ? <FieldMessage id="post-body-error">{errors.body}</FieldMessage> : <p id="post-body-help" className="text-xs text-muted-foreground">{mode === "professional" ? "补充未包含在结构化字段中的说明；最终正文会自动编排。" : "没有图片时至少 20 个字符。可直接粘贴截图。"}</p>}
+        <Textarea id="post-body" value={body} onChange={(event) => { setBody(event.target.value); setErrors((current) => ({ ...current, body: undefined })); }} rows={mode === "professional" ? 6 : 8} maxLength={20_000} aria-invalid={Boolean(errors.body)} aria-describedby={errors.body ? "post-body-error" : "post-body-help"} />
+        {errors.body ? <FieldMessage id="post-body-error" role="alert">{errors.body}</FieldMessage> : <p id="post-body-help" className="text-xs text-muted-foreground">{mode === "professional" ? "补充未包含在结构化字段中的说明；最终正文会自动编排。" : "正文至少 20 个字符，即使附图也需要简要说明。可直接粘贴截图。"}<span className="ml-2 tabular-nums">{Array.from(body).length}/20000</span></p>}
       </Field>
 
       <Field>
@@ -302,22 +356,22 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
         <div onDragOver={(event) => event.preventDefault()} onDrop={handleDrop} className="grid min-h-28 place-items-center gap-3 rounded-xl border border-dashed bg-muted/45 p-5 text-center">
           <ImageSquare aria-hidden size={28} weight="duotone" className="text-primary" />
           <div className="text-sm"><span className="font-medium">拖入或粘贴图片</span><span className="text-muted-foreground">，也可以从设备选择</span></div>
-          <Button asChild type="button" variant="secondary" size="small">
-            <label htmlFor="post-images" className="cursor-pointer"><UploadSimple aria-hidden size={16} />选择图片</label>
+          <Button type="button" variant="secondary" className="min-h-11" data-image-picker onClick={() => fileInputRef.current?.click()}>
+            <UploadSimple aria-hidden size={16} />选择图片
           </Button>
-          <input id="post-images" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => {
+          <input ref={fileInputRef} id="post-images" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => {
             if (event.target.files) addImages(imageFiles(event.target.files));
             event.target.value = "";
           }} />
         </div>
-        {errors.images ? <FieldMessage>{errors.images}</FieldMessage> : null}
+        {errors.images ? <FieldMessage id="post-images-error" role="alert">{errors.images}</FieldMessage> : null}
         {existingImages.length || images.length ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-label="待发布图片">
             {existingImages.map((image, index) => (
               <figure key={image.id} className="relative overflow-hidden rounded-xl border bg-muted">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={publicPostImageUrl(image.storage_path)} alt={`现有图片 ${index + 1}`} className="aspect-square h-auto w-full object-cover" />
-                <Button type="button" variant="danger" size="icon" aria-label={`移除现有图片 ${index + 1}`} className="absolute right-2 top-2 size-9" onClick={() => setExistingImages((current) => current.filter((item) => item.id !== image.id))}>
+                <Button type="button" variant="danger" size="icon" aria-label={`移除现有图片 ${index + 1}`} className="absolute right-2 top-2 size-11" onClick={() => setExistingImages((current) => current.filter((item) => item.id !== image.id))}>
                   <Trash aria-hidden size={17} />
                 </Button>
                 <Input aria-label={`现有图片 ${index + 1} 说明`} value={image.caption ?? ""} maxLength={240} placeholder={`图 ${index + 1} 说明（可选）`} className="rounded-none border-x-0 border-b-0 bg-surface" onChange={(event) => setExistingImages((current) => current.map((item) => item.id === image.id ? { ...item, caption: event.target.value } : item))} />
@@ -327,7 +381,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
               <figure key={image.key} className="relative overflow-hidden rounded-xl border bg-muted">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={image.previewUrl} alt={`待发布图片 ${index + 1}`} className="aspect-square h-auto w-full object-cover" />
-                <Button type="button" variant="danger" size="icon" aria-label={`移除图片 ${index + 1}`} className="absolute right-2 top-2 size-9" onClick={() => removeImage(image.key)}>
+                <Button type="button" variant="danger" size="icon" aria-label={`移除图片 ${index + 1}`} className="absolute right-2 top-2 size-11" onClick={() => removeImage(image.key)}>
                   <Trash aria-hidden size={17} />
                 </Button>
                 <Input aria-label={`待发布图片 ${index + 1} 说明`} value={image.caption} maxLength={240} placeholder={`图 ${existingImages.length + index + 1} 说明（可选）`} className="rounded-none border-x-0 border-b-0 bg-surface" onChange={(event) => setImages((current) => current.map((item) => item.key === image.key ? { ...item, caption: event.target.value } : item))} />
@@ -343,7 +397,7 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
             <h2 id="post-media-title" className="flex items-center gap-2 text-lg font-semibold"><LinkSimple aria-hidden size={19} />媒体与外部引用</h2>
             <p className="mt-1 text-xs text-muted-foreground">支持 YouTube 视频和 X 帖子，最多 {MAX_EXTERNAL_REFERENCES} 条；详情页会安全地延迟加载。</p>
           </div>
-          <Button type="button" variant="secondary" size="small" disabled={references.length >= MAX_EXTERNAL_REFERENCES} onClick={() => setReferences((current) => [...current, { key: crypto.randomUUID(), url: "" }])}>
+          <Button type="button" variant="secondary" className="min-h-11" disabled={references.length >= MAX_EXTERNAL_REFERENCES} onClick={() => setReferences((current) => [...current, { key: crypto.randomUUID(), url: "" }])}>
             <Plus aria-hidden size={16} />添加引用
           </Button>
         </header>
@@ -355,22 +409,24 @@ export function PostComposer({ board, userId, post, source }: { board: BoardSlug
               <Field key={reference.key} className="rounded-xl border bg-muted/35 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <Label htmlFor={`external-url-${reference.key}`}>媒体引用 {index + 1}</Label>
-                  <Button type="button" variant="ghost" size="icon" className="size-9" aria-label={`删除媒体引用 ${index + 1}`} onClick={() => setReferences((current) => current.length === 1 ? [{ key: crypto.randomUUID(), url: "" }] : current.filter((item) => item.key !== reference.key))}><Trash aria-hidden size={16} /></Button>
+                  <Button type="button" variant="ghost" size="icon" className="size-11" aria-label={`删除媒体引用 ${index + 1}`} onClick={() => setReferences((current) => current.length === 1 ? [{ key: crypto.randomUUID(), url: "" }] : current.filter((item) => item.key !== reference.key))}><Trash aria-hidden size={16} /></Button>
                 </div>
-                <Input id={`external-url-${reference.key}`} type="url" inputMode="url" value={reference.url} onChange={(event) => setReferences((current) => current.map((item) => item.key === reference.key ? { ...item, url: event.target.value } : item))} placeholder="https://www.youtube.com/watch?v=... 或 https://x.com/.../status/..." aria-invalid={Boolean(reference.url.trim() && !parsed.ok)} />
-                {recognized ? <p className="text-xs font-medium text-primary">已识别为 {parsed.kind === "youtube" ? "YouTube 视频" : "X 帖子"}</p> : reference.url.trim() ? <p className="text-xs text-destructive">{parsed.error}</p> : null}
+                <Input id={`external-url-${reference.key}`} type="url" inputMode="url" value={reference.url} onChange={(event) => setReferences((current) => current.map((item) => item.key === reference.key ? { ...item, url: event.target.value } : item))} placeholder="https://www.youtube.com/watch?v=... 或 https://x.com/.../status/..." aria-invalid={Boolean(reference.url.trim() && !parsed.ok)} aria-describedby={reference.url.trim() && !parsed.ok ? `media-error-${reference.key}` : undefined} />
+                {recognized ? <p className="text-xs font-medium text-primary">已识别为 {parsed.kind === "youtube" ? "YouTube 视频" : "X 帖子"}</p> : reference.url.trim() ? <p id={`media-error-${reference.key}`} className="text-xs text-destructive">{parsed.error}</p> : null}
               </Field>
             );
           })}
         </div>
-        {errors.externalUrl ? <FieldMessage id="external-url-error">{errors.externalUrl}</FieldMessage> : null}
+        {errors.externalUrl ? <FieldMessage id="external-url-error" role="alert">{errors.externalUrl}</FieldMessage> : null}
       </section>
+      </div>
 
       {errors.form ? <FieldMessage role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 p-3">{errors.form}</FieldMessage> : null}
       <div className="flex flex-col-reverse gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-muted-foreground">{post ? "保存成功后，移除的旧图片会从存储中清理。" : "文字草稿自动保存在这台设备。图片需要发布时才上传。"}</p>
-        <Button type="submit" size="large" disabled={!hydrated || pending}>{pending ? "正在保存" : post ? "保存修改" : "发布内容"}</Button>
+        <p className="max-w-[65ch] text-xs leading-5 text-muted-foreground">图片仅保留在当前页面，刷新后需要重新选择；发布时才会上传。{post ? "移除的旧图片会在保存后清理。" : ""}</p>
+        <Button type="submit" size="large">{pending ? "正在保存" : post ? "保存修改" : "发布内容"}</Button>
       </div>
+      </fieldset>
     </form>
   );
 }

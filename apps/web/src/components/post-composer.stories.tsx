@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { PostComposer } from "./post-composer";
+import { compileStructuredPost } from "@/lib/community/research-catalog";
 
 const post = {
   id: "11111111-1111-4111-8111-111111111111", board: "idea_sharing" as const, title: "BTC 4 小时推动浪的成立边界",
@@ -20,4 +21,12 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
-export const ProfessionalEditing: Story = {};
+export const NewPost: Story = { args: { post: undefined } };
+export const ProfessionalEditing: Story = {
+  args: { post: { ...post, body: compileStructuredPost({
+    market: "crypto", instrument: "BTC", timeframe: "4小时", pattern: "impulse", position: "浪3", direction: "up",
+    thesis: "当前结构需要等同级别突破确认，失效前保留备选计数。", evidence: "浪2未越过浪1起点。", invalidation: "跌破结构起点。",
+    question: "第三浪是否延长？", primaryCount: "", alternateCount: "", confirmation: "", application: "控制仓位。", notes: "",
+  }, "idea_sharing") } },
+};
+export const LegacyEditing: Story = {};

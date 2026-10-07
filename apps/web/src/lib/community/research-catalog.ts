@@ -101,3 +101,10 @@ export function parseStructuredPost(body: string): StructuredPost | null {
   }
   return recognized ? parsed : null;
 }
+
+export function parseEditableStructuredPost(body: string, board: BoardSlug): StructuredPost | null {
+  const original = body.trim();
+  const parsed = parseStructuredPost(original);
+  if (!parsed || compileStructuredPost(parsed, board) !== original) return null;
+  return parsed;
+}
