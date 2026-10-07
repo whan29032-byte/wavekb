@@ -181,7 +181,9 @@ test("research posts use reusable media, lightbox and immutable server-timed tim
   ]);
   for (const component of ["ResearchAuthor", "ResearchBody", "ResearchLightbox", "ResearchMedia", "ResearchTimeline"]) assert.match(page, new RegExp(component));
   assert.match(composer, /MAX_EXTERNAL_REFERENCES/);
-  assert.match(composer, /媒体与外部引用/);
+  assert.match(composer, /id="post-media-title"[\s\S]*?>外部链接<\/h2>/);
+  assert.match(composer, /id="post-media-fields" hidden=\{!showReferences\}/);
+  assert.match(composer, /aria-expanded=\{showReferences\}/);
   assert.match(mediaParser, /youtube-nocookie/);
   assert.match(media, /platform\.twitter\.com\/widgets\.js/);
   assert.match(media, /noopener noreferrer/);
