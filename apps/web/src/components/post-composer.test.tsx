@@ -396,6 +396,9 @@ describe("PostComposer keyboard access", () => {
   it("exposes a native professional-mode button with pressed state and stable focus", async () => {
     render(<PostComposer board="idea_sharing" userId={actor} />); await restored();
     const mode = screen.getByRole("button", { name: "专业分析" });
+    expect(mode.parentElement?.classList.contains("flex-wrap")).toBe(true);
+    expect(mode.parentElement?.classList.contains("justify-between")).toBe(false);
+    expect(mode.classList.contains("scroll-mt-28")).toBe(true);
     expect(mode.tagName).toBe("BUTTON"); expect(mode.tabIndex).toBeGreaterThanOrEqual(0);
     expect(mode.getAttribute("aria-pressed")).toBe("false"); mode.focus(); fireEvent.click(mode);
     expect(screen.getByRole("button", { name: "专业分析" })).toBe(mode);
