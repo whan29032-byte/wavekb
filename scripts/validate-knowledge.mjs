@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAiKnowledgeArtifact } from "./lib/ai-knowledge-artifact.mjs";
 import { applyBookReadingCorrections, reviewedBookCorrections } from "./lib/book-reading-corrections.mjs";
+import { applyBookIllustrations, reviewedBookIllustrations } from "./lib/book-illustrations.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const knowledgeRoot = path.join(repositoryRoot, "knowledge");
@@ -64,6 +65,13 @@ const supplements = readJson(path.join(knowledgeRoot, "source/supplements.json")
 const framework = readJson(path.join(knowledgeRoot, "source/framework.json"));
 const library = readJson(path.join(knowledgeRoot, "source/library.json"));
 const readingCorrections = readJson(path.join(knowledgeRoot, "reading/text-corrections.json"));
+const bookIllustrations = readJson(path.join(knowledgeRoot, "reading/book-illustrations.json"));
+let illustratedBooks = new Map();
+try {
+  illustratedBooks = reviewedBookIllustrations(bookIllustrations, library.books || []);
+} catch (error) {
+  errors.push(error.message);
+}
 let correctedBooks = new Map();
 try {
   correctedBooks = reviewedBookCorrections(readingCorrections, library.books || []);
@@ -114,7 +122,9 @@ const pageSources = Object.fromEntries((library.books || []).flatMap((book) => {
   expect(Array.isArray(source.pages) && source.pages.length === book.pdf_pages, `${book.id} library text page count does not match`);
   expect((source.pages || []).every((page, index) => page.page === index + 1 && String(page.text || "").trim()), `${book.id} library text pages are incomplete`);
   try {
-    const correctedPages = applyBookReadingCorrections({ book, pages: source.pages, correction: correctedBooks.get(book.id), sourcePdfSha256: sha256(path.join(repositoryRoot, book.pdf_path)) });
+    const sourcePdfSha256 = sha256(path.join(repositoryRoot, book.pdf_path));
+    const correctedText = applyBookReadingCorrections({ book, pages: source.pages, correction: correctedBooks.get(book.id), sourcePdfSha256 });
+    const correctedPages = applyBookIllustrations({ book, pages: correctedText, illustrationSet: illustratedBooks.get(book.id), sourcePdfSha256, readAsset: (assetPath) => fs.readFileSync(path.join(repositoryRoot, assetPath)) });
     const compiledBook = compiled.library?.books?.find((candidate) => candidate.id === book.id);
     expect(JSON.stringify(compiledBook?.text_pages) === JSON.stringify(correctedPages), `${book.id} compiled reading pages are stale`);
     return [[book.id, { ...source, pages: correctedPages }]];
@@ -338,6 +348,7 @@ const status = {
     questions: questions.length,
     compiled_pages: compiled.pages?.length || 0,
     image_assets: imageRegistry.assets?.length || 0,
+    book_illustrations: [...illustratedBooks.values()].reduce((count, book) => count + book.illustrations.length, 0),
     restored_units: restoredUnits.length,
     generic_relations: genericRelations,
     primary_source_verified: Boolean(manifest.path && fs.existsSync(manifest.path) && sha256(manifest.path) === manifest.sha256),

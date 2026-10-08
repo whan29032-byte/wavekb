@@ -4,7 +4,9 @@ import { ArrowLeft, ArrowRight, Images, SealCheck } from "@phosphor-icons/react/
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData, type KnowledgeAsset } from "@wavekb/knowledge";
 import { KnowledgeImageViewer } from "@/components/knowledge-image-viewer";
+import { KnowledgeUnitIllustrations } from "@/components/knowledge-unit-illustrations";
 import { KnowledgeBodyReference, KnowledgeSourceUnitIndex, publicSourceUnitPages } from "@/components/knowledge-body-reference";
+import { coreBookExplanations } from "@/lib/knowledge/core-book-illustrations";
 import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -55,6 +57,9 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
   const supplementSourceAssets = uniqueAssets(page.supplement_source_images);
   const related = page.related_page_ids.map(getKnowledgePage).filter((item) => item !== null);
   const sourceUnitPages = publicSourceUnitPages(page.source_unit_ids);
+  const fullBookExplanations = page.id === "core-full-book"
+    ? coreBookExplanations(page.sections.find((section) => section.title === "完整解释")?.paragraphs || [], sourceUnitPages)
+    : null;
 
   return (
     <main className="mx-auto grid max-w-6xl gap-8 px-4 py-10 md:grid-cols-[minmax(0,1fr)_16rem] md:px-6 md:py-14">
@@ -71,7 +76,13 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
           {page.sections.map((section, sectionIndex) => (
             <section key={section.title} id={`knowledge-section-${sectionIndex}`} aria-labelledby={`knowledge-section-${sectionIndex}-title`} className="grid scroll-mt-24 gap-3">
               <h2 id={`knowledge-section-${sectionIndex}-title`} className="text-xl font-semibold tracking-tight md:text-2xl">{section.title}</h2>
-              {section.paragraphs.map((paragraph, index) => <p key={index} className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90"><KnowledgeBodyReference text={paragraph} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></p>)}
+              {section.title === "完整解释" && fullBookExplanations ? <>
+                <p className="max-w-[76ch] text-sm leading-7 text-muted-foreground">原页摘录按已核验的知识单元关联，保留图示与上下文；并非每个知识单元都有独立配图。同一原页仅展示一次，后续条目提供定位链接。</p>
+                {fullBookExplanations.map(({ text, unit, figures }, index) => <div key={index} data-reading-explanation data-source-unit-id={unit?.id} className="grid min-w-0 gap-4">
+                  <p className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90"><KnowledgeBodyReference text={text} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></p>
+                  {unit ? <KnowledgeUnitIllustrations figures={figures} unitTitle={unit.title} /> : null}
+                </div>)}
+              </> : section.paragraphs.map((paragraph, index) => <p key={index} className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90"><KnowledgeBodyReference text={paragraph} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></p>)}
               {section.items.length ? <ul className="grid max-w-[76ch] gap-2 pl-5 text-base leading-7 text-foreground/90">{section.items.map((item, index) => <li key={index} className="list-disc pl-1 marker:text-primary"><KnowledgeBodyReference text={item} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></li>)}</ul> : null}
             </section>
           ))}

@@ -9,6 +9,7 @@ const knowledge = JSON.parse(fs.readFileSync(knowledgeFile, "utf8"));
 const assetFields = ["primary_figures", "figures", "supplement_figures", "source_images", "supplement_source_images"];
 const referencedImages = new Set();
 const referencedBooks = new Set();
+const illustratedBookImages = new Set();
 
 for (const page of knowledge.pages || []) {
   for (const field of assetFields) {
@@ -20,6 +21,14 @@ for (const page of knowledge.pages || []) {
 for (const book of knowledge.library?.books || []) {
   if (book?.pdf_path) referencedBooks.add(String(book.pdf_path).replace(/^\/+/, ""));
   if (book?.cover_path) referencedImages.add(String(book.cover_path).replace(/^\/+/, ""));
+  for (const page of book.text_pages || []) {
+    for (const figure of page.illustrations || []) {
+      if (figure?.asset_path) {
+        referencedImages.add(figure.asset_path);
+        illustratedBookImages.add(figure.asset_path);
+      }
+    }
+  }
 }
 
 const missing = [];
@@ -43,7 +52,7 @@ const productionOrigin = String(process.env.KNOWLEDGE_ASSET_CHECK_ORIGIN || "").
 if (productionOrigin && (referencedImages.size || referencedBooks.size) && !process.exitCode) {
   const images = [...referencedImages].sort();
   const sampleSize = Math.min(12, images.length);
-  const imageSample = Array.from({ length: sampleSize }, (_, index) => images[Math.floor(index * (images.length - 1) / Math.max(1, sampleSize - 1))]);
+  const imageSample = [...new Set([...Array.from({ length: sampleSize }, (_, index) => images[Math.floor(index * (images.length - 1) / Math.max(1, sampleSize - 1))]), ...illustratedBookImages])];
   const assets = [
     ...imageSample.map((assetPath) => ({ assetPath, mime: "image/" })),
     ...[...referencedBooks].sort().map((assetPath) => ({ assetPath, mime: "application/pdf" })),

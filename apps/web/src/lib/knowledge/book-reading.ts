@@ -1,4 +1,4 @@
-import type { KnowledgeData } from "@wavekb/knowledge";
+import type { KnowledgeBookIllustration, KnowledgeData } from "@wavekb/knowledge";
 import { CORE_BOOK_ID, getKnowledgeBook, type KnowledgeBookCatalogEntry } from "./book-catalog";
 import { readingTextToPlainText } from "./reading-text";
 
@@ -24,7 +24,7 @@ export type BookReadingModel = {
     chapters: Array<{ id: string; title: string; count: number }>;
     readingGuide: Array<{ title: string; description: string }>;
     topics: string[];
-    pages: Array<{ page: number; text: string }>;
+    pages: Array<{ page: number; text: string; illustrations?: KnowledgeBookIllustration[] }>;
   };
   sourceArtifact: { label: string; href: string } | null;
   boundaries: string[];
@@ -97,7 +97,7 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
   if (book.kind !== "extension") return null;
   const source = book.source;
   // Preserve reviewed paragraph/table layout in the reading body; compact only the search index.
-  const pages = source.text_pages.map((page) => ({ page: page.page, text: page.text }));
+  const pages = source.text_pages.map((page) => ({ page: page.page, text: page.text, ...(page.illustrations?.length ? { illustrations: page.illustrations } : {}) }));
   const availableSections = new Set([
     ...(source.reading_guide.length ? ["#reading-guide"] : []),
     ...(source.topics.length ? ["#topics"] : []),

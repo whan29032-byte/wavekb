@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { buildAiKnowledgeArtifact } from "./lib/ai-knowledge-artifact.mjs";
 import { createHash } from "node:crypto";
 import { applyBookReadingCorrections, reviewedBookCorrections } from "./lib/book-reading-corrections.mjs";
+import { applyBookIllustrations, reviewedBookIllustrations } from "./lib/book-illustrations.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const knowledgeRoot = path.join(repositoryRoot, "knowledge");
@@ -178,10 +179,12 @@ const manifest = readJson(path.join(knowledgeRoot, "source/manifest.json"));
 const framework = readJson(path.join(knowledgeRoot, "source/framework.json"));
 const library = readJson(path.join(knowledgeRoot, "source/library.json"));
 const readingCorrections = readJson(path.join(knowledgeRoot, "reading/text-corrections.json"));
+const bookIllustrations = readJson(path.join(knowledgeRoot, "reading/book-illustrations.json"));
 const coverage = readJsonl(path.join(knowledgeRoot, "coverage/tenth-edition-pages.jsonl"));
 
 if (!library || !Array.isArray(library.books)) throw new Error("knowledge/source/library.json must contain a books array");
 const correctedBooks = reviewedBookCorrections(readingCorrections, library.books);
+const illustratedBooks = reviewedBookIllustrations(bookIllustrations, library.books);
 const libraryBookIds = new Set();
 const pageSources = {};
 for (const book of library.books) {
@@ -207,7 +210,8 @@ for (const book of library.books) {
     throw new Error(`Knowledge library text pages are incomplete: ${book.id}`);
   }
   const sourcePdfSha256 = createHash("sha256").update(fs.readFileSync(path.join(repositoryRoot, book.pdf_path))).digest("hex");
-  book.text_pages = applyBookReadingCorrections({ book, pages: textDocument.pages, correction: correctedBooks.get(book.id), sourcePdfSha256 });
+  const correctedPages = applyBookReadingCorrections({ book, pages: textDocument.pages, correction: correctedBooks.get(book.id), sourcePdfSha256 });
+  book.text_pages = applyBookIllustrations({ book, pages: correctedPages, illustrationSet: illustratedBooks.get(book.id), sourcePdfSha256, readAsset: (assetPath) => fs.readFileSync(path.join(repositoryRoot, assetPath)) });
   pageSources[book.id] = { ...textDocument, pages: book.text_pages };
   if (!Number.isInteger(book.pdf_pages) || book.pdf_pages < 1 || !Number.isInteger(book.source_page_count) || book.source_page_count < 1) {
     throw new Error(`Knowledge library book has invalid page counts: ${book.id}`);

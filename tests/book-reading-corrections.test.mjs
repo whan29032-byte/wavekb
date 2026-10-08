@@ -46,7 +46,7 @@ test("compiled three-book content matches the hash-bound overlay and retains all
     const source = read(entry.text_path);
     const digest = sha256Text(fs.readFileSync(path.join(root, entry.pdf_path)));
     const expected = applyBookReadingCorrections({ book: entry, pages: source.pages, correction: corrections.get(entry.id), sourcePdfSha256: digest });
-    assert.deepEqual(compiled.library.books.find((value) => value.id === entry.id).text_pages, expected);
+    assert.deepEqual(compiled.library.books.find((value) => value.id === entry.id).text_pages.map(({ illustrations, ...page }) => page), expected);
     pageCount += expected.length;
   }
   assert.equal(pageCount, 61);

@@ -1,8 +1,21 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { KnowledgeBookText, parseKnowledgeBookText } from "./knowledge-book-text";
+import { knowledgeData } from "@wavekb/knowledge";
 
 describe("reviewed book text", () => {
+  it("places a source-grounded image immediately after its exact reviewed heading without consuming text", () => {
+    const page = knowledgeData().library.books.find((book) => book.id === "elliott-wave-natural-law")!.text_pages.find((page) => page.page === 7)!;
+    const figure = page.illustrations![0];
+    const { container } = render(<KnowledgeBookText text={page.text} illustrations={page.illustrations} />);
+    const placement = container.querySelector(`[data-book-illustration="${figure.id}"]`)!;
+    expect(placement.previousElementSibling?.textContent).toBe("锯齿形与倒置锯齿形");
+    expect(placement.querySelector("img")?.getAttribute("src")).toBe(`/${figure.asset_path}`);
+    expect(placement.querySelector("figcaption")?.textContent).toContain("图源 PDF 32 / 原书第 21 页");
+    expect(placement.nextElementSibling?.textContent).toContain("图源：");
+    expect(container.querySelectorAll("p")).toHaveLength(parseKnowledgeBookText(page.text).filter((block) => block.kind === "paragraph").length);
+  });
+
   it("keeps separate paragraphs and meaningful theory notation intact", () => {
     const text = "结构 5-3-5、(A)、[i]、α < β、0.618、61.8%\n\n第二段：2—4 通道 → 确认";
     const { container } = render(<KnowledgeBookText text={text} />);

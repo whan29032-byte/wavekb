@@ -76,9 +76,10 @@
       "source_page": 48,
       "book_pages": [],
       "figure_nos": [
-        "图1-22至图1-25"
+        "图1-22",
+        "图1-23"
       ],
-      "caption": "图1-22至图1-25",
+      "caption": "图1-22、图1-23",
       "width": 1191,
       "height": 1759,
       "bytes": 503298,
@@ -118,10 +119,9 @@
       "source_page": 56,
       "book_pages": [],
       "figure_nos": [
-        "图1-42",
-        "图1-43"
+        "图1-42"
       ],
-      "caption": "图1-42、图1-43",
+      "caption": "图1-42",
       "width": 1191,
       "height": 1759,
       "bytes": 569048,
@@ -281,10 +281,9 @@
       "source_page": 80,
       "book_pages": [],
       "figure_nos": [
-        "图2-9",
-        "锯齿形通道"
+        "图2-9"
       ],
-      "caption": "图2-9、锯齿形通道",
+      "caption": "图2-9：最终推动浪通道；同页含锯齿形通道文字说明",
       "width": 1191,
       "height": 1759,
       "bytes": 428904,
@@ -512,15 +511,12 @@
       "figure_type": "original_source_excerpt",
       "source_page": 160,
       "book_pages": [],
-      "figure_nos": [
-        "图4-17多重比例聚合"
-      ],
-      "caption": "图4-17多重比例聚合",
+      "figure_nos": [],
+      "caption": "价格比率文字说明（图4-17解释，未含图体）",
       "width": 1191,
       "height": 1759,
       "bytes": 667986,
       "unit_ids": [
-        "ewp-method-fibonacci-time",
         "ewp-method-target-confluence"
       ]
     },

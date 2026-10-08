@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { getKnowledgePage } from "@wavekb/knowledge";
+import { coreBookExplanations } from "@/lib/knowledge/core-book-illustrations";
 import KnowledgeDetailPage from "./page";
 
 afterEach(cleanup);
@@ -25,11 +26,45 @@ describe("knowledge detail body navigation", () => {
     render(await KnowledgeDetailPage({ params: Promise.resolve({ id: page.id }) }));
     for (const sectionTitle of ["快速答案", "完整解释"]) {
       const section = screen.getByRole("region", { name: sectionTitle });
-      expect(within(section).getAllByRole("link")).toHaveLength(page.source_unit_ids.length);
+      const unitTitleLinks = within(section).getAllByRole("link").filter((link) => link.getAttribute("href")?.startsWith("/knowledge/unit-"));
+      expect(unitTitleLinks).toHaveLength(page.source_unit_ids.length);
+      expect(unitTitleLinks.map((link) => link.getAttribute("href"))).toEqual(page.source_unit_ids.map((id) => `/knowledge/unit-${id}`));
     }
     fireEvent.click(screen.getByText("查看本页知识目录（117）"));
     const directory = screen.getByRole("navigation", { name: "本页知识目录" });
     expect(within(directory).getAllByRole("link")).toHaveLength(117);
+  });
+
+  it("places deduplicated tenth-edition excerpts beside their exact full-book explanations, never in the quick summary", async () => {
+    const page = getKnowledgePage("core-full-book")!;
+    const paragraphs = page.sections.find((section) => section.title === "完整解释")!.paragraphs;
+    const units = page.source_unit_ids.map((id) => getKnowledgePage(`unit-${id}`)!);
+    const plan = coreBookExplanations(paragraphs, units);
+    render(await KnowledgeDetailPage({ params: Promise.resolve({ id: page.id }) }));
+    const summary = screen.getByRole("region", { name: "快速答案" });
+    expect(summary.querySelector("img")).toBeNull();
+    const explanations = screen.getByRole("region", { name: "完整解释" });
+    expect(explanations.querySelectorAll("[data-reading-explanation]")).toHaveLength(117);
+    for (const item of plan) {
+      const block = explanations.querySelector(`[data-source-unit-id="${item.unit!.id}"]`)!;
+      expect(block.querySelector(":scope > p")?.textContent).toBe(item.text);
+      expect(block.querySelectorAll("img")).toHaveLength(item.figures.filter((figure) => figure.firstOccurrence).length);
+      expect(block.querySelectorAll("[data-core-book-figure-reference]")).toHaveLength(item.figures.filter((figure) => !figure.firstOccurrence).length);
+      for (const link of block.querySelectorAll<HTMLAnchorElement>("[data-core-book-figure-reference]")) {
+        const target = document.getElementById(link.getAttribute("href")!.slice(1))!;
+        expect(target.dataset.coreBookFigure).toBe(link.dataset.coreBookFigureReference);
+        expect(target.querySelector("img")).not.toBeNull();
+      }
+    }
+    expect(explanations.querySelector('[data-authority="supplement"]')).toBeNull();
+    expect(screen.queryByRole("region", { name: "第11版补充图示" })).toBeNull();
+  });
+
+  it("does not inject full-book illustration references into other aggregate knowledge views", async () => {
+    const { container } = render(await KnowledgeDetailPage({ params: Promise.resolve({ id: "core-zigzag" }) }));
+    expect(container.querySelector("[data-reading-explanation]")).toBeNull();
+    expect(container.querySelector("[data-core-book-figure-reference]")).toBeNull();
+    expect(container.querySelector("[data-core-book-figure]")).toBeNull();
   });
 
   it("shows the first eight related pages and expands all remaining public targets", async () => {
