@@ -1,32 +1,44 @@
-import { afterEach, describe, expect, it } from "vitest";
+import type { AnchorHTMLAttributes } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { knowledgeData } from "@wavekb/knowledge";
-import { CORE_BOOK_ID } from "@/lib/knowledge/book-catalog";
+import KnowledgeChapterPage from "./chapters/[id]/page";
 import KnowledgeThemePage from "./themes/[id]/page";
 import KnowledgeQuestionPage from "./questions/[id]/page";
-import KnowledgeChapterPage from "./chapters/[id]/page";
+import KnowledgeBookDetailPage from "./books/[id]/page";
+import { CORE_BOOK_ID } from "@/lib/knowledge/book-catalog";
 
+vi.mock("next/link", () => ({
+  default: ({ href, className, children }: AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} className={className} data-next-client-link="true">{children}</a>,
+}));
 afterEach(() => cleanup());
 
-describe("core book route return links", () => {
-  it("returns theme readers to the theme index inside the core book", async () => {
-    render(await KnowledgeThemePage({ params: Promise.resolve({ id: knowledgeData().themes[0].id }) }));
+const data = knowledgeData();
+const cases = [
+  { section: "chapters", label: "返回原书目录", id: "chapter-01", Page: KnowledgeChapterPage },
+  { section: "themes", label: "返回八大主题", id: data.themes[0]!.id, Page: KnowledgeThemePage },
+  { section: "questions", label: "返回问题路线", id: data.questions[0]!.id, Page: KnowledgeQuestionPage },
+];
 
-    expect(screen.getByRole("link", { name: "返回八大主题" }).getAttribute("href"))
-      .toBe(`/knowledge/books/${CORE_BOOK_ID}?section=themes#core-themes`);
-  });
+describe("native book index return links", () => {
+  it.each(cases)("returns $section to an existing expanded index without client hash duplication", async ({ section, label, id, Page }) => {
+    const source = render(await Page({ params: Promise.resolve({ id }) }));
+    const link = screen.getByRole("link", { name: label }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(`/knowledge/books/${CORE_BOOK_ID}?section=${section}#core-${section}`);
+    expect(link.getAttribute("data-next-client-link")).toBeNull();
+    expect(link.className).toContain("min-h-11");
+    expect(link.className).toContain("focus-visible:outline");
+    expect(source.container.querySelectorAll("a[data-next-client-link]").length).toBeGreaterThan(0);
+    const destination = new URL(link.href);
+    source.unmount();
 
-  it("returns question readers to the question index inside the core book", async () => {
-    render(await KnowledgeQuestionPage({ params: Promise.resolve({ id: knowledgeData().questions[0].id }) }));
-
-    expect(screen.getByRole("link", { name: "返回问题路线" }).getAttribute("href"))
-      .toBe(`/knowledge/books/${CORE_BOOK_ID}?section=questions#core-questions`);
-  });
-
-  it("returns chapter readers to the chapter index inside the core book", async () => {
-    render(await KnowledgeChapterPage({ params: Promise.resolve({ id: knowledgeData().chapters[0].id }) }));
-
-    expect(screen.getByRole("link", { name: "返回原书目录" }).getAttribute("href"))
-      .toBe(`/knowledge/books/${CORE_BOOK_ID}?section=chapters#core-chapters`);
+    render(await KnowledgeBookDetailPage({
+      params: Promise.resolve({ id: CORE_BOOK_ID }),
+      searchParams: Promise.resolve({ section: destination.searchParams.get("section")! }),
+    }));
+    const target = document.getElementById(destination.hash.slice(1));
+    expect(target).not.toBeNull();
+    expect((target as HTMLDetailsElement).open).toBe(true);
+    expect(target?.className).toContain("scroll-mt-24");
   });
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { BookSearch } from "./book-search";
 import { buildBookReadingModel, buildLibrarySearchDocuments } from "@/lib/knowledge/book-reading";
@@ -60,5 +60,21 @@ describe("BookSearch", () => {
       href: "/knowledge/books/chan-theory-complete#page-1",
     });
     expect(natural.searchDocuments.some((document) => document.text.includes(chanOnlyTerm))).toBe(false);
+  });
+
+  it("locates a same-book result in the actual body without dropping its search context", () => {
+    window.history.replaceState({}, "", "/knowledge/books/test");
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    render(<><BookSearch bookId="test" items={[{ ...items[0]!, href: "/knowledge/books/test#page-1" }]} /><section id="page-1" tabIndex={-1}>第三浪正文</section></>);
+    fireEvent.change(screen.getByRole("searchbox", { name: "搜索本书" }), { target: { value: "第三浪" } });
+    const result = screen.getByRole("link", { name: /第一章/ });
+    expect(result.getAttribute("href")).toBe("#page-1");
+    fireEvent.click(result);
+
+    expect(window.location.hash).toBe("#page-1");
+    expect(new URL(window.location.href).searchParams.get("q")).toBe("第三浪");
+    expect(document.activeElement?.id).toBe("page-1");
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(screen.getByRole("searchbox", { name: "搜索本书" }).getAttribute("value")).toBe("第三浪");
   });
 });

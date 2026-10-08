@@ -34,7 +34,7 @@ export default async function KnowledgeQuestionPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto grid max-w-4xl gap-8 px-4 py-10 md:px-6 md:py-14">
-      <Link href={`/knowledge/books/${CORE_BOOK_ID}?section=questions#core-questions`} className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回问题路线</Link>
+      <a href={`/knowledge/books/${CORE_BOOK_ID}?section=questions#core-questions`} className="inline-flex min-h-11 w-fit items-center gap-2 rounded-sm text-sm font-medium text-muted-foreground hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><ArrowLeft aria-hidden size={17} />返回问题路线</a>
       <header className="grid gap-3 border-b pb-7">
         <span className="text-sm font-medium text-primary">问题阅读路径</span>
         <h1 className="text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-5xl">{question.question}</h1>

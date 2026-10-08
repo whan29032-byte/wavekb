@@ -3,7 +3,7 @@ import test from "node:test";
 import { loadConfig } from "../src/config.ts";
 import { KnowledgeRuntime } from "../src/knowledge/runtime.ts";
 import { classifyProviderError } from "../src/jobs/router.ts";
-import type { KnowledgeChunk, KnowledgeIndex } from "../src/knowledge/index.ts";
+import { buildKnowledgeIndex, type KnowledgeChunk, type KnowledgeIndex } from "../src/knowledge/index.ts";
 import type { ProviderRequest, ProviderResult } from "../src/providers/types.ts";
 import { AiJobWorker, type ClaimedJob } from "../src/worker-main.ts";
 
@@ -16,6 +16,7 @@ const config = loadConfig({
 });
 
 const CONNECTION_ID = "44444444-4444-4444-8444-444444444444";
+const artifactKnowledgeVersion = buildKnowledgeIndex().knowledgeVersion;
 
 const baseJob: ClaimedJob = {
   id: "job-1",
@@ -23,7 +24,7 @@ const baseJob: ClaimedJob = {
   analysis_id: "33333333-3333-4333-8333-333333333333",
   user_connection_id: CONNECTION_ID,
   task_type: "wave_analysis",
-  knowledge_version: "e50017a8f53a9d78e65bfa51871de50864c8f4ebb0e7cabe2d68018a04b5da61",
+  knowledge_version: artifactKnowledgeVersion,
   input_payload: {
     request_version: 2,
     client_request_id: "11111111-1111-4111-8111-111111111111",
@@ -265,7 +266,7 @@ test("a single-scope no-match succeeds without broadening or invoking a provider
     status: "insufficient_evidence",
     reason: "no_relevant_knowledge",
     scope: { mode: "single", book_id: "elliott-wave-natural-law" },
-    knowledge_version: "e50017a8f53a9d78e65bfa51871de50864c8f4ebb0e7cabe2d68018a04b5da61",
+    knowledge_version: artifactKnowledgeVersion,
     citations: [],
   });
 });

@@ -1,9 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import KnowledgeBookDetailPage from "./page";
 import { CORE_BOOK_ID } from "@/lib/knowledge/book-catalog";
 
 afterEach(() => cleanup());
+beforeEach(() => {
+  window.history.replaceState({}, "", "/knowledge/books/test");
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+});
 
 async function renderBook(id: string, section?: string) {
   return render(await KnowledgeBookDetailPage({
@@ -53,5 +57,19 @@ describe("knowledge book reading pages", () => {
     expect(screen.getByText("生成页面导航")).toBeTruthy();
     expect(screen.getByRole("link", { name: /生成 · 第 1 页/ }).getAttribute("href")).toBe("#page-1");
     expect(screen.getByRole("heading", { name: "使用边界" })).toBeTruthy();
+  });
+
+  it.each(["elliott-wave-natural-law", "chan-theory-complete"])("provides real, unobscured focusable targets for every same-page link in %s", async (id) => {
+    const view = await renderBook(id);
+    const localLinks = [...view.container.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')];
+    expect(localLinks.length).toBeGreaterThan(10);
+    for (const link of localLinks) {
+      const target = document.getElementById(link.hash.slice(1));
+      expect(target, link.href).not.toBeNull();
+      expect(target?.getAttribute("tabindex")).toBe("-1");
+      expect(target?.className).toContain("scroll-mt-24");
+    }
+    expect(screen.getByRole("textbox", { name: "跳至页码" })).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: /生成 · 第/ })).toHaveLength(7);
   });
 });
