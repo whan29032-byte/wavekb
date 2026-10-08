@@ -49,6 +49,8 @@
 2. Backend-first：使用现有人工批准的后端工作流，依次执行精确迁移
    `202610080002_mentor_checkout_recovery.sql` 与 `202610080003_mentor_payment_notifications.sql`。
    未知 schema 拒绝发布；公开最终 marker 应为 `202610080003`。
+   若同时发布后续 YouTube 接入批次，继续精确迁移到 `202610080004`，以
+   [YouTube 配置清单](./youtube-sync-setup.md) 的最新门禁为准。
 3. 发布同一 SHA 的 Gateway 和通知 Worker，保留旧代码与 unit 的回滚副本。
 4. 安全配置已验证发件域与密钥，再由可控测试收件人验证一条提醒。
 5. 最后发布同一 SHA 的 Next 前端并验收手机/桌面流程。

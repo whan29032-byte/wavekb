@@ -43,6 +43,12 @@ test("community repository pagination triggers real posting acceptance", (t) => 
   assert.equal(result.postingRequired, true);
 });
 
+test("YouTube automatic publishing changes are classified as posting acceptance", (t) => {
+  for (const filename of ["apps/web/src/components/youtube-connection.tsx", "apps/web/src/lib/youtube/client.ts", "apps/web/src/app/api/youtube/callback/route.ts"]) {
+    assert.equal(api.planRelease(fixture(t, filename)).postingRequired, true, filename);
+  }
+});
+
 test("shared identity and dependency changes cannot silently skip posting", (t) => {
   assert.equal(typeof api.planRelease, "function", "read-only preflight must exist");
   assert.equal(api.planRelease(fixture(t, "packages/ui/src/identity.tsx")).postingRequired, true);

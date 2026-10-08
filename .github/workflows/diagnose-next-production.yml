@@ -7,7 +7,7 @@ on:
         description: "Release diagnostics, or an explicitly authorized disposable mentor account audit (no orders/payment writes)"
         required: true
         type: choice
-        options: [release, mentor-account]
+        options: [release, mentor-account, integration-config]
         default: release
       account_confirmation:
         description: "For mentor-account only, type CREATE_DISPOSABLE_MENTOR_AUDIT_ACCOUNT"
@@ -73,3 +73,14 @@ jobs:
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "sudo -n /usr/bin/node --input-type=module - 'gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'" < scripts/mentor-account-audit.mjs
+
+      - name: Read only mail and YouTube configuration presence
+        if: inputs.operation == 'integration-config'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/node --input-type=module -" < scripts/integration-config-audit.mjs

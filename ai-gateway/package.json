@@ -13,7 +13,8 @@
     "start": "node src/server.ts",
     "worker": "node src/worker-main.ts",
     "trading:sync": "node src/trading-worker.ts",
-    "mentor:notify": "node src/mentor-notification-worker.ts"
+    "mentor:notify": "node src/mentor-notification-worker.ts",
+    "youtube:sync": "node src/youtube-sync-worker.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

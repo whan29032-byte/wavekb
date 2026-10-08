@@ -18,8 +18,8 @@ export function planRelease({ cwd, baseSha, sha, schemaVersion, requiredSchema, 
   const gatewayChanged = changed.some((file) => file.startsWith("ai-gateway/") || /^deployment\/systemd\/elliott-wave-/.test(file));
   if (gatewayChanged && gatewayReleaseApproved !== true) throw new Error("Gateway changed: a separate approved gateway deployment is required before this Next.js release");
   const postingPatterns = [
-    /^apps\/web\/src\/(app\/(community|member|api\/(community|auth))\/|lib\/(community|auth|supabase|member)\/)/,
-    /^apps\/web\/src\/components\/(post-|community-|comment-|research-|identity-|profile-|member-|account-navigation|nameplate|avatar-frame|social-desktop|site-header|mobile-navigation|image-viewer|tradingview)/,
+    /^apps\/web\/src\/(app\/(community|member|api\/(community|auth|youtube))\/|lib\/(community|auth|supabase|member|youtube)\/)/,
+    /^apps\/web\/src\/components\/(post-|community-|comment-|research-|identity-|profile-|member-|youtube-|account-navigation|nameplate|avatar-frame|social-desktop|site-header|mobile-navigation|image-viewer|tradingview)/,
     /^apps\/web\/src\/(app\/(layout\.tsx|globals\.css)|proxy\.ts|middleware\.ts|lib\/(env|pagination)\.ts)/,
     /^apps\/web\/(next\.config\.|package\.json|e2e\/(posting|member-shell)\.acceptance\.spec\.ts)/,
     /^packages\/(domain|ui)\//,

@@ -22,7 +22,7 @@ export class ResendMailSender implements MailSender {
 
   async send(payload: MailEnvelope, idempotencyKey: string): Promise<{ providerMessageId: string }> {
     if (!this.apiKey || /\s/.test(this.apiKey) || !isMailEnvelope(payload)
-      || !/^mentor-payment-claim:[0-9a-f-]{36}$/i.test(idempotencyKey)) {
+      || !/^(mentor-payment-claim|mentor-email-smoke):[0-9a-f-]{36}$/i.test(idempotencyKey)) {
       throw new MailProviderError("provider_rejected", false);
     }
     let response: Response;
