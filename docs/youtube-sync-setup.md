@@ -39,7 +39,7 @@
 | 配置 | 值 / 说明 |
 | --- | --- |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | 已有服务器数据库配置 |
-| `YOUTUBE_SYNC_ENABLED` | 初始 `false`；真实 OAuth 验收通过后才设为 `true` |
+| `YOUTUBE_SYNC_ENABLED` | 初始 `false`；配置齐全后仅在受控测试窗口设为 `true` 验收，正式面向所有用户开放前完成真实验收与 Google 发布要求 |
 | `YOUTUBE_OAUTH_CLIENT_ID` | Google Web OAuth Client ID |
 | `YOUTUBE_OAUTH_CLIENT_SECRET` | 对应 Client Secret，服务器专用 |
 | `YOUTUBE_OAUTH_REDIRECT_URI` | `https://wavekb.com/api/youtube/callback` |
@@ -82,6 +82,8 @@ Next 仅使用已有服务端 `AUTH_GATEWAY_INTERNAL_URL` 访问 Gateway，不�
 3. 发布同一 SHA 的 Gateway 与 `elliott-wave-youtube-sync.service`，保留旧代码和 systemd unit 回滚副本。
    配置缺失时保持关闭，不领取新同步任务，不产生 Google 绑定/扫描流量。
 4. 最后发布同一 SHA 的 Next 前端，再在 HTTPS、已登录的受控站内账号上完成真实 Google 回调。
+   受控测试时先完成所有服务器配置，使用 Google Testing 的指定测试用户，再临时启用
+   `YOUTUBE_SYNC_ENABLED=true` 并重启 Gateway/同步 worker；关闭状态不允许新授权，不能先验收后再启用。
    检查单次 state、CSRF cookie、频道归属、后台 refresh 和生产客户端的 PKCE 兼容。
 5. 用受控频道验证：历史超过 50 条的分页、新视频出现、重复轮询、暂停新视频、补导、私有化、
    站内删帖不复活、禁言不能发布、解绑删除及真实 Google 授权撤销。
