@@ -26,37 +26,48 @@ export type MentorPaymentMethodInput = {
   sortOrder?: number;
 };
 
-export type MentorCheckoutGateway = {
-  createOrder(offerId: string, paymentMethodId: string): Promise<string>;
-  submitClaim(orderId: string, note: string): Promise<string>;
-};
+export class MentorCheckoutError extends Error {
+  constructor(message: string, public readonly definite: boolean) { super(message); }
+}
 
-function defaultCheckoutGateway(client: SupabaseClient): MentorCheckoutGateway {
-  return {
-    async createOrder(offerId, paymentMethodId) {
-      const result = await client.rpc("create_manual_mentor_order", { p_offer_id: offerId, p_payment_method_id: paymentMethodId });
-      if (result.error) throw result.error;
-      return String(result.data);
-    },
-    async submitClaim(orderId, note) {
-      const result = await client.rpc("submit_mentor_payment_claim", { p_order_id: orderId, p_buyer_note: note });
-      if (result.error) throw result.error;
-      return String(result.data);
-    },
-  };
+export type MentorOfferQuote = { price_cents: number; currency: string; duration_days: number; weekly_questions: number };
+
+export function isDefiniteMentorCheckoutFailure(error: unknown): boolean {
+  if (error instanceof MentorCheckoutError) return error.definite;
+  const message = error instanceof Error ? error.message : String((error as { message?: string })?.message || "");
+  return /^(authentication_required|account_ineligible|offer_unavailable|offer_changed|offer_quote_required|mentor_unavailable|mentor_self_purchase|payment_method_unavailable|payment_method_required|order_payment_route_invalid|mentor_access_active|checkout_pending_exists|request_conflict|request_id_required|order_access_denied|order_not_pending|order_not_cancellable|unpaid_confirmation_required)$/.test(message);
+}
+
+function checkoutFailure(error: { message: string; code?: string }) {
+  // Business rejections and SQL constraint failures are rolled back atomically.
+  // A network/unknown response keeps the stable request ID for safe retries.
+  return new MentorCheckoutError(error.message, isDefiniteMentorCheckoutFailure(error) || error.code === "P0001" || Boolean(error.code?.startsWith("23")));
 }
 
 export async function submitManualMentorPayment(
   client: SupabaseClient,
-  value: { offerId: string; paymentMethodId: string; buyerNote: string; onOrderCreated?: (orderId: string) => void | Promise<void> },
-  injectedGateway?: MentorCheckoutGateway,
+  value: { offerId: string; paymentMethodId: string; buyerNote: string; requestId: string; expectedQuote: MentorOfferQuote },
 ) {
-  const gateway = injectedGateway ?? defaultCheckoutGateway(client);
-  const orderId = await gateway.createOrder(value.offerId, value.paymentMethodId);
-  // Checkpoint before the next network write so a failed claim can be reconciled.
-  await value.onOrderCreated?.(orderId);
-  const claimId = await gateway.submitClaim(orderId, String(value.buyerNote || "").trim().slice(0, 1000));
-  return { orderId, claimId };
+  const result = await client.rpc("submit_manual_mentor_payment", {
+    p_offer_id: value.offerId, p_payment_method_id: value.paymentMethodId,
+    p_buyer_note: String(value.buyerNote || "").trim().slice(0, 1000), p_request_id: value.requestId, p_expected_quote: value.expectedQuote,
+  });
+  if (result.error) throw checkoutFailure(result.error);
+  const receipt = result.data as { order_id?: unknown; claim_id?: unknown } | null;
+  if (typeof receipt?.order_id !== "string" || typeof receipt.claim_id !== "string") throw new MentorCheckoutError("付款声明回执不完整，请用原请求重试核对。", false);
+  return { orderId: receipt.order_id, claimId: receipt.claim_id };
+}
+
+export async function resumeManualMentorPayment(client: SupabaseClient, orderId: string, buyerNote: string) {
+  const result = await client.rpc("submit_mentor_payment_claim", { p_order_id: orderId, p_buyer_note: String(buyerNote || "").trim().slice(0, 1000) });
+  if (result.error) throw checkoutFailure(result.error);
+  return String(result.data);
+}
+
+export async function cancelUnsubmittedMentorOrder(client: SupabaseClient, orderId: string, confirmUnpaid: boolean) {
+  const result = await client.rpc("cancel_unsubmitted_mentor_order", { p_order_id: orderId, p_confirm_unpaid: confirmUnpaid });
+  if (result.error) throw checkoutFailure(result.error);
+  return String(result.data);
 }
 
 export async function sendMentorMessage(client: SupabaseClient, threadId: string, body: string) {

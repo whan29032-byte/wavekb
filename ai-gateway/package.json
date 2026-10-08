@@ -12,7 +12,8 @@
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts",
     "worker": "node src/worker-main.ts",
-    "trading:sync": "node src/trading-worker.ts"
+    "trading:sync": "node src/trading-worker.ts",
+    "mentor:notify": "node src/mentor-notification-worker.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

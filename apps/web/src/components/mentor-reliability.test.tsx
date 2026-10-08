@@ -22,7 +22,7 @@ vi.mock("@/lib/mentor/server-repository", () => ({
 const offer: MentorOffer = { id: "offer", name: "30 天辅导", description: "", price_cents: 10000, currency: "USDT", duration_days: 30, weekly_questions: 3, active: true };
 const method: MentorPaymentMethod = { id: "method", mentor_id: "mentor", kind: "binance", label: "币安 UID", account_name: "导师", account_value: "123456789", network: "USDT", instructions: "", active: true };
 const claim = { id: "claim", order_id: "order", buyer_id: "student", mentor_id: "mentor", payment_method_id: "method", status: "submitted", submitted_at: "2026-09-01T00:00:00Z", reviewed_at: null };
-const pendingOrder = { id: "order", buyer_id: "student", mentor_id: "mentor", offer_id: "offer", payment_method_id: "method", status: "pending", created_at: "2026-09-01T00:00:00Z" };
+const pendingOrder = { id: "order", buyer_id: "student", mentor_id: "mentor", offer_id: "offer", payment_method_id: "method", payment_provider: "manual", status: "pending", created_at: "2026-09-01T00:00:00Z" };
 const thread: Thread = { thread_id: "thread", mentor_id: "mentor", mentor_name: "导师", mentor_avatar_url: null, student_id: "student", status: "active", weekly_question_limit: 3, questions_used: 0, starts_at: "2026-01-01T00:00:00Z", ends_at: "2099-01-01T00:00:00Z" };
 let claims: typeof claim[];
 let orders: typeof pendingOrder[];
@@ -52,11 +52,12 @@ beforeEach(() => {
       };
       return query;
     },
-    rpc: async (name: string) => {
+    rpc: async (name: string, params?: Record<string, string>) => {
       if (name === "list_mentor_messages") { readCount++; return { data: messages, error: null }; }
       writes.push(name);
-      if (name === "create_manual_mentor_order") return { data: "order", error: null };
+      if (name === "submit_manual_mentor_payment") { claims = [claim]; return { data: { order_id: "order", claim_id: "claim" }, error: null }; }
       if (name === "submit_mentor_payment_claim") { claims = [claim]; return { data: "claim", error: null }; }
+      if (name === "cancel_unsubmitted_mentor_order") { orders = orders.filter((order) => order.id !== params?.p_order_id); return { data: params?.p_order_id, error: null }; }
       return { data: 1, error: null };
     },
   };
@@ -215,7 +216,7 @@ describe("mentor payment reliability", () => {
     const button = await screen.findByRole("button", { name: "我已付款，通知导师" });
     fireEvent.click(button); fireEvent.click(button);
     await screen.findByRole("region", { name: "付款待核对摘要" });
-    expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim"]);
+    expect(writes).toEqual(["submit_manual_mentor_payment"]);
   });
 
   it("restores checkout in the same mount after the submitted claim is rejected", async () => {
@@ -231,7 +232,7 @@ describe("mentor payment reliability", () => {
 
     fireEvent.click(restoredCheckout);
     await screen.findByRole("region", { name: "付款待核对摘要" });
-    expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim", "create_manual_mentor_order", "submit_mentor_payment_claim"]);
+    expect(writes).toEqual(["submit_manual_mentor_payment", "submit_manual_mentor_payment"]);
   });
 
   it("removes already loaded private claims when the authenticated session changes", async () => {
@@ -247,7 +248,6 @@ describe("mentor payment reliability", () => {
   it("only retries status reads after an uncertain write response", async () => {
     boundary.client.rpc = async (name: string) => {
       writes.push(name);
-      if (name === "create_manual_mentor_order") return { data: "order", error: null };
       return { data: null, error: new Error("fetch failed") };
     };
     checkout();
@@ -255,11 +255,11 @@ describe("mentor payment reliability", () => {
     await screen.findByRole("button", { name: "刷新付款状态" });
     fireEvent.click(screen.getByRole("button", { name: "刷新付款状态" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull());
-    expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim"]);
+    expect(writes).toEqual(["submit_manual_mentor_payment"]);
   });
 
-  it("retains an uncertain order ID and blocks a duplicate after the checkout is remounted", async () => {
-    boundary.client.rpc = async (name: string) => { writes.push(name); return name === "create_manual_mentor_order" ? { data: "order", error: null } : { data: null, error: new Error("fetch failed") }; };
+  it("retains a stable uncertain request and blocks a new payment after remount", async () => {
+    boundary.client.rpc = async (name: string) => { writes.push(name); return { data: null, error: new Error("fetch failed") }; };
     const view = checkout();
     fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
     await screen.findByRole("button", { name: "刷新付款状态" });
@@ -267,7 +267,8 @@ describe("mentor payment reliability", () => {
     await screen.findByRole("button", { name: "刷新付款状态" });
     expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull();
     expect(screen.getByRole("region", { name: "付款待核对摘要" })).toBeDefined();
-    expect(writes).toEqual(["create_manual_mentor_order", "submit_mentor_payment_claim"]);
+    expect(writes).toEqual(["submit_manual_mentor_payment"]);
+    expect(await screen.findByRole("button", { name: "核对并重试原付款声明" })).toBeDefined();
   });
 
   it("retains ambiguity after a lost create-order response even when no claim can be found", async () => {
@@ -278,7 +279,7 @@ describe("mentor payment reliability", () => {
     view.unmount(); checkout();
     await screen.findByRole("button", { name: "刷新付款状态" });
     expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull();
-    expect(writes).toEqual(["create_manual_mentor_order"]);
+    expect(writes).toEqual(["submit_manual_mentor_payment"]);
   });
 
   it("shows an authorized pending order without a declaration on a different device", async () => {
@@ -332,14 +333,96 @@ describe("mentor payment reliability", () => {
   });
 
   it("reconciles a known local order with its later authoritative declaration", async () => {
-    boundary.client.rpc = async (name: string) => name === "create_manual_mentor_order" ? { data: "order", error: null } : { data: null, error: new Error("fetch failed") };
+    localStorage.setItem("wavekb:mentor-payment-attempt:student:mentor", JSON.stringify({ ownerId: "student", mentorId: "mentor", startedAt: "2026-09-05", orderId: "order" }));
     const view = checkout();
-    fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
     await screen.findByRole("region", { name: "付款待核对摘要" });
     view.unmount(); claims = [{ ...claim, status: "confirmed" }];
     checkout();
     await screen.findByRole("button", { name: "我已付款，通知导师" });
     expect(localStorage.getItem("wavekb:mentor-payment-attempt:student:mentor")).toBeNull();
+  });
+
+  it("retries an unknown response with exactly the same request and displayed quote", async () => {
+    const rpc = vi.fn().mockResolvedValueOnce({ data: null, error: { message: "fetch failed" } }).mockImplementation(async () => { claims = [claim]; return { data: { order_id: "order", claim_id: "claim" }, error: null }; });
+    boundary.client.rpc = rpc;
+    checkout();
+    fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
+    await screen.findByRole("button", { name: "核对并重试原付款声明" });
+    const marker = JSON.parse(localStorage.getItem("wavekb:mentor-payment-attempt:student:mentor") || "null");
+    expect(marker.requestId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(marker.expectedQuote).toEqual({ price_cents: 10000, currency: "USDT", duration_days: 30, weekly_questions: 3 });
+    fireEvent.click(screen.getByRole("button", { name: "核对并重试原付款声明" }));
+    await screen.findByText("待导师核对");
+    expect(rpc.mock.calls[0]).toEqual(rpc.mock.calls[1]);
+    expect(localStorage.getItem("wavekb:mentor-payment-attempt:student:mentor")).toBeNull();
+  });
+
+  it("re-enables submission after a storage failure before any network write", async () => {
+    checkout();
+    const button = await screen.findByRole("button", { name: "我已付款，通知导师" });
+    const store = vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new Error("QuotaExceededError"); });
+    fireEvent.click(button);
+    await screen.findByText(/无法保存付款核对标记/);
+    expect((screen.getByRole("button", { name: "我已付款，通知导师" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(writes).toEqual([]);
+    store.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "我已付款，通知导师" }));
+    await screen.findByText("待导师核对");
+    expect(writes).toEqual(["submit_manual_mentor_payment"]);
+  });
+
+  it("does not preserve uncertainty when the session failed before submitting", async () => {
+    checkout();
+    const button = await screen.findByRole("button", { name: "我已付款，通知导师" });
+    boundary.client.auth = { getUser: async () => ({ data: { user: null }, error: null }) };
+    fireEvent.click(button);
+    await screen.findByRole("button", { name: "重试查询状态" });
+    expect(writes).toEqual([]);
+    boundary.client.auth = { getUser: async () => ({ data: { user: { id: "student" } }, error: null }) };
+    fireEvent.click(screen.getByRole("button", { name: "重试查询状态" }));
+    fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
+    await screen.findByText("待导师核对");
+    expect(writes).toEqual(["submit_manual_mentor_payment"]);
+  });
+
+  it("a definite quote rejection shows useful guidance without a dead-end marker", async () => {
+    boundary.client.rpc = async () => ({ data: null, error: { code: "P0001", message: "offer_changed" } });
+    checkout();
+    fireEvent.click(await screen.findByRole("button", { name: "我已付款，通知导师" }));
+    await screen.findByText(/方案已更新，请联系导师核对已转账金额/);
+    expect((screen.getByRole("button", { name: "我已付款，通知导师" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "核对并重试原付款声明" })).toBeNull();
+    expect(localStorage.getItem("wavekb:mentor-payment-attempt:student:mentor")).toBeNull();
+  });
+
+  it("lets the buyer resume a legacy orphan rather than creating another order", async () => {
+    orders = [pendingOrder];
+    checkout();
+    fireEvent.click(await screen.findByRole("button", { name: "已付款，补交原订单声明" }));
+    await screen.findByText("待导师核对");
+    expect(writes).toEqual(["submit_mentor_payment_claim"]);
+  });
+
+  it("requires unpaid confirmation before cancelling a legacy orphan and clearing its checkpoint", async () => {
+    orders = [pendingOrder];
+    localStorage.setItem("wavekb:mentor-payment-attempt:student:mentor", JSON.stringify({ ownerId: "student", mentorId: "mentor", startedAt: "2026-09-05", orderId: "order" }));
+    checkout();
+    const button = await screen.findByRole("button", { name: "取消未付款原订单" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "我确认此订单从未转账，需要取消" }));
+    fireEvent.click(button);
+    await screen.findByRole("button", { name: "我已付款，通知导师" });
+    expect(writes).toEqual(["cancel_unsubmitted_mentor_order"]);
+    expect(localStorage.getItem("wavekb:mentor-payment-attempt:student:mentor")).toBeNull();
+  });
+
+  it("does not offer manual declaration or cancellation for hosted-payment orders", async () => {
+    orders = [{ ...pendingOrder, payment_provider: "stripe" }];
+    checkout();
+    await screen.findByText(/不是可补交声明的手工付款订单/);
+    expect(screen.queryByRole("button", { name: "已付款，补交原订单声明" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "取消未付款原订单" })).toBeNull();
+    expect(writes).toEqual([]);
   });
 });
 

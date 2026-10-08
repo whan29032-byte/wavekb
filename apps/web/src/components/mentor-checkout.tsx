@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CheckCircle, Copy, LockKey, WarningCircle } from "@phosphor-icons/react";
 import { formatMentorPrice, type MentorOffer, type MentorPaymentMethod } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
 import { createClient } from "@/lib/supabase/client";
-import { submitManualMentorPayment } from "@/lib/mentor/client-repository";
+import { isDefiniteMentorCheckoutFailure, submitManualMentorPayment, type MentorOfferQuote } from "@/lib/mentor/client-repository";
 import { MentorPaymentSummary, useBuyerMentorClaims } from "@/components/mentor-payment-status";
 
 function paymentConfigurationIssue(method: MentorPaymentMethod | null) {
@@ -25,19 +26,27 @@ function friendlyError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/authentication|jwt|auth/i.test(message)) return "登录状态已失效，请重新登录后再提交。";
   if (/offer_unavailable|mentor_unavailable/i.test(message)) return "这项辅导方案目前不可购买，请返回导师页刷新。";
+  if (/offer_changed/i.test(message)) return "方案已更新，请联系导师核对已转账金额，勿重复转账。";
   if (/payment_method_unavailable/i.test(message)) return "该收款方式已经停用，请刷新后选择其他方式。";
+  if (/checkout_pending_exists/i.test(message)) return "已有待处理订单，请继续核对原订单，不需要重新转账。";
+  if (/account_ineligible/i.test(message)) return "请完成邮箱验证和站内 UID 激活后再提交。";
+  if (/mentor_access_active/i.test(message)) return "你已拥有有效辅导权益，请在“我的辅导”继续现有会话。";
+  if (/mentor_self_purchase/i.test(message)) return "不能购买自己的导师服务，请使用学员账户。";
   if (/network|fetch/i.test(message)) return "网络中断，暂时无法确认付款声明结果。";
-  return message || "付款声明没有提交，请稍后重试。";
+  if (/^(无法保存付款核对标记|已有待核实的付款提交|付款核对标记已经变化)/.test(message)) return message;
+  if (/request_conflict/i.test(message)) return "原付款请求的内容发生变化，请核对原订单，不要再次转账。";
+  return "暂时无法确认付款声明结果，请查询原订单后再操作。";
 }
 
 type CheckoutProps = { actorId: string | null; mentorName: string; offers: MentorOffer[]; paymentMethods: MentorPaymentMethod[]; returnPath: string };
-type PaymentAttempt = { ownerId: string; mentorId: string; startedAt: string; orderId?: string };
+type PaymentAttempt = { ownerId: string; mentorId: string; startedAt: string; orderId?: string; requestId?: string; offerId?: string; paymentMethodId?: string; buyerNote?: string; expectedQuote?: MentorOfferQuote };
 
 export function MentorCheckout(props: CheckoutProps) {
   return <MentorCheckoutForm key={`${props.actorId}:${props.returnPath}`} {...props} />;
 }
 
 function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, returnPath }: CheckoutProps) {
+  const router = useRouter();
   const activeOffers = useMemo(() => offers.filter((offer) => offer.active !== false), [offers]);
   const [offerId, setOfferId] = useState(activeOffers[0]?.id || "");
   const [methodId, setMethodId] = useState(paymentMethods.find((method) => method.active !== false)?.id || "");
@@ -46,8 +55,10 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
   const [error, setError] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const selectedMethod = paymentMethods.find((method) => method.id === methodId) ?? null;
+  const selectedOffer = activeOffers.find((offer) => offer.id === offerId);
   const mentorId = returnPath.split("/").filter(Boolean).at(-1) || "";
   const claims = useBuyerMentorClaims(actorId, mentorId);
+  const refreshClaims = claims.refresh;
   const attemptKey = `wavekb:mentor-payment-attempt:${actorId}:${mentorId}`;
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const [localChecked, setLocalChecked] = useState(false);
@@ -64,6 +75,7 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
         if (stored) {
           const value = JSON.parse(stored) as PaymentAttempt;
           if (value.ownerId !== actorId || value.mentorId !== mentorId || typeof value.startedAt !== "string" || (value.orderId !== undefined && typeof value.orderId !== "string")) throw new Error("invalid payment checkpoint");
+          if (value.requestId && (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.requestId) || typeof value.offerId !== "string" || typeof value.paymentMethodId !== "string" || typeof value.buyerNote !== "string" || !value.expectedQuote)) throw new Error("invalid payment request");
           setAttempt(value);
           setUncertain(true);
           setError("已恢复上次待核实的付款提交；请先查询状态，不要重复转账或提交。");
@@ -75,10 +87,14 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
       setLocalChecked(true);
     };
     const timer = window.setTimeout(restoreCheckpoint, 0);
-    const onStorage = (event: StorageEvent) => { if (event.key === attemptKey && event.newValue) restoreCheckpoint(); };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== attemptKey) return;
+      if (event.newValue) restoreCheckpoint();
+      else { setAttempt(null); setUncertain(false); void refreshClaims(); }
+    };
     window.addEventListener("storage", onStorage);
     return () => { window.clearTimeout(timer); window.removeEventListener("storage", onStorage); };
-  }, [actorId, mentorId, attemptKey]);
+  }, [actorId, mentorId, attemptKey, refreshClaims]);
 
   useEffect(() => {
     if (!attempt?.orderId || claims.loading || claims.error || !claims.claims.some((claim) => claim.order_id === attempt.orderId)) return;
@@ -99,6 +115,13 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
     setStatus("idle");
   }, [status, claims.loading, claims.error, claims.revision, pendingClaims.length, claims.pendingOrders.length]);
 
+  const previousPending = useRef<string[]>([]);
+  useEffect(() => {
+    if (claims.loading || claims.error) return;
+    if (claims.claims.some((claim) => claim.status === "confirmed" && previousPending.current.includes(claim.id))) router.refresh();
+    previousPending.current = pendingClaims.map((claim) => claim.id);
+  }, [claims.claims, claims.loading, claims.error, router, pendingClaims]);
+
   async function copyAccount() {
     if (!selectedMethod || configurationIssue) return;
     try {
@@ -109,50 +132,76 @@ function MentorCheckoutForm({ actorId, mentorName, offers, paymentMethods, retur
     }
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!actorId || !mentorId || !offerId || !methodId || submissionLock.current || configurationIssue || !localChecked || claims.loading || claims.error || pendingClaims.length || claims.pendingOrders.length || uncertain || attempt) return;
+  async function submitAttempt(retry?: PaymentAttempt) {
+    if (!actorId || !mentorId || submissionLock.current) return;
     submissionLock.current = true;
     setStatus("submitting");
     setError("");
+    let requestStarted = false;
+    let existingCheckpoint = false;
     try {
       const client = createClient();
       const auth = await client.auth.getUser();
       if (!auth.data.user || auth.data.user.id !== actorId) throw new Error("authentication_required");
-      if (localStorage.getItem(attemptKey)) throw new Error("已有待核实的付款提交，可能来自另一标签页。请先核对原订单。");
-      let checkpoint: PaymentAttempt = { ownerId: actorId, mentorId, startedAt: new Date().toISOString() };
+      const stored = localStorage.getItem(attemptKey);
+      if (stored && !retry) {
+        existingCheckpoint = true;
+        const existing = JSON.parse(stored) as PaymentAttempt;
+        if (existing.ownerId === actorId && existing.mentorId === mentorId) setAttempt(existing);
+        throw new Error("已有待核实的付款提交，可能来自另一标签页。请先核对原订单。");
+      }
+      if (retry && (!stored || JSON.parse(stored).requestId !== retry.requestId)) throw new Error("付款核对标记已经变化，请刷新后核对原订单。");
+      if (!retry && !selectedOffer) throw new Error("offer_unavailable");
+      const checkpoint: PaymentAttempt = retry ?? { ownerId: actorId, mentorId, startedAt: new Date().toISOString(), requestId: crypto.randomUUID(), offerId, paymentMethodId: methodId, buyerNote, expectedQuote: { price_cents: selectedOffer!.price_cents, currency: selectedOffer!.currency, duration_days: selectedOffer!.duration_days, weekly_questions: selectedOffer!.weekly_questions } };
       try { localStorage.setItem(attemptKey, JSON.stringify(checkpoint)); } catch { throw new Error("无法保存付款核对标记，尚未发起订单请求。请修复浏览器存储后再核对。"); }
       setAttempt(checkpoint);
-      await submitManualMentorPayment(client, { offerId, paymentMethodId: methodId, buyerNote, onOrderCreated: (orderId) => {
-        checkpoint = { ...checkpoint, orderId };
-        setAttempt(checkpoint);
-        localStorage.setItem(attemptKey, JSON.stringify(checkpoint));
-      } });
+      requestStarted = true;
+      const receipt = await submitManualMentorPayment(client, { offerId: checkpoint.offerId!, paymentMethodId: checkpoint.paymentMethodId!, buyerNote: checkpoint.buyerNote!, requestId: checkpoint.requestId!, expectedQuote: checkpoint.expectedQuote! });
+      setAttempt({ ...checkpoint, orderId: receipt.orderId });
       submittedAfterRevision.current = claims.revision;
+      setUncertain(false);
       setStatus("submitted");
       try { localStorage.removeItem(attemptKey); setAttempt(null); } catch { /* A known claim is still protected by the server read. */ }
       await claims.refresh();
     } catch (submitError) {
-      setError(`${friendlyError(submitError)} 若请求已送达，结果可能尚未返回；请先查询状态，不要重复转账或提交。`);
-      setUncertain(true);
+      const unknown = existingCheckpoint || Boolean(retry) && !requestStarted || requestStarted && !isDefiniteMentorCheckoutFailure(submitError);
+      setError(`${friendlyError(submitError)}${unknown ? " 请核对原请求，不要重复转账；重试只核对同一次付款。" : " 尚未创建新的付款声明，可核对后重新提交。"}`);
+      setUncertain(unknown);
+      if (!unknown) {
+        try { localStorage.removeItem(attemptKey); } catch { /* No server write occurred; the marker can be retried after storage recovers. */ }
+        setAttempt(null);
+      }
       setStatus("idle");
       await claims.refresh();
+    } finally {
+      submissionLock.current = false;
     }
   }
 
-  if (!actorId) return <section className="grid gap-4 rounded-xl border bg-surface p-5"><div><h2 className="text-xl font-semibold">登录后查看付款信息</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">登录用于把订单、付款声明和后续辅导权益绑定到同一账户。</p></div><Button asChild className="w-fit"><Link href={`/login?next=${encodeURIComponent(returnPath)}`}>登录账户</Link></Button></section>;
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!offerId || !methodId || configurationIssue || !localChecked || claims.loading || claims.error || pendingClaims.length || claims.pendingOrders.length || uncertain || attempt) return;
+    await submitAttempt();
+  }
+
+  function orderResolved(orderId: string) {
+    if (attempt?.orderId !== orderId) return;
+    try { localStorage.removeItem(attemptKey); setAttempt(null); setUncertain(false); } catch { /* Preserve the checkpoint until cleanup succeeds. */ }
+  }
+
+  if (!actorId) return <section className="grid gap-4 rounded-xl border bg-surface p-5"><div><h2 className="text-xl font-semibold">登录后查看付款信息</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">登录用于把订单、付款声明和后续辅导权益绑定到同一账户。</p></div><Button asChild className="min-h-11 w-fit"><Link href={`/login?next=${encodeURIComponent(returnPath)}`}>登录账户</Link></Button></section>;
   if (claims.loading || !localChecked) return <p role="status" className="text-sm text-muted-foreground">正在查询付款声明状态…</p>;
-  if (pendingClaims.length || claims.pendingOrders.length || claims.error || uncertain) return <div className="grid gap-4">{uncertain ? <p role="alert" className="text-sm text-destructive">{error} 如果查询后仍没有记录，请联系导师核实这次提交。</p> : null}<MentorPaymentSummary claims={claims.claims} pendingOrders={claims.pendingOrders} error={claims.error} refresh={claims.refresh} /></div>;
+  if (pendingClaims.length || claims.pendingOrders.length || claims.error || uncertain) return <div className="grid gap-4">{uncertain ? <section className="grid gap-3 rounded-xl border bg-surface p-5"><p role="alert" className="text-sm text-destructive">{error}</p>{attempt?.requestId && attempt.offerId && attempt.paymentMethodId ? <><p className="text-sm text-muted-foreground">付款声明采用同一请求编号核对；网络恢复后重试不会创建重复订单或要求再次转账。</p><Button type="button" variant="secondary" className="min-h-11 w-fit" disabled={status === "submitting" || Boolean(claims.error)} onClick={() => void submitAttempt(attempt)}>{status === "submitting" ? "正在核对原请求" : "核对并重试原付款声明"}</Button></> : <p className="text-sm text-muted-foreground">如有原订单，请在下方补交声明；没有记录的旧提交请联系导师核实，不要再次转账。</p>}</section> : null}<MentorPaymentSummary claims={claims.claims} pendingOrders={claims.pendingOrders} error={claims.error} refresh={claims.refresh} onOrderResolved={orderResolved} /></div>;
   if (!activeOffers.length) return <section className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">这位导师暂未开放可购买方案。</section>;
   if (!paymentMethods.length) return <section className="rounded-xl border border-dashed p-6"><h2 className="font-semibold">尚未配置收款方式</h2><p className="mt-1 text-sm text-muted-foreground">导师需要先添加有效收款信息，当前不会创建订单。</p></section>;
-  if (status === "submitted") return <section className="grid gap-4 rounded-xl border border-primary/30 bg-primary/8 p-6"><CheckCircle aria-hidden size={30} weight="duotone" className="text-primary" /><div><h2 className="text-xl font-semibold">已通知导师核对付款</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">导师确认收款后，服务器会自动发放权益并创建专属会话。确认前请勿重复提交。</p></div><Button asChild variant="secondary" className="w-fit"><Link href="/tutoring">查看我的辅导</Link></Button></section>;
+  if (status === "submitted") return <section className="grid gap-4 rounded-xl border border-primary/30 bg-primary/8 p-6"><CheckCircle aria-hidden size={30} weight="duotone" className="text-primary" /><div><h2 className="text-xl font-semibold">付款声明已提交</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">声明不代表已到账。导师核实收款后才发放权益并创建专属会话，确认前请勿重复转账。</p></div><Button asChild variant="secondary" className="min-h-11 w-fit"><Link href="/tutoring">查看我的辅导</Link></Button></section>;
 
   return (
     <form className="grid gap-6 rounded-xl border bg-surface p-5 md:p-6" onSubmit={submit}>
       <header className="flex items-start gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><LockKey aria-hidden size={20} weight="duotone" /></span><div><h2 className="text-xl font-semibold">选择辅导方案</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">付款由你直接转给{mentorName}。平台只记录声明，导师确认后才发放权益。</p></div></header>
       <fieldset className="grid gap-3"><legend className="text-sm font-semibold">服务方案</legend>{activeOffers.map((offer) => <label key={offer.id} className={`grid cursor-pointer gap-2 rounded-xl border p-4 ${offerId === offer.id ? "border-primary ring-2 ring-primary/15" : "hover:border-primary/45"}`}><span className="flex items-start gap-3"><input type="radio" name="mentor-offer" value={offer.id} checked={offerId === offer.id} onChange={() => setOfferId(offer.id)} className="mt-1 accent-primary" /><span className="min-w-0 flex-1"><strong className="block">{offer.name}</strong><span className="mt-1 block text-sm leading-6 text-muted-foreground">{offer.description || `有效期 ${offer.duration_days} 天，每周可提问 ${offer.weekly_questions} 次。`}</span></span><strong className="shrink-0 tabular-nums">{formatMentorPrice(offer.price_cents, offer.currency)}</strong></span><span className="ml-7 text-xs text-muted-foreground">有效期 {offer.duration_days} 天，每周 {offer.weekly_questions} 次</span></label>)}</fieldset>
-      <fieldset className="grid gap-3"><legend className="text-sm font-semibold">导师收款方式</legend>{paymentMethods.filter((method) => method.active !== false).map((method) => <label key={method.id} className={`grid cursor-pointer gap-2 rounded-xl border p-4 ${methodId === method.id ? "border-primary ring-2 ring-primary/15" : "hover:border-primary/45"}`}><span className="flex items-center gap-3"><input type="radio" name="mentor-payment-method" value={method.id} checked={methodId === method.id} onChange={() => { setMethodId(method.id); setCopyStatus(""); }} className="accent-primary" /><strong>{method.label}</strong></span>{methodId === method.id ? <span className="ml-6 grid gap-2"><span className="text-xs text-muted-foreground">{method.kind === "crypto" ? "链上收款地址" : method.kind === "binance" ? "币安 UID" : "收款账号"}</span><span className="break-all rounded-lg bg-muted p-3 font-mono text-sm">{method.account_value}</span><span className="text-xs text-muted-foreground">网络字段（导师原始配置）：{method.network || "未填写"}</span>{method.kind === "binance" ? <span className="text-xs text-muted-foreground">此数字是币安 UID，不是 PayID 或链上地址。请在币安平台内核对收款人及转账方式；网络字段仅展示原始配置，不作为支付路由。</span> : null}{method.account_name ? <span className="text-xs text-muted-foreground">收款人：{method.account_name}</span> : null}{method.instructions ? <span className="text-xs leading-5 text-muted-foreground">{method.instructions}</span> : null}{configurationIssue ? <span role="alert" className="text-sm text-destructive">收款配置需要导师核实：地址或网络不明确。请勿转账，平台不会猜测或修正收款信息。</span> : <Button type="button" variant="secondary" size="small" className="w-fit" onClick={copyAccount}><Copy aria-hidden size={16} />复制收款信息</Button>}{copyStatus ? <span role="status" className="text-xs text-muted-foreground">{copyStatus}</span> : null}</span> : null}</label>)}</fieldset>
-      <Field><Label htmlFor="mentor-payment-note">付款备注或转账编号（可选）</Label><Input id="mentor-payment-note" value={buyerNote} onChange={(event) => setBuyerNote(event.target.value)} maxLength={1000} placeholder="填写便于导师核对的转账信息" /></Field>
+      <fieldset className="grid gap-3"><legend className="text-sm font-semibold">导师收款方式</legend>{paymentMethods.filter((method) => method.active !== false).map((method) => <label key={method.id} className={`grid cursor-pointer gap-2 rounded-xl border p-4 ${methodId === method.id ? "border-primary ring-2 ring-primary/15" : "hover:border-primary/45"}`}><span className="flex items-center gap-3"><input type="radio" name="mentor-payment-method" value={method.id} checked={methodId === method.id} onChange={() => { setMethodId(method.id); setCopyStatus(""); }} className="accent-primary" /><strong>{method.label}</strong></span>{methodId === method.id ? <span className="ml-6 grid gap-2"><span className="text-xs text-muted-foreground">{method.kind === "crypto" ? "链上收款地址" : method.kind === "binance" ? "币安 UID" : "收款账号"}</span><span className="break-all rounded-lg bg-muted p-3 font-mono text-sm">{method.account_value}</span><span className="text-xs text-muted-foreground">网络字段（导师原始配置）：{method.network || "未填写"}</span>{method.kind === "binance" ? <span className="text-xs text-muted-foreground">此数字是币安 UID，不是 PayID 或链上地址。请在币安平台内核对收款人及转账方式；网络字段仅展示原始配置，不作为支付路由。</span> : null}{method.account_name ? <span className="text-xs text-muted-foreground">收款人：{method.account_name}</span> : null}{method.instructions ? <span className="text-xs leading-5 text-muted-foreground">{method.instructions}</span> : null}{configurationIssue ? <span role="alert" className="text-sm text-destructive">收款配置需要导师核实：地址或网络不明确。请勿转账，平台不会猜测或修正收款信息。</span> : <Button type="button" variant="secondary" size="small" className="min-h-11 w-fit" onClick={copyAccount}><Copy aria-hidden size={16} />复制收款信息</Button>}{copyStatus ? <span role="status" className="text-xs text-muted-foreground">{copyStatus}</span> : null}</span> : null}</label>)}</fieldset>
+      <Field><Label htmlFor="mentor-payment-note">付款备注或转账编号（可选）</Label><Input className="min-h-11" id="mentor-payment-note" value={buyerNote} onChange={(event) => setBuyerNote(event.target.value)} maxLength={1000} placeholder="填写便于导师核对的转账信息" /></Field>
       <div className="flex items-start gap-2 rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground"><WarningCircle aria-hidden size={17} className="mt-0.5 shrink-0 text-primary" /><span>请先完成转账，再点击“我已付款”。点击后只会提交待核对声明，不代表平台已经确认到账。</span></div>
       {error ? <FieldMessage role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 p-3">{error}</FieldMessage> : null}
       <Button type="submit" size="large" disabled={status === "submitting" || !offerId || !methodId || configurationIssue}>{status === "submitting" ? "正在提交付款声明" : "我已付款，通知导师"}</Button>

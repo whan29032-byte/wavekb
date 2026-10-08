@@ -1,38 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
-import { submitManualMentorPayment } from "./client-repository";
+import { cancelUnsubmittedMentorOrder, isDefiniteMentorCheckoutFailure, resumeManualMentorPayment, submitManualMentorPayment } from "./client-repository";
 
-describe("manual mentor payment transaction", () => {
-  it("records the returned order ID before a claim can fail", async () => {
-    const checkpoints: string[] = [];
-    await expect(submitManualMentorPayment({} as never, { offerId: "offer", paymentMethodId: "method", buyerNote: "", onOrderCreated: (id) => { checkpoints.push(id); } }, {
-      createOrder: async () => "known-order", submitClaim: async () => { throw new Error("ambiguous claim response"); },
-    })).rejects.toThrow("ambiguous claim response");
-    expect(checkpoints).toEqual(["known-order"]);
-  });
-  it("creates the pending order before submitting its payment claim", async () => {
-    const calls: string[] = [];
-    const result = await submitManualMentorPayment({} as never, {
-      offerId: "offer-id",
-      paymentMethodId: "method-id",
-      buyerNote: "  转账编号 94217  ",
-    }, {
-      createOrder: vi.fn(async () => { calls.push("order"); return "order-id"; }),
-      submitClaim: vi.fn(async (_orderId, note) => { calls.push(`claim:${note}`); return "claim-id"; }),
+const input = { offerId: "offer-id", paymentMethodId: "method-id", buyerNote: "  转账编号 94217  ", requestId: "11111111-1111-4111-8111-111111111111", expectedQuote: { price_cents: 10000, currency: "USDT", duration_days: 30, weekly_questions: 3 } };
+
+describe("atomic manual mentor payment", () => {
+  it("submits the order and declaration in one RPC with a caller-owned request ID", async () => {
+    const rpc = vi.fn(async () => ({ data: { order_id: "order-id", claim_id: "claim-id" }, error: null }));
+    expect(await submitManualMentorPayment({ rpc } as never, input)).toEqual({ orderId: "order-id", claimId: "claim-id" });
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_manual_mentor_payment", {
+      p_offer_id: "offer-id", p_payment_method_id: "method-id", p_buyer_note: "转账编号 94217", p_request_id: input.requestId, p_expected_quote: input.expectedQuote,
     });
-    expect(calls).toEqual(["order", "claim:转账编号 94217"]);
-    expect(result).toEqual({ orderId: "order-id", claimId: "claim-id" });
   });
-
-  it("does not submit a claim when order creation fails", async () => {
-    const submitClaim = vi.fn(async () => "claim-id");
-    await expect(submitManualMentorPayment({} as never, {
-      offerId: "offer-id",
-      paymentMethodId: "method-id",
-      buyerNote: "",
-    }, {
-      createOrder: vi.fn(async () => { throw new Error("offer unavailable"); }),
-      submitClaim,
-    })).rejects.toThrow("offer unavailable");
-    expect(submitClaim).not.toHaveBeenCalled();
+  it("retains the identical request ID when a lost response is retried", async () => {
+    const rpc = vi.fn().mockResolvedValueOnce({ data: null, error: { message: "fetch failed", code: "" } }).mockResolvedValueOnce({ data: { order_id: "same-order", claim_id: "same-claim" }, error: null });
+    await expect(submitManualMentorPayment({ rpc } as never, input)).rejects.toMatchObject({ definite: false });
+    expect(await submitManualMentorPayment({ rpc } as never, input)).toEqual({ orderId: "same-order", claimId: "same-claim" });
+    expect(rpc.mock.calls[0][1]).toEqual(rpc.mock.calls[1][1]);
+  });
+  it.each(["mentor_unavailable", "checkout_pending_exists", "account_ineligible"])("distinguishes rolled-back %s from an unknown response", async (message) => {
+    const rpc = vi.fn(async () => ({ data: null, error: { code: "P0001", message } }));
+    await expect(submitManualMentorPayment({ rpc } as never, input)).rejects.toMatchObject({ definite: true });
+    expect(isDefiniteMentorCheckoutFailure(new Error(message))).toBe(true);
+  });
+  it("does not treat an incomplete successful response as proof of no write", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    await expect(submitManualMentorPayment({ rpc } as never, input)).rejects.toMatchObject({ definite: false });
+  });
+  it("resumes the existing order rather than creating a replacement", async () => {
+    const rpc = vi.fn(async () => ({ data: "claim", error: null }));
+    await resumeManualMentorPayment({ rpc } as never, "original-order", " note ");
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("submit_mentor_payment_claim", { p_order_id: "original-order", p_buyer_note: "note" });
+  });
+  it("includes explicit unpaid confirmation when cancelling an unclaimed order", async () => {
+    const rpc = vi.fn(async () => ({ data: "original-order", error: null }));
+    await cancelUnsubmittedMentorOrder({ rpc } as never, "original-order", true);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("cancel_unsubmitted_mentor_order", { p_order_id: "original-order", p_confirm_unpaid: true });
   });
 });
