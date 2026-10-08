@@ -38,8 +38,9 @@ function boundary({ ordersExist = false, identityChanged = false, signInFails = 
 test("server settings parse only the necessary allow-list and require the production origin", () => {
   const source = `SUPABASE_URL="${settings.SUPABASE_URL}"\nSUPABASE_SERVICE_ROLE_KEY='server-only-test-secret'\nSUPABASE_PUBLISHABLE_KEY=public-test-key\nAUTH_SITE_URL=https://wavekb.com\nOTHER_PRIVATE_SETTING=never-return-me`;
   const loaded = readAuditSettings(source);
-  const { business_mail_config_presence, ...credentials } = loaded;
+  const { business_mail_config_presence, server_auth_site_origin_matches, ...credentials } = loaded;
   assert.deepEqual(credentials, settings);
+  assert.equal(server_auth_site_origin_matches, true);
   assert.equal(Object.values(business_mail_config_presence).every((value) => value === false), true);
   const mailConfigured = readAuditSettings(`${source}\nRESEND_API_KEY=private-mail-key\nMENTOR_EMAIL_FROM=mentor@example.test\nSMTP_HOST=""`);
   assert.equal(mailConfigured.business_mail_config_presence.RESEND_API_KEY, true);
@@ -49,7 +50,13 @@ test("server settings parse only the necessary allow-list and require the produc
   assert.equal(JSON.stringify(mailConfigured).includes("mentor@example.test"), false);
   assert.throws(() => readAuditSettings(`${source}\nSUPABASE_SERVICE_ROLE_KEY=duplicate`), /duplicate_server_setting/);
   assert.throws(() => readAuditSettings(source.replace(settings.SUPABASE_URL, "https://other.example.test")), /unexpected_supabase_origin/);
-  assert.throws(() => readAuditSettings(source.replace("AUTH_SITE_URL=https://wavekb.com", "AUTH_SITE_URL=https://other.example.test")), /unexpected_site_origin/);
+  const oldAuthSetting = readAuditSettings(source.replace("AUTH_SITE_URL=https://wavekb.com", "AUTH_SITE_URL=https://other.example.test"));
+  assert.equal(oldAuthSetting.AUTH_SITE_URL, "https://wavekb.com");
+  assert.equal(oldAuthSetting.server_auth_site_origin_matches, false);
+  assert.equal(JSON.stringify(oldAuthSetting).includes("other.example.test"), false);
+  const noAuthSetting = readAuditSettings(source.replace("AUTH_SITE_URL=https://wavekb.com", ""));
+  assert.equal(noAuthSetting.AUTH_SITE_URL, "https://wavekb.com");
+  assert.equal(noAuthSetting.server_auth_site_origin_matches, false);
   assert.throws(() => readAuditSettings("SUPABASE_URL=https://example.test"), /missing_server_setting/);
 });
 

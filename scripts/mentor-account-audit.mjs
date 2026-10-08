@@ -4,7 +4,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 const productionSupabaseOrigin = "https://odmtxwlnlvwldrjttyqu.supabase.co";
 const productionSiteOrigin = "https://wavekb.com";
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const requiredSettings = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_PUBLISHABLE_KEY", "AUTH_SITE_URL"];
+const requiredSettings = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_PUBLISHABLE_KEY"];
+const allowedSettings = [...requiredSettings, "AUTH_SITE_URL"];
 const mailSettings = ["MENTOR_EMAIL_ENABLED", "MENTOR_EMAIL_API_KEY", "MENTOR_EMAIL_FROM", "MENTOR_ORDER_EMAIL_FROM", "RESEND_API_KEY", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM", "SENDGRID_API_KEY"];
 
 class AuditFailure extends Error {
@@ -16,7 +17,7 @@ export function readAuditSettings(source) {
   const businessMailConfigPresence = Object.fromEntries(mailSettings.map((key) => [key, false]));
   for (const line of source.split(/\r?\n/)) {
     const match = line.match(/^\s*(?:export\s+)?([A-Z_]+)\s*=\s*(.*?)\s*$/);
-    if (!match || (!requiredSettings.includes(match[1]) && !mailSettings.includes(match[1]))) continue;
+    if (!match || (!allowedSettings.includes(match[1]) && !mailSettings.includes(match[1]))) continue;
     let value = match[2];
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
     if (mailSettings.includes(match[1])) { businessMailConfigPresence[match[1]] = Boolean(value.trim()); continue; }
@@ -25,8 +26,10 @@ export function readAuditSettings(source) {
   }
   if (requiredSettings.some((key) => !settings[key])) throw new AuditFailure("missing_server_setting");
   if (settings.SUPABASE_URL.replace(/\/$/, "") !== productionSupabaseOrigin) throw new AuditFailure("unexpected_supabase_origin");
-  if (settings.AUTH_SITE_URL.replace(/\/$/, "") !== productionSiteOrigin) throw new AuditFailure("unexpected_site_origin");
-  return { ...settings, business_mail_config_presence: businessMailConfigPresence };
+  const serverAuthSiteOriginMatches = settings.AUTH_SITE_URL?.replace(/\/$/, "") === productionSiteOrigin;
+  // This audit's authorized target is fixed in code, not a possibly stale
+  // gateway auth setting. Never return or follow a different server URL.
+  return { ...settings, AUTH_SITE_URL: productionSiteOrigin, server_auth_site_origin_matches: serverAuthSiteOriginMatches, business_mail_config_presence: businessMailConfigPresence };
 }
 
 function paymentSummary(method) {
@@ -51,7 +54,7 @@ export async function auditDisposableMentorAccount({ settings, auditId, fetchImp
   let accountId = null;
   let accessToken = null;
   let siteCookie = null;
-  const report = { audit_id: auditId, started_at: new Date().toISOString(), completed_at: null, ok: false, account_creation_attempted: false, account_created: false, account_uuid: null, public_uid: null, authenticated: false, ordinary_student: false, account_avatar_configured: false, site_login_http_ok: false, site_uid_activation_not_needed: false, mentors: [], counts: { mentors: 0, offers: 0, payment_methods: 0 }, business_mail_config_presence: Object.fromEntries(mailSettings.map((key) => [key, settings.business_mail_config_presence?.[key] === true])), cleanup: "not_created", cleanup_read_checks: { orders_empty: null, claims_empty: null, mentor_binding_empty: null }, error: null };
+  const report = { audit_id: auditId, started_at: new Date().toISOString(), completed_at: null, ok: false, account_creation_attempted: false, account_created: false, account_uuid: null, public_uid: null, authenticated: false, ordinary_student: false, account_avatar_configured: false, site_login_http_ok: false, site_uid_activation_not_needed: false, server_auth_site_origin_matches: settings.server_auth_site_origin_matches ?? true, mentors: [], counts: { mentors: 0, offers: 0, payment_methods: 0 }, business_mail_config_presence: Object.fromEntries(mailSettings.map((key) => [key, settings.business_mail_config_presence?.[key] === true])), cleanup: "not_created", cleanup_read_checks: { orders_empty: null, claims_empty: null, mentor_binding_empty: null }, error: null };
 
   async function siteRequest(path, { method = "GET", body, code }) {
     let response;
