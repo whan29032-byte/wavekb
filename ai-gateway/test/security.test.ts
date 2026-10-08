@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { loadConfig } from "../src/config.ts";
+import { buildKnowledgeIndex } from "../src/knowledge/index.ts";
 import { SupabaseGatewayApi } from "../src/routes/gateway-api.ts";
 import { assertSafeProviderDestination, validateProviderUrl, validateUserProviderUrl } from "../src/security/provider-url.ts";
 
@@ -15,6 +16,7 @@ const gatewayConfig = loadConfig({
 const retrievalIndexPath = fileURLToPath(
   new URL("../knowledge/retrieval-index.json", import.meta.url),
 );
+const artifactKnowledgeVersion = buildKnowledgeIndex(retrievalIndexPath).knowledgeVersion;
 const OWNER_ID = "22222222-2222-4222-8222-222222222222";
 const ANALYSIS_ID = "33333333-3333-4333-8333-333333333333";
 const CLIENT_REQUEST_ID = "11111111-1111-4111-8111-111111111111";
@@ -138,7 +140,7 @@ test("enqueue stores only normalized scope input with deterministic owner idempo
   assert.equal(body.idempotency_key, `${OWNER_ID}:${ANALYSIS_ID}:${CLIENT_REQUEST_ID}`);
   assert.equal(
     body.knowledge_version,
-    "e50017a8f53a9d78e65bfa51871de50864c8f4ebb0e7cabe2d68018a04b5da61",
+    artifactKnowledgeVersion,
   );
   assert.equal(body.task_type, "wave_analysis");
   assert.equal(job.id, "job-1");

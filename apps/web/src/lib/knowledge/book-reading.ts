@@ -1,5 +1,6 @@
 import type { KnowledgeData } from "@wavekb/knowledge";
 import { CORE_BOOK_ID, getKnowledgeBook, type KnowledgeBookCatalogEntry } from "./book-catalog";
+import { readingTextToPlainText } from "./reading-text";
 
 export type BookSearchDocument = {
   id: string;
@@ -95,13 +96,20 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
 
   if (book.kind !== "extension") return null;
   const source = book.source;
-  const pages = source.text_pages.map((page) => ({ page: page.page, text: normalizedText(page.text) }));
+  // Preserve reviewed paragraph/table layout in the reading body; compact only the search index.
+  const pages = source.text_pages.map((page) => ({ page: page.page, text: page.text }));
+  const availableSections = new Set([
+    ...(source.reading_guide.length ? ["#reading-guide"] : []),
+    ...(source.topics.length ? ["#topics"] : []),
+    ...(pages.length ? ["#book-text"] : []),
+    ...(source.boundaries.length ? ["#boundaries"] : []),
+  ]);
   return {
     book,
     hero: { primaryHref: "#book-text", primaryLabel: "开始网页阅读" },
     searchDocuments: pages.map((page) => ({
       id: `${book.id}::page::p${String(page.page).padStart(4, "0")}`,
-      title: `第 ${page.page} 页`, text: page.text, meta: "网页正文",
+      title: `第 ${page.page} 页`, text: normalizedText(readingTextToPlainText(page.text)), meta: "网页正文",
       href: `/knowledge/books/${book.id}#page-${page.page}`,
       bookId: book.id, bookTitle: book.title,
     })),
@@ -110,12 +118,12 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
       { title: "主题", description: "从资料覆盖的主题进入内容。", href: "#topics" },
       { title: "网页正文", description: "按蒸馏 PDF 页码阅读可检索正文。", href: "#book-text" },
       { title: "使用边界", description: "了解资料的来源、范围和不能替代的判断。", href: "#boundaries" },
-    ],
+    ].filter((option) => availableSections.has(option.href)),
     navigationEntries: [
       { title: "阅读导览", href: "#reading-guide" }, { title: "主题", href: "#topics" },
       { title: "网页正文", href: "#book-text" }, { title: "使用边界", href: "#boundaries" },
       ...pages.map((page) => ({ title: `第 ${page.page} 页`, href: `#page-${page.page}`, generated: true })),
-    ],
+    ].filter((entry) => ("generated" in entry && entry.generated) || availableSections.has(entry.href)),
     content: { themes: [], questions: [], chapters: [], readingGuide: source.reading_guide, topics: source.topics, pages },
     sourceArtifact: { label: "WaveKB 蒸馏 PDF", href: assetUrl(source.pdf_path) },
     boundaries: source.boundaries,

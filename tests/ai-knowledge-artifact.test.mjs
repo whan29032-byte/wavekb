@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { buildAiKnowledgeArtifact, normalizeSearchText } from "../scripts/lib/ai-knowledge-artifact.mjs";
+import { applyBookReadingCorrections, reviewedBookCorrections, sha256Text } from "../scripts/lib/book-reading-corrections.mjs";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const CORE_BOOK_ID = "elliott-wave-principle-tenth-edition";
@@ -19,10 +20,15 @@ function readJsonl(relativePath) {
 
 function sourceInputs() {
   const library = readJson("knowledge/source/library.json");
+  const corrections = reviewedBookCorrections(readJson("knowledge/reading/text-corrections.json"), library.books);
   return {
     units: readJsonl("knowledge/units/all.jsonl"),
     library,
-    pageSources: Object.fromEntries(library.books.map((book) => [book.id, readJson(book.text_path)])),
+    pageSources: Object.fromEntries(library.books.map((book) => {
+      const source = readJson(book.text_path);
+      const sourcePdfSha256 = sha256Text(fs.readFileSync(path.join(repositoryRoot, book.pdf_path)));
+      return [book.id, { ...source, pages: applyBookReadingCorrections({ book, pages: source.pages, correction: corrections.get(book.id), sourcePdfSha256 }) }];
+    })),
   };
 }
 

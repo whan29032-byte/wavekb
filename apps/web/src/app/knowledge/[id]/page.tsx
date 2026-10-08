@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Images, SealCheck } from "@phosphor-icons/react/
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData, type KnowledgeAsset } from "@wavekb/knowledge";
 import { KnowledgeImageViewer } from "@/components/knowledge-image-viewer";
+import { KnowledgeBodyReference, KnowledgeSourceUnitIndex, publicSourceUnitPages } from "@/components/knowledge-body-reference";
 import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -53,6 +54,7 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
   const supplementAssets = uniqueAssets(page.supplement_figures);
   const supplementSourceAssets = uniqueAssets(page.supplement_source_images);
   const related = page.related_page_ids.map(getKnowledgePage).filter((item) => item !== null);
+  const sourceUnitPages = publicSourceUnitPages(page.source_unit_ids);
 
   return (
     <main className="mx-auto grid max-w-6xl gap-8 px-4 py-10 md:grid-cols-[minmax(0,1fr)_16rem] md:px-6 md:py-14">
@@ -63,12 +65,14 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
           <h1 className="max-w-[24ch] text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-5xl">{page.title}</h1>
         </header>
 
+        <KnowledgeSourceUnitIndex pages={sourceUnitPages} />
+
         <div className="grid gap-7">
-          {page.sections.map((section) => (
-            <section key={section.title} className="grid gap-3">
-              <h2 className="text-xl font-semibold tracking-tight md:text-2xl">{section.title}</h2>
-              {section.paragraphs.map((paragraph, index) => <p key={index} className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90">{paragraph}</p>)}
-              {section.items.length ? <ul className="grid max-w-[76ch] gap-2 pl-5 text-base leading-7 text-foreground/90">{section.items.map((item, index) => <li key={index} className="list-disc pl-1 marker:text-primary">{item}</li>)}</ul> : null}
+          {page.sections.map((section, sectionIndex) => (
+            <section key={section.title} id={`knowledge-section-${sectionIndex}`} aria-labelledby={`knowledge-section-${sectionIndex}-title`} className="grid scroll-mt-24 gap-3">
+              <h2 id={`knowledge-section-${sectionIndex}-title`} className="text-xl font-semibold tracking-tight md:text-2xl">{section.title}</h2>
+              {section.paragraphs.map((paragraph, index) => <p key={index} className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90"><KnowledgeBodyReference text={paragraph} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></p>)}
+              {section.items.length ? <ul className="grid max-w-[76ch] gap-2 pl-5 text-base leading-7 text-foreground/90">{section.items.map((item, index) => <li key={index} className="list-disc pl-1 marker:text-primary"><KnowledgeBodyReference text={item} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></li>)}</ul> : null}
             </section>
           ))}
         </div>
@@ -88,7 +92,7 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
           <h2 className="text-sm font-semibold">条目信息</h2>
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs text-muted-foreground"><dt>知识类型</dt><dd>{page.unit_types.join("、") || (page.kind === "core" ? "核心视图" : "辅助资料")}</dd><dt>来源单元</dt><dd>{page.source_unit_ids.length}</dd><dt>相关条目</dt><dd>{related.length}</dd></dl>
         </div>
-        {related.length ? <nav className="grid gap-2" aria-label="相关知识"><h2 className="text-sm font-semibold">相关知识</h2>{related.slice(0, 8).map((item) => <Link key={item.id} href={`/knowledge/${item.id}`} className="flex items-start justify-between gap-2 rounded-lg bg-muted p-3 text-sm leading-5 hover:text-primary"><span>{item.title}</span><ArrowRight aria-hidden size={15} className="mt-0.5 shrink-0" /></Link>)}</nav> : null}
+        {related.length ? <nav className="grid gap-2" aria-label="相关知识"><h2 className="text-sm font-semibold">相关知识</h2>{related.slice(0, 8).map((item) => <Link key={item.id} href={`/knowledge/${item.id}`} className="flex items-start justify-between gap-2 rounded-lg bg-muted p-3 text-sm leading-5 hover:text-primary"><span>{item.title}</span><ArrowRight aria-hidden size={15} className="mt-0.5 shrink-0" /></Link>)}{related.length > 8 ? <details className="rounded-lg border p-3 open:grid open:gap-3"><summary className="cursor-pointer rounded-sm text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary">展开全部关联（另 {related.length - 8} 条）</summary><div className="grid gap-2 pt-1">{related.slice(8).map((item) => <Link key={item.id} href={`/knowledge/${item.id}`} className="flex items-start justify-between gap-2 rounded-lg bg-muted p-3 text-sm leading-5 hover:text-primary"><span>{item.title}</span><ArrowRight aria-hidden size={15} className="mt-0.5 shrink-0" /></Link>)}</div></details> : null}</nav> : null}
       </aside>
     </main>
   );

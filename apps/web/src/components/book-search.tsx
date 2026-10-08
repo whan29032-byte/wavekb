@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { Input, Label } from "@wavekb/ui";
+import { BookReadingLink } from "./book-reading-link";
 
 export type BookSearchItem = {
   id: string;
@@ -75,11 +76,13 @@ export function BookSearch({ bookId, items, placeholder = "搜索本书章节、
         <div className="divide-y overflow-hidden rounded-lg border bg-surface" aria-live="polite">
           {results.map((item) => {
             const snippet = resultSnippet(item.text, query.trim());
+            const bookPath = `/knowledge/books/${bookId}`;
+            const href = item.href.startsWith(`${bookPath}#`) ? item.href.slice(bookPath.length) : item.href;
             return (
-              <Link key={item.id} href={item.href} className="grid gap-1 px-4 py-3 hover:bg-muted">
+              <BookReadingLink key={item.id} href={href} className="grid min-h-11 gap-1 px-4 py-3 hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary">
                 <span className="flex flex-wrap items-baseline justify-between gap-2"><strong className="text-sm"><Highlight text={item.title} query={query.trim()} /></strong><span className="text-xs text-muted-foreground">{item.meta}</span></span>
                 <span className="text-xs leading-5 text-muted-foreground"><Highlight text={snippet} query={query.trim()} /></span>
-              </Link>
+              </BookReadingLink>
             );
           })}
         </div>

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAiKnowledgeArtifact } from "./lib/ai-knowledge-artifact.mjs";
+import { applyBookReadingCorrections, reviewedBookCorrections } from "./lib/book-reading-corrections.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const knowledgeRoot = path.join(repositoryRoot, "knowledge");
@@ -62,6 +63,13 @@ const manifest = readJson(path.join(knowledgeRoot, "source/manifest.json"));
 const supplements = readJson(path.join(knowledgeRoot, "source/supplements.json"));
 const framework = readJson(path.join(knowledgeRoot, "source/framework.json"));
 const library = readJson(path.join(knowledgeRoot, "source/library.json"));
+const readingCorrections = readJson(path.join(knowledgeRoot, "reading/text-corrections.json"));
+let correctedBooks = new Map();
+try {
+  correctedBooks = reviewedBookCorrections(readingCorrections, library.books || []);
+} catch (error) {
+  errors.push(error.message);
+}
 const imageRegistry = readJson(path.join(knowledgeRoot, "images/registry.json"));
 const sourceRanges = readJson(path.join(knowledgeRoot, "source/ranges.json"));
 const sourcePackets = readJson(path.join(knowledgeRoot, "source/packets.json"));
@@ -105,7 +113,15 @@ const pageSources = Object.fromEntries((library.books || []).flatMap((book) => {
   expect(source.book_id === book.id && source.source_pdf === book.pdf_path, `${book.id} library text metadata does not match`);
   expect(Array.isArray(source.pages) && source.pages.length === book.pdf_pages, `${book.id} library text page count does not match`);
   expect((source.pages || []).every((page, index) => page.page === index + 1 && String(page.text || "").trim()), `${book.id} library text pages are incomplete`);
-  return [[book.id, source]];
+  try {
+    const correctedPages = applyBookReadingCorrections({ book, pages: source.pages, correction: correctedBooks.get(book.id), sourcePdfSha256: sha256(path.join(repositoryRoot, book.pdf_path)) });
+    const compiledBook = compiled.library?.books?.find((candidate) => candidate.id === book.id);
+    expect(JSON.stringify(compiledBook?.text_pages) === JSON.stringify(correctedPages), `${book.id} compiled reading pages are stale`);
+    return [[book.id, { ...source, pages: correctedPages }]];
+  } catch (error) {
+    errors.push(error.message);
+    return [];
+  }
 }));
 
 expect(units.length === 117, `Expected 117 Units, found ${units.length}`);
@@ -254,9 +270,11 @@ const compiledPageIds = uniqueIds(compiled.pages || [], "Compiled pages");
 for (const unitId of unitIds) expect(compiledPageIds.has(`unit-${unitId}`), `Missing compiled page for Unit ${unitId}`);
 for (const page of compiled.pages || []) {
   for (const unitId of page.source_unit_ids || []) expect(unitIds.has(unitId), `${page.id} references missing Unit ${unitId}`);
+  for (const relatedId of page.related_page_ids || []) expect(compiledPageIds.has(relatedId), `${page.id} exposes a missing or hidden related page ${relatedId}`);
   expect(!(page.figures || []).length, `${page.id} uses deprecated mixed figures`);
   expect(!(page.source_images || []).length, `${page.id} uses deprecated mixed source_images`);
   if (page.kind === "core") expect(page.generation_source === "canonical_units", `${page.id} does not generate its body from canonical Units`);
+  if (page.kind === "candidate") expect(page.generation_source === "markdown_candidate", `${page.id} does not preserve its candidate source body`);
 }
 
 expect(retrieval.schemaVersion === "wavekb-ai-knowledge-v1", `Unexpected retrieval schema: ${retrieval.schemaVersion}`);
