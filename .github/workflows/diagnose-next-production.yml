@@ -3,6 +3,16 @@ name: Diagnose WaveKB Next.js production release
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: "Release diagnostics, or an explicitly authorized disposable mentor account audit (no orders/payment writes)"
+        required: true
+        type: choice
+        options: [release, mentor-account]
+        default: release
+      account_confirmation:
+        description: "For mentor-account only, type CREATE_DISPOSABLE_MENTOR_AUDIT_ACCOUNT"
+        required: false
+        type: string
       release_id:
         description: "Failed immutable release identity (SHA-run-attempt)"
         required: true
@@ -39,6 +49,7 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
 
       - name: Read allow-listed retained release state
+        if: inputs.operation == 'release'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -48,3 +59,17 @@ jobs:
           [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "sudo -n /usr/bin/node --input-type=module - '${RELEASE_ID}'" < scripts/diagnose-release.mjs
+
+      - name: Audit with a disposable ordinary mentor buyer account
+        if: inputs.operation == 'mentor-account'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ACCOUNT_CONFIRMATION: ${{ inputs.account_confirmation }}
+        run: |
+          set -Eeuo pipefail
+          test "$ACCOUNT_CONFIRMATION" = CREATE_DISPOSABLE_MENTOR_AUDIT_ACCOUNT
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/node --input-type=module - 'gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'" < scripts/mentor-account-audit.mjs

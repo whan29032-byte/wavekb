@@ -13,6 +13,8 @@ const workflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-
 const steps = workflow.jobs["build-and-deploy"].steps;
 const backendWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-backend-production.yml", import.meta.url), "utf8"));
 const backendSteps = backendWorkflow.jobs["migrate-and-deploy"].steps;
+const diagnosticWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8"));
+const diagnosticSteps = diagnosticWorkflow.jobs.diagnose.steps;
 const releaseVerificationWorkflowPath = new URL("../.github/workflows/verify-release.yml", import.meta.url);
 
 test("persistent candidate runs owned standalone SQLite browser and worker gates before upload", () => {
@@ -31,10 +33,23 @@ test("persistent candidate runs owned standalone SQLite browser and worker gates
 });
 
 test("every emitted workflow shell program parses before a runner can execute it", () => {
-  for (const step of [...steps, ...backendSteps].filter((item) => item.run)) {
+  for (const step of [...steps, ...backendSteps, ...diagnosticSteps].filter((item) => item.run)) {
     const result = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
     assert.equal(result.status, 0, `${step.name}: ${result.stderr}`);
   }
+});
+
+test("disposable mentor account diagnostics require explicit opt-in and do not run on release diagnostics", () => {
+  const inputs = (diagnosticWorkflow.on ?? diagnosticWorkflow.true).workflow_dispatch.inputs;
+  assert.equal(inputs.operation.default, "release");
+  const account = diagnosticSteps.find((step) => /disposable ordinary mentor buyer/.test(step.name));
+  const release = diagnosticSteps.find((step) => /Read allow-listed retained release state/.test(step.name));
+  assert.equal(account.if, "inputs.operation == 'mentor-account'");
+  assert.equal(release.if, "inputs.operation == 'release'");
+  assert.match(account.run, /test "\$ACCOUNT_CONFIRMATION" = CREATE_DISPOSABLE_MENTOR_AUDIT_ACCOUNT/);
+  assert.match(account.run, /scripts\/mentor-account-audit\.mjs/);
+  assert.match(account.run, /gha-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}/);
+  assert.doesNotMatch(account.run, /gateway\.env|mentor_orders|submit_mentor|\bpsql\b/);
 });
 
 test("backend deployment migrates only the exact predecessor schema before upload and rolls gateway code back on activation failure", () => {
@@ -49,18 +64,39 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
   assert.match(backendSteps[schemaGate].run, /202609090002\)[\s\S]*202609100001_reward_lottery_manual_fulfillment\.sql[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202609100001\)[\s\S]*202610080001_admin_custom_trading_display\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202610080001\)[\s\S]*already applied/);
+  assert.match(backendSteps[schemaGate].run, /202610080001\)[\s\S]*202610080002_mentor_checkout_recovery\.sql[\s\S]*202610080003_mentor_payment_notifications\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610080003\)[\s\S]*already applied/);
   assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610080001/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610080003/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610080001/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610080003/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
   assert.match(backendSteps[activation].run, /legacy_layout/);
   assert.match(backendSteps[activation].run, /sudo mv "\$current_link" "\$previous"/);
   assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
+});
+
+test("mentor notification worker is packaged, installed, health-checked and included in rollback", () => {
+  const upload = backendSteps.find((step) => /Upload gateway archive/.test(step.name));
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
+  assert.match(contracts.run, /mentor-checkout-postgres\.test\.mjs/);
+  assert.match(contracts.run, /mentor-notification-postgres\.test\.mjs/);
+  assert.match(upload.run, /for unit in [^;]*elliott-wave-mentor-notifications\.service/);
+  assert.match(activation.run, /units=\([^)]*elliott-wave-mentor-notifications\.service/);
+  assert.match(activation.run, /sudo systemctl try-restart elliott-wave-mentor-notifications\.service \|\| true/);
+  assert.match(activation.run, /sudo systemctl enable --now elliott-wave-mentor-notifications\.service/);
+  assert.match(activation.run, /is-active elliott-wave-mentor-notifications\.service/);
+  const unit = fs.readFileSync(new URL("../deployment/systemd/elliott-wave-mentor-notifications.service", import.meta.url), "utf8");
+  assert.match(unit, /EnvironmentFile=\/etc\/elliott-wave\/gateway\.env/);
+  assert.match(unit, /ExecStart=\/usr\/bin\/node src\/mentor-notification-worker\.ts/);
+  assert.match(unit, /DynamicUser=yes/);
+  assert.match(unit, /ProtectSystem=strict/);
+  assert.doesNotMatch(JSON.stringify(backendSteps), /MENTOR_EMAIL_API_KEY|MENTOR_EMAIL_FROM/,
+    "deployment must preserve server mail configuration, never copy keys into artifacts");
 });
 
 test("backend artifact, gateway, and packaging checks all precede the first upload", () => {
