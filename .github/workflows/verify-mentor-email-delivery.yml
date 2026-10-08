@@ -1,0 +1,96 @@
+name: Verify one mentor email delivery
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Read mail configuration presence, or send one explicitly authorized test (no orders)"
+        required: true
+        type: choice
+        options: [check-config, send-once]
+        default: check-config
+      test_recipient:
+        description: "For send-once only: one mailbox controlled by the requesting user"
+        required: false
+        type: string
+      confirmation:
+        description: "For send-once only: SEND_ONE_TEST_EMAIL"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-one-mail-test
+  cancel-in-progress: false
+
+jobs:
+  verify-mail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: next-preview
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate the narrow operation before host access
+        env:
+          OPERATION: ${{ inputs.operation }}
+          RECIPIENT: ${{ inputs.test_recipient }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -Eeuo pipefail
+          if [ "$OPERATION" = send-once ]; then
+            test "$CONFIRMATION" = SEND_ONE_TEST_EMAIL
+            node --input-type=module -e 'if(!/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(process.env.RECIPIENT || ""))process.exit(1)'
+          else
+            test "$OPERATION" = check-config
+          fi
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+      - name: Run the isolated mail verifier without starting the queue
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          OPERATION: ${{ inputs.operation }}
+          RECIPIENT: ${{ inputs.test_recipient }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          receipt_id=$(node --input-type=module -e 'import{createHash}from"node:crypto";let h=createHash("sha256").update("wavekb-email-smoke:"+process.env.GITHUB_RUN_ID).digest("hex");console.log(h.slice(0,8)+"-"+h.slice(8,12)+"-4"+h.slice(13,16)+"-8"+h.slice(17,20)+"-"+h.slice(20,32))')
+          recipient_encoded=$(node -e 'console.log(Buffer.from(process.env.RECIPIENT || "").toString("base64url"))')
+          [[ "$receipt_id" =~ ^[0-9a-f-]{36}$ && "$recipient_encoded" =~ ^[A-Za-z0-9_-]*$ ]]
+          tar -czf mail-test.tar.gz ai-gateway/src/mentor-email-smoke.ts ai-gateway/src/mentor-notifications/contracts.ts ai-gateway/src/mentor-notifications/resend.ts
+          archive_name="wavekb-mail-test-${GITHUB_RUN_ID}.tar.gz"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes mail-test.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:${archive_name}"
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash -s -- '$archive_name' '$OPERATION' '$receipt_id' '$recipient_encoded'" <<'REMOTE'
+          set -Eeuo pipefail
+          archive_name="$1"
+          operation="$2"
+          receipt_id="$3"
+          recipient_encoded="$4"
+          [[ "$archive_name" =~ ^wavekb-mail-test-[1-9][0-9]*\.tar\.gz$ ]]
+          [[ "$operation" = check-config || "$operation" = send-once ]]
+          [[ "$receipt_id" =~ ^[0-9a-f-]{36}$ && "$recipient_encoded" =~ ^[A-Za-z0-9_-]*$ ]]
+          mail_test_dir=$(mktemp -d /tmp/wavekb-mail-test.XXXXXX)
+          tar -xzf "$HOME/$archive_name" -C "$mail_test_dir"
+          sudo -n /usr/bin/node "$mail_test_dir/ai-gateway/src/mentor-email-smoke.ts" "$operation" "$receipt_id" "$recipient_encoded" SEND_ONE_TEST_EMAIL
+          # Only verifier files are temporary; permanent receipt is retained to
+          # prevent a known accepted test from being sent again on rerun.
+          rm -- "$mail_test_dir/ai-gateway/src/mentor-email-smoke.ts" "$mail_test_dir/ai-gateway/src/mentor-notifications/contracts.ts" "$mail_test_dir/ai-gateway/src/mentor-notifications/resend.ts" "$HOME/$archive_name"
+          rmdir "$mail_test_dir/ai-gateway/src/mentor-notifications" "$mail_test_dir/ai-gateway/src" "$mail_test_dir/ai-gateway" "$mail_test_dir"
+          REMOTE

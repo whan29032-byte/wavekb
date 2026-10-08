@@ -6,6 +6,10 @@ import { AuthApi } from "./auth/auth-api.ts";
 import { loadConfig, type GatewayConfig } from "./config.ts";
 import { SupabaseGatewayApi } from "./routes/gateway-api.ts";
 import { AuthRateLimiter } from "./security/auth-rate-limit.ts";
+import { youtubeRoute, type YouTubeRouteApi } from "./youtube/routes.ts";
+import { loadYouTubeSyncConfig } from "./youtube/config.ts";
+import { GoogleYouTubeProvider } from "./youtube/provider.ts";
+import { YouTubeService } from "./youtube/service.ts";
 
 export type ServerDeps = {
   config: GatewayConfig;
@@ -14,6 +18,7 @@ export type ServerDeps = {
   authApi?: AuthRouteApi;
   userAdministrationApi?: AdminUsersApi;
   authRateLimiter?: AuthRateLimiter;
+  youtubeApi?: YouTubeRouteApi;
 };
 
 export type GatewayUser = { id: string; role: string };
@@ -419,6 +424,10 @@ async function route(
   }
   const actor = await actorFor(deps, headers);
   if (!actor) return { statusCode: 401, body: { error: "authentication_required" } };
+  if (path.startsWith("/v1/youtube/")) {
+    if (!authOriginAllowed(deps.config, headers)) return { statusCode: 403, body: { error: "invalid_request" } };
+    return youtubeRoute(deps.youtubeApi, actor.id, method, path, payload);
+  }
   if (path.startsWith("/v1/admin/") && actor.role !== "admin") {
     return { statusCode: 403, body: { error: "admin_required" } };
   }
@@ -725,11 +734,21 @@ const isMain = process.argv[1]
 
 if (isMain) {
   const config = loadConfig(process.env);
+  let youtubeApi: YouTubeRouteApi | undefined;
+  try {
+    const youtubeConfig = loadYouTubeSyncConfig(process.env);
+    youtubeApi = new YouTubeService(youtubeConfig, { provider: new GoogleYouTubeProvider(youtubeConfig) });
+  } catch {
+    // A malformed optional integration must not take login, posting or other
+    // existing Gateway services offline. Never print configuration values.
+    console.warn("youtube_configuration_unavailable");
+  }
   const server = buildServer({
     config,
     api: new SupabaseGatewayApi(config),
     authApi: new AuthApi(config),
     userAdministrationApi: new UserAdministrationApi(config),
+    ...(youtubeApi ? { youtubeApi } : {}),
   });
   await server.listen({ port: config.PORT, host: "127.0.0.1" });
 }

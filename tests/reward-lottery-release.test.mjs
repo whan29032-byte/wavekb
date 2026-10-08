@@ -7,7 +7,7 @@ const source = (path) => readFile(new URL(path, root), "utf8");
 
 test("the lottery schema, member UI, admin UI and deployment marker ship together", async () => {
   const migrations = (await readdir(new URL("supabase/migrations/", root))).filter((name) => name.endsWith(".sql")).sort();
-  assert.equal(migrations.at(-1), "202610080003_mentor_payment_notifications.sql");
+  assert.equal(migrations.at(-1), "202610080004_youtube_auto_posts.sql");
 
   const [migration, manualMigration, customDisplayMigration, workflow, memberPage, memberRepository, memberComponent, adminPage, adminRepository, e2e] = await Promise.all([
     source("supabase/migrations/202609090002_reward_lottery.sql"),
@@ -30,7 +30,7 @@ test("the lottery schema, member UI, admin UI and deployment marker ship togethe
   const mentorNotifications = await source("supabase/migrations/202610080003_mentor_payment_notifications.sql");
   assert.match(mentorNotifications, /select '202610080003'::text/);
   assert.doesNotMatch(mentorNotifications, /(?:drop|alter) (?:table|function) public\.reward_lottery/);
-  assert.match(workflow, /test "\$schema" = 202610080003/);
+  assert.match(workflow, /test "\$schema" = 202610080004/);
   for (const table of ["reward_lottery_campaigns", "reward_lottery_prizes", "reward_lottery_draws", "reward_lottery_admin_audit"]) {
     assert.match(migration, new RegExp(`alter table public\\.${table} enable row level security`));
   }

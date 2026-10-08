@@ -15,6 +15,8 @@ const backendWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/
 const backendSteps = backendWorkflow.jobs["migrate-and-deploy"].steps;
 const diagnosticWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8"));
 const diagnosticSteps = diagnosticWorkflow.jobs.diagnose.steps;
+const mailWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/verify-mentor-email-delivery.yml", import.meta.url), "utf8"));
+const mailSteps = mailWorkflow.jobs["verify-mail"].steps;
 const releaseVerificationWorkflowPath = new URL("../.github/workflows/verify-release.yml", import.meta.url);
 
 test("persistent candidate runs owned standalone SQLite browser and worker gates before upload", () => {
@@ -33,10 +35,36 @@ test("persistent candidate runs owned standalone SQLite browser and worker gates
 });
 
 test("every emitted workflow shell program parses before a runner can execute it", () => {
-  for (const step of [...steps, ...backendSteps, ...diagnosticSteps].filter((item) => item.run)) {
+  for (const step of [...steps, ...backendSteps, ...diagnosticSteps, ...mailSteps].filter((item) => item.run)) {
     const result = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
     assert.equal(result.status, 0, `${step.name}: ${result.stderr}`);
   }
+});
+
+test("YouTube worker is optional, secret-free in deployment and covered by rollback", () => {
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
+  assert.match(contracts.run, /youtube-sync-postgres\.test\.mjs/);
+  assert.match(activation.run, /units=\([^)]*elliott-wave-youtube-sync\.service/);
+  assert.match(activation.run, /try-restart elliott-wave-youtube-sync\.service \|\| true/);
+  assert.match(activation.run, /is-active elliott-wave-youtube-sync\.service/);
+  const unit = fs.readFileSync(new URL("../deployment/systemd/elliott-wave-youtube-sync.service", import.meta.url), "utf8");
+  assert.match(unit, /ExecStart=\/usr\/bin\/node src\/youtube-sync-worker\.ts/);
+  assert.match(unit, /ProtectSystem=strict/);
+  assert.match(unit, /DynamicUser=yes/);
+  assert.doesNotMatch(JSON.stringify(backendSteps), /YOUTUBE_OAUTH_CLIENT_SECRET|YOUTUBE_TOKEN_MASTER_KEY/);
+});
+
+test("one email test is opt-in, isolated from real orders and idempotent across reruns", () => {
+  const inputs = (mailWorkflow.on ?? mailWorkflow.true).workflow_dispatch.inputs;
+  assert.equal(inputs.operation.default, "check-config");
+  assert.equal(mailWorkflow.concurrency["cancel-in-progress"], false);
+  const validation = mailSteps.find((step) => /Validate the narrow operation/.test(step.name));
+  const run = mailSteps.find((step) => /Run the isolated mail verifier/.test(step.name));
+  assert.match(validation.run, /SEND_ONE_TEST_EMAIL/);
+  assert.match(run.run, /wavekb-email-smoke:/);
+  assert.doesNotMatch(run.run, /GITHUB_RUN_ATTEMPT|\bpsql\b|mentor_orders|mentor-notification-worker/);
+  assert.doesNotMatch(JSON.stringify(mailSteps), /MENTOR_EMAIL_API_KEY|MENTOR_EMAIL_FROM/);
 });
 
 test("disposable mentor account diagnostics require explicit opt-in and do not run on release diagnostics", () => {
@@ -65,12 +93,13 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /202609090002\)[\s\S]*202609100001_reward_lottery_manual_fulfillment\.sql[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202609100001\)[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610080001\)[\s\S]*202610080002_mentor_checkout_recovery\.sql[\s\S]*202610080003_mentor_payment_notifications\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202610080003\)[\s\S]*already applied/);
+  assert.match(backendSteps[schemaGate].run, /202610080003\)[\s\S]*202610080004_youtube_auto_posts\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610080004\)[\s\S]*already applied/);
   assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610080003/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610080004/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610080003/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610080004/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
