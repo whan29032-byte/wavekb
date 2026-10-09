@@ -34,14 +34,21 @@ test("knowledge images and extension books are locally published and audited", a
   assert.match(audit, /Missing .* referenced knowledge assets/);
   assert.match(audit, /content-type/);
   assert.match(audit, /application\/pdf/);
-  assert.match(books, /三本图书/);
+  assert.match(books, /知识库图书/);
+  assert.match(books, /以第11版原书为主，保留第10版补充与版本对照/);
   assert.match(detail, /buildBookReadingModel/);
   assert.match(detail, /model\.hero\.primaryLabel/);
   assert.match(readingModel, /开始网页阅读/);
   assert.match(readingModel, /text_pages/);
   assert.match(detail, /noopener noreferrer/);
   const catalog = JSON.parse(library);
-  assert.deepEqual(catalog.books.map((book) => book.id), ["elliott-wave-natural-law", "chan-theory-complete"]);
+  assert.deepEqual(catalog.books.map((book) => book.id), ["elliott-wave-natural-law", "chan-theory-complete", "elliott-wave-principle-eleventh-edition"]);
+  assert.equal(catalog.books.filter((book) => book.role === "core").length, 1);
+  const original = catalog.books.find((book) => book.role === "core");
+  assert.equal(original.id, "elliott-wave-principle-eleventh-edition");
+  assert.equal(original.source_kind, "original_pdf");
+  assert.equal(original.edition, 11);
+  assert.equal(original.pdf_pages, 321);
   assert.ok(catalog.books.every((book) => book.pdf_path.startsWith("assets/books/") && book.sha256.length === 64));
 });
 

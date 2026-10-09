@@ -22,6 +22,7 @@ for (const book of knowledge.library?.books || []) {
   if (book?.pdf_path) referencedBooks.add(String(book.pdf_path).replace(/^\/+/, ""));
   if (book?.cover_path) referencedImages.add(String(book.cover_path).replace(/^\/+/, ""));
   for (const page of book.text_pages || []) {
+    if (page.source_image?.asset_path) referencedImages.add(page.source_image.asset_path);
     for (const figure of page.illustrations || []) {
       if (figure?.asset_path) {
         referencedImages.add(figure.asset_path);

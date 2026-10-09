@@ -41,7 +41,7 @@ export function coreBookExplanations(paragraphs: string[], sourceUnitPages: Know
 
 export function coreBookFigureCaption(asset: KnowledgeAsset) {
   return [
-    "第10版原页摘录",
+    "第10版原页摘录（补充资料）",
     asset.caption,
     asset.book_pages?.length ? `原书页 ${asset.book_pages.join("、")}` : "",
     asset.pdf_page ? `PDF 第 ${asset.pdf_page} 页` : "",

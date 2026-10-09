@@ -12,6 +12,7 @@ describe("knowledge scope selector", () => {
     expect((screen.getByRole("radio", { name: "全部已发布书籍" }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getAllByRole("radio").map((input) => input.getAttribute("value"))).toEqual([
       "all",
+      "elliott-wave-principle-eleventh-edition",
       "elliott-wave-principle-tenth-edition",
       "elliott-wave-natural-law",
       "chan-theory-complete",

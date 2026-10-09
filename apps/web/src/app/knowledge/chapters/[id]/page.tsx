@@ -3,7 +3,8 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData } from "@wavekb/knowledge";
-import { CORE_BOOK_ID } from "@/lib/knowledge/book-catalog";
+import { UNIT_BOOK_ID } from "@/lib/knowledge/book-catalog";
+import { knowledgePageSourceLabels } from "@/lib/knowledge/source-labels";
 import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -28,12 +29,12 @@ export default async function KnowledgeChapterPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto grid max-w-4xl gap-8 px-4 py-10 md:px-6 md:py-14">
-      <a href={`/knowledge/books/${CORE_BOOK_ID}?section=chapters#core-chapters`} className="inline-flex min-h-11 w-fit items-center gap-2 rounded-sm text-sm font-medium text-muted-foreground hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><ArrowLeft aria-hidden size={17} />返回原书目录</a>
-      <header className="grid gap-3 border-b pb-7"><span className="text-sm font-medium text-primary">原书顺序视图</span><h1 className="text-3xl font-semibold tracking-[-0.035em] md:text-5xl">{chapterTitles[id] || id}</h1><p className="text-sm leading-6 text-muted-foreground">本页只维护顺序与 Unit 引用；正文、类型、来源和图片均由同一 Unit 数据生成。</p></header>
+      <a href={`/knowledge/books/${UNIT_BOOK_ID}?section=chapters#core-chapters`} className="inline-flex min-h-11 w-fit items-center gap-2 rounded-sm text-sm font-medium text-muted-foreground hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"><ArrowLeft aria-hidden size={17} />返回原书目录</a>
+      <header className="grid gap-3 border-b pb-7"><span className="text-sm font-medium text-primary">补充与版本对照 · 原有章节索引</span><h1 className="text-3xl font-semibold tracking-[-0.035em] md:text-5xl">{chapterTitles[id] || id}</h1><p className="text-sm leading-6 text-muted-foreground">本页只维护顺序与 Unit 引用；正文、类型、来源和图片均由同一 Unit 数据生成。</p></header>
       <ol className="grid gap-3">
         {chapter.unit_ids.map((unitId, index) => {
           const page = getKnowledgePage(`unit-${unitId}`);
-          return page ? <li key={unitId}><Link href={`/knowledge/${page.id}`} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-xl border bg-surface p-4 hover:border-primary/45"><span className="text-xs font-semibold text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span><strong className="block text-sm leading-5">{page.title}</strong><span className="mt-1 block text-xs text-muted-foreground">{page.unit_types.join("、")} · {page.source_authorities.map((authority) => authority === "primary" ? "第10版" : "第11版补充").join(" / ")}</span></span><ArrowRight aria-hidden size={16} /></Link></li> : null;
+          return page ? <li key={unitId}><Link href={`/knowledge/${page.id}`} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-xl border bg-surface p-4 hover:border-primary/45"><span className="text-xs font-semibold text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span><strong className="block text-sm leading-5">{page.title}</strong><span className="mt-1 block text-xs text-muted-foreground">{page.unit_types.join("、")} · {knowledgePageSourceLabels(page).join(" / ")}</span></span><ArrowRight aria-hidden size={16} /></Link></li> : null;
         })}
       </ol>
     </main>

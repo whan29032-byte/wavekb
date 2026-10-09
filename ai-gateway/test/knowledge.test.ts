@@ -20,6 +20,7 @@ const artifactPath = fileURLToPath(
   new URL("../knowledge/retrieval-index.json", import.meta.url),
 );
 const BOOK_IDS = [
+  "elliott-wave-principle-eleventh-edition",
   "elliott-wave-principle-tenth-edition",
   "elliott-wave-natural-law",
   "chan-theory-complete",
@@ -221,13 +222,37 @@ test("artifact loading enforces core and extension role coherence", () => {
     (artifact: Record<string, any>) => { artifact.books[0].role = "extension"; },
     (artifact: Record<string, any>) => { artifact.books[1].role = "core"; },
     (artifact: Record<string, any>) => { artifact.chunks[0].authority = "contextual"; },
-    (artifact: Record<string, any>) => { artifact.chunks[0].contentStatus = "generated"; },
-    (artifact: Record<string, any>) => { artifact.chunks[0].kind = "page"; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].contentStatus = "verified"; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].kind = "unit"; },
     (artifact: Record<string, any>) => { artifact.chunks[0].sourceId = "unapproved-source"; },
     (artifact: Record<string, any>) => { artifact.books[0].sourceArtifacts[0].authority = "supplement"; },
     (artifact: Record<string, any>) => { artifact.chunks.at(-1).authority = "primary"; },
     (artifact: Record<string, any>) => { artifact.chunks.at(-1).contentStatus = "verified"; },
     (artifact: Record<string, any>) => { artifact.chunks.at(-1).kind = "unit"; },
+  ];
+  for (const mutate of mutations) {
+    withTemporaryArtifact(mutate, (path) => assert.throws(() => buildKnowledgeIndex(path)));
+  }
+});
+
+test("edition 11 original provenance and supplemental actual-edition identities fail closed", () => {
+  const mutations = [
+    (artifact: Record<string, any>) => { artifact.books[0].sourceArtifacts[0].kind = "canonical_units"; },
+    (artifact: Record<string, any>) => { artifact.books[0].sourceArtifacts[0].sha256 = "a".repeat(64); },
+    (artifact: Record<string, any>) => { artifact.books[0].sourceArtifacts[0].edition = 10; },
+    (artifact: Record<string, any>) => { artifact.books[0].sourceArtifacts[0].pageCount = 280; },
+    (artifact: Record<string, any>) => { artifact.books[1].sourceArtifacts[0].authority = "primary"; },
+    (artifact: Record<string, any>) => { artifact.books[1].sourceArtifacts[1].sourceId = "ewp-11-zh-2021"; },
+    (artifact: Record<string, any>) => { artifact.books[1].sourceArtifacts[1].edition = 10; },
+    (artifact: Record<string, any>) => { artifact.books[1].sourceArtifacts.pop(); },
+    (artifact: Record<string, any>) => { artifact.books[1].sourceArtifacts.push({ ...artifact.books[1].sourceArtifacts[0], sourceId: "unknown-source" }); },
+    (artifact: Record<string, any>) => { artifact.books[2].sourceArtifacts[0].sha256 = "a".repeat(64); },
+    (artifact: Record<string, any>) => { artifact.books[3].sourceArtifacts[0].kind = "original_pdf"; },
+    (artifact: Record<string, any>) => { artifact.chunks.find((chunk: any) => chunk.bookId === BOOK_IDS[1]).sourceId = "ewp-11-zh-2021"; },
+    (artifact: Record<string, any>) => { artifact.chunks.find((chunk: any) => chunk.sourceId === "ewp-10-zh-2016::canonical-units").pdfPages = [281]; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].pdfPages = [1]; artifact.chunks[0].href = `/knowledge/books/${BOOK_IDS[0]}#page-1`; },
+    (artifact: Record<string, any>) => { artifact.chunks[0].text = "[本页无可提取文字，请查看原页。]"; },
+    (artifact: Record<string, any>) => { artifact.chunks = artifact.chunks.filter((chunk: any) => chunk.bookId !== BOOK_IDS[0] || chunk.pdfPages[0] !== 34); },
   ];
   for (const mutate of mutations) {
     withTemporaryArtifact(mutate, (path) => assert.throws(() => buildKnowledgeIndex(path)));
@@ -351,7 +376,7 @@ test("all-books retrieval caps every book at four and the merged context at twel
   const context = retrieve(fixtureIndex(chunks), { mode: "all" });
   assert.equal(context.items.length, 12);
   for (const bookId of BOOK_IDS) {
-    assert.equal(context.items.filter((item) => item.bookId === bookId).length, 4);
+    assert.equal(context.items.filter((item) => item.bookId === bookId).length, 3);
   }
 });
 

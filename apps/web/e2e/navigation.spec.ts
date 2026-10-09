@@ -163,16 +163,16 @@ test("knowledge search opens a fully migrated article", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "类型与使用边界" })).toBeVisible();
   await expect(page.getByText(/知识类型：METHOD/)).toBeVisible();
   await expect(page.getByText("原书来源", { exact: true })).toBeVisible();
-  const sourceSummary = page.getByText(/查看第11版补充来源页/);
+  const sourceSummary = page.getByText(/查看第11版原书来源页/);
   await sourceSummary.click();
-  const sourceImage = page.getByRole("button", { name: /放大查看：第11版补充来源页/ }).first();
+  const sourceImage = page.getByRole("button", { name: /放大查看：第11版原书来源/ }).first();
   await expect(sourceImage).toBeVisible();
   await sourceImage.click();
-  await expect(page.getByRole("dialog", { name: /第11版补充来源页/ })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /第11版原书来源/ })).toBeVisible();
   await page.getByRole("button", { name: "放大", exact: true }).click();
   await expect(page.getByText("125%", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: /第11版补充来源页/ })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: /第11版原书来源/ })).toHaveCount(0);
   const imageResponse = await page.request.get("/assets/source-pages/page-269.png");
   expect(imageResponse.status()).toBe(200);
   expect(imageResponse.headers()["content-type"]).toMatch(/^image\/png/);
@@ -180,7 +180,7 @@ test("knowledge search opens a fully migrated article", async ({ page }) => {
 
 test("extension shelf publishes the two supplied distillations with PDF MIME types", async ({ page }) => {
   await page.goto("/knowledge/books");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("三本图书");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("知识库图书");
   await expect(page.locator('a[href="/knowledge/books/elliott-wave-natural-law"]')).toBeVisible();
   await expect(page.locator('a[href="/knowledge/books/chan-theory-complete"]')).toBeVisible();
   for (const title of ["艾略特波浪理论：自然法则", "缠中说禅 CHM 整本文集蒸馏"]) {

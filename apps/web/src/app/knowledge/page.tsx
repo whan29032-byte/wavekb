@@ -5,8 +5,9 @@ import Link from "next/link";
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { knowledgeData } from "@wavekb/knowledge";
 import { KnowledgeExplorer } from "@/components/knowledge-explorer";
-import { CORE_BOOK_ID, getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
+import { getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
 import { buildLibrarySearchDocuments } from "@/lib/knowledge/book-reading";
+import { knowledgePageSourceLabels, sourceEditionLabel } from "@/lib/knowledge/source-labels";
 import { publicMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = publicMetadata({
@@ -24,34 +25,38 @@ export default function KnowledgePage() {
   const data = knowledgeData();
   const books = getKnowledgeBookCatalog(data);
   const coreCount = data.pages.filter((page) => page.kind === "core").length;
-  const listItems = [
-    ...data.pages.map(({ id, title, kind, parent, sections, search_terms, source_refs }) => ({
+  const pageItems = data.pages.map(({ id, title, kind, parent, sections, search_terms, source_refs }) => ({
       id,
       title,
       kind,
       parent,
+      label: kind === "core" ? `补充与版本对照 · ${knowledgePageSourceLabels({ source_refs }).join(" / ")}` : "辅助资料",
       searchText: [
         ...sections.flatMap((section) => [...section.paragraphs, ...section.items]),
         ...search_terms,
         ...source_refs.flatMap((source) => [source.chapter, source.section, source.source_id, ...source.figures]),
       ].join(" "),
-    })),
-    ...books.map((book) => ({
+    }));
+  const documents = buildLibrarySearchDocuments(data);
+  const listItems = [
+    ...books.flatMap((book) => [{
       id: `book-${book.id}`,
       title: book.title,
-      kind: book.kind === "core" ? "core" as const : "candidate" as const,
+      kind: book.role === "core" ? "core" as const : "candidate" as const,
       parent: null,
       href: book.href,
+      label: `${book.label} · ${book.edition}`,
       searchText: [book.edition, book.description, ...book.topics].join(" "),
-    })),
-    ...buildLibrarySearchDocuments(data).filter((document) => document.bookId !== CORE_BOOK_ID).map((document) => ({
+    }, ...(book.kind === "core" ? pageItems.filter((item) => item.kind === "core") : documents.filter((document) => document.bookId === book.id).map((document) => ({
       id: document.id,
       title: `${document.bookTitle} · ${document.title}`,
       kind: "generated" as const,
       parent: null,
       href: document.href,
+      label: book.source.source_kind === "original_pdf" ? `${sourceEditionLabel(book.source.source_id, book.source.edition)}原书文字层提取 · 未逐页核验` : "蒸馏生成页面",
       searchText: document.text,
-    })),
+    })))]),
+    ...pageItems.filter((item) => item.kind !== "core"),
   ];
 
   return (
@@ -61,7 +66,7 @@ export default function KnowledgePage() {
           <h1 className="text-4xl font-semibold tracking-[-0.04em] md:text-5xl">知识库</h1>
           <p className="max-w-[68ch] text-base leading-7 text-muted-foreground">选择一本书，再通过书内搜索、主题、问题或原书章节定位内容。所有核心结论都保留来源与失效边界。</p>
         </div>
-        <p className="text-sm tabular-nums text-muted-foreground"><strong className="text-foreground">{coreCount}</strong> 个核心知识条目</p>
+        <p className="text-sm tabular-nums text-muted-foreground"><strong className="text-foreground">{coreCount}</strong> 个已整理知识条目</p>
       </header>
 
       <KnowledgeExplorer items={listItems} />
@@ -69,7 +74,7 @@ export default function KnowledgePage() {
       <section className="grid gap-5" aria-labelledby="book-shelf-title">
         <header className="grid gap-1">
           <h2 id="book-shelf-title" className="text-2xl font-semibold tracking-tight">选择一本书</h2>
-          <p className="text-sm leading-6 text-muted-foreground">核心主书提供站内规则依据；扩展资料用于交叉阅读，不覆盖核心结论。</p>
+          <p className="text-sm leading-6 text-muted-foreground">第11版原书为主；第10版补充与版本对照保留现有整理条目，其他资料用于交叉阅读。文字、图表和页码均保留真实来源版次。</p>
         </header>
         <div className="grid gap-6 lg:grid-cols-3">
           {books.map((book) => (
@@ -78,7 +83,7 @@ export default function KnowledgePage() {
                 <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="7.25rem" className="object-contain" />
               </div>
               <span className="grid min-w-0 content-start gap-2">
-                <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.kind === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>
+                <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.role === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>
                 <strong className="text-lg leading-6 group-hover:text-primary">{book.title}</strong>
                 <span className="line-clamp-3 text-sm leading-6 text-muted-foreground">{book.description}</span>
                 <span className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-foreground">{book.itemCount} {book.itemLabel}<ArrowRight aria-hidden size={14} className="transition-transform group-hover:translate-x-0.5" /></span>

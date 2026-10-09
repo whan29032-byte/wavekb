@@ -11,7 +11,7 @@ describe("Unit-local original-page illustrations", () => {
     const unit = getKnowledgePage("unit-ewp-rule-zigzag")!;
     const [{ figures }] = coreBookExplanations([`${unit.title}（RULE）\n解释`], [unit]);
     const { container } = render(<KnowledgeUnitIllustrations figures={figures} unitTitle={unit.title} />);
-    expect(screen.getByRole("group", { name: `${unit.title}的第10版原页摘录` })).toBeDefined();
+    expect(screen.getByRole("group", { name: `${unit.title}的第10版补充原页摘录` })).toBeDefined();
     expect(container.querySelectorAll("img")).toHaveLength(figures.length);
     figures.forEach((figure) => {
       const target = document.getElementById(figure.anchorId)!;

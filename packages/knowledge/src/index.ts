@@ -13,6 +13,7 @@ export type KnowledgeAsset = {
   pdf_page?: number;
   book_pages?: number[];
   figure_nos?: string[];
+  asset_sha256?: string;
 };
 
 export type KnowledgeSection = {
@@ -107,10 +108,20 @@ export type KnowledgeLibraryBook = {
   redistribution_allowed: boolean | null;
   source_provenance: string;
   derivative_of: string | null;
+  role?: "core" | "extension";
+  source_kind?: "original_pdf" | "distilled_pdf";
+  source_id?: string;
+  edition?: number;
   topics: string[];
   reading_guide: Array<{ title: string; description: string }>;
   boundaries: string[];
-  text_pages: Array<{ page: number; text: string; illustrations?: KnowledgeBookIllustration[] }>;
+  text_pages: Array<{
+    page: number;
+    text: string;
+    extraction?: { status: "text_layer_extracted" | "image_only"; human_review: string };
+    source_image?: KnowledgeAsset;
+    illustrations?: KnowledgeBookIllustration[];
+  }>;
 };
 
 export type KnowledgeLibrary = {

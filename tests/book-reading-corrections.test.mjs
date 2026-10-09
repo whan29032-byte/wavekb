@@ -37,7 +37,7 @@ test("rejects unknown books, duplicated pages, out-of-range pages, and missing e
   assert.throws(() => reviewedBookCorrections(overlay({ ...correction, source_pdf_sha256: "b".repeat(64) }), [book]), /version mismatch/);
 });
 
-test("compiled three-book content matches the hash-bound overlay and retains all 61 extension pages", () => {
+test("compiled four-book content matches the hash-bound overlay and retains all 61 distilled and 321 original pages", () => {
   const library = read("knowledge/source/library.json");
   const corrections = reviewedBookCorrections(read("knowledge/reading/text-corrections.json"), library.books);
   const compiled = read("packages/knowledge/src/knowledge.json");
@@ -49,7 +49,9 @@ test("compiled three-book content matches the hash-bound overlay and retains all
     assert.deepEqual(compiled.library.books.find((value) => value.id === entry.id).text_pages.map(({ illustrations, ...page }) => page), expected);
     pageCount += expected.length;
   }
-  assert.equal(pageCount, 61);
+  assert.equal(pageCount, 382);
+  assert.equal(compiled.library.books.filter((book) => book.source_kind !== "original_pdf").reduce((total, book) => total + book.text_pages.length, 0), 61);
+  assert.equal(compiled.library.books.find((book) => book.source_kind === "original_pdf").text_pages.length, 321);
   assert.equal(compiled.pages.filter((page) => page.id.startsWith("unit-")).length, 117);
   const publicIds = new Set(compiled.pages.map((page) => page.id));
   for (const page of compiled.pages) assert.ok(page.related_page_ids.every((id) => publicIds.has(id)), page.id);

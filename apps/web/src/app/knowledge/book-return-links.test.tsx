@@ -6,7 +6,7 @@ import KnowledgeChapterPage from "./chapters/[id]/page";
 import KnowledgeThemePage from "./themes/[id]/page";
 import KnowledgeQuestionPage from "./questions/[id]/page";
 import KnowledgeBookDetailPage from "./books/[id]/page";
-import { CORE_BOOK_ID } from "@/lib/knowledge/book-catalog";
+import { UNIT_BOOK_ID } from "@/lib/knowledge/book-catalog";
 
 vi.mock("next/link", () => ({
   default: ({ href, className, children }: AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} className={className} data-next-client-link="true">{children}</a>,
@@ -24,7 +24,7 @@ describe("native book index return links", () => {
   it.each(cases)("returns $section to an existing expanded index without client hash duplication", async ({ section, label, id, Page }) => {
     const source = render(await Page({ params: Promise.resolve({ id }) }));
     const link = screen.getByRole("link", { name: label }) as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe(`/knowledge/books/${CORE_BOOK_ID}?section=${section}#core-${section}`);
+    expect(link.getAttribute("href")).toBe(`/knowledge/books/${UNIT_BOOK_ID}?section=${section}#core-${section}`);
     expect(link.getAttribute("data-next-client-link")).toBeNull();
     expect(link.className).toContain("min-h-11");
     expect(link.className).toContain("focus-visible:outline");
@@ -33,7 +33,7 @@ describe("native book index return links", () => {
     source.unmount();
 
     render(await KnowledgeBookDetailPage({
-      params: Promise.resolve({ id: CORE_BOOK_ID }),
+      params: Promise.resolve({ id: UNIT_BOOK_ID }),
       searchParams: Promise.resolve({ section: destination.searchParams.get("section")! }),
     }));
     const target = document.getElementById(destination.hash.slice(1));

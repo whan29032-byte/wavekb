@@ -3,7 +3,7 @@ import type { WorkbenchAnalysis } from "@wavekb/domain";
 
 export type WorkbenchAnalysisDraft = Omit<WorkbenchAnalysis, "id" | "created_at" | "updated_at">;
 
-export type KnowledgeScopeValue = "all" | "elliott-wave-principle-tenth-edition" | "elliott-wave-natural-law" | "chan-theory-complete";
+export type KnowledgeScopeValue = "all" | "elliott-wave-principle-eleventh-edition" | "elliott-wave-principle-tenth-edition" | "elliott-wave-natural-law" | "chan-theory-complete";
 
 export function createAiRunRequest(step: number, scope: KnowledgeScopeValue, clientRequestId: string) {
   return {

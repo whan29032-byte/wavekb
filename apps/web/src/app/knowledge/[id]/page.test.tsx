@@ -57,7 +57,7 @@ describe("knowledge detail body navigation", () => {
       }
     }
     expect(explanations.querySelector('[data-authority="supplement"]')).toBeNull();
-    expect(screen.queryByRole("region", { name: "第11版补充图示" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "第11版原书图示" })).toBeNull();
   });
 
   it("does not inject full-book illustration references into other aggregate knowledge views", async () => {

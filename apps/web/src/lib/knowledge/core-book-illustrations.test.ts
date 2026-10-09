@@ -63,6 +63,6 @@ describe("core full-book illustration plan", () => {
   });
 
   it("labels the actual original PDF page as an excerpt instead of claiming an exact standalone figure match", () => {
-    expect(coreBookFigureCaption({ ...excerpt, caption: "图1-14与斜纹浪导入", pdf_page: 43, book_pages: [] })).toBe("第10版原页摘录 · 图1-14与斜纹浪导入 · PDF 第 43 页");
+    expect(coreBookFigureCaption({ ...excerpt, caption: "图1-14与斜纹浪导入", pdf_page: 43, book_pages: [] })).toBe("第10版原页摘录（补充资料） · 图1-14与斜纹浪导入 · PDF 第 43 页");
   });
 });

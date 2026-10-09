@@ -9,6 +9,7 @@ it("labels distilled extension-page search results as generated instead of verif
     id: "chan-theory-complete::page::p0001",
     title: "缠中说禅 CHM 整本文集蒸馏 · 第 1 页",
     kind: "generated",
+    label: "蒸馏生成页面",
     parent: null,
     href: "/knowledge/books/chan-theory-complete#page-1",
     searchText: "只在蒸馏网页正文中出现的检索词",

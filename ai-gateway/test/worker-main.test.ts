@@ -93,10 +93,16 @@ function fixtureIndex(chunks: KnowledgeChunk[]): KnowledgeIndex {
     knowledgeVersion: baseJob.knowledge_version as string,
     books: [
       {
-        bookId: "elliott-wave-principle-tenth-edition",
-        title: "Elliott Wave Principle, Tenth Edition",
+        bookId: "elliott-wave-principle-eleventh-edition",
+        title: "Elliott Wave Principle, Eleventh Edition",
         role: "core",
-        sourceArtifacts: [{ sourceId: "core-source", authority: "primary" }],
+        sourceArtifacts: [{ sourceId: "original-source", authority: "primary" }],
+      },
+      {
+        bookId: "elliott-wave-principle-tenth-edition",
+        title: "Elliott Wave Principle, Supplemental Units and Edition Comparison",
+        role: "extension",
+        sourceArtifacts: [{ sourceId: "core-source", authority: "supplement" }],
       },
       {
         bookId: "elliott-wave-natural-law",
@@ -302,18 +308,18 @@ test("the server expands retrieved citation ids from trusted index records", asy
   }]);
 });
 
-test("extension-only retrieval excludes core prose while the tenth-edition hard-rule gate still runs", async () => {
+test("contextual-only retrieval excludes primary eleventh-edition prose while the independent hard-rule gate still runs", async () => {
   const coreChunk = chunk({
     chunkId: "core-rule",
-    bookId: "elliott-wave-principle-tenth-edition",
-    sourceId: "core-source",
+    bookId: "elliott-wave-principle-eleventh-edition",
+    sourceId: "original-source",
     title: "Core rule",
-    text: "CORE TENTH EDITION PROSE MUST NOT LEAK",
-    kind: "unit",
+    text: "PRIMARY ELEVENTH EDITION PROSE MUST NOT LEAK",
+    kind: "page",
     authority: "primary",
-    contentStatus: "verified",
-    pdfPages: [],
-    href: "/knowledge/unit-core-rule",
+    contentStatus: "generated",
+    pdfPages: [34],
+    href: "/knowledge/books/elliott-wave-principle-eleventh-edition#page-34",
     searchable: "target core",
     contentSha256: "c".repeat(64),
   });
@@ -367,7 +373,7 @@ test("extension-only retrieval excludes core prose while the tenth-edition hard-
   await fixture.worker.runJob(baseJob);
 
   const requestText = String(fixture.providerRequests[0]?.messages[0]?.content);
-  assert.doesNotMatch(requestText, /CORE TENTH EDITION PROSE MUST NOT LEAK/);
+  assert.doesNotMatch(requestText, /PRIMARY ELEVENTH EDITION PROSE MUST NOT LEAK/);
   assert.match(requestText, /Trusted extension evidence/);
   const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
   const output = patch?.body?.output_payload as Record<string, any>;
