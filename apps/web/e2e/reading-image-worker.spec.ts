@@ -37,14 +37,15 @@ test.describe("real first-visit reading-worker delivery", () => {
   test.use({ serviceWorkers: "allow" });
 
   for (const shelf of ["/knowledge", "/knowledge/books"]) {
-    test(`the ${shelf} shelf does not download unclicked books while its real client navigation completes`, async ({ page, context }) => {
+    test(`the ${shelf} shelf does not download unclicked books while its real client navigation completes`, async ({ page, context }, testInfo) => {
       const prefetches: string[] = [];
       const navigations: string[] = [];
+      const origin = new URL(String(testInfo.project.use.baseURL)).origin;
       context.on("request", (request) => {
-        const path = new URL(request.url()).pathname;
-        if (!path.startsWith("/knowledge")) return;
+        const url = new URL(request.url());
+        if (url.origin !== origin) return;
         if (request.headers()["next-router-prefetch"]) prefetches.push(request.url());
-        if (request.isNavigationRequest()) navigations.push(path);
+        if (url.pathname.startsWith("/knowledge") && request.isNavigationRequest()) navigations.push(url.pathname);
       });
       await page.goto(shelf);
       const books = page.getByRole("region", { name: "知识库图书", exact: true }).getByRole("link");
@@ -60,17 +61,18 @@ test.describe("real first-visit reading-worker delivery", () => {
     });
   }
 
-  test("a fresh first visit acquires the controller and loads real verified range bytes", async ({ page, context }) => {
+  test("a fresh first visit acquires the controller and loads real verified range bytes", async ({ page, context }, testInfo) => {
     expect(context.serviceWorkers()).toHaveLength(0);
     const parts = observeParts(context);
-    const unclickedKnowledgePrefetches: string[] = [];
+    const unclickedSameOriginPrefetches: string[] = [];
+    const origin = new URL(String(testInfo.project.use.baseURL)).origin;
     const offlineShellRequests: string[] = [];
     const separateWorkerHelpers: string[] = [];
     context.on("request", (request) => {
       if (new URL(request.url()).pathname === "/offline.html") offlineShellRequests.push(request.url());
       if (["/sw-policy.js", "/sw-reading-images.js"].includes(new URL(request.url()).pathname)) separateWorkerHelpers.push(request.url());
-      if (new URL(request.url()).pathname.startsWith("/knowledge") && request.headers()["next-router-prefetch"]) {
-        unclickedKnowledgePrefetches.push(request.url());
+      if (new URL(request.url()).origin === origin && request.headers()["next-router-prefetch"]) {
+        unclickedSameOriginPrefetches.push(request.url());
       }
     });
     // No interception or readiness sleep: scroll as soon as real SSR exists.
@@ -88,7 +90,7 @@ test.describe("real first-visit reading-worker delivery", () => {
       return entry?.workerStart || 0;
     }, imagePath);
     expect(workerStart).toBeGreaterThan(0);
-    expect(unclickedKnowledgePrefetches).toEqual([]);
+    expect(unclickedSameOriginPrefetches).toEqual([]);
     expect(offlineShellRequests).toEqual([]);
     expect(separateWorkerHelpers).toEqual([]);
     const cachedOffline = await page.evaluate(async () => {

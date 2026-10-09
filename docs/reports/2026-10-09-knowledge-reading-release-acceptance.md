@@ -51,3 +51,22 @@ The actual origin projection showed Nginx 1.24.0 with the HTTP/2 module compiled
 Diagnostic fixtures and related workflow/state tests: 51 passed locally, zero skips; all 18 transport fixtures also passed on the fresh Ubuntu runner. These are diagnostic-tool proofs, not a replacement for the still-failed 92-case product acceptance. The diagnostic branch is not merged into production and contains no changed frontend or knowledge source files.
 
 Keep the failed acceptance result, source integrity checks and original time budgets intact. Further source-server or VPN/CDN changes require a specific evidence-backed scope; do not claim complete acceptance from deployment success or response headers alone.
+
+## Follow-up candidate, 2026-10-10
+
+The fresh remote baseline remains `05af67a5d48dd777979797180b5e6d98c5259e6a`. A trace-backed client omission was found: `AccountNavigation` used a direct Next Link, so unclicked `/login` RSC prefetch overlapped actual image Range requests. The candidate changes only that component's Link import to the existing `ReadingPriorityLink`. Anonymous login and authenticated personal links now use the reading-priority policy; non-reading routes, authentication, identity, sign-out and visible layout are unchanged.
+
+Six additional account unit cases cover anonymous/authenticated reading and normal non-reading prefetch. The original reading-worker browser observation now checks every same-origin prefetch destination, including `/login`, rather than only `/knowledge` paths. No original image, navigation, native-size, cache or five-second assertion is weakened.
+
+- Complete candidate unit run: **1,424 passed, one existing absent-Nginx-fixture skip**, exit 0. The 18 focused account/reading-link cases are included, not added to this total.
+- Workspace typecheck and frontend lint: exit 0.
+- Build using the same public Supabase and legacy-origin configuration as the production workflow: exit 0.
+- Actual configured local reader/navigation/worker/hydration acceptance: **104 passed**, two workers, zero retries, 39.7 seconds. Evidence: `apps/web/test-results/knowledge-account-link-local-20261010-b/`; log: `/tmp/wavekb-knowledge-account-link-local-20261010-b.log`.
+- The earlier local run was interrupted after revealing the preview build lacked the public Supabase configuration, producing a client error page. Its evidence remains in `knowledge-account-link-local-20261010-a`; it is not counted as a passing product run.
+- Source assets, PDFs, knowledge corpus and generated reading-image mapping remain identical to `origin/main`.
+
+This candidate is not yet published or fully accepted on the Mac's public access path. Removing unclicked account prefetch reduces irrelevant traffic but does not establish that all previously incomplete response bodies now meet the original gates. The original **74/92** result and all 18 failures above remain valid retained evidence until an independently recorded new run passes.
+
+The user authorized publishing after completion. A reversible `wavekb.com`-only direct rule in the actual Shadowrocket client is prepared, but has not been saved; global VPN, other domains and Hermes remain unchanged. Once the rule is authorized at save time, verify the effective path and the same four full-body/SHA probes, then run the 14 original sparse cases and the unchanged 92-case public acceptance with zero retries and new artifact directories.
+
+The account component change triggers `posting_required=true` in the existing deployment preflight. Production release must retain real posting and authenticated member-shell acceptance and cleanup; do not use the diagnostic-only classification or a read-only override. There are no Gateway, migration or system-service changes.

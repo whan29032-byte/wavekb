@@ -1,21 +1,67 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { AccountNavigation } from "./account-navigation";
 import { notifyIdentityChanged } from "@/lib/member/identity-events";
 import { installBrowserStorage } from "@/test/browser-storage";
-const mocks = vi.hoisted(() => ({ read: vi.fn(), auth: vi.fn(), session: vi.fn(), unsubscribe: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({}) }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), auth: vi.fn(), session: vi.fn(), unsubscribe: vi.fn(), link: vi.fn(), pathname: "/community/idea_sharing" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({}), usePathname: () => mocks.pathname }));
+vi.mock("next/link", () => ({ default: ({ prefetch, ...props }: ComponentProps<"a"> & { prefetch?: boolean | null }) => {
+  mocks.link({ prefetch, ...props });
+  return <a {...props} />;
+} }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({
   rpc: mocks.read,
   auth: { getSession: mocks.session, onAuthStateChange: mocks.auth },
 }) }));
 beforeEach(() => {
   installBrowserStorage();
+  mocks.pathname = "/community/idea_sharing";
   mocks.read.mockReset(); mocks.session.mockReset(); mocks.auth.mockReset();
   mocks.session.mockResolvedValue({ data: { session: { user: { id: "owner" } } } });
   mocks.auth.mockReturnValue({ data: { subscription: { unsubscribe: mocks.unsubscribe } } });
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
+it.each(["/knowledge", "/knowledge/core-full-book", "/knowledge/books/elliott-wave-principle-eleventh-edition"])("does not prefetch the anonymous login link while reading %s", async (pathname) => {
+  mocks.pathname = pathname;
+  mocks.session.mockResolvedValue({ data: { session: null } });
+  render(<AccountNavigation />);
+  const link = await screen.findByRole("link", { name: "登录" });
+  expect(link.getAttribute("href")).toBe("/login");
+  const loginCalls = mocks.link.mock.calls.filter(([props]) => props.href === "/login");
+  expect(loginCalls.length).toBeGreaterThan(0);
+  expect(loginCalls.every(([props]) => props.prefetch === false)).toBe(true);
+});
+
+it("does not prefetch either authenticated personal link while reading", async () => {
+  mocks.pathname = "/knowledge/books/elliott-wave-principle-eleventh-edition";
+  mocks.read.mockResolvedValue({ data: [{ id: "owner", public_uid: 12345, nameplate_style: "blackgold" }], error: null });
+  render(<AccountNavigation />);
+  await waitFor(() => expect(screen.getAllByLabelText("UID 12345")).toHaveLength(2));
+  expect(screen.getAllByLabelText("UID 12345").every((element) => element.closest("a")?.getAttribute("href") === "/member/12345")).toBe(true);
+  const profileCalls = mocks.link.mock.calls.filter(([props]) => props.href === "/member/12345");
+  expect(profileCalls.length).toBeGreaterThanOrEqual(2);
+  expect(profileCalls.every(([props]) => props.prefetch === false)).toBe(true);
+});
+
+it("preserves the anonymous login link's default prefetch policy outside reading", async () => {
+  mocks.session.mockResolvedValue({ data: { session: null } });
+  render(<AccountNavigation />);
+  expect((await screen.findByRole("link", { name: "登录" })).getAttribute("href")).toBe("/login");
+  const loginCalls = mocks.link.mock.calls.filter(([props]) => props.href === "/login");
+  expect(loginCalls.length).toBeGreaterThan(0);
+  expect(loginCalls.every(([props]) => props.prefetch === undefined)).toBe(true);
+});
+
+it("preserves authenticated personal links' default prefetch policy outside reading", async () => {
+  mocks.read.mockResolvedValue({ data: [{ id: "owner", public_uid: 12345, nameplate_style: "blackgold" }], error: null });
+  render(<AccountNavigation />);
+  await waitFor(() => expect(screen.getAllByLabelText("UID 12345")).toHaveLength(2));
+  const profileCalls = mocks.link.mock.calls.filter(([props]) => props.href === "/member/12345");
+  expect(profileCalls.length).toBeGreaterThanOrEqual(2);
+  expect(profileCalls.every(([props]) => props.prefetch === undefined)).toBe(true);
+});
+
 it("shows an accessible bounded account placeholder until the initial session resolves", async () => {
   let finishSession!: (result: unknown) => void;
   mocks.session.mockReturnValue(new Promise((resolve) => { finishSession = resolve; }));
