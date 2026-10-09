@@ -108,6 +108,25 @@ export function createReadingImageManifest(proofs) {
   return manifest;
 }
 
+// Static source-verified lengths remove a serial network probe. The hash still
+// names the complete bytes; this is not a license to skip response/SHA checks.
+export function createReadingImageSizes(proofs) {
+  const sizes = {};
+  for (const proof of proofs) {
+    if (!sha256Pattern.test(proof.webp_sha256) || proof.url !== `/assets/reading-images/${proof.webp_sha256}.webp`
+      || !Number.isSafeInteger(proof.webp_bytes) || proof.webp_bytes <= 0
+      || (sizes[proof.webp_sha256] !== undefined && sizes[proof.webp_sha256] !== proof.webp_bytes)) {
+      throw new Error(`Invalid or conflicting reading image size: ${proof.source_path}`);
+    }
+    sizes[proof.webp_sha256] = proof.webp_bytes;
+  }
+  return Object.fromEntries(Object.entries(sizes).sort(([left], [right]) => left.localeCompare(right, "en")));
+}
+
+export function readingImageSizeScript(proofs) {
+  return `/* BEGIN VERIFIED READING IMAGE SIZES */\nself.WaveKBReadingImageSizes = Object.freeze(${JSON.stringify(createReadingImageSizes(proofs))});\n/* END VERIFIED READING IMAGE SIZES */`;
+}
+
 export function assertReadingImageProof(actual, expected) {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`Reading image delivery proof changed; explicit reviewed manifest update required: ${actual.source_path}`);

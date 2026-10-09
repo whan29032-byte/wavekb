@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertPinnedReadingImageSource, assertReadingImageProof, collectReadingImageSources,
-  createReadingImageManifest, deriveReadingImage, readingImageEncoder, sha256,
+  createReadingImageManifest, deriveReadingImage, readingImageEncoder, readingImageSizeScript, sha256,
 } from "./lib/reading-images.mjs";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -11,6 +11,7 @@ const repositoryRoot = path.resolve(appRoot, "../..");
 const manifestPath = path.join(appRoot, "src/lib/knowledge/generated-reading-images.json");
 const integrityPath = path.join(repositoryRoot, "knowledge/reading/image-delivery-integrity.json");
 const outputDirectory = path.join(appRoot, "public/assets/reading-images");
+const workerPath = path.join(appRoot, "public/sw.js");
 const updateManifest = process.argv.includes("--update-manifest");
 if (process.argv.slice(2).some((argument) => argument !== "--update-manifest")) throw new Error("Unknown reading image generation argument");
 const start = performance.now();
@@ -65,6 +66,10 @@ if (updateManifest) {
 } else if (JSON.stringify(JSON.parse(fs.readFileSync(manifestPath, "utf8"))) !== JSON.stringify(manifest)) {
   throw new Error("Reading image client manifest differs from verified derivatives");
 }
+const workerSource = fs.readFileSync(workerPath, "utf8");
+const sizeProjection = /\/\* BEGIN VERIFIED READING IMAGE SIZES \*\/[\s\S]*?\/\* END VERIFIED READING IMAGE SIZES \*\//g;
+if ([...workerSource.matchAll(sizeProjection)].length !== 1) throw new Error("Missing or duplicate verified worker image-size projection");
+fs.writeFileSync(workerPath, workerSource.replace(sizeProjection, readingImageSizeScript(results)));
 const originalBytes = results.reduce((sum, asset) => sum + asset.source_bytes, 0);
 const derivedBytes = results.reduce((sum, asset) => sum + asset.webp_bytes, 0);
 console.log(`Verified ${results.length} native-size, pixel-identical WebP reading images: ${originalBytes} -> ${derivedBytes} bytes (${((1 - derivedBytes / originalBytes) * 100).toFixed(2)}% less); originals unchanged; ${(performance.now() - start).toFixed(0)} ms.`);

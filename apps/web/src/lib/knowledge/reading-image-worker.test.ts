@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readingImageWorkerReady } from "./reading-image-worker";
+import { cancelHiddenReadingImage, readingImageWorkerReady } from "./reading-image-worker";
+import type { PwaRegistrationWindow } from "@/lib/pwa-bootstrap";
 
 const url = `/assets/reading-images/${"a".repeat(64)}.webp`;
 const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
 type Worker = { scriptURL: string; postMessage: (message: unknown, ports: Array<{ postMessage: (value: unknown) => void }>) => void };
 let workers: EventTarget & { controller: Worker | null; ready: Promise<unknown> };
-const worker = (path = "/sw.js", capable = true, version = 2): Worker => ({
+const worker = (path = "/sw.js", capable = true, version = 3): Worker => ({
   scriptURL: new URL(path, location.href).href,
   postMessage: vi.fn((_message, ports) => { if (capable) ports[0].postMessage({ version }); }),
 });
@@ -24,6 +25,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  delete (window as PwaRegistrationWindow).__wavekbPwaRegistration;
+  delete (window as PwaRegistrationWindow).__wavekbPwaRegistrationFailed;
   if (previous) Object.defineProperty(navigator, "serviceWorker", previous);
   else Reflect.deleteProperty(navigator, "serviceWorker");
 });
@@ -79,7 +82,7 @@ describe("a bounded first-visit reading worker opportunity", () => {
   });
 
   it("an old same-URL controller does not pass until a capable replacement really claims the tab", async () => {
-    workers.controller = worker("/sw.js", true, 1);
+    workers.controller = worker("/sw.js", true, 2);
     const finished = vi.fn();
     const result = readingImageWorkerReady(url, new AbortController().signal);
     void result?.then(finished);
@@ -98,6 +101,27 @@ describe("a bounded first-visit reading worker opportunity", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("unblocks immediately when parser registration explicitly returns undefined or rejects", async () => {
+    for (const registration of [Promise.resolve(undefined), Promise.reject(new Error("blocked"))]) {
+      (window as PwaRegistrationWindow).__wavekbPwaRegistration = registration;
+      await readingImageWorkerReady(url, new AbortController().signal);
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  it("does not wait after a known synchronous failure, but a new pending retry still gets its bounded chance", async () => {
+    const owner = window as PwaRegistrationWindow;
+    owner.__wavekbPwaRegistrationFailed = true;
+    expect(readingImageWorkerReady(url, new AbortController().signal)).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+    owner.__wavekbPwaRegistration = new Promise(() => {});
+    const result = readingImageWorkerReady(url, new AbortController().signal);
+    expect(result).toBeInstanceOf(Promise);
+    await vi.advanceTimersByTimeAsync(1200);
+    await result;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("registration rejection and unmount cancellation unblock normal delivery without leaked timers", async () => {
     workers.ready = Promise.reject(new Error("Registration disabled"));
     await readingImageWorkerReady(url, new AbortController().signal);
@@ -109,5 +133,24 @@ describe("a bounded first-visit reading worker opportunity", () => {
     await result;
     expect(vi.getTimerCount()).toBe(0);
     expect(readingImageWorkerReady(url, cancel.signal)).toBeUndefined();
+  });
+});
+
+describe("hidden-image cancellation scope", () => {
+  it("sends only the public hashed pathname to this tab's real root controller", () => {
+    workers.controller = worker();
+    cancelHiddenReadingImage(url);
+    expect(workers.controller.postMessage).toHaveBeenCalledExactlyOnceWith({ type: "wavekb-reading-image-hidden", path: url });
+  });
+
+  it("does not send original, cross-origin, query, hash or unrelated-controller targets", () => {
+    const root = worker();
+    workers.controller = root;
+    for (const value of [undefined, "/assets/figures-v10/page-043.png", "https://external.invalid" + url, url + "?preview=1", url + "#fragment"]) cancelHiddenReadingImage(value);
+    expect(root.postMessage).not.toHaveBeenCalled();
+    const other = worker("/other.js");
+    workers.controller = other;
+    cancelHiddenReadingImage(url);
+    expect(other.postMessage).not.toHaveBeenCalled();
   });
 });

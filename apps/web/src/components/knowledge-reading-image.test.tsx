@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeReadingImage } from "./knowledge-reading-image";
+import * as readingWorker from "@/lib/knowledge/reading-image-worker";
 
 const source = { url: "/assets/figures-v10/page-043.png", optimizedUrl: "/assets/reading-images/page-043.webp", alt: "第10版原页摘录", width: 1191, height: 1755 };
 let notify: IntersectionObserverCallback;
@@ -18,7 +19,7 @@ beforeEach(() => {
     disconnect = disconnect;
   });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function enterViewport(isIntersecting = true) {
   act(() => notify([{ target, isIntersecting } as IntersectionObserverEntry], {} as IntersectionObserver));
@@ -51,7 +52,7 @@ describe("knowledge reading image loading", () => {
     expect((image as HTMLImageElement).style.display).toBe("block");
     expect(container.querySelector("[data-reading-image-state]")?.getAttribute("data-reading-image-state")).toBe("loading");
     expect(screen.getByRole("status").textContent).toBe("正在载入原图…");
-    expect(disconnect).toHaveBeenCalledOnce();
+    expect(disconnect).not.toHaveBeenCalled();
     fireEvent.load(image);
     expect(container.querySelector("[data-reading-image-state]")?.getAttribute("data-reading-image-state")).toBe("loaded");
     expect(screen.queryByRole("status")).toBeNull();
@@ -108,5 +109,72 @@ describe("knowledge reading image loading", () => {
     expect(image.getAttribute("loading")).toBe("lazy");
     expect((image as HTMLImageElement).style.display).toBe("none");
     expect(container.querySelector("[data-reading-image-state]")?.getAttribute("data-reading-image-state")).toBe("waiting");
+  });
+
+  it("cancels a hidden pending native image without triggering a PNG fallback, then requests the same real source on re-entry", () => {
+    const cancel = vi.spyOn(readingWorker, "cancelHiddenReadingImage").mockImplementation(() => {});
+    const { container } = render(<KnowledgeReadingImage {...source} />);
+    enterViewport();
+    const previous = screen.getByAltText(source.alt);
+    enterViewport(false);
+    const hidden = screen.getByAltText(source.alt);
+    expect(hidden).not.toBe(previous);
+    expect((hidden as HTMLImageElement).style.display).toBe("none");
+    expect(hidden.getAttribute("loading")).toBe("lazy");
+    expect(hidden.getAttribute("src")).toBe(source.url);
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(source.optimizedUrl);
+    fireEvent.error(previous);
+    fireEvent.error(hidden);
+    expect(container.querySelector("[data-reading-image-state]")?.getAttribute("data-reading-image-state")).toBe("waiting");
+    enterViewport();
+    const resumed = screen.getByAltText(source.alt);
+    expect(resumed.getAttribute("srcset")).toBe(source.optimizedUrl);
+    expect(resumed.getAttribute("src")).toBe(source.url);
+    expect(resumed.getAttribute("width")).toBe("1191");
+    expect(resumed.getAttribute("height")).toBe("1755");
+    expect((resumed as HTMLImageElement).style.display).toBe("block");
+    fireEvent.error(previous);
+    expect(resumed.getAttribute("srcset")).toBe(source.optimizedUrl);
+    fireEvent.error(resumed);
+    expect(resumed.getAttribute("srcset")).toBeNull();
+    fireEvent.load(resumed);
+    expect(container.querySelector("[data-reading-image-state]")?.getAttribute("data-reading-image-state")).toBe("loaded");
+  });
+
+  it("aborts worker preparation on exit and ignores its late resolution before normal re-entry", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => { finish = resolve; });
+    const ready = vi.spyOn(readingWorker, "readingImageWorkerReady").mockReturnValueOnce(pending).mockReturnValue(undefined);
+    const cancel = vi.spyOn(readingWorker, "cancelHiddenReadingImage").mockImplementation(() => {});
+    const { container } = render(<KnowledgeReadingImage {...source} />);
+    enterViewport();
+    const signal = ready.mock.calls[0][1];
+    expect(signal.aborted).toBe(false);
+    enterViewport(false);
+    expect(signal.aborted).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+    await act(async () => { finish(); await pending; });
+    expect((screen.getByAltText(source.alt) as HTMLImageElement).style.display).toBe("none");
+    expect(container.querySelector("[data-reading-image-state]")?.getAttribute("data-reading-image-state")).toBe("waiting");
+    enterViewport();
+    expect((screen.getByAltText(source.alt) as HTMLImageElement).style.display).toBe("block");
+    expect(ready).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cancel completed bytes when scrolling away, but cancels a pending request on unmount", () => {
+    const cancel = vi.spyOn(readingWorker, "cancelHiddenReadingImage").mockImplementation(() => {});
+    const first = render(<KnowledgeReadingImage {...source} />);
+    enterViewport();
+    fireEvent.load(screen.getByAltText(source.alt));
+    enterViewport(false);
+    expect(cancel).not.toHaveBeenCalled();
+    expect((screen.getByAltText(source.alt) as HTMLImageElement).style.display).toBe("block");
+    first.unmount();
+    expect(cancel).not.toHaveBeenCalled();
+    const pending = render(<KnowledgeReadingImage {...source} />);
+    enterViewport();
+    pending.unmount();
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(source.optimizedUrl);
+    expect(disconnect).toHaveBeenCalledTimes(2);
   });
 });

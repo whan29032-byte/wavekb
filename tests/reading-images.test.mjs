@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   assertPinnedReadingImageSource, assertReadingImageProof, collectReadingImageSources,
-  createReadingImageManifest, deriveReadingImage, readingImageEncoder, sha256,
+  createReadingImageManifest, createReadingImageSizes, deriveReadingImage, readingImageEncoder, readingImageSizeScript, sha256,
 } from "../apps/web/scripts/lib/reading-images.mjs";
 
 const appRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
@@ -54,6 +54,21 @@ test("normal builds cannot silently accept changed sources, pixels, dimensions o
   assert.throws(() => createReadingImageManifest([{ ...expected, url: "/assets/reading-images/unhashed.webp" }]), /Invalid/);
 });
 
+test("worker sizes come only from complete content-addressed verified metadata", () => {
+  const hash = "a".repeat(64);
+  const proof = { source_path: fixture.asset_path, webp_sha256: hash, webp_bytes: 404664, url: `/assets/reading-images/${hash}.webp` };
+  assert.deepEqual(createReadingImageSizes([proof, proof]), { [hash]: 404664 });
+  for (const webp_bytes of [0, -1, 1.2, Number.MAX_SAFE_INTEGER + 1, "404664", undefined]) {
+    assert.throws(() => createReadingImageSizes([{ ...proof, webp_bytes }]), /Invalid/);
+  }
+  assert.throws(() => createReadingImageSizes([proof, { ...proof, webp_bytes: 404665 }]), /conflicting/);
+  assert.throws(() => createReadingImageSizes([{ ...proof, url: "/assets/original.png" }]), /Invalid/);
+  const scope = {};
+  new Function("self", readingImageSizeScript([proof]))(scope);
+  assert.deepEqual(scope.WaveKBReadingImageSizes, { [hash]: 404664 });
+  assert.equal(Object.isFrozen(scope.WaveKBReadingImageSizes), true);
+});
+
 test("checked-in manifest covers exactly the current references with unchanged source hashes and dimensions", async () => {
   const knowledge = JSON.parse(fs.readFileSync(path.join(root, "packages/knowledge/src/knowledge.json"), "utf8"));
   const sources = collectReadingImageSources(knowledge);
@@ -63,6 +78,10 @@ test("checked-in manifest covers exactly the current references with unchanged s
   assert.deepEqual(integrity.encoder, readingImageEncoder);
   assert.deepEqual(integrity.assets.map((asset) => asset.source_path), sources.map((source) => source.source_path));
   assert.deepEqual(manifest, createReadingImageManifest(integrity.assets));
+  const workerSource = fs.readFileSync(path.join(root, "apps/web/public/sw.js"), "utf8");
+  const projection = workerSource.match(/\/\* BEGIN VERIFIED READING IMAGE SIZES \*\/[\s\S]*?\/\* END VERIFIED READING IMAGE SIZES \*\//)?.[0];
+  assert.equal(projection, readingImageSizeScript(integrity.assets));
+  assert.ok(workerSource.indexOf(projection) < workerSource.indexOf("importScripts("));
   for (let index = 0; index < sources.length; index++) {
     const source = sources[index];
     const original = fs.readFileSync(path.join(root, source.source_path));
@@ -70,5 +89,8 @@ test("checked-in manifest covers exactly the current references with unchanged s
     const metadata = await sharp(original).metadata();
     assert.equal(metadata.width, integrity.assets[index].width);
     assert.equal(metadata.height, integrity.assets[index].height);
+    const derivative = fs.readFileSync(path.join(root, "apps/web/public", integrity.assets[index].url));
+    assert.equal(derivative.byteLength, integrity.assets[index].webp_bytes);
+    assert.equal(sha256(derivative), integrity.assets[index].webp_sha256);
   }
 });
