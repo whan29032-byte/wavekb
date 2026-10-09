@@ -258,9 +258,54 @@ function requestSnapshotOnce(url, { port = 443, tls = true, headers = {} } = {},
   });
 }
 
-function command(binary, args) {
-  try { return execFileSync(binary, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000, maxBuffer: 16 * 1024 * 1024 }); }
+function command(binary, args, timeout = 30000) {
+  try { return execFileSync(binary, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout, maxBuffer: 16 * 1024 * 1024 }); }
   catch (error) { throw new ControlledFailure(`Production ${path.basename(binary)} ${args[0]} command failed (exit ${Number.isInteger(error.status) ? error.status : "unknown"}); output values omitted`); }
+}
+
+export function nginxWorkerIds(output) {
+  const ids = output.split("\n").flatMap((line) => {
+    const match = /^\s*([1-9][0-9]*)\s+nginx: worker process(?: \(nginx\))?\s*$/.exec(line);
+    return match ? [Number(match[1])] : [];
+  });
+  requireValue(ids.every(Number.isSafeInteger) && new Set(ids).size === ids.length, "Unknown Nginx worker identity");
+  return ids.sort((a, b) => a - b);
+}
+
+export async function waitForNginxGeneration(before, readSnapshot) {
+  requireValue(before && Number.isSafeInteger(before.master) && before.master > 0 && Array.isArray(before.workers) && before.workers.length > 0
+    && before.workers.every((pid) => Number.isSafeInteger(pid) && pid > 0)
+    && new Set(before.workers).size === before.workers.length, "Unknown original Nginx generation");
+  const deadline = Date.now() + 2000;
+  let ready = null;
+  while (Date.now() < deadline) {
+    const next = await readSnapshot(deadline - Date.now());
+    requireValue(next && next.master === before.master, "Nginx master changed during reload");
+    requireValue(Array.isArray(next.workers) && next.workers.every((pid) => Number.isSafeInteger(pid) && pid > 0)
+      && new Set(next.workers).size === next.workers.length, "Unknown new Nginx generation");
+    const replaced = next.workers.length === before.workers.length
+      && next.workers.every((pid) => !before.workers.includes(pid));
+    const identity = [...next.workers].sort((a, b) => a - b).join(",");
+    if (Date.now() < deadline && replaced && ready === identity) return;
+    ready = replaced ? identity : null;
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(25, remaining)));
+  }
+  throw new ControlledFailure("Nginx new worker generation was not ready within the fixed reload budget");
+}
+
+function nginxGeneration(budget = 1000) {
+  requireValue(budget > 0, "Nginx generation metadata budget exceeded");
+  const deadline = Date.now() + Math.min(1000, budget);
+  const timeout = () => {
+    const remaining = deadline - Date.now();
+    requireValue(remaining > 0, "Nginx generation metadata budget exceeded");
+    return Math.max(1, Math.min(500, remaining));
+  };
+  const master = command("/usr/bin/systemctl", ["show", "nginx", "-p", "MainPID", "--value"], timeout()).trim();
+  requireValue(/^[1-9][0-9]*$/.test(master) && Number.isSafeInteger(Number(master)), "Unknown Nginx master identity");
+  const workers = nginxWorkerIds(command("/usr/bin/ps", ["--ppid", master, "-ww", "-o", "pid=,args="], timeout()));
+  return { master: Number(master), workers };
 }
 function secureDirectory(directory) {
   const stat = fs.lstatSync(directory);
@@ -352,7 +397,12 @@ export function productionRuntime(transactionId) {
       fs.renameSync(temporary, inspected.realFile); syncDirectory(path.dirname(inspected.realFile));
     },
     async test() { command("/usr/sbin/nginx", ["-t"]); },
-    async reload() { command("/usr/bin/systemctl", ["reload", "nginx"]); },
+    async reload() {
+      const before = nginxGeneration();
+      requireValue(before.workers.length > 0, "No current Nginx workers were detected before reload");
+      command("/usr/bin/systemctl", ["reload", "nginx"]);
+      await waitForNginxGeneration(before, nginxGeneration);
+    },
     async verify(context) { await verifyPublicDelivery(context); },
   };
   return runtime;
@@ -385,7 +435,11 @@ async function verifyPublicDelivery(context) {
       requireValue(full.status === 200 && full.size === source.size && full.sha256 === source.sha256
         && full.headers["content-type"]?.startsWith(mime), "Full public source byte/MIME proof failed");
       if (managed && encoding === "gzip" && mime !== "image/webp") {
-        requireValue(full.headers["content-encoding"] === "gzip" && full.wireSize < source.size, "Transparent source gzip proof failed");
+        const compressed = full.headers["content-encoding"] === "gzip";
+        const receivedEncoding = !full.headers["content-encoding"] ? "none"
+          : ["gzip", "identity"].includes(full.headers["content-encoding"]) ? full.headers["content-encoding"] : "other";
+        requireValue(compressed && full.wireSize < source.size,
+          `Transparent source gzip proof failed (${mime}; encoding=${receivedEncoding}; wire=${full.wireSize}; decoded=${full.size}; source=${source.size})`);
       }
       requireValue(full.headers["cache-control"] === (immutable ? "public, max-age=31536000, immutable" : "public, max-age=0"), "Public source cache policy changed");
       for (const [header, value] of [["x-content-type-options", "nosniff"], ["referrer-policy", "strict-origin-when-cross-origin"],

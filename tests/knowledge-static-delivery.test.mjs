@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { createServer as createHttpServer } from "node:http";
 import test from "node:test";
-import { buildCandidate, runTransaction, validateVersion, staticLocations, requestSnapshot } from "../scripts/knowledge-static-delivery.mjs";
+import { buildCandidate, runTransaction, validateVersion, staticLocations, requestSnapshot, nginxWorkerIds, waitForNginxGeneration } from "../scripts/knowledge-static-delivery.mjs";
 
 // Independently transcribed from read-only production routing run 37887955912.
 const site = `server {
@@ -124,6 +124,137 @@ test("unknown host, competing asset location, proxy target, headers, TLS, includ
 test("supported Nginx version is checked without enabling TLS/http2 or optional modules", () => {
   assert.equal(validateVersion("nginx version: nginx/1.24.0"), "1.24.0");
   for (const version of ["nginx/1.16.1", "unknown", "nginx/0.8.0"]) assert.throws(() => validateVersion(version), /version/);
+});
+
+test("Nginx worker parsing accepts only complete active worker titles and returns sorted safe PID identities", () => {
+  assert.deepEqual(nginxWorkerIds(`
+    312 nginx: worker process
+    301 nginx: worker process (nginx)
+    298 nginx: worker process is shutting down
+    299 nginx: cache manager process
+    300 nginx: master process /usr/sbin/nginx
+    304 unrelated: worker process
+  `), [301, 312]);
+  for (const text of ["", " ", "0 nginx: worker process", "-1 nginx: worker process", "01 nginx: worker process",
+    "1.5 nginx: worker process", "1e3 nginx: worker process", "NaN nginx: worker process", "Infinity nginx: worker process",
+    "101 nginx: worker process extra", "101 nginx: worker process (other)", "101 nginx: worker process is shutting down (nginx)",
+    "101 prefix nginx: worker process", "prefix 101 nginx: worker process", "101 nginx: worker process;", "101 nginx: worker process\rjunk"]) {
+    assert.deepEqual(nginxWorkerIds(text), [], text);
+  }
+});
+
+test("Nginx worker parsing rejects duplicate active PIDs and unsafe numeric identities instead of merging them", () => {
+  for (const text of ["101 nginx: worker process\n101 nginx: worker process (nginx)",
+    "9007199254740992 nginx: worker process", "999999999999999999999999999 nginx: worker process"]) {
+    assert.throws(() => nginxWorkerIds(text), /worker identity/);
+  }
+});
+
+test("Nginx generation requires two consecutive observations of the same complete new PID set, independent of order", async () => {
+  const snapshots = [{ master: 100, workers: [212, 211] }, { master: 100, workers: [211, 212] }];
+  let reads = 0;
+  await waitForNginxGeneration({ master: 100, workers: [101, 102] }, async (budget) => {
+    assert.equal(budget > 0 && budget <= 2000, true);
+    assert.equal(reads < snapshots.length, true); return snapshots[reads++];
+  });
+  assert.equal(reads, 2);
+});
+
+test("coexisting old/new or partially replaced Nginx workers cannot pass the generation barrier", async () => {
+  const snapshots = [[101, 102, 211, 212], [101, 211], [211, 212], [212, 211]];
+  let reads = 0;
+  await waitForNginxGeneration({ master: 100, workers: [101, 102] }, async () => {
+    assert.equal(reads < snapshots.length, true); return { master: 100, workers: snapshots[reads++] };
+  });
+  assert.equal(reads, 4);
+});
+
+test("a changed new PID set or reappearance of the old generation resets Nginx readiness stability", async () => {
+  const snapshots = [[211, 212], [311, 312], [101, 102], [311, 312], [312, 311]];
+  let reads = 0;
+  await waitForNginxGeneration({ master: 100, workers: [101, 102] }, async () => {
+    assert.equal(reads < snapshots.length, true); return { master: 100, workers: snapshots[reads++] };
+  });
+  assert.equal(reads, 5);
+});
+
+test("retiring Nginx worker titles are excluded while a stable active replacement generation is verified", async () => {
+  let reads = 0;
+  await waitForNginxGeneration({ master: 100, workers: [101, 102] }, async () => {
+    reads++;
+    return { master: 100, workers: nginxWorkerIds("101 nginx: worker process is shutting down\n102 nginx: worker process is shutting down\n211 nginx: worker process\n212 nginx: worker process (nginx)") };
+  });
+  assert.equal(reads, 2);
+});
+
+test("a changed or missing Nginx master identity fails immediately even when the new workers look complete", async () => {
+  for (const master of [200, undefined, null, "100", 0, -1, Number.NaN]) {
+    let reads = 0;
+    await assert.rejects(waitForNginxGeneration({ master: 100, workers: [101, 102] }, async () => {
+      reads++; return { master, workers: [211, 212] };
+    }), /master changed/);
+    assert.equal(reads, 1);
+  }
+});
+
+test("missing or malformed original Nginx generation metadata is rejected before reading any new snapshot", async () => {
+  for (const before of [null, undefined, {}, { master: 100 }, { master: 100, workers: null }, { master: 100, workers: "101" },
+    { master: 100, workers: [] }, { master: 0, workers: [101] }, { master: "100", workers: [101] },
+    { master: 100, workers: [0] }, { master: 100, workers: [-1] }, { master: 100, workers: [101, 101] },
+    { master: 100, workers: [Number.MAX_SAFE_INTEGER + 1] }, { master: 100, workers: [Number.NaN] }]) {
+    let reads = 0;
+    await assert.rejects(waitForNginxGeneration(before, async () => { reads++; return { master: 100, workers: [211] }; }), /original Nginx generation/);
+    assert.equal(reads, 0);
+  }
+});
+
+test("missing or malformed replacement Nginx metadata is rejected rather than interpreted as a ready generation", async () => {
+  for (const next of [null, undefined, {}, { master: 100 }, { master: 100, workers: null }, { master: 100, workers: "211" },
+    { master: 100, workers: [0] }, { master: 100, workers: [-1] }, { master: 100, workers: [1.5] },
+    { master: 100, workers: [211, 211] }, { master: 100, workers: [Number.NaN] },
+    { master: 100, workers: [Number.POSITIVE_INFINITY] }, { master: 100, workers: [Number.MAX_SAFE_INTEGER + 1] }]) {
+    let reads = 0;
+    await assert.rejects(waitForNginxGeneration({ master: 100, workers: [101] }, async () => { reads++; return next; }), /new Nginx generation|master changed/);
+    assert.equal(reads, 1);
+  }
+});
+
+test("no active Nginx worker metadata cannot satisfy the fixed generation deadline", async () => {
+  const realNow = Date.now, initial = realNow();
+  let clockNow = initial, reads = 0;
+  try {
+    Date.now = () => clockNow;
+    await assert.rejects(waitForNginxGeneration({ master: 100, workers: [101] }, async (budget) => {
+      assert.equal(budget, 2000); reads++; clockNow = initial + 2000;
+      return { master: 100, workers: nginxWorkerIds("101 nginx: worker process is shutting down\n200 nginx: cache manager process") };
+    }), /fixed reload budget/);
+    assert.equal(reads, 1);
+  } finally { Date.now = realNow; }
+});
+
+test("the real two-second generation budget expires if Nginx never replaces its active old workers", async () => {
+  const budgets = [], started = Date.now();
+  await assert.rejects(waitForNginxGeneration({ master: 100, workers: [101] }, async (budget) => {
+    budgets.push(budget); return { master: 100, workers: [101] };
+  }), /fixed reload budget/);
+  assert.equal(Date.now() - started >= 2000, true);
+  assert.equal(budgets.length > 1, true);
+  assert.equal(budgets.every((budget) => budget > 0 && budget <= 2000), true);
+  assert.equal(budgets.every((budget, index) => index === 0 || budget <= budgets[index - 1]), true);
+});
+
+test("a replacement observation arriving after the two-second absolute deadline is never accepted", async () => {
+  const realNow = Date.now, initial = realNow();
+  let clockNow = initial, reads = 0;
+  try {
+    Date.now = () => clockNow;
+    await assert.rejects(waitForNginxGeneration({ master: 100, workers: [101] }, async (budget) => {
+      assert.equal(budget > 0 && budget <= 2000, true);
+      reads++; clockNow = initial + (reads === 1 ? 1999 : 2001);
+      return { master: 100, workers: [211] };
+    }), /fixed reload budget/);
+    assert.equal(reads, 2);
+  } finally { Date.now = realNow; }
 });
 
 test("default mode is read-only audit with no backup, config write, reload or state update", async () => {
@@ -393,15 +524,18 @@ test("real Nginx fixture: native bytes, gzip decode, identity/gzip ranges, missi
   const webpPath = `/assets/reading-images/${hash(webp)}.webp`;
   fs.writeFileSync(path.join(publicRoot, webpPath), webp);
   const config = path.join(temp, "nginx.conf");
-  fs.writeFileSync(config, `pid ${temp}/nginx.pid; error_log ${temp}/logs/error.log; events {} http {
+  const fixtureConfig = (locations) => `pid ${temp}/nginx.pid; worker_processes 2; error_log ${temp}/logs/error.log; events {} http {
     access_log off;
     client_body_temp_path ${temp}/client-body;
     proxy_temp_path ${temp}/proxy;
     fastcgi_temp_path ${temp}/fastcgi;
     uwsgi_temp_path ${temp}/uwsgi;
     scgi_temp_path ${temp}/scgi;
-    server { listen 127.0.0.1:${port}; ${staticLocations(publicRoot)} location / { return 418; } }
-  }`);
+    server { listen 127.0.0.1:${port}; ${locations} location / { return 418; } }
+  }`;
+  // Start an actual old generation without the asset locations. The same
+  // master must gracefully activate the static candidate before byte proofs.
+  fs.writeFileSync(config, fixtureConfig(""));
   const binary = process.env.KNOWLEDGE_NGINX_TEST_BIN;
   const checked = spawnSync(binary, ["-t", "-c", config, "-p", `${temp}/`, "-e", `${temp}/logs/error.log`], { encoding: "utf8", timeout: 5000 });
   assert.equal(checked.status, 0, checked.error?.message || checked.stderr);
@@ -424,6 +558,30 @@ test("real Nginx fixture: native bytes, gzip decode, identity/gzip ranges, missi
       } catch { await new Promise((resolve) => setTimeout(resolve, 20)); }
     }
     assert.equal(ready, true, startError?.message || diagnostics || fs.readFileSync(`${temp}/logs/error.log`, "utf8"));
+    const readGeneration = (budget) => {
+      const masterText = fs.readFileSync(`${temp}/nginx.pid`, "utf8").trim();
+      assert.match(masterText, /^[1-9][0-9]*$/);
+      const master = Number(masterText);
+      assert.equal(Number.isSafeInteger(master), true); assert.equal(master, child.pid);
+      const workers = spawnSync("/usr/bin/ps", ["--ppid", masterText, "-ww", "-o", "pid=,args="],
+        { encoding: "utf8", timeout: Math.max(1, Math.min(500, budget)) });
+      assert.equal(workers.status, 0, workers.error?.message || workers.stderr);
+      return { master, workers: nginxWorkerIds(workers.stdout) };
+    };
+    const before = readGeneration(1000);
+    assert.equal(before.workers.length, 2);
+    fs.writeFileSync(config, fixtureConfig(staticLocations(publicRoot)));
+    const reloadChecked = spawnSync(binary, ["-t", "-c", config, "-p", `${temp}/`, "-e", `${temp}/logs/error.log`], { encoding: "utf8", timeout: 5000 });
+    assert.equal(reloadChecked.status, 0, reloadChecked.error?.message || reloadChecked.stderr);
+    process.kill(before.master, "SIGHUP");
+    const generations = [];
+    await waitForNginxGeneration(before, async (budget) => {
+      const next = readGeneration(budget); generations.push(next); return next;
+    });
+    const after = generations.at(-1);
+    assert.equal(after.master, before.master); assert.equal(after.workers.length, before.workers.length);
+    assert.equal(after.workers.every((pid) => !before.workers.includes(pid)), true);
+    assert.deepEqual(after.workers, generations.at(-2).workers);
     for (const [url, source, mime] of [["/assets/books/test.pdf", pdf, "application/pdf"], ["/assets/figures-v10/test.png", png, "image/png"], [webpPath, webp, "image/webp"]]) {
       for (const encoding of ["identity", "gzip"]) {
         const full = await requestSnapshot(url, { port, tls: false, headers: { "Accept-Encoding": encoding } });
