@@ -237,7 +237,7 @@ test("new workflow operation is isolated and preserves all prior operation contr
   const workflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8"));
   const inputs = (workflow.on ?? workflow.true).workflow_dispatch.inputs;
   assert.equal(inputs.operation.default, "release");
-  assert.deepEqual(inputs.operation.options, ["release", "release-state", "mentor-account", "integration-config"]);
+  assert.deepEqual(inputs.operation.options, ["release", "release-state", "knowledge-transport", "mentor-account", "integration-config"]);
   const steps = workflow.jobs.diagnose.steps, step = steps.find((value) => value.if === "inputs.operation == 'release-state'");
   assert.match(step.run, /< scripts\/diagnose-release-state\.mjs/);
   assert.match(step.run, /sudo -n \/usr\/bin\/node --input-type=module - '\$\{RELEASE_ID\}'/);
