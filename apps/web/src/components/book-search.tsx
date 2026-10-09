@@ -73,7 +73,7 @@ export function BookSearch({ bookId, items, placeholder = "搜索本书章节、
             <Input id={`${bookId}-search`} type="search" disabled={!hydrated} aria-describedby={`${bookId}-search-hint`} value={query} onChange={(event) => updateQuery(event.target.value)} placeholder={placeholder} className="pl-10" />
           </div>
         </div>
-        <Link href="/knowledge#knowledge-search" className="text-sm font-medium text-primary hover:underline">搜索全部知识库</Link>
+        <Link href="/knowledge#knowledge-search" prefetch={false} className="text-sm font-medium text-primary hover:underline">搜索全部知识库</Link>
       </div>
 
       {query.trim() ? results.length ? (

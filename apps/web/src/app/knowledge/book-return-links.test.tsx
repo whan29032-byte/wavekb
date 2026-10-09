@@ -9,7 +9,7 @@ import KnowledgeBookDetailPage from "./books/[id]/page";
 import { UNIT_BOOK_ID } from "@/lib/knowledge/book-catalog";
 
 vi.mock("next/link", () => ({
-  default: ({ href, className, children }: AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} className={className} data-next-client-link="true">{children}</a>,
+  default: ({ href, className, children, prefetch }: AnchorHTMLAttributes<HTMLAnchorElement> & { prefetch?: boolean }) => <a href={href} className={className} data-next-client-link="true" data-prefetch={String(prefetch)}>{children}</a>,
 }));
 afterEach(() => cleanup());
 
@@ -29,6 +29,7 @@ describe("native book index return links", () => {
     expect(link.className).toContain("min-h-11");
     expect(link.className).toContain("focus-visible:outline");
     expect(source.container.querySelectorAll("a[data-next-client-link]").length).toBeGreaterThan(0);
+    source.container.querySelectorAll("a[data-next-client-link]").forEach((entry) => expect(entry.getAttribute("data-prefetch")).toBe("false"));
     const destination = new URL(link.href);
     source.unmount();
 
