@@ -14,6 +14,52 @@ function renderNavigator(pages = pageNumbers) {
 }
 
 describe("book page navigation", () => {
+  it.each(["summary", "button"] as const)("keeps an already focused %s when initial hash navigation hydrates", (control) => {
+    window.history.replaceState({}, "", "/knowledge/books/test?q=结构#page-57");
+    const { container } = render(<section id="page-57" tabIndex={-1}>
+      {control === "summary" ? <details><summary>查看原页</summary><p>原页内容</p></details> : <button type="button">放大查看</button>}
+    </section>);
+    const focused = container.querySelector<HTMLElement>(control)!;
+    focused.focus();
+    expect(document.activeElement).toBe(focused);
+
+    render(<BookPageNavigation bookId="test" pageNumbers={[57]} />);
+
+    expect(document.activeElement).toBe(focused);
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("当前定位：第 57 页");
+    expect(screen.getByRole("textbox", { name: "跳至页码" }).getAttribute("value")).toBe("57");
+    expect(new URL(window.location.href).searchParams.get("q")).toBe("结构");
+  });
+
+  it("restores an initial hash target when the reader has not focused a control", () => {
+    window.history.replaceState({}, "", "/knowledge/books/test?q=结构#page-20");
+    expect(document.activeElement).toBe(document.body);
+
+    renderNavigator();
+
+    expect(document.activeElement?.id).toBe("page-20");
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ behavior: "instant", block: "start" });
+    expect(screen.getByRole("status").textContent).toContain("当前定位：第 20 页");
+    expect(new URL(window.location.href).searchParams.get("q")).toBe("结构");
+  });
+
+  it.each(["hashchange", "popstate"] as const)("still moves focus for explicit %s navigation", (eventType) => {
+    renderNavigator();
+    const input = screen.getByRole("textbox", { name: "跳至页码" });
+    input.focus();
+    expect(document.activeElement).toBe(input);
+    window.history.replaceState({}, "", "/knowledge/books/test?q=结构#page-20");
+
+    fireEvent(window, eventType === "hashchange" ? new HashChangeEvent("hashchange") : new PopStateEvent("popstate"));
+
+    expect(document.activeElement?.id).toBe("page-20");
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ behavior: "instant", block: "start" });
+    expect(screen.getByRole("status").textContent).toContain("当前定位：第 20 页");
+    expect(screen.getByRole("textbox", { name: "跳至页码" }).getAttribute("value")).toBe("20");
+    expect(new URL(window.location.href).searchParams.get("q")).toBe("结构");
+  });
+
   it("jumps directly to an existing page and keeps the numbered window bounded", () => {
     renderNavigator();
     fireEvent.change(screen.getByRole("textbox", { name: "跳至页码" }), { target: { value: "20" } });

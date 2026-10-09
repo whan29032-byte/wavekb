@@ -21,7 +21,10 @@ export function BookPageNavigation({ bookId, pageNumbers }: { bookId: string; pa
     }
     const fromNavigation = () => syncLocation();
     const fromHistory = () => syncLocation(true);
-    syncLocation(true);
+    // Late hydration must not move focus away from a control the reader has already chosen.
+    const activeElement = document.activeElement;
+    const restoreInitialFocus = activeElement === null || activeElement === document.body || activeElement === document.documentElement;
+    syncLocation(restoreInitialFocus);
     window.addEventListener(BOOK_LOCATION_EVENT, fromNavigation);
     window.addEventListener("hashchange", fromHistory);
     window.addEventListener("popstate", fromHistory);
