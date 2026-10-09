@@ -82,15 +82,21 @@ test("checked-in manifest covers exactly the current references with unchanged s
   const projection = workerSource.match(/\/\* BEGIN VERIFIED READING IMAGE SIZES \*\/[\s\S]*?\/\* END VERIFIED READING IMAGE SIZES \*\//)?.[0];
   assert.equal(projection, readingImageSizeScript(integrity.assets));
   assert.ok(workerSource.indexOf(projection) < workerSource.indexOf("importScripts("));
-  for (let index = 0; index < sources.length; index++) {
-    const source = sources[index];
-    const original = fs.readFileSync(path.join(root, source.source_path));
-    assertPinnedReadingImageSource(source, original, integrity.assets[index]);
-    const metadata = await sharp(original).metadata();
-    assert.equal(metadata.width, integrity.assets[index].width);
-    assert.equal(metadata.height, integrity.assets[index].height);
-    const derivative = fs.readFileSync(path.join(root, "apps/web/public", integrity.assets[index].url));
-    assert.equal(derivative.byteLength, integrity.assets[index].webp_bytes);
-    assert.equal(sha256(derivative), integrity.assets[index].webp_sha256);
+  // Unit contracts run before assets:sync in a clean checkout. Derive actual
+  // bytes in memory from the pinned original rather than trusting a leftover
+  // build artifact (or skipping validation when that artifact is absent).
+  let next = 0;
+  async function verifySource() {
+    while (next < sources.length) {
+      const index = next++;
+      const source = sources[index];
+      const original = fs.readFileSync(path.join(root, source.source_path));
+      assertPinnedReadingImageSource(source, original, integrity.assets[index]);
+      const result = await deriveReadingImage(source, original);
+      assertReadingImageProof(result.proof, integrity.assets[index]);
+      assert.equal(result.bytes.byteLength, integrity.assets[index].webp_bytes);
+      assert.equal(sha256(result.bytes), integrity.assets[index].webp_sha256);
+    }
   }
+  await Promise.all(Array.from({ length: 4 }, verifySource));
 });
