@@ -153,6 +153,21 @@ for (const fail of ["test", "reload", "verify"]) {
   });
 }
 
+test("post-install and recovery failures expose exact safe stages without arbitrary underlying values", async () => {
+  const f = fixture();
+  f.runtime.test = async () => { throw Object.assign(new Error("secret-value-must-not-be-logged"), { code: "SENTINEL_SENSITIVE_CODE" }); };
+  await assert.rejects(runTransaction({ mode: "apply", id }, f.runtime), (error) => {
+    assert.match(error.message, /apply_nginx_test/);
+    assert.match(error.message, /recovery_nginx_test/);
+    assert.doesNotMatch(error.message, /secret-value/);
+    assert.doesNotMatch(error.message, /SENTINEL_SENSITIVE_CODE/);
+    return true;
+  });
+  assert.equal(f.bytes.toString(), site);
+  assert.equal(f.state.phase, "rollback_failed");
+  await assert.rejects(runTransaction({ mode: "rollback", id }, f.runtime), /rollback_nginx_test/);
+});
+
 test("rollback needs durable matching state, is byte-exact and refuses foreign config instead of overwriting it", async () => {
   const f = fixture(); await assert.rejects(runTransaction({ mode: "rollback", id }, f.runtime), /missing/);
   await runTransaction({ mode: "apply", id }, f.runtime);

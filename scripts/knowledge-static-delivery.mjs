@@ -16,7 +16,15 @@ const publicRoot = `${current}/apps/web/public`;
 const stateRoot = "/var/lib/wavekb-knowledge-static-delivery";
 const idPattern = /^[a-f0-9]{40}-[1-9][0-9]*-[1-9][0-9]*$/;
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const requireValue = (condition, message) => { if (!condition) throw new Error(message); };
+class ControlledFailure extends Error {}
+const requireValue = (condition, message) => { if (!condition) throw new ControlledFailure(message); };
+const failureDetail = (error) => error instanceof ControlledFailure ? error.message
+  : ["EACCES", "EPERM", "ENOENT", "EEXIST", "EINVAL", "EIO", "ENOSPC", "ETIMEDOUT", "ECONNREFUSED", "ECONNRESET"].includes(error?.code)
+    ? error.code : "failed; underlying values omitted";
+async function atStage(stage, action) {
+  try { return await action(); }
+  catch (error) { throw new ControlledFailure(`${stage}: ${failureDetail(error)}`); }
+}
 const begin = "# BEGIN WAVEKB KNOWLEDGE STATIC DELIVERY v1";
 const end = "# END WAVEKB KNOWLEDGE STATIC DELIVERY v1";
 const security = `        add_header X-Content-Type-Options "nosniff" always;
@@ -162,17 +170,17 @@ export async function runTransaction({ mode = "audit", id } = {}, runtime) {
     let restored = presentHash === state.originalHash;
     try {
       if (!alreadyVerified) {
-        state.phase = "rolling_back"; await runtime.save(id, state);
-        if (!restored) { await runtime.install(saved.backup, state.candidateHash); restored = true; }
+        state.phase = "rolling_back"; await atStage("rollback_save", () => runtime.save(id, state));
+        if (!restored) { await atStage("rollback_install", () => runtime.install(saved.backup, state.candidateHash)); restored = true; }
       }
-      await runtime.test();
-      if (!alreadyVerified) await runtime.reload();
-      await runtime.verify(context);
+      await atStage("rollback_nginx_test", () => runtime.test());
+      if (!alreadyVerified) await atStage("rollback_reload", () => runtime.reload());
+      await atStage("rollback_public_proof", () => runtime.verify(context));
       if (!alreadyVerified) { state.phase = "rolled_back"; await runtime.save(id, state); }
       return { mode, phase: "rolled_back", id, deployment: context.deployment, idempotent: alreadyVerified };
-    } catch {
+    } catch (error) {
       state.phase = "rollback_failed"; await runtime.save(id, state);
-      throw new Error(restored ? "Exact vhost bytes restored; Nginx recovery verification failed, rollback may be retried" : "Exact rollback installation failed; operator review is required");
+      throw new ControlledFailure(`${restored ? "Exact vhost bytes restored; Nginx recovery verification failed, rollback may be retried" : "Exact rollback installation failed; operator review is required"} (${failureDetail(error)})`);
     }
   }
   const candidate = buildCandidate(context.bytes);
@@ -184,21 +192,25 @@ export async function runTransaction({ mode = "audit", id } = {}, runtime) {
     originalHash: sha(context.bytes), candidateHash: sha(candidate.bytes), mode: context.mode, uid: context.uid, gid: context.gid };
   await runtime.prepare(id, state, context.bytes);
   try {
-    state.phase = "installing"; await runtime.save(id, state);
-    await runtime.install(candidate.bytes, state.originalHash);
-    await runtime.test(); await runtime.reload(); await runtime.verify(context);
+    state.phase = "installing"; await atStage("apply_save", () => runtime.save(id, state));
+    await atStage("apply_install", () => runtime.install(candidate.bytes, state.originalHash));
+    await atStage("apply_nginx_test", () => runtime.test());
+    await atStage("apply_reload", () => runtime.reload());
+    await atStage("apply_public_proof", () => runtime.verify(context));
     state.phase = "applied"; await runtime.save(id, state);
     return { mode, phase: state.phase, id, deployment: context.deployment };
-  } catch {
+  } catch (error) {
     try {
-      await runtime.install(context.bytes, state.candidateHash);
-      await runtime.test(); await runtime.reload(); await runtime.verify(context);
+      await atStage("recovery_install", () => runtime.install(context.bytes, state.candidateHash));
+      await atStage("recovery_nginx_test", () => runtime.test());
+      await atStage("recovery_reload", () => runtime.reload());
+      await atStage("recovery_public_proof", () => runtime.verify(context));
       state.phase = "rolled_back"; await runtime.save(id, state);
-    } catch {
+    } catch (recoveryError) {
       state.phase = "rollback_failed"; await runtime.save(id, state);
-      throw new Error("Static delivery failed; exact rollback needs operator review");
+      throw new ControlledFailure(`Static delivery failed (${failureDetail(error)}); exact rollback needs operator review (${failureDetail(recoveryError)})`);
     }
-    throw new Error("Static delivery failed; exact rollback verified");
+    throw new ControlledFailure(`Static delivery failed; exact rollback verified (${failureDetail(error)})`);
   }
 }
 
@@ -229,7 +241,7 @@ export function requestSnapshot(url, { port = 443, tls = true, headers = {} } = 
 
 function command(binary, args) {
   try { return execFileSync(binary, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000, maxBuffer: 16 * 1024 * 1024 }); }
-  catch { throw new Error("Production capability command failed; values omitted"); }
+  catch (error) { throw new ControlledFailure(`Production ${path.basename(binary)} ${args[0]} command failed (exit ${Number.isInteger(error.status) ? error.status : "unknown"}); output values omitted`); }
 }
 function secureDirectory(directory) {
   const stat = fs.lstatSync(directory);
@@ -381,5 +393,5 @@ if (process.argv[1] === "-" || process.argv[1] && import.meta.url === pathToFile
     requireValue(process.argv.length <= 4, "No host/file/path overrides are allowed");
     const result = await runTransaction({ mode, id }, productionRuntime(id));
     console.log(JSON.stringify(result));
-  } catch (error) { console.error(error.message); process.exitCode = 1; }
+  } catch (error) { console.error(failureDetail(error)); process.exitCode = 1; }
 }
