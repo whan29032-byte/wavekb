@@ -18,7 +18,7 @@ describe("on-demand original source page", () => {
     expect(summary.className).toContain("min-h-11");
     fireEvent.click(summary);
     await waitFor(() => expect(container.querySelector("img")).not.toBeNull());
-    expect(screen.getByRole("img").getAttribute("src")).toBe(`/${asset.asset_path}`);
+    expect((await screen.findByRole("img")).getAttribute("src")).toBe(`/${asset.asset_path}`);
     expect(screen.getByText(/第11版原书原页 · PDF 第 43 页 · ewp-11-zh-2021/)).toBeDefined();
     fireEvent.click(summary);
     await waitFor(() => expect(container.querySelector("img")).toBeNull());

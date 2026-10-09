@@ -42,8 +42,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
+        {/* Register independently of stylesheet-blocked classic scripts. The
+            appearance bootstrap still runs before any page content paints. */}
+        <script id="wavekb-pwa-bootstrap" type="module" async dangerouslySetInnerHTML={{ __html: PWA_BOOTSTRAP }} />
         <script dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOTSTRAP }} />
-        <script id="wavekb-pwa-bootstrap" dangerouslySetInnerHTML={{ __html: PWA_BOOTSTRAP }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(structuredData) }} />
       </head>
       <body className="font-sans antialiased">

@@ -81,7 +81,11 @@ test("checked-in manifest covers exactly the current references with unchanged s
   const workerSource = fs.readFileSync(path.join(root, "apps/web/public/sw.js"), "utf8");
   const projection = workerSource.match(/\/\* BEGIN VERIFIED READING IMAGE SIZES \*\/[\s\S]*?\/\* END VERIFIED READING IMAGE SIZES \*\//)?.[0];
   assert.equal(projection, readingImageSizeScript(integrity.assets));
-  assert.ok(workerSource.indexOf(projection) < workerSource.indexOf("importScripts("));
+  const helperStart = workerSource.indexOf("/* BEGIN BUNDLED PUBLIC WORKER HELPERS */");
+  assert.ok(helperStart > workerSource.indexOf(projection));
+  const helperBytes = ["sw-policy.js", "sw-reading-images.js"].map((name) => fs.readFileSync(path.join(root, "apps/web/public", name), "utf8")).join("\n");
+  assert.ok(workerSource.includes(`/* BEGIN BUNDLED PUBLIC WORKER HELPERS */\n${helperBytes}\n/* END BUNDLED PUBLIC WORKER HELPERS */`));
+  assert.doesNotMatch(workerSource, /\bimportScripts\s*\(/);
   // Unit contracts run before assets:sync in a clean checkout. Derive actual
   // bytes in memory from the pinned original rather than trusting a leftover
   // build artifact (or skipping validation when that artifact is absent).

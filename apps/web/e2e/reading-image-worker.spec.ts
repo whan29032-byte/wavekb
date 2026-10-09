@@ -5,6 +5,7 @@ const delivery: Record<string, string> = JSON.parse(readFileSync(new URL("../src
 const originalPath = "/assets/figures-v10/page-043.png";
 const imagePath = delivery[originalPath];
 const bookPath = "/knowledge/core-full-book";
+const offlineDocument = readFileSync(new URL("../public/offline.html", import.meta.url), "utf8");
 
 type PartResponse = { range: string; status: number; contentRange: string };
 
@@ -39,7 +40,11 @@ test.describe("real first-visit reading-worker delivery", () => {
     expect(context.serviceWorkers()).toHaveLength(0);
     const parts = observeParts(context);
     const unclickedKnowledgePrefetches: string[] = [];
+    const offlineShellRequests: string[] = [];
+    const separateWorkerHelpers: string[] = [];
     context.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/offline.html") offlineShellRequests.push(request.url());
+      if (["/sw-policy.js", "/sw-reading-images.js"].includes(new URL(request.url()).pathname)) separateWorkerHelpers.push(request.url());
       if (new URL(request.url()).pathname.startsWith("/knowledge") && request.headers()["next-router-prefetch"]) {
         unclickedKnowledgePrefetches.push(request.url());
       }
@@ -60,6 +65,13 @@ test.describe("real first-visit reading-worker delivery", () => {
     }, imagePath);
     expect(workerStart).toBeGreaterThan(0);
     expect(unclickedKnowledgePrefetches).toEqual([]);
+    expect(offlineShellRequests).toEqual([]);
+    expect(separateWorkerHelpers).toEqual([]);
+    const cachedOffline = await page.evaluate(async () => {
+      const response = await (await caches.open("wavekb-shell-v2")).match("/offline.html");
+      return response ? { body: await response.text(), type: response.headers.get("content-type") } : null;
+    });
+    expect(cachedOffline).toEqual({ body: offlineDocument, type: "text/html; charset=utf-8" });
   });
 
   test("a second visit reuses the completed real image without downloading range parts again", async ({ page, context }) => {
@@ -101,12 +113,15 @@ test.describe("local browser without a reading worker", () => {
   test.describe("parser registration before hydration", () => {
     test.use({ serviceWorkers: "allow" });
 
-    test("real worker registration begins while all Next hydration scripts are still held", async ({ page, context }, testInfo) => {
+    test("real worker registration begins while stylesheets and all Next hydration scripts are still held", async ({ page, context }, testInfo) => {
       expect(["127.0.0.1", "localhost", "[::1]"]).toContain(new URL(String(testInfo.project.use.baseURL)).hostname);
       expect(context.serviceWorkers()).toHaveLength(0);
       let release!: () => void;
       const held = new Promise<void>((resolve) => { release = resolve; });
-      await page.route("**/_next/static/**/*.js", async (route) => { await held; await route.continue(); });
+      let heldStylesheets = 0;
+      let heldHydrationScripts = 0;
+      await page.route((url) => url.pathname.startsWith("/_next/static/") && url.pathname.endsWith(".js"), async (route) => { heldHydrationScripts++; await held; await route.continue(); });
+      await page.route((url) => url.pathname.startsWith("/_next/static/") && url.pathname.endsWith(".css"), async (route) => { heldStylesheets++; await held; await route.continue(); });
       try {
         await page.goto(bookPath, { waitUntil: "commit" });
         await expect(page.locator("#wavekb-pwa-bootstrap")).toHaveCount(1);
@@ -114,6 +129,8 @@ test.describe("local browser without a reading worker", () => {
         await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL))
           .toBe(new URL("/sw.js", page.url()).href);
         expect(context.serviceWorkers()).toHaveLength(1);
+        expect(heldStylesheets).toBeGreaterThan(0);
+        expect(heldHydrationScripts).toBeGreaterThan(0);
       } finally {
         release();
       }
@@ -122,6 +139,42 @@ test.describe("local browser without a reading worker", () => {
 
   test.describe("viewport cancellation with a real worker", () => {
     test.use({ serviceWorkers: "allow" });
+
+    test("an explicit reading target preempts an unfinished neighbor that remains visible", async ({ page, context }, testInfo) => {
+      expect(["127.0.0.1", "localhost", "[::1]"]).toContain(new URL(String(testInfo.project.use.baseURL)).hostname);
+      await page.setViewportSize({ width: 390, height: 1000 });
+      const neighborSource = "/assets/figures-v10/page-047.png";
+      const neighborPath = delivery[neighborSource];
+      const parts = observeParts(context);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let heldNeighborParts = 0;
+      await context.route((url) => url.pathname === neighborPath, async (route) => {
+        if (route.request().serviceWorker() && route.request().headers()["range"]) {
+          heldNeighborParts++;
+          await held;
+        }
+        try { await route.continue(); } catch { /* Genuine target preemption may already have aborted this request. */ }
+      });
+      try {
+        await page.goto(bookPath);
+        const neighbor = page.locator('[data-core-book-figure="assets/figures-v10/page-047.png"]');
+        await neighbor.evaluate((element) => { element.scrollIntoView({ block: "start" }); (element as HTMLElement).focus({ preventScroll: true }); });
+        await expect.poll(() => heldNeighborParts).toBeGreaterThan(0);
+        const target = page.locator('[data-core-book-figure="assets/figures-v10/page-043.png"]');
+        await target.evaluate((element) => { element.scrollIntoView({ block: "start" }); (element as HTMLElement).focus({ preventScroll: true }); });
+        expect(await neighbor.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.bottom > 0 && rect.top < innerHeight;
+        })).toBe(true);
+        await readActualImage(page);
+        expect(parts).toHaveLength(4);
+        expect(parts.every((part) => part.status === 206)).toBe(true);
+      } finally {
+        release();
+        await context.unrouteAll({ behavior: "wait" });
+      }
+    });
 
     for (const entry of ["direct", "home SPA"] as const) {
     test(`a new reading target completes while the offscreen previous image is still held after ${entry} entry`, async ({ page, context }, testInfo) => {
