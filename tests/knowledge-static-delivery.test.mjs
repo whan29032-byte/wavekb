@@ -503,6 +503,25 @@ test("the fixed total proof deadline stops a new connection when a reset backoff
   } finally { Date.now = realNow; clearTimeout(advance); }
 });
 
+test("an actual socket reset received after the total proof deadline reports the controlled budget failure without a second GET", async () => {
+  const realNow = Date.now, initial = realNow();
+  let clockNow = initial;
+  try {
+    await withHttpSocketFixture((request) => {
+      // Exhaust the unchanged 120-second budget at the actual reset itself,
+      // not in a later timer/backoff callback, and never sleep for that budget.
+      clockNow = initial + 120001;
+      request.socket.destroy();
+    }, async ({ port, requests, connections }) => {
+      Date.now = () => clockNow;
+      await assert.rejects(requestSnapshot("/source.png", { port, tls: false }), { message: "Public probe budget exceeded" });
+      assert.equal(requests.length, 1); assert.equal(connections.length, 1);
+      assert.equal(requests[0].method, "GET"); assert.equal(requests[0].url, "/source.png");
+      assert.equal(requests[0].headers.connection, "close");
+    });
+  } finally { Date.now = realNow; }
+});
+
 test("real Nginx fixture: native bytes, gzip decode, identity/gzip ranges, missing hash and unrelated proxy isolation", { skip: !process.env.KNOWLEDGE_NGINX_TEST_BIN }, async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-nginx-assets-"));
   // Nothing relies on the distribution's /var/log or /var/lib paths. The

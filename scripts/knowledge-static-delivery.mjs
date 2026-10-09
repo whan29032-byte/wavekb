@@ -225,7 +225,9 @@ export async function requestSnapshot(url, options = {}) {
     requireValue(Date.now() < deadline, "Public probe budget exceeded");
     try { return await requestSnapshotOnce(url, options, deadline); }
     catch (error) {
-      if (attempt === 2 || !["ECONNRESET", "ECONNREFUSED"].includes(error?.code) || Date.now() >= deadline) throw error;
+      const retryable = ["ECONNRESET", "ECONNREFUSED"].includes(error?.code);
+      if (retryable) requireValue(Date.now() < deadline, "Public probe budget exceeded");
+      if (attempt === 2 || !retryable) throw error;
       await new Promise((resolve) => setTimeout(resolve, Math.min(50 * (attempt + 1), Math.max(0, deadline - Date.now()))));
     }
   }
