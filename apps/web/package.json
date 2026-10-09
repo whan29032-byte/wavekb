@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "assets:sync": "node scripts/sync-legacy-assets.mjs",
+    "assets:sync": "node scripts/sync-legacy-assets.mjs && node scripts/generate-reading-images.mjs",
     "assets:check": "node scripts/check-knowledge-assets.mjs",
     "predev": "pnpm assets:sync",
     "dev": "next dev",
@@ -42,6 +42,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "16.3.0",
     "jsdom": "^30.0.1",
+    "sharp": "0.35.3",
     "storybook": "^10.5.8",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",

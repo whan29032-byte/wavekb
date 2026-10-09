@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import type { KnowledgeData } from "@wavekb/knowledge";
+const images: Record<string, string> = JSON.parse(readFileSync(new URL("../src/lib/knowledge/generated-reading-images.json", import.meta.url), "utf8"));
 
 const data = JSON.parse(readFileSync(new URL("../../../packages/knowledge/src/knowledge.json", import.meta.url), "utf8")) as KnowledgeData;
 const book = data.library.books.find((book) => book.id === "elliott-wave-natural-law")!;
@@ -21,9 +22,12 @@ test("Natural Law: all 14 reviewed original image groups are in the right pages 
     await expect(region).toHaveCount(1);
     expect(await region.evaluate((element) => element.previousElementSibling?.textContent)).toBe(figure.after_heading);
     const image = region.locator("img");
-    await image.scrollIntoViewIfNeeded();
+    // Scroll the stable figure, not its not-yet-displayed deferred image.
+    // Native dimensions, original URL, and the default 5s load gate stay exact.
+    await region.scrollIntoViewIfNeeded();
     await expect.poll(() => image.evaluate((element) => element instanceof HTMLImageElement ? { complete: element.complete, width: element.naturalWidth, height: element.naturalHeight } : null)).toEqual({ complete: true, width: figure.width, height: figure.height });
     expect(new URL((await image.getAttribute("src"))!, page.url()).pathname).toBe(`/${figure.asset_path}`);
+    expect(await image.evaluate((element: HTMLImageElement) => new URL(element.currentSrc).pathname)).toBe((images as Record<string, string>)[`/${figure.asset_path}`]);
     await expect(region.locator("figcaption")).toContainText(`图源 PDF ${figure.original_pdf_page} / 原书第 ${figure.original_book_page} 页`);
     const response = await request.get(`/${figure.asset_path}`, { headers: { range: "bytes=0-31" } });
     expect(response.ok()).toBe(true);

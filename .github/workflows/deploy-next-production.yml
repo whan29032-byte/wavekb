@@ -105,6 +105,11 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:3108/api/health > /dev/null
           pnpm --filter @wavekb/web exec playwright test e2e/navigation.spec.ts --workers=2
+          pnpm --filter @wavekb/web exec playwright test \
+            e2e/eleventh-edition-reading.spec.ts e2e/core-book-illustrations.spec.ts \
+            e2e/book-reading-navigation.spec.ts e2e/knowledge-reading-content.spec.ts \
+            e2e/natural-law-illustrations.spec.ts e2e/knowledge-image-delivery.spec.ts \
+            --workers=2 --retries=0
           pnpm --filter @wavekb/web exec playwright test --config=playwright.ui.config.ts
 
       # No DB credentials or migrations belong in a code deployment. Unknown live
@@ -223,6 +228,11 @@ jobs:
           '
           pnpm --filter @wavekb/web assets:check
           pnpm --filter @wavekb/web exec playwright test e2e/navigation.spec.ts --workers=2
+          pnpm --filter @wavekb/web exec playwright test \
+            e2e/eleventh-edition-reading.spec.ts e2e/core-book-illustrations.spec.ts \
+            e2e/book-reading-navigation.spec.ts e2e/knowledge-reading-content.spec.ts \
+            e2e/natural-law-illustrations.spec.ts e2e/knowledge-image-delivery.spec.ts \
+            --workers=2 --retries=0
 
       - name: Verify real Tline research inside the production website without posting
         env:
