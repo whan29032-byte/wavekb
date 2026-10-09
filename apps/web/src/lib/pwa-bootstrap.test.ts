@@ -2,15 +2,16 @@ import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PWA_BOOTSTRAP, registerPwaOnce } from "./pwa-bootstrap";
 
-type Owner = Window & { __wavekbPwaRegistration?: Promise<ServiceWorkerRegistration | undefined> };
+type Owner = Window & { __wavekbPwaRegistration?: Promise<ServiceWorkerRegistration | undefined>; __wavekbPwaRegistrationFailed?: boolean };
 
 afterEach(() => {
   delete (window as Owner).__wavekbPwaRegistration;
+  delete (window as Owner).__wavekbPwaRegistrationFailed;
   vi.restoreAllMocks();
 });
 
 function fixture(register = vi.fn().mockResolvedValue({ scope: "/" })) {
-  const owner = { isSecureContext: true, __wavekbPwaRegistration: undefined as unknown };
+  const owner = { isSecureContext: true, __wavekbPwaRegistration: undefined as unknown, __wavekbPwaRegistrationFailed: undefined as boolean | undefined };
   const navigator = { serviceWorker: { register } };
   return { owner, navigator, register, context: { window: owner, navigator } };
 }
@@ -40,6 +41,7 @@ describe("parser-stage worker registration", () => {
     value.owner.isSecureContext = true;
     value.register.mockImplementation(() => { throw new Error("unavailable"); });
     expect(() => runInNewContext(PWA_BOOTSTRAP, value.context)).not.toThrow();
+    expect(value.owner.__wavekbPwaRegistrationFailed).toBe(true);
   });
 
   it("catches a rejection and clears the attempt so hydration may recover", async () => {
@@ -47,6 +49,29 @@ describe("parser-stage worker registration", () => {
     runInNewContext(PWA_BOOTSTRAP, value.context);
     await expect(value.owner.__wavekbPwaRegistration).resolves.toBeUndefined();
     expect(value.owner.__wavekbPwaRegistration).toBeUndefined();
+    expect(value.owner.__wavekbPwaRegistrationFailed).toBe(true);
+  });
+
+  it("records an undefined registration and allows a future real retry", async () => {
+    const value = fixture(vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce({ scope: "/" }));
+    runInNewContext(PWA_BOOTSTRAP, value.context);
+    await value.owner.__wavekbPwaRegistration;
+    expect(value.owner.__wavekbPwaRegistrationFailed).toBe(true);
+    runInNewContext(PWA_BOOTSTRAP, value.context);
+    expect(value.owner.__wavekbPwaRegistrationFailed).toBe(false);
+    await expect(value.owner.__wavekbPwaRegistration).resolves.toEqual({ scope: "/" });
+    expect(value.register).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let a synchronous hydration failure permanently disable retry", async () => {
+    const value = fixture(vi.fn().mockImplementationOnce(() => { throw new Error("blocked"); }).mockResolvedValueOnce({ scope: "/" }));
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: value.navigator.serviceWorker });
+    registerPwaOnce();
+    expect((window as Owner).__wavekbPwaRegistrationFailed).toBe(true);
+    registerPwaOnce();
+    expect((window as Owner).__wavekbPwaRegistrationFailed).toBe(false);
+    await expect((window as Owner).__wavekbPwaRegistration).resolves.toEqual({ scope: "/" });
   });
 
   it("does not register again when hydration finds the parser registration", () => {

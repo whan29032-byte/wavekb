@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { readingImageWorkerReady } from "@/lib/knowledge/reading-image-worker";
+import { cancelHiddenReadingImage, readingImageWorkerReady } from "@/lib/knowledge/reading-image-worker";
 
 type ReadingImageProps = {
   url: string;
@@ -18,6 +18,10 @@ export function KnowledgeReadingImage(props: ReadingImageProps) {
 
 function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: ReadingImageProps) {
   const frame = useRef<HTMLSpanElement>(null);
+  const visible = useRef(false);
+  const completed = useRef(false);
+  const attempt = useRef(0);
+  const [generation, setGeneration] = useState(0);
   const [requested, setRequested] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -28,20 +32,42 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
     const target = frame.current;
     if (!target) return;
     let mounted = true;
-    const controller = new AbortController();
+    let controller: AbortController | undefined;
     const requestImage = () => {
-      if (!mounted) return;
-      const worker = readingImageWorkerReady(optimizedUrl, controller.signal);
-      if (!worker) { setRequested(true); return; }
-      setPreparing(true);
+      if (!mounted || visible.current) return;
+      visible.current = true;
+      if (completed.current) return;
+      const current = new AbortController();
+      controller = current;
       const reveal = () => {
-        if (!mounted) return;
+        if (!mounted || !visible.current || controller !== current || current.signal.aborted) return;
         setPreparing(false);
         setRequested(true);
       };
+      const worker = readingImageWorkerReady(optimizedUrl, current.signal);
+      if (!worker) { reveal(); return; }
+      setPreparing(true);
       void worker.then(reveal, reveal);
     };
-    const cancel = () => { mounted = false; controller.abort(); };
+    const cancelPending = () => {
+      const pending = Boolean(controller);
+      visible.current = false;
+      controller?.abort();
+      controller = undefined;
+      if (completed.current || !pending) return;
+      cancelHiddenReadingImage(optimizedUrl);
+      // A replacement hidden native element cannot turn a late abort error
+      // from the previous request into a new original-PNG download on re-entry.
+      attempt.current++;
+      if (mounted) {
+        setGeneration(attempt.current);
+        setRequested(false);
+        setPreparing(false);
+        setLoaded(false);
+        setFailed(false);
+      }
+    };
+    const cancel = () => { mounted = false; cancelPending(); };
     const revealWithoutObserver = () => {
       queueMicrotask(requestImage);
       return cancel;
@@ -51,9 +77,11 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
     }
     try {
       const observer = new IntersectionObserver((entries) => {
-        if (!entries.some((entry) => entry.target === target && entry.isIntersecting)) return;
-        requestImage();
-        observer.disconnect();
+        for (const entry of entries) {
+          if (entry.target !== target) continue;
+          if (entry.isIntersecting) requestImage();
+          else if (visible.current) cancelPending();
+        }
       }, { rootMargin: "120px 0px" });
       observer.observe(target);
       return () => { cancel(); observer.disconnect(); };
@@ -72,7 +100,13 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
       {/* The original src and dimensions remain auditable. Only the same-size
           lossless derivative is selected after this frame enters the viewport. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} srcSet={useOptimized ? optimizedUrl : undefined} alt={alt} width={width} height={height} loading={requested ? "eager" : "lazy"} decoding="async" fetchPriority={requested ? "high" : "low"} className="h-auto w-full object-contain" style={{ display: requested ? "block" : "none" }} onLoad={() => { setLoaded(true); setFailed(false); }} onError={() => {
+      <img key={generation} src={url} srcSet={useOptimized ? optimizedUrl : undefined} alt={alt} width={width} height={height} loading={requested ? "eager" : "lazy"} decoding="async" fetchPriority={requested ? "high" : "low"} className="h-auto w-full object-contain" style={{ display: requested ? "block" : "none" }} onLoad={() => {
+        if (!visible.current || !requested || generation !== attempt.current) return;
+        completed.current = true;
+        setLoaded(true);
+        setFailed(false);
+      }} onError={() => {
+        if (!visible.current || !requested || generation !== attempt.current) return;
         if (useOptimized) {
           // A missing/unsupported derivative gets one ordinary original-file
           // fallback, not a loop of retries or an invented success state.

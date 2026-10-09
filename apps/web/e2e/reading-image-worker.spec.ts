@@ -119,4 +119,64 @@ test.describe("local browser without a reading worker", () => {
       }
     });
   });
+
+  test.describe("viewport cancellation with a real worker", () => {
+    test.use({ serviceWorkers: "allow" });
+
+    for (const entry of ["direct", "home SPA"] as const) {
+    test(`a new reading target completes while the offscreen previous image is still held after ${entry} entry`, async ({ page, context }, testInfo) => {
+      expect(["127.0.0.1", "localhost", "[::1]"]).toContain(new URL(String(testInfo.project.use.baseURL)).hostname);
+      const previousSource = "/assets/figures-v10/page-100.png";
+      const previousPath = delivery[previousSource];
+      expect(previousPath).toMatch(/\/assets\/reading-images\/[a-f0-9]{64}\.webp$/);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      let heldParts = 0;
+      const originalFallbacks: string[] = [];
+      context.on("request", (request) => {
+        if (new URL(request.url()).pathname === previousSource) originalFallbacks.push(request.url());
+      });
+      // A controlled local delay only. The visible target still uses actual
+      // unmodified server bytes, the real worker and the original 5s assertion.
+      await context.route(`**${previousPath}`, async (route) => {
+        if (route.request().serviceWorker() && route.request().headers()["range"]) {
+          heldParts++;
+          await held;
+        }
+        try { await route.continue(); } catch { /* The actual viewport cancel may already have aborted it. */ }
+      });
+      try {
+        if (entry === "home SPA") {
+          await page.goto("/");
+          await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL))
+            .toBe(new URL("/sw.js", page.url()).href);
+          const mobileMenu = page.getByRole("button", { name: "展开主导航" });
+          const mobile = await mobileMenu.isVisible();
+          if (mobile) await mobileMenu.click();
+          const navigation = page.getByRole("navigation", { name: mobile ? "移动主导航" : "主导航", exact: true });
+          await navigation.getByRole("link", { name: "知识库", exact: true }).click();
+          await expect(page).toHaveURL(/\/knowledge$/);
+          await page.locator('a[href="/knowledge/books/elliott-wave-principle-tenth-edition"]').click();
+          await page.locator(`a[href="${bookPath}"]`).first().click();
+          await expect(page).toHaveURL(new RegExp(`${bookPath}$`));
+          // This is an actual Next SPA transition, not a second document load.
+          expect(await page.evaluate(() => performance.getEntriesByType("navigation").map((entry) => new URL(entry.name).pathname))).toEqual(["/"]);
+        } else {
+          await page.goto(bookPath);
+        }
+        await page.locator(`[data-core-book-figure="${previousSource.slice(1)}"]`).scrollIntoViewIfNeeded();
+        await expect.poll(() => heldParts).toBeGreaterThan(0);
+        const parts = observeParts(context);
+        await readActualImage(page);
+        expect(parts).toHaveLength(4);
+        expect(parts.every((part) => part.status === 206)).toBe(true);
+        expect(parts.some((part) => part.range === "bytes=0-0")).toBe(false);
+        expect(originalFallbacks).toEqual([]);
+      } finally {
+        release();
+        await context.unrouteAll({ behavior: "wait" });
+      }
+    });
+    }
+  });
 });

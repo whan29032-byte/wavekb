@@ -1,0 +1,129 @@
+name: Knowledge assets static delivery
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "默认只读审计；apply/rollback 只修改既有公开知识资产的 Nginx location"
+        type: choice
+        options: [audit, apply, rollback]
+        default: audit
+      change_approved:
+        description: "仅在人工审查并批准静态送达配置事务时启用；审计无需批准"
+        type: boolean
+        default: false
+      rollback_transaction:
+        description: "rollback 时填此前 apply 返回的完整 SHA-run-attempt 身份；不传文件/主机路径"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# Serialize with existing Next deployment, without modifying that workflow.
+concurrency:
+  group: wavekb-next-production
+  cancel-in-progress: false
+
+jobs:
+  verify-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - name: Install pinned byte-verification dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install only a disposable runner Nginx for actual transport fixtures
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nginx
+      - name: Verify fail-closed transaction and real identity/gzip/Range bytes
+        env:
+          KNOWLEDGE_NGINX_TEST_BIN: /usr/sbin/nginx
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/knowledge-static-delivery.mjs
+          node --test tests/knowledge-static-delivery.test.mjs
+
+  inspect-or-apply:
+    needs: verify-transaction
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve and validate the explicit operation before opening SSH
+        env:
+          MODE: ${{ inputs.mode }}
+          APPROVED: ${{ inputs.change_approved }}
+          ROLLBACK_TRANSACTION: ${{ inputs.rollback_transaction }}
+          TRANSACTION_CODE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$MODE" =~ ^(audit|apply|rollback)$ ]]
+          if [ "$MODE" != audit ]; then test "$APPROVED" = true; fi
+          [[ "$TRANSACTION_CODE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ && "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          if [ "$MODE" = rollback ]; then
+            [[ "$ROLLBACK_TRANSACTION" =~ ^[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          else
+            test -z "$ROLLBACK_TRANSACTION"
+          fi
+      - name: Run the audited fixed-target transaction over pinned SSH without uploading credentials or runners
+        env:
+          MODE: ${{ inputs.mode }}
+          ROLLBACK_TRANSACTION: ${{ inputs.rollback_transaction }}
+          TRANSACTION_CODE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+        run: |
+          set -Eeuo pipefail
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_SSH_KEY"
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          task_ssh_dir=$(mktemp -d)
+          chmod 700 "$task_ssh_dir"
+          eval "$(ssh-agent -s)" > /dev/null
+          cleanup_knowledge_ssh() {
+            ssh-agent -k > /dev/null 2>&1 || true
+            if [[ "$task_ssh_dir" == /tmp/tmp.* ]]; then
+              rm -f -- "$task_ssh_dir/known_hosts"
+              rmdir -- "$task_ssh_dir" || true
+            fi
+          }
+          trap cleanup_knowledge_ssh EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" | ssh-add - > /dev/null 2>&1
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$task_ssh_dir/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$task_ssh_dir/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$task_ssh_dir/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          chmod 600 "$task_ssh_dir/known_hosts"
+          # This SHA identifies the reviewed transaction implementation only.
+          # The runner reads the actual current web deployment independently
+          # from its managed release/DEPLOYMENT_VERSION and canonical health.
+          # It does not deploy the workflow SHA or replace the current symlink.
+          transaction_id="${TRANSACTION_CODE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          if [ "$MODE" = rollback ]; then transaction_id="$ROLLBACK_TRANSACTION"; fi
+          # The key remains only in this process environment and isolated agent.
+          # No key, vhost, backup/state file or credential artifact is uploaded.
+          ssh -F /dev/null -o BatchMode=yes -o ForwardAgent=no \
+            -o StrictHostKeyChecking=yes -o HostKeyAlgorithms=ssh-ed25519 \
+            -o UserKnownHostsFile="$task_ssh_dir/known_hosts" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/node --input-type=module - '${MODE}' '${transaction_id}'" \
+            < scripts/knowledge-static-delivery.mjs

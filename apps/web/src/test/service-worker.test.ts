@@ -17,7 +17,7 @@ async function bootServiceWorker() {
   };
   const networkFetch = vi.fn().mockResolvedValue({ ok: true, status: 200, type: "basic", clone: () => ({ ok: true }) });
   const readingFetch = vi.fn(async (request: unknown) => ({ response: await networkFetch(request), verified: false }));
-  const readingHelper = { canHandle: vi.fn().mockReturnValue(false), fetch: readingFetch };
+  const readingHelper = { canHandle: vi.fn().mockReturnValue(false), fetch: readingFetch, cancel: vi.fn().mockReturnValue(1) };
   const importScripts = vi.fn();
   const scope: Record<string, unknown> = {
     location: { origin: "https://wavekb.com" },
@@ -234,7 +234,7 @@ it("acknowledges only its public reading capability without fetching or accessin
   const { listeners, caches, cache, networkFetch, readingHelper } = await bootServiceWorker();
   const postMessage = vi.fn();
   listeners.get("message")?.({ data: { type: "wavekb-reading-delivery-ready" }, ports: [{ postMessage }] } as never);
-  expect(postMessage.mock.calls).toEqual([[{ version: 2 }]]);
+  expect(postMessage.mock.calls).toEqual([[{ version: 3 }]]);
   expect(networkFetch).not.toHaveBeenCalled();
   expect(readingHelper.canHandle).not.toHaveBeenCalled();
   expect(readingHelper.fetch).not.toHaveBeenCalled();
@@ -256,7 +256,7 @@ it.each([undefined, [], [{}]])("safely ignores a capability message without a us
   expect(() => listeners.get("message")?.({ data: { type: "wavekb-reading-delivery-ready" }, ports } as never)).not.toThrow();
 });
 
-it.each(["canHandle", "fetch"] as const)("does not acknowledge a missing reading helper %s capability", async (method) => {
+it.each(["canHandle", "fetch", "cancel"] as const)("does not acknowledge a missing reading helper %s capability", async (method) => {
   const { listeners, readingHelper } = await bootServiceWorker();
   Reflect.deleteProperty(readingHelper, method);
   const postMessage = vi.fn();
@@ -276,12 +276,45 @@ it("delivers and caches a public constructed response only after the reading hel
   expect(delivered).toBe(response);
   expect(await delivered.text()).toBe("complete verified image bytes");
   await waitUntil.mock.calls[0][0];
-  expect(readingFetch).toHaveBeenCalledWith(request);
+  expect(readingFetch).toHaveBeenCalledWith(request, undefined);
   expect(networkFetch).not.toHaveBeenCalled();
   expect(cache.put).toHaveBeenCalledOnce();
   const saved = cache.put.mock.calls[0][1] as Response;
   expect(saved.status).toBe(200);
   expect(await saved.text()).toBe("complete verified image bytes");
+});
+
+it("forwards the real fetch-event client id without accepting a caller-supplied identity", async () => {
+  const { listeners, readingFetch } = await bootServiceWorker();
+  const event = { request: { url: "https://wavekb.com/assets/books/cover.png", method: "GET", mode: "no-cors", destination: "image" }, clientId: "actual-browser-client", respondWith: vi.fn(), waitUntil: vi.fn() };
+  listeners.get("fetch")?.(event);
+  await event.respondWith.mock.calls[0][0];
+  await event.waitUntil.mock.calls[0][0];
+  expect(readingFetch).toHaveBeenCalledWith(event.request, "actual-browser-client");
+});
+
+it.each(["/", "/login", "/account", "/knowledge/core-full-book#page-43"])("cancels only the same-origin window sender's exact public image after SPA navigation from %s", async (initialDocument) => {
+  const { listeners, readingHelper, networkFetch, caches } = await bootServiceWorker();
+  const path = `/assets/reading-images/${"a".repeat(64)}.webp`;
+  listeners.get("message")?.({ data: { type: "wavekb-reading-image-hidden", path, clientId: "other-tab", size: 1 }, source: { id: "real-tab", type: "window", url: `https://wavekb.com${initialDocument}` } } as never);
+  expect(readingHelper.cancel).toHaveBeenCalledExactlyOnceWith("real-tab", path);
+  expect(networkFetch).not.toHaveBeenCalled();
+  expect(caches.match).not.toHaveBeenCalled();
+  expect(caches.open).not.toHaveBeenCalled();
+});
+
+it.each([
+  { source: undefined },
+  { source: { id: "", type: "window", url: "https://wavekb.com/knowledge" } },
+  { source: { id: "tab", type: "worker", url: "https://wavekb.com/knowledge" } },
+  { source: { id: "tab", type: "window", url: "https://other.example/knowledge" } },
+  { source: { id: "tab", type: "window", url: "https://wavekb.com/knowledge" }, path: "/api/private" },
+  { source: { id: "tab", type: "window", url: "https://wavekb.com/knowledge" }, path: `/assets/reading-images/${"a".repeat(64)}.webp?token=secret` },
+])("ignores an invalid visibility cancellation %#", async ({ source, path }) => {
+  const { listeners, readingHelper, networkFetch } = await bootServiceWorker();
+  listeners.get("message")?.({ data: { type: "wavekb-reading-image-hidden", path: path || `/assets/reading-images/${"a".repeat(64)}.webp` }, source } as never);
+  expect(readingHelper.cancel).not.toHaveBeenCalled();
+  expect(networkFetch).not.toHaveBeenCalled();
 });
 
 it.each([
