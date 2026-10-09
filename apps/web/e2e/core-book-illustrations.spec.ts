@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import type { KnowledgeAsset, KnowledgeData, KnowledgePage } from "@wavekb/knowledge";
+const images: Record<string, string> = JSON.parse(readFileSync(new URL("../src/lib/knowledge/generated-reading-images.json", import.meta.url), "utf8"));
 
 // Read-only public book acceptance. Expected correspondence is constructed
 // independently from compiled canonical Units, not from the UI planning helper.
@@ -40,9 +41,12 @@ async function noHorizontalOverflow(page: Page) {
 
 async function imageIsLoaded(page: Page, anchorId: string, asset: KnowledgeAsset) {
   const image = page.locator(`#${anchorId} img`);
-  await image.scrollIntoViewIfNeeded();
+  // The stable source figure is the scroll target; its image is requested
+  // only when the figure enters the viewport. Keep the original 5s load gate.
+  await page.locator(`#${anchorId}`).scrollIntoViewIfNeeded();
   await expect.poll(() => image.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true);
   expect(new URL((await image.getAttribute("src"))!, page.url()).pathname).toBe(`/${asset.asset_path}`);
+  expect(await image.evaluate((element: HTMLImageElement) => new URL(element.currentSrc).pathname)).toBe((images as Record<string, string>)[`/${asset.asset_path}`]);
 }
 
 async function attachScreenshot(page: Page, anchorId: string, testInfo: TestInfo, filename: string) {

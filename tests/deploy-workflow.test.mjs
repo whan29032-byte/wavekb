@@ -41,6 +41,20 @@ test("every emitted workflow shell program parses before a runner can execute it
   }
 });
 
+test("full book and real image completion gates run before upload and before finalizing production without retries", () => {
+  const upload = steps.findIndex((step) => step.id === "upload");
+  const finalize = steps.findIndex((step) => /Finalize only/.test(step.name));
+  const local = steps.findIndex((step) => /Verify local critical browser journeys/.test(step.name));
+  const live = steps.findIndex((step) => /Verify production version and read-only browser journeys/.test(step.name));
+  assert.ok(local >= 0 && local < upload && live > upload && live < finalize);
+  for (const index of [local, live]) {
+    for (const file of ["eleventh-edition-reading", "core-book-illustrations", "book-reading-navigation", "knowledge-reading-content", "natural-law-illustrations", "knowledge-image-delivery"]) {
+      assert.ok(steps[index].run.includes(`e2e/${file}.spec.ts`), `Missing ${file} completion gate`);
+    }
+    assert.match(steps[index].run, /--workers=2 --retries=0/);
+  }
+});
+
 test("YouTube worker is optional, secret-free in deployment and covered by rollback", () => {
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
   const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));

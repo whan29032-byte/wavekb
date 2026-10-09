@@ -97,7 +97,7 @@ test("the exact eleventh original figure page loads on demand and Viewer returns
   await expect(original).toHaveAttribute("open", "");
   const trigger = original.getByRole("button", { name: `放大查看：第11版原书 PDF 第 ${number} 页`, exact: true });
   const image = original.locator("img");
-  await image.scrollIntoViewIfNeeded();
+  await original.locator("[data-reading-image]").scrollIntoViewIfNeeded();
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
   expect(new URL((await image.getAttribute("src"))!, page.url()).pathname).toBe(`/${source.asset_path}`);
   await expect(original.locator("figcaption")).toContainText(`第11版原书原页 · PDF 第 ${number} 页 · ewp-11-zh-2021`);

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MagnifyingGlassMinus, MagnifyingGlassPlus, X } from "@phosphor-icons/react";
+import { KnowledgeReadingImage } from "./knowledge-reading-image";
+import { readingImageUrl } from "@/lib/knowledge/reading-image-url";
 
 export type ViewerAsset = { url: string; alt: string; width: number; height: number; caption: string };
 
@@ -10,6 +12,8 @@ export function KnowledgeImageViewer({ assets }: { assets: ViewerAsset[] }) {
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [failedDeliveryUrl, setFailedDeliveryUrl] = useState<string | null>(null);
+  const [fullImageState, setFullImageState] = useState<"loading" | "loaded" | "error">("loading");
   const drag = useRef<{ id: number; x: number; y: number; originX: number; originY: number } | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -40,9 +44,10 @@ export function KnowledgeImageViewer({ assets }: { assets: ViewerAsset[] }) {
     };
   }, [active]);
 
-  const open = (index: number, button: HTMLButtonElement) => { opener.current = button; setActive(index); setScale(1); setOffset({ x: 0, y: 0 }); setDragging(false); drag.current = null; };
+  const open = (index: number, button: HTMLButtonElement) => { opener.current = button; setActive(index); setScale(1); setOffset({ x: 0, y: 0 }); setDragging(false); setFailedDeliveryUrl(null); setFullImageState("loading"); drag.current = null; };
   const zoom = (delta: number) => setScale((value) => Math.min(4, Math.max(0.5, Number((value + delta).toFixed(2)))));
   const current = active === null ? null : assets[active];
+  const currentDelivery = current && failedDeliveryUrl !== current.url ? readingImageUrl(current.url) : undefined;
 
   return (
     <>
@@ -50,8 +55,7 @@ export function KnowledgeImageViewer({ assets }: { assets: ViewerAsset[] }) {
         {assets.map((asset, index) => (
           <figure key={asset.url} className="overflow-hidden rounded-xl border bg-muted">
             <button type="button" className="block w-full cursor-zoom-in focus-visible:outline-offset-[-3px]" onClick={(event) => open(index, event.currentTarget)} aria-label={`放大查看：${asset.alt}`}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={asset.url} alt={asset.alt} width={asset.width} height={asset.height} loading="lazy" className="h-auto w-full object-contain" />
+              <KnowledgeReadingImage url={asset.url} optimizedUrl={readingImageUrl(asset.url)} alt={asset.alt} width={asset.width} height={asset.height} />
             </button>
             {asset.caption ? <figcaption className="border-t px-3 py-2 text-xs text-muted-foreground">{asset.caption}</figcaption> : null}
           </figure>
@@ -69,8 +73,11 @@ export function KnowledgeImageViewer({ assets }: { assets: ViewerAsset[] }) {
             </div>
           </div>
           <div className="relative min-h-0 overflow-hidden touch-none" onWheel={(event) => { event.preventDefault(); zoom(event.deltaY < 0 ? 0.25 : -0.25); }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={current.url} alt="" draggable={false} className="absolute left-1/2 top-1/2 max-h-[86vh] max-w-[92vw] select-none object-contain will-change-transform" style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`, cursor: dragging ? "grabbing" : scale > 1 ? "grab" : "zoom-in" }} onDoubleClick={() => zoom(scale > 1 ? 1 - scale : 1)} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, originX: offset.x, originY: offset.y }; setDragging(true); }} onPointerMove={(event) => { const state = drag.current; if (!state || state.id !== event.pointerId) return; setOffset({ x: state.originX + event.clientX - state.x, y: state.originY + event.clientY - state.y }); }} onPointerUp={(event) => { if (drag.current?.id === event.pointerId) { drag.current = null; setDragging(false); } }} onPointerCancel={() => { drag.current = null; setDragging(false); }} />
+            {fullImageState !== "loaded" ? <p className="pointer-events-none absolute inset-0 grid place-items-center p-4 text-center text-sm text-white" aria-live="polite">{fullImageState === "error" ? "原图暂时无法载入，请稍后重试或查看原书 PDF。" : "正在载入原图…"}</p> : null}
+            <picture>
+            {currentDelivery ? <source type="image/webp" srcSet={currentDelivery} /> : null}
+            <img src={current.url} alt="" draggable={false} onLoad={() => setFullImageState("loaded")} onError={() => { if (currentDelivery) setFailedDeliveryUrl(current.url); else setFullImageState("error"); }} className="absolute left-1/2 top-1/2 max-h-[86vh] max-w-[92vw] select-none object-contain will-change-transform" style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})`, cursor: dragging ? "grabbing" : scale > 1 ? "grab" : "zoom-in" }} onDoubleClick={() => zoom(scale > 1 ? 1 - scale : 1)} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, originX: offset.x, originY: offset.y }; setDragging(true); }} onPointerMove={(event) => { const state = drag.current; if (!state || state.id !== event.pointerId) return; setOffset({ x: state.originX + event.clientX - state.x, y: state.originY + event.clientY - state.y }); }} onPointerUp={(event) => { if (drag.current?.id === event.pointerId) { drag.current = null; setDragging(false); } }} onPointerCancel={() => { drag.current = null; setDragging(false); }} />
+            </picture>
           </div>
         </div>
       ) : null}
