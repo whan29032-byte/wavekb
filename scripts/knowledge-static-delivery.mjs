@@ -19,7 +19,8 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 class ControlledFailure extends Error {}
 const requireValue = (condition, message) => { if (!condition) throw new ControlledFailure(message); };
 const failureDetail = (error) => error instanceof ControlledFailure ? error.message
-  : /^[A-Z][A-Z0-9_]+$/.test(error?.code || "") ? error.code : "failed; underlying values omitted";
+  : ["EACCES", "EPERM", "ENOENT", "EEXIST", "EINVAL", "EIO", "ENOSPC", "ETIMEDOUT", "ECONNREFUSED", "ECONNRESET"].includes(error?.code)
+    ? error.code : "failed; underlying values omitted";
 async function atStage(stage, action) {
   try { return await action(); }
   catch (error) { throw new ControlledFailure(`${stage}: ${failureDetail(error)}`); }
@@ -392,5 +393,5 @@ if (process.argv[1] === "-" || process.argv[1] && import.meta.url === pathToFile
     requireValue(process.argv.length <= 4, "No host/file/path overrides are allowed");
     const result = await runTransaction({ mode, id }, productionRuntime(id));
     console.log(JSON.stringify(result));
-  } catch (error) { console.error(error.message); process.exitCode = 1; }
+  } catch (error) { console.error(failureDetail(error)); process.exitCode = 1; }
 }
