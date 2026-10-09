@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { BookPageNavigation } from "./book-page-navigation";
 
 const pageNumbers = Array.from({ length: 36 }, (_, index) => index + 1);
@@ -14,6 +15,29 @@ function renderNavigator(pages = pageNumbers) {
 }
 
 describe("book page navigation", () => {
+  it("does not expose an active JavaScript-only form before hydration", () => {
+    const html = renderToString(<BookPageNavigation bookId="test" pageNumbers={pageNumbers} />);
+    const markup = document.createElement("div");
+    markup.innerHTML = html;
+    expect(markup.querySelector<HTMLInputElement>('input[name="page"]')?.disabled).toBe(true);
+    expect(markup.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+    expect(markup.querySelector('a[href="#page-1"]')?.textContent).toBe("1");
+    expect(markup.textContent).toContain("仍可使用下方页码链接阅读");
+    renderNavigator();
+    expect((screen.getByRole("textbox", { name: "跳至页码" }) as HTMLInputElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "跳转" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("submits the actual input when a browser restores its value without a React change event", () => {
+    renderNavigator();
+    const input = screen.getByRole("textbox", { name: "跳至页码" }) as HTMLInputElement;
+    input.value = "20";
+    fireEvent.submit(screen.getByRole("button", { name: "跳转" }).closest("form")!);
+    expect(window.location.hash).toBe("#page-20");
+    expect(document.activeElement?.id).toBe("page-20");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it.each(["summary", "button"] as const)("keeps an already focused %s when initial hash navigation hydrates", (control) => {
     window.history.replaceState({}, "", "/knowledge/books/test?q=结构#page-57");
     const { container } = render(<section id="page-57" tabIndex={-1}>

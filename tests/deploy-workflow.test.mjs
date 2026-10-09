@@ -55,6 +55,25 @@ test("full book and real image completion gates run before upload and before fin
   }
 });
 
+test("candidate owns its actual Node process, validates the exact SHA and retains failed browser evidence", () => {
+  const local = steps.find((step) => /Verify local critical browser journeys/.test(step.name));
+  assert.match(local.run, /node apps\/web\/\.next\/standalone\/apps\/web\/server\.js[^\n]* &/);
+  assert.match(local.run, /kill -0 "\$candidate_pid"/);
+  assert.match(local.run, /assert\.equal\(health\.deployment, process\.env\.DEPLOYMENT_VERSION\)/);
+  assert.match(local.run, /tail -n 200 \/tmp\/wavekb-candidate-acceptance\.log/);
+  assert.match(local.run, /wait "\$candidate_pid"/);
+  assert.match(local.run, /e2e\/navigation\.spec\.ts e2e\/book-navigation-hydration\.spec\.ts --workers=2 --retries=0/);
+  const evidence = steps.find((step) => /Preserve failed local browser evidence/.test(step.name));
+  assert.equal(evidence.if, "failure()");
+  assert.equal(evidence.uses, "actions/upload-artifact@v4");
+  assert.equal(evidence.with["retention-days"], 3);
+  assert.match(evidence.with.path, /apps\/web\/test-results\//);
+  assert.match(evidence.with.path, /wavekb-candidate-acceptance\.log/);
+  assert.doesNotMatch(JSON.stringify(evidence), /secrets\.|\.env|\.sqlite/);
+  const live = steps.find((step) => /Verify production version and read-only browser journeys/.test(step.name));
+  assert.doesNotMatch(live.run, /book-navigation-hydration/);
+});
+
 test("YouTube worker is optional, secret-free in deployment and covered by rollback", () => {
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
   const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
