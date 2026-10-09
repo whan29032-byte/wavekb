@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ReadingPriorityLink as Link } from "@/components/reading-priority-link";
 import { BookOpenText, ChatsCircle, Coins, GraduationCap, Newspaper, Trophy } from "@phosphor-icons/react/dist/ssr";
 import { AccountNavigation } from "@/components/account-navigation";
 import { AppearanceSettings } from "@/components/appearance-settings";

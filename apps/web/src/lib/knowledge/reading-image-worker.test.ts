@@ -5,9 +5,9 @@ const url = `/assets/reading-images/${"a".repeat(64)}.webp`;
 const previous = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
 type Worker = { scriptURL: string; postMessage: (message: unknown, ports: Array<{ postMessage: (value: unknown) => void }>) => void };
 let workers: EventTarget & { controller: Worker | null; ready: Promise<unknown> };
-const worker = (path = "/sw.js", capable = true): Worker => ({
+const worker = (path = "/sw.js", capable = true, version = 2): Worker => ({
   scriptURL: new URL(path, location.href).href,
-  postMessage: vi.fn((_message, ports) => { if (capable) ports[0].postMessage({ version: 1 }); }),
+  postMessage: vi.fn((_message, ports) => { if (capable) ports[0].postMessage({ version }); }),
 });
 
 beforeEach(() => {
@@ -79,7 +79,7 @@ describe("a bounded first-visit reading worker opportunity", () => {
   });
 
   it("an old same-URL controller does not pass until a capable replacement really claims the tab", async () => {
-    workers.controller = worker("/sw.js", false);
+    workers.controller = worker("/sw.js", true, 1);
     const finished = vi.fn();
     const result = readingImageWorkerReady(url, new AbortController().signal);
     void result?.then(finished);

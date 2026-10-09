@@ -13,6 +13,9 @@ const bytes = await sharp(fs.readFileSync(path.join(root, "assets/figures-v10/pa
 const digest = createHash("sha256").update(bytes).digest("hex");
 const origin = "https://wavekb.test";
 const imageUrl = `${origin}/assets/reading-images/${digest}.webp`;
+const neighborBytes = await sharp(fs.readFileSync(path.join(root, "assets/books/elliott-wave-natural-law/figure-p005.png"))).webp({ lossless: true, effort: 6 }).toBuffer();
+const neighborDigest = createHash("sha256").update(neighborBytes).digest("hex");
+const neighborUrl = `${origin}/assets/reading-images/${neighborDigest}.webp`;
 const script = fs.readFileSync(path.join(root, "apps/web/public/sw-reading-images.js"), "utf8");
 
 function imageRequest(url = imageUrl, init) {
@@ -201,4 +204,164 @@ test("fallback does not manufacture success when the real full fetch also fails"
   const helper = load(async (_input, init) => { count++; if (init.headers.Range) return new Response(null, { status: 503 }); throw new TypeError("Full fetch unavailable"); });
   await assert.rejects(helper.fetch(imageRequest()), /Full fetch unavailable/);
   assert.equal(count, 2);
+});
+
+function concurrentImageServer({ failFirstImage = false, slowFirstProbe = false } = {}) {
+  const data = new Map([[imageUrl, bytes], [neighborUrl, neighborBytes]]);
+  const calls = [];
+  let active = 0, maximum = 0;
+  const fetcher = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    const range = new Headers(init.headers).get("Range");
+    const original = data.get(url);
+    calls.push({ url, range, signal: init.signal });
+    if (!range) return streamedResponse(original, { "Content-Type": "image/webp", "Content-Length": String(original.length) }, 200, init.signal);
+    if (init.signal.aborted) throw init.signal.reason;
+    const [, low, high] = /^bytes=(\d+)-(\d+)$/.exec(range);
+    const start = Number(low), end = Number(high), isProbe = start === 0 && end === 0;
+    const body = original.subarray(start, end + 1);
+    let sent = false, finished = false;
+    active++; maximum = Math.max(active, maximum);
+    const finish = () => { if (!finished) { finished = true; active--; } };
+    const stream = new ReadableStream({
+      start(controller) {
+        init.signal.addEventListener("abort", () => { if (!finished) { finish(); controller.error(init.signal.reason); } }, { once: true });
+      },
+      async pull(controller) {
+        // Headers are immediate, while each complete body takes two pulls. The
+        // counter therefore exposes any premature slot release at headers.
+        const probeDelay = slowFirstProbe ? (url === imageUrl ? 7 : 1) : (url === imageUrl ? 2 : 5);
+        await new Promise((resolve) => setTimeout(resolve, isProbe ? probeDelay : 8));
+        if (finished) return;
+        if (sent) { finish(); controller.close(); } else { sent = true; controller.enqueue(body); }
+      },
+      cancel() { finish(); },
+    });
+    const wrong = failFirstImage && url === imageUrl && !isProbe && start === 0;
+    return new Response(stream, { status: 206, headers: { "Content-Type": "image/webp", "Content-Length": String(body.length),
+      "Content-Range": `bytes ${wrong ? start + 1 : start}-${end}/${original.length}` } });
+  };
+  return { fetcher, calls, get maximum() { return maximum; }, get active() { return active; } };
+}
+
+test("two different real images share four FIFO slots through full body reads and preserve both SHA values", async () => {
+  const backend = concurrentImageServer(); const helper = load(backend.fetcher);
+  const [first, neighbor] = await Promise.all([helper.fetch(imageRequest()), helper.fetch(imageRequest(neighborUrl))]);
+  assert.equal(first.verified, true); assert.equal(neighbor.verified, true);
+  assert.deepEqual(Buffer.from(await first.response.arrayBuffer()), bytes);
+  assert.deepEqual(Buffer.from(await neighbor.response.arrayBuffer()), neighborBytes);
+  assert.equal(backend.maximum, 4); assert.equal(backend.active, 0);
+  const parts = backend.calls.filter((call) => call.range && call.range !== "bytes=0-0");
+  assert.deepEqual(parts.slice(0, 4).map((call) => call.url), Array(4).fill(imageUrl));
+  assert.deepEqual(parts.slice(4).map((call) => call.url), Array(4).fill(neighborUrl));
+});
+
+function heldProbeServer() {
+  const backend = server(); const calls = [];
+  const fetcher = async (input, init = {}) => {
+    const range = new Headers(init.headers).get("Range");
+    calls.push({ input, init, range });
+    if (range && calls.filter((call) => call.range).length <= 1) {
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(Uint8Array.of(bytes[0]));
+        init.signal.addEventListener("abort", () => controller.error(init.signal.reason), { once: true });
+      } }), { status: 206, headers: { "Content-Type": "image/webp", "Content-Length": "1", "Content-Range": `bytes 0-0/${bytes.length}` } });
+    }
+    return backend.fetcher(input, init);
+  };
+  return { fetcher, calls };
+}
+
+test("a queued owner cancellation removes its task immediately without starting fetch or leaking the next slot", async () => {
+  const backend = heldProbeServer(); const helper = load(backend.fetcher);
+  const owners = Array.from({ length: 1 }, () => new AbortController());
+  const blocking = owners.map((owner) => helper.fetch(imageRequest(imageUrl, { signal: owner.signal })));
+  const settled = Promise.allSettled(blocking);
+  const canceled = new AbortController();
+  const queued = helper.fetch(imageRequest(imageUrl, { signal: canceled.signal }));
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(backend.calls.length, 1, "the first image probe body, not just headers, must retain its image lease");
+    canceled.abort(new DOMException("Queued request canceled", "AbortError"));
+    await assert.rejects(queued, { name: "AbortError" });
+    assert.equal(backend.calls.length, 1);
+    const survivor = helper.fetch(imageRequest());
+    owners.forEach((owner) => owner.abort());
+    await settled;
+    const result = await survivor;
+    assert.equal(result.verified, true); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+    assert.equal(backend.calls.filter((call) => !call.range).length, 0);
+  } finally { owners.forEach((owner) => owner.abort()); await settled; }
+});
+
+test("the unchanged twelve-second budget includes FIFO waiting and expires only its own task", async () => {
+  const backend = heldProbeServer(); const budgets = [];
+  const helper = load(backend.fetcher, {}, { setTimeout(fn, duration) { assert.equal(duration, 12000); budgets.push(fn); return budgets.length; }, clearTimeout() {} });
+  const owners = Array.from({ length: 1 }, () => new AbortController());
+  const blocking = owners.map((owner) => helper.fetch(imageRequest(imageUrl, { signal: owner.signal })));
+  const settled = Promise.allSettled(blocking);
+  const queued = helper.fetch(imageRequest());
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(backend.calls.length, 1);
+    budgets[1]();
+    const result = await queued;
+    assert.equal(result.verified, false); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+    assert.equal(backend.calls.filter((call) => !call.range).length, 1);
+    assert.equal(backend.calls.slice(0, 1).every((call) => !call.init.signal.aborted), true);
+    const survivor = helper.fetch(imageRequest());
+    owners.forEach((owner) => owner.abort()); await settled;
+    assert.equal((await survivor).verified, true);
+  } finally { owners.forEach((owner) => owner.abort()); await settled; }
+});
+
+test("a failed image releases and cancels only its own slots while the neighboring real image verifies normally", async () => {
+  const backend = concurrentImageServer({ failFirstImage: true }); const helper = load(backend.fetcher);
+  const [failed, survivor] = await Promise.all([helper.fetch(imageRequest()), helper.fetch(imageRequest(neighborUrl))]);
+  assert.equal(failed.verified, false); assert.equal(survivor.verified, true);
+  assert.deepEqual(Buffer.from(await failed.response.arrayBuffer()), bytes);
+  assert.deepEqual(Buffer.from(await survivor.response.arrayBuffer()), neighborBytes);
+  assert.equal(backend.maximum <= 4, true); assert.equal(backend.active, 0);
+  assert.equal(backend.calls.filter((call) => !call.range).length, 1);
+  assert.equal(backend.calls.filter((call) => call.url === neighborUrl).every((call) => !call.signal.aborted), true);
+  // No leaked slot may prevent a subsequent valid first-image request.
+  assert.equal((await helper.fetch(imageRequest(neighborUrl))).verified, true);
+});
+
+test("ignored-Range real 200 releases its FIFO slot at headers without truncating the still-open body", async () => {
+  let activeHeaders = 0, maximum = 0, calls = 0;
+  const owners = Array.from({ length: 5 }, () => new AbortController());
+  const helper = load(async (_input, init) => {
+    calls++; activeHeaders++; maximum = Math.max(maximum, activeHeaders);
+    await new Promise((resolve) => setTimeout(resolve, 3)); activeHeaders--;
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(Uint8Array.of(bytes[0]));
+      init.signal.addEventListener("abort", () => controller.error(init.signal.reason), { once: true });
+      // The legitimate forwarded body remains open after its headers.
+    } }), { status: 200, headers: { "Content-Type": "image/webp" } });
+  });
+  try {
+    const results = await Promise.all(owners.map((owner) => helper.fetch(imageRequest(imageUrl, { signal: owner.signal }))));
+    assert.equal(calls, 5); assert.equal(maximum, 1);
+    assert.equal(results.every((result) => result.verified === false && result.response.status === 200), true);
+    assert.equal(owners.every((owner) => !owner.signal.aborted), true);
+    owners.forEach((owner) => owner.abort());
+    await Promise.all(results.map((result) => assert.rejects(result.response.arrayBuffer(), { name: "AbortError" })));
+  } finally { owners.forEach((owner) => owner.abort()); }
+});
+
+test("first image operation completes before a neighboring image even when its probe is much slower", async () => {
+  const backend = concurrentImageServer({ slowFirstProbe: true }); const helper = load(backend.fetcher);
+  const completed = [];
+  const [first, neighbor] = await Promise.all([
+    helper.fetch(imageRequest()).then((result) => { completed.push("first"); return result; }),
+    helper.fetch(imageRequest(neighborUrl)).then((result) => { completed.push("neighbor"); return result; }),
+  ]);
+  assert.deepEqual(completed, ["first", "neighbor"]);
+  assert.equal(first.verified, true); assert.equal(neighbor.verified, true);
+  assert.deepEqual(Buffer.from(await first.response.arrayBuffer()), bytes);
+  assert.deepEqual(Buffer.from(await neighbor.response.arrayBuffer()), neighborBytes);
+  assert.deepEqual(backend.calls.slice(0, 5).map((call) => call.url), Array(5).fill(imageUrl));
+  assert.deepEqual(backend.calls.slice(5).map((call) => call.url), Array(5).fill(neighborUrl));
+  assert.equal(backend.maximum, 4); assert.equal(backend.active, 0);
 });

@@ -1,6 +1,5 @@
 /* WaveKB service worker: public, account-free caches only. */
-importScripts("/sw-policy.js");
-importScripts("/sw-reading-images.js");
+importScripts("/sw-policy.js", "/sw-reading-images.js");
 
 var CACHE_VERSION = "v2";
 var SHELL_CACHE = "wavekb-shell-" + CACHE_VERSION;
@@ -25,7 +24,7 @@ self.addEventListener("message", function (event) {
       || typeof reading.canHandle !== "function" || typeof reading.fetch !== "function") return;
   // A public capability acknowledgement only: no identity, credentials,
   // requests or cache mutation. Old same-URL controllers cannot emit this.
-  port.postMessage({ version: 1 });
+  port.postMessage({ version: 2 });
 });
 
 function cacheable(response, verified) {

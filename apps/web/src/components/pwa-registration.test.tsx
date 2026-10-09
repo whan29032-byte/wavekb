@@ -2,11 +2,13 @@ import { render, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 afterEach(() => {
+  delete (window as Window & { __wavekbPwaRegistration?: unknown }).__wavekbPwaRegistration;
   vi.restoreAllMocks();
 });
 
 it("starts non-blocking root-scope registration without waiting for page resources to load", async () => {
   vi.spyOn(document, "readyState", "get").mockReturnValue("loading");
+  Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
   const register = vi.fn().mockResolvedValue({});
   Object.defineProperty(window.navigator, "serviceWorker", {
     configurable: true,
