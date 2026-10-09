@@ -1,5 +1,5 @@
-import type { KnowledgeData } from "@wavekb/knowledge";
-import { CORE_BOOK_ID, getKnowledgeBook, type KnowledgeBookCatalogEntry } from "./book-catalog";
+import type { KnowledgeAsset, KnowledgeBookIllustration, KnowledgeData } from "@wavekb/knowledge";
+import { UNIT_BOOK_ID, getKnowledgeBook, getKnowledgeBookCatalog, type KnowledgeBookCatalogEntry } from "./book-catalog";
 import { readingTextToPlainText } from "./reading-text";
 
 export type BookSearchDocument = {
@@ -24,7 +24,7 @@ export type BookReadingModel = {
     chapters: Array<{ id: string; title: string; count: number }>;
     readingGuide: Array<{ title: string; description: string }>;
     topics: string[];
-    pages: Array<{ page: number; text: string }>;
+    pages: Array<{ page: number; text: string; illustrations?: KnowledgeBookIllustration[]; sourceImage?: KnowledgeAsset; imageOnly?: boolean }>;
   };
   sourceArtifact: { label: string; href: string } | null;
   boundaries: string[];
@@ -52,7 +52,7 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
   const book = getKnowledgeBook(bookId, data);
   if (!book) return null;
 
-  if (book.id === CORE_BOOK_ID && book.kind === "core") {
+  if (book.id === UNIT_BOOK_ID && book.kind === "core") {
     const corePages = data.pages.filter((page) => page.kind === "core");
     return {
       book,
@@ -69,7 +69,7 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
       readingOptions: [
         { title: "规则与指引", description: "先检查强制规则，再使用指南排序候选。", href: "/knowledge/core-system" },
         { title: "按问题查答案", description: `${data.questions.length} 条判断路径，连接规则、证据和失效管理。`, href: `${book.href}?section=questions#core-questions` },
-        { title: "按原书章节", description: "沿第10版章节顺序阅读同一批知识条目。", href: `${book.href}?section=chapters#core-chapters` },
+        { title: "按原书章节", description: "沿原有章节索引阅读版本对照知识条目；来源版次逐条标注。", href: `${book.href}?section=chapters#core-chapters` },
         { title: "术语表", description: "查看浪级、结构和比例相关术语。", href: "/knowledge/chapters/glossary" },
       ],
       navigationEntries: [
@@ -96,8 +96,9 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
 
   if (book.kind !== "extension") return null;
   const source = book.source;
+  const originalSource = source.source_kind === "original_pdf";
   // Preserve reviewed paragraph/table layout in the reading body; compact only the search index.
-  const pages = source.text_pages.map((page) => ({ page: page.page, text: page.text }));
+  const pages = source.text_pages.map((page) => ({ page: page.page, text: page.text, ...(page.illustrations?.length ? { illustrations: page.illustrations } : {}), ...(page.source_image ? { sourceImage: page.source_image } : {}), ...(page.extraction?.status === "image_only" ? { imageOnly: true } : {}) }));
   const availableSections = new Set([
     ...(source.reading_guide.length ? ["#reading-guide"] : []),
     ...(source.topics.length ? ["#topics"] : []),
@@ -107,30 +108,30 @@ export function buildBookReadingModel(bookId: string, data: KnowledgeData): Book
   return {
     book,
     hero: { primaryHref: "#book-text", primaryLabel: "开始网页阅读" },
-    searchDocuments: pages.map((page) => ({
+    searchDocuments: pages.filter((page) => !page.imageOnly).map((page) => ({
       id: `${book.id}::page::p${String(page.page).padStart(4, "0")}`,
-      title: `第 ${page.page} 页`, text: normalizedText(readingTextToPlainText(page.text)), meta: "网页正文",
+      title: `第 ${page.page} 页`, text: normalizedText(readingTextToPlainText(page.text)), meta: originalSource ? `第${source.edition}版原书 PDF 第 ${page.page} 页` : "网页正文",
       href: `/knowledge/books/${book.id}#page-${page.page}`,
       bookId: book.id, bookTitle: book.title,
     })),
     readingOptions: [
       { title: "阅读导览", description: "按主题和使用目的安排交叉阅读。", href: "#reading-guide" },
       { title: "主题", description: "从资料覆盖的主题进入内容。", href: "#topics" },
-      { title: "网页正文", description: "按蒸馏 PDF 页码阅读可检索正文。", href: "#book-text" },
+      { title: "网页正文", description: originalSource ? `按第${source.edition}版原书 PDF 页码阅读，原页图表按需展开。` : "按蒸馏 PDF 页码阅读可检索正文。", href: "#book-text" },
       { title: "使用边界", description: "了解资料的来源、范围和不能替代的判断。", href: "#boundaries" },
-    ].filter((option) => availableSections.has(option.href)),
+    ].filter((option) => availableSections.has(option.href)).concat(originalSource ? [{ title: "第10版补充与版本对照", description: "查看现有117个整理条目，真实来源版次逐条标注；不等同于第11版全文。", href: `/knowledge/books/${UNIT_BOOK_ID}` }] : []),
     navigationEntries: [
       { title: "阅读导览", href: "#reading-guide" }, { title: "主题", href: "#topics" },
       { title: "网页正文", href: "#book-text" }, { title: "使用边界", href: "#boundaries" },
       ...pages.map((page) => ({ title: `第 ${page.page} 页`, href: `#page-${page.page}`, generated: true })),
     ].filter((entry) => ("generated" in entry && entry.generated) || availableSections.has(entry.href)),
     content: { themes: [], questions: [], chapters: [], readingGuide: source.reading_guide, topics: source.topics, pages },
-    sourceArtifact: { label: "WaveKB 蒸馏 PDF", href: assetUrl(source.pdf_path) },
+    sourceArtifact: { label: book.sourceArtifactLabel, href: assetUrl(source.pdf_path) },
     boundaries: source.boundaries,
   };
 }
 
 export function buildLibrarySearchDocuments(data: KnowledgeData) {
-  return [CORE_BOOK_ID, ...data.library.books.map((book) => book.id)]
+  return getKnowledgeBookCatalog(data).map((book) => book.id)
     .flatMap((bookId) => buildBookReadingModel(bookId, data)?.searchDocuments || []);
 }

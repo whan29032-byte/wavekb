@@ -9,7 +9,9 @@ export type KnowledgeCitation = {
   snippet: string;
 };
 
-const CORE_BOOK_ID = "elliott-wave-principle-tenth-edition";
+import { SOURCE_BOOK_ID, UNIT_BOOK_ID } from "@/lib/knowledge/book-catalog";
+import { sourceEditionLabel } from "@/lib/knowledge/source-labels";
+
 const EXTENSION_BOOK_IDS = new Set(["elliott-wave-natural-law", "chan-theory-complete"]);
 const ARTIFACT_VERSION_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -27,10 +29,11 @@ function isSafeCitation(value: unknown): value is KnowledgeCitation {
     || typeof href !== "string" || typeof bookId !== "string"
     || !Array.isArray(pages) || pages.some((page) => !Number.isInteger(page) || page < 1)
     || href.includes("%") || href.includes("..") || href.includes("://")) return false;
-  if (bookId === CORE_BOOK_ID) return /^\/knowledge\/unit-[a-z0-9-]+$/.test(href);
-  if (!EXTENSION_BOOK_IDS.has(bookId)) return false;
+  if (bookId === UNIT_BOOK_ID) return /^\/knowledge\/unit-[a-z0-9-]+$/.test(href);
+  if (bookId === SOURCE_BOOK_ID && value.source_id !== "ewp-11-zh-2021") return false;
+  if (bookId !== SOURCE_BOOK_ID && !EXTENSION_BOOK_IDS.has(bookId)) return false;
   const match = new RegExp(`^/knowledge/books/${bookId}#page-([1-9][0-9]*)$`).exec(href);
-  return Boolean(match && pages.includes(Number(match[1])));
+  return Boolean(match && pages.includes(Number(match[1])) && (bookId !== SOURCE_BOOK_ID || pages.every((page) => page <= 321)));
 }
 
 export function KnowledgeCitations({
@@ -53,10 +56,11 @@ export function KnowledgeCitations({
     <ul className="grid gap-3">{trusted.map((citation) => {
       const extension = EXTENSION_BOOK_IDS.has(citation.book_id);
       const pages = citation.pages.join("、");
+      const edition = sourceEditionLabel(citation.source_id.replace(/::canonical-units$/, ""));
       return <li key={`${citation.book_id}:${citation.knowledge_id}`} className="grid gap-1 rounded-lg bg-muted p-3 text-sm">
         <p className="font-semibold">{citation.book_title}</p>
         <p>{citation.title}</p>
-        <p className="text-xs text-muted-foreground">{extension ? `蒸馏 PDF 第 ${pages} 页` : `PDF 第 ${pages} 页`} · {citation.source_id}</p>
+        <p className="text-xs text-muted-foreground">{extension ? `蒸馏 PDF 第 ${pages} 页` : `${edition}原书 PDF 第 ${pages} 页`}{citation.book_id === UNIT_BOOK_ID ? " · 补充与版本对照条目" : ""} · {citation.source_id}</p>
         <p className="text-xs leading-5 text-muted-foreground">{citation.snippet}</p>
         <a className="w-fit text-xs font-semibold text-primary hover:underline" href={citation.href}>打开知识原文</a>
       </li>;

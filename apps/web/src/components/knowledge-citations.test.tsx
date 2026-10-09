@@ -18,6 +18,29 @@ const ARTIFACT_VERSION = "e50017a8f53a9d78e65bfa51871de50864c8f4ebb0e7cabe2d6801
 const LEGACY_VERSION = "ewp-10-zh-2016";
 
 describe("knowledge citations", () => {
+  it("labels original eleventh-edition page citations separately from distillations", () => {
+    render(<KnowledgeCitations citations={[{ ...citation, book_id: "elliott-wave-principle-eleventh-edition", book_title: "第11版原书", source_id: "ewp-11-zh-2021", href: "/knowledge/books/elliott-wave-principle-eleventh-edition#page-43", pages: [43] }]} jobKnowledgeVersion={ARTIFACT_VERSION} outputKnowledgeVersion={ARTIFACT_VERSION} />);
+    expect(screen.getByText(/第11版原书 PDF 第 43 页/)).toBeDefined();
+    expect(screen.queryByText(/蒸馏 PDF/)).toBeNull();
+    expect(screen.getByRole("link", { name: "打开知识原文" }).getAttribute("href")).toBe("/knowledge/books/elliott-wave-principle-eleventh-edition#page-43");
+  });
+
+  it("retains actual eleventh-edition sources within the legacy Unit comparison collection", () => {
+    render(<KnowledgeCitations citations={[{ ...citation, source_id: "ewp-11-zh-2021::canonical-units" }]} jobKnowledgeVersion={ARTIFACT_VERSION} outputKnowledgeVersion={ARTIFACT_VERSION} />);
+    expect(screen.getByText(/第11版原书 PDF 第 32 页 · 补充与版本对照条目/)).toBeDefined();
+    expect(screen.getByRole("link", { name: "打开知识原文" }).getAttribute("href")).toBe(citation.href);
+    expect(screen.queryByText(/第10版原书 PDF/)).toBeNull();
+  });
+
+  it.each([
+    { source_id: "ewp-10-zh-2016", pages: [43], href: "/knowledge/books/elliott-wave-principle-eleventh-edition#page-43" },
+    { source_id: "ewp-11-zh-2021", pages: [322], href: "/knowledge/books/elliott-wave-principle-eleventh-edition#page-322" },
+    { source_id: "ewp-11-zh-2021", pages: [43], href: "/knowledge/unit-ewp-rule-impulse-core" },
+  ])("refuses eleventh-edition route/source mismatches %j", (change) => {
+    render(<KnowledgeCitations citations={[{ ...citation, book_id: "elliott-wave-principle-eleventh-edition", ...change }]} jobKnowledgeVersion={ARTIFACT_VERSION} outputKnowledgeVersion={ARTIFACT_VERSION} />);
+    expect(screen.queryByRole("link", { name: "打开知识原文" })).toBeNull();
+  });
+
   it("renders only expanded server citations with a matching artifact hash, book, page, excerpt, and safe link", () => {
     render(<KnowledgeCitations citations={[citation]} jobKnowledgeVersion={ARTIFACT_VERSION} outputKnowledgeVersion={ARTIFACT_VERSION} />);
 

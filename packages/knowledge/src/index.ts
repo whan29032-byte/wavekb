@@ -13,6 +13,7 @@ export type KnowledgeAsset = {
   pdf_page?: number;
   book_pages?: number[];
   figure_nos?: string[];
+  asset_sha256?: string;
 };
 
 export type KnowledgeSection = {
@@ -72,6 +73,23 @@ export type KnowledgeRelation = { source: string; target: string; type: string }
 export type KnowledgeChapter = { id: string; unit_ids: string[] };
 export type KnowledgeTheme = { id: string; title: string; unit_ids: string[]; children: KnowledgeTheme[] };
 
+export type KnowledgeBookIllustration = {
+  id: string;
+  reading_page: number;
+  image_pdf_page: number;
+  source_image_name: string;
+  source_image_sha256: string;
+  crop: [number, number, number, number];
+  asset_path: string;
+  asset_sha256: string;
+  width: number;
+  height: number;
+  after_heading: string;
+  caption: string;
+  original_pdf_page: number;
+  original_book_page: number;
+};
+
 export type KnowledgeLibraryBook = {
   id: string;
   title: string;
@@ -90,10 +108,20 @@ export type KnowledgeLibraryBook = {
   redistribution_allowed: boolean | null;
   source_provenance: string;
   derivative_of: string | null;
+  role?: "core" | "extension";
+  source_kind?: "original_pdf" | "distilled_pdf";
+  source_id?: string;
+  edition?: number;
   topics: string[];
   reading_guide: Array<{ title: string; description: string }>;
   boundaries: string[];
-  text_pages: Array<{ page: number; text: string }>;
+  text_pages: Array<{
+    page: number;
+    text: string;
+    extraction?: { status: "text_layer_extracted" | "image_only"; human_review: string };
+    source_image?: KnowledgeAsset;
+    illustrations?: KnowledgeBookIllustration[];
+  }>;
 };
 
 export type KnowledgeLibrary = {

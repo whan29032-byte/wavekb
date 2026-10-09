@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAiKnowledgeArtifact } from "./lib/ai-knowledge-artifact.mjs";
 import { applyBookReadingCorrections, reviewedBookCorrections } from "./lib/book-reading-corrections.mjs";
+import { applyBookIllustrations, reviewedBookIllustrations } from "./lib/book-illustrations.mjs";
+import { validateSourcePageImages } from "./lib/source-page-images.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const knowledgeRoot = path.join(repositoryRoot, "knowledge");
@@ -64,6 +66,13 @@ const supplements = readJson(path.join(knowledgeRoot, "source/supplements.json")
 const framework = readJson(path.join(knowledgeRoot, "source/framework.json"));
 const library = readJson(path.join(knowledgeRoot, "source/library.json"));
 const readingCorrections = readJson(path.join(knowledgeRoot, "reading/text-corrections.json"));
+const bookIllustrations = readJson(path.join(knowledgeRoot, "reading/book-illustrations.json"));
+let illustratedBooks = new Map();
+try {
+  illustratedBooks = reviewedBookIllustrations(bookIllustrations, library.books || []);
+} catch (error) {
+  errors.push(error.message);
+}
 let correctedBooks = new Map();
 try {
   correctedBooks = reviewedBookCorrections(readingCorrections, library.books || []);
@@ -83,6 +92,8 @@ const imageIds = new Set((imageRegistry.assets || []).map((asset) => asset.id));
 const assetById = new Map((imageRegistry.assets || []).map((asset) => [asset.id, asset]));
 
 expect(Array.isArray(library.books) && library.books.length > 0, "Knowledge library has no books");
+expect(library.books?.filter((book) => book.role === "core").length === 1, "Reading library must have exactly one primary book");
+expect(library.books?.find((book) => book.role === "core")?.id === "elliott-wave-principle-eleventh-edition", "Reading primary book must be the actual eleventh edition");
 const libraryBookIds = uniqueIds(library.books || [], "Knowledge library books");
 for (const book of library.books || []) {
   for (const field of ["id", "title", "eyebrow", "description", "source_label", "coverage_note", "generated_on", "pdf_path", "cover_path", "text_path", "sha256", "rights_status", "source_provenance"]) {
@@ -97,7 +108,8 @@ for (const book of library.books || []) {
   expect(Array.isArray(book.reading_guide) && book.reading_guide.length > 0, `${book.id} has no reading guide`);
   expect(Array.isArray(book.boundaries) && book.boundaries.length > 0, `${book.id} has no usage boundaries`);
   for (const assetPath of [book.pdf_path, book.cover_path]) {
-    expect(String(assetPath || "").startsWith("assets/books/") && !String(assetPath).includes(".."), `${book.id} has unsafe library asset path: ${assetPath}`);
+    const originalCover = book.id === "elliott-wave-principle-eleventh-edition" && assetPath === book.cover_path && assetPath === "assets/source-pages/page-001.png";
+    expect((String(assetPath || "").startsWith("assets/books/") || originalCover) && !String(assetPath).includes(".."), `${book.id} has unsafe library asset path: ${assetPath}`);
     expect(fs.existsSync(path.join(repositoryRoot, assetPath || "")), `${book.id} is missing library asset: ${assetPath}`);
   }
   if (book.pdf_path && fs.existsSync(path.join(repositoryRoot, book.pdf_path))) expect(sha256(path.join(repositoryRoot, book.pdf_path)) === book.sha256, `${book.id} PDF SHA-256 mismatch`);
@@ -114,7 +126,10 @@ const pageSources = Object.fromEntries((library.books || []).flatMap((book) => {
   expect(Array.isArray(source.pages) && source.pages.length === book.pdf_pages, `${book.id} library text page count does not match`);
   expect((source.pages || []).every((page, index) => page.page === index + 1 && String(page.text || "").trim()), `${book.id} library text pages are incomplete`);
   try {
-    const correctedPages = applyBookReadingCorrections({ book, pages: source.pages, correction: correctedBooks.get(book.id), sourcePdfSha256: sha256(path.join(repositoryRoot, book.pdf_path)) });
+    const sourcePdfSha256 = sha256(path.join(repositoryRoot, book.pdf_path));
+    validateSourcePageImages({ book, pages: source.pages, sourcePdfSha256, readAsset: (assetPath) => fs.readFileSync(path.join(repositoryRoot, assetPath)) });
+    const correctedText = applyBookReadingCorrections({ book, pages: source.pages, correction: correctedBooks.get(book.id), sourcePdfSha256 });
+    const correctedPages = applyBookIllustrations({ book, pages: correctedText, illustrationSet: illustratedBooks.get(book.id), sourcePdfSha256, readAsset: (assetPath) => fs.readFileSync(path.join(repositoryRoot, assetPath)) });
     const compiledBook = compiled.library?.books?.find((candidate) => candidate.id === book.id);
     expect(JSON.stringify(compiledBook?.text_pages) === JSON.stringify(correctedPages), `${book.id} compiled reading pages are stale`);
     return [[book.id, { ...source, pages: correctedPages }]];
@@ -282,7 +297,7 @@ expect(/^[a-f0-9]{64}$/.test(retrieval.knowledgeVersion || ""), "Retrieval knowl
 const retrievalBooks = Array.isArray(retrieval.books) ? retrieval.books : [];
 const retrievalChunks = Array.isArray(retrieval.chunks) ? retrieval.chunks : [];
 const retrievalBookIds = uniqueValues(retrievalBooks.map((book) => book.bookId), "Retrieval books");
-expect(JSON.stringify([...retrievalBookIds]) === JSON.stringify(["elliott-wave-principle-tenth-edition", "elliott-wave-natural-law", "chan-theory-complete"]), "Retrieval book list is not the approved three-book catalog");
+expect(JSON.stringify([...retrievalBookIds]) === JSON.stringify(["elliott-wave-principle-eleventh-edition", "elliott-wave-principle-tenth-edition", "elliott-wave-natural-law", "chan-theory-complete"]), "Retrieval book list is not the approved primary and supplementary catalog");
 uniqueValues(retrievalChunks.map((chunk) => chunk.chunkId), "Retrieval chunks");
 const retrievalSources = retrievalBooks.flatMap((book) => book.sourceArtifacts || []);
 uniqueValues(retrievalSources.map((source) => source.sourceId), "Retrieval sources");
@@ -329,6 +344,9 @@ else warnings.push("Framework source file is unavailable; hash could not be veri
 const status = {
   ok: errors.length === 0,
   counts: {
+    reading_primary_pdf_pages: library.books?.find((book) => book.role === "core")?.pdf_pages || 0,
+    reading_primary_text_pages: pageSources["elliott-wave-principle-eleventh-edition"]?.pages?.filter((page) => page.extraction?.status === "text_layer_extracted").length || 0,
+    reading_primary_image_only_pages: pageSources["elliott-wave-principle-eleventh-edition"]?.pages?.filter((page) => page.extraction?.status === "image_only").length || 0,
     source_pages: coverage.length,
     coverage_ok: coverage.length - coverageNeedsReview,
     coverage_needs_review: coverageNeedsReview,
@@ -338,6 +356,7 @@ const status = {
     questions: questions.length,
     compiled_pages: compiled.pages?.length || 0,
     image_assets: imageRegistry.assets?.length || 0,
+    book_illustrations: [...illustratedBooks.values()].reduce((count, book) => count + book.illustrations.length, 0),
     restored_units: restoredUnits.length,
     generic_relations: genericRelations,
     primary_source_verified: Boolean(manifest.path && fs.existsSync(manifest.path) && sha256(manifest.path) === manifest.sha256),

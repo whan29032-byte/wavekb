@@ -4,7 +4,11 @@ import { ArrowLeft, ArrowRight, Images, SealCheck } from "@phosphor-icons/react/
 import { notFound } from "next/navigation";
 import { getKnowledgePage, knowledgeData, type KnowledgeAsset } from "@wavekb/knowledge";
 import { KnowledgeImageViewer } from "@/components/knowledge-image-viewer";
+import { KnowledgeUnitIllustrations } from "@/components/knowledge-unit-illustrations";
 import { KnowledgeBodyReference, KnowledgeSourceUnitIndex, publicSourceUnitPages } from "@/components/knowledge-body-reference";
+import { coreBookExplanations } from "@/lib/knowledge/core-book-illustrations";
+import { knowledgeAssetSourceLabel, knowledgePageSourceLabels } from "@/lib/knowledge/source-labels";
+import { SOURCE_BOOK_ID } from "@/lib/knowledge/book-catalog";
 import { publicMetadata } from "@/lib/seo";
 
 type PageProps = { params: Promise<{ id: string }> };
@@ -32,7 +36,7 @@ function uniqueAssets(assets: KnowledgeAsset[]) {
 }
 
 function assetCaption(asset: KnowledgeAsset) {
-  const source = asset.authority === "primary" ? "第10版 Primary" : asset.authority === "supplement" ? "第11版 Supplement" : "";
+  const source = knowledgeAssetSourceLabel(asset);
   const location = `${asset.book_pages?.length ? `书页 ${asset.book_pages.join(", ")}` : ""}${asset.book_pages?.length && asset.pdf_page ? " / " : ""}${asset.pdf_page ? `PDF 页 ${asset.pdf_page}` : ""}`;
   return [source, asset.caption, location].filter(Boolean).join(" · ");
 }
@@ -50,19 +54,24 @@ function AssetGrid({ assets, title }: { assets: KnowledgeAsset[]; title: string 
 export default async function KnowledgeDetailPage({ params }: PageProps) {
   const page = getKnowledgePage((await params).id);
   if (!page) notFound();
-  const primaryAssets = uniqueAssets(page.primary_figures);
-  const supplementAssets = uniqueAssets(page.supplement_figures);
-  const supplementSourceAssets = uniqueAssets(page.supplement_source_images);
+  const figureAssets = uniqueAssets([...page.primary_figures, ...page.supplement_figures]);
+  const primaryAssets = figureAssets.filter((asset) => asset.source_id === "ewp-10-zh-2016" && asset.edition === 10);
+  const supplementAssets = figureAssets.filter((asset) => asset.source_id === "ewp-11-zh-2021" && asset.edition === 11);
+  const supplementSourceAssets = uniqueAssets(page.supplement_source_images).filter((asset) => asset.source_id === "ewp-11-zh-2021" && asset.edition === 11);
   const related = page.related_page_ids.map(getKnowledgePage).filter((item) => item !== null);
   const sourceUnitPages = publicSourceUnitPages(page.source_unit_ids);
+  const fullBookExplanations = page.id === "core-full-book"
+    ? coreBookExplanations(page.sections.find((section) => section.title === "完整解释")?.paragraphs || [], sourceUnitPages)
+    : null;
 
   return (
     <main className="mx-auto grid max-w-6xl gap-8 px-4 py-10 md:grid-cols-[minmax(0,1fr)_16rem] md:px-6 md:py-14">
       <article className="grid min-w-0 gap-8">
         <Link href="/knowledge" className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回知识库</Link>
         <header className="grid gap-4 border-b pb-7">
-          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground"><span>{page.kind === "core" ? "核心知识" : "辅助资料"}</span><span aria-hidden>/</span><span className="inline-flex items-center gap-1"><SealCheck aria-hidden size={16} className="text-primary" />{page.status === "verified" ? "已核验" : page.status}</span>{page.source_authorities.map((authority) => <span key={authority} className="rounded-full bg-muted px-2 py-1">{authority === "primary" ? "第10版 Primary" : "第11版 Supplement"}</span>)}</div>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground"><span>{page.kind === "core" ? "核心知识" : "辅助资料"}</span><span aria-hidden>/</span><span className="inline-flex items-center gap-1"><SealCheck aria-hidden size={16} className="text-primary" />{page.status === "verified" ? "已核验" : page.status}</span>{knowledgePageSourceLabels(page).map((label) => <span key={label} className="rounded-full bg-muted px-2 py-1">{label}</span>)}</div>
           <h1 className="max-w-[24ch] text-3xl font-semibold leading-tight tracking-[-0.035em] md:text-5xl">{page.title}</h1>
+          {page.kind === "core" ? <p className="max-w-[76ch] text-sm leading-7 text-muted-foreground">这是现有整理条目的补充与版本对照视图，文字和图示保留各自实际来源；117条目中81条以第10版、36条以第11版为主来源，不代表第11版全文已逐条核验。<Link href={`/knowledge/books/${SOURCE_BOOK_ID}`} className="ml-1 font-semibold text-primary hover:underline">阅读第11版原书</Link></p> : null}
         </header>
 
         <KnowledgeSourceUnitIndex pages={sourceUnitPages} />
@@ -71,18 +80,24 @@ export default async function KnowledgeDetailPage({ params }: PageProps) {
           {page.sections.map((section, sectionIndex) => (
             <section key={section.title} id={`knowledge-section-${sectionIndex}`} aria-labelledby={`knowledge-section-${sectionIndex}-title`} className="grid scroll-mt-24 gap-3">
               <h2 id={`knowledge-section-${sectionIndex}-title`} className="text-xl font-semibold tracking-tight md:text-2xl">{section.title}</h2>
-              {section.paragraphs.map((paragraph, index) => <p key={index} className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90"><KnowledgeBodyReference text={paragraph} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></p>)}
+              {section.title === "完整解释" && fullBookExplanations ? <>
+                <p className="max-w-[76ch] text-sm leading-7 text-muted-foreground">原页摘录按已核验的知识单元关联，保留图示与上下文；并非每个知识单元都有独立配图。同一原页仅展示一次，后续条目提供定位链接。</p>
+                {fullBookExplanations.map(({ text, unit, figures }, index) => <div key={index} data-reading-explanation data-source-unit-id={unit?.id} className="grid min-w-0 gap-4">
+                  <p className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90"><KnowledgeBodyReference text={text} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></p>
+                  {unit ? <KnowledgeUnitIllustrations figures={figures} unitTitle={unit.title} /> : null}
+                </div>)}
+              </> : section.paragraphs.map((paragraph, index) => <p key={index} className="max-w-[76ch] whitespace-pre-wrap text-base leading-8 text-foreground/90"><KnowledgeBodyReference text={paragraph} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></p>)}
               {section.items.length ? <ul className="grid max-w-[76ch] gap-2 pl-5 text-base leading-7 text-foreground/90">{section.items.map((item, index) => <li key={index} className="list-disc pl-1 marker:text-primary"><KnowledgeBodyReference text={item} sectionTitle={section.title} sourceUnitPages={sourceUnitPages} /></li>)}</ul> : null}
             </section>
           ))}
         </div>
 
-        <AssetGrid assets={primaryAssets} title="第10版核心图示与原页摘录" />
-        <AssetGrid assets={supplementAssets} title="第11版补充图示" />
+        <AssetGrid assets={primaryAssets} title="第10版补充图示与原页摘录" />
+        <AssetGrid assets={supplementAssets} title="第11版原书图示" />
         {supplementSourceAssets.length ? (
           <details className="rounded-xl border bg-surface p-5 open:grid open:gap-5">
-            <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold"><Images aria-hidden size={20} className="text-primary" />查看第11版补充来源页（{supplementSourceAssets.length}）</summary>
-            <div className="pt-1"><KnowledgeImageViewer assets={supplementSourceAssets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `第11版补充来源页 ${index + 1}`, width: asset.width, height: asset.height, caption: assetCaption(asset) }))} /></div>
+            <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold"><Images aria-hidden size={20} className="text-primary" />查看第11版原书来源页（{supplementSourceAssets.length}）</summary>
+            <div className="pt-1"><KnowledgeImageViewer assets={supplementSourceAssets.map((asset, index) => ({ url: assetUrl(asset.asset_path), alt: `${knowledgeAssetSourceLabel(asset)} · PDF 第 ${asset.pdf_page || index + 1} 页`, width: asset.width, height: asset.height, caption: assetCaption(asset) }))} /></div>
           </details>
         ) : null}
       </article>

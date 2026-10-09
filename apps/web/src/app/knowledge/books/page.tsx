@@ -24,8 +24,8 @@ export default function KnowledgeBooksPage() {
       <header className="grid gap-5 border-b pb-8">
         <Link href="/knowledge" className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary"><ArrowLeft aria-hidden size={17} />返回知识库</Link>
         <div className="grid gap-3">
-          <h1 className="text-4xl font-semibold tracking-[-0.04em] md:text-5xl">三本图书</h1>
-          <p className="max-w-[68ch] text-base leading-7 text-muted-foreground">选择一本书进入独立目录和书内搜索。核心主书用于规则判断，扩展资料用于交叉阅读。</p>
+          <h1 className="text-4xl font-semibold tracking-[-0.04em] md:text-5xl">知识库图书</h1>
+          <p className="max-w-[68ch] text-base leading-7 text-muted-foreground">以第11版原书为主，保留第10版补充与版本对照，其他资料用于交叉阅读。每本书都有独立阅读入口和书内搜索。</p>
         </div>
       </header>
 
@@ -36,7 +36,7 @@ export default function KnowledgeBooksPage() {
               <Image src={assetUrl(book.coverPath)} alt={`${book.title}封面`} fill sizes="13rem" className="object-contain" />
             </div>
             <span className="grid gap-2">
-              <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.kind === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>
+              <span className="flex flex-wrap items-center gap-2 text-xs"><strong className={book.role === "core" ? "text-primary" : "text-muted-foreground"}>{book.label}</strong><span className="text-muted-foreground">{book.edition}</span></span>
               <strong className="text-xl leading-7 group-hover:text-primary">{book.title}</strong>
               <span className="text-sm leading-6 text-muted-foreground">{book.description}</span>
               <span className="inline-flex items-center gap-1 text-sm font-semibold">进入图书<ArrowRight aria-hidden size={16} className="transition-transform group-hover:translate-x-0.5" /></span>

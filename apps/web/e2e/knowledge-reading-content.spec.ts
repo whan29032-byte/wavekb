@@ -51,7 +51,9 @@ async function renderedBookPages(page: Page) {
   return page.locator('#book-text > div > section[id^="page-"]').evaluateAll((sections) => sections.map((section) => {
     const body = section.querySelector(":scope > div");
     if (!body) throw new Error(`Missing reading body: ${section.id}`);
-    const blocks: ReadingBlock[] = [...body.children].map((element) => {
+    // Figure provenance is tested separately; preserve the complete text-only
+    // block comparison so adding illustrations cannot mask lost book content.
+    const blocks: ReadingBlock[] = [...body.children].filter((element) => !element.hasAttribute("data-book-illustration")).map((element) => {
       const text = element.textContent || "";
       if (element.tagName === "P") return { kind: "paragraph", text };
       if (element.tagName === "H4" || element.tagName === "H5") return { kind: "heading", text, level: element.tagName === "H4" ? 2 : 3 };

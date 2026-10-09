@@ -16,6 +16,11 @@ describe("review generated from analysis", () => {
 });
 
 describe("AI run request", () => {
+  it("preserves distinct eleventh-edition and comparison-book single scopes", () => {
+    for (const bookId of ["elliott-wave-principle-eleventh-edition", "elliott-wave-principle-tenth-edition"] as const) {
+      expect(createAiRunRequest(4, bookId, "11111111-1111-4111-8111-111111111111").knowledge_scope).toEqual({ mode: "single", book_id: bookId });
+    }
+  });
   it("creates the exact version-2 all-books payload", () => {
     expect(createAiRunRequest(4, "all", "11111111-1111-4111-8111-111111111111")).toEqual({
       request_version: 2,

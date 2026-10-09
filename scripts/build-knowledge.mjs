@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { buildAiKnowledgeArtifact } from "./lib/ai-knowledge-artifact.mjs";
 import { createHash } from "node:crypto";
 import { applyBookReadingCorrections, reviewedBookCorrections } from "./lib/book-reading-corrections.mjs";
+import { applyBookIllustrations, reviewedBookIllustrations } from "./lib/book-illustrations.mjs";
+import { validateSourcePageImages } from "./lib/source-page-images.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const knowledgeRoot = path.join(repositoryRoot, "knowledge");
@@ -178,10 +180,12 @@ const manifest = readJson(path.join(knowledgeRoot, "source/manifest.json"));
 const framework = readJson(path.join(knowledgeRoot, "source/framework.json"));
 const library = readJson(path.join(knowledgeRoot, "source/library.json"));
 const readingCorrections = readJson(path.join(knowledgeRoot, "reading/text-corrections.json"));
+const bookIllustrations = readJson(path.join(knowledgeRoot, "reading/book-illustrations.json"));
 const coverage = readJsonl(path.join(knowledgeRoot, "coverage/tenth-edition-pages.jsonl"));
 
 if (!library || !Array.isArray(library.books)) throw new Error("knowledge/source/library.json must contain a books array");
 const correctedBooks = reviewedBookCorrections(readingCorrections, library.books);
+const illustratedBooks = reviewedBookIllustrations(bookIllustrations, library.books);
 const libraryBookIds = new Set();
 const pageSources = {};
 for (const book of library.books) {
@@ -191,7 +195,8 @@ for (const book of library.books) {
   if (libraryBookIds.has(book.id)) throw new Error(`Duplicate knowledge library book id: ${book.id}`);
   libraryBookIds.add(book.id);
   for (const assetPath of [book.pdf_path, book.cover_path]) {
-    if (!String(assetPath).startsWith("assets/books/") || String(assetPath).includes("..")) throw new Error(`Unsafe knowledge library asset path: ${assetPath}`);
+    const originalCover = book.id === "elliott-wave-principle-eleventh-edition" && assetPath === book.cover_path && assetPath === "assets/source-pages/page-001.png";
+    if ((!String(assetPath).startsWith("assets/books/") && !originalCover) || String(assetPath).includes("..")) throw new Error(`Unsafe knowledge library asset path: ${assetPath}`);
     if (!fs.existsSync(path.join(repositoryRoot, assetPath))) throw new Error(`Missing knowledge library asset: ${assetPath}`);
   }
   if (!String(book.text_path).startsWith("knowledge/source/book-text/") || String(book.text_path).includes("..")) {
@@ -207,7 +212,9 @@ for (const book of library.books) {
     throw new Error(`Knowledge library text pages are incomplete: ${book.id}`);
   }
   const sourcePdfSha256 = createHash("sha256").update(fs.readFileSync(path.join(repositoryRoot, book.pdf_path))).digest("hex");
-  book.text_pages = applyBookReadingCorrections({ book, pages: textDocument.pages, correction: correctedBooks.get(book.id), sourcePdfSha256 });
+  const correctedPages = applyBookReadingCorrections({ book, pages: textDocument.pages, correction: correctedBooks.get(book.id), sourcePdfSha256 });
+  book.text_pages = applyBookIllustrations({ book, pages: correctedPages, illustrationSet: illustratedBooks.get(book.id), sourcePdfSha256, readAsset: (assetPath) => fs.readFileSync(path.join(repositoryRoot, assetPath)) });
+  validateSourcePageImages({ book, pages: book.text_pages, sourcePdfSha256, readAsset: (assetPath) => fs.readFileSync(path.join(repositoryRoot, assetPath)) });
   pageSources[book.id] = { ...textDocument, pages: book.text_pages };
   if (!Number.isInteger(book.pdf_pages) || book.pdf_pages < 1 || !Number.isInteger(book.source_page_count) || book.source_page_count < 1) {
     throw new Error(`Knowledge library book has invalid page counts: ${book.id}`);
@@ -320,6 +327,7 @@ const data = {
   library,
   summary: {
     source: {
+      scope: "existing_canonical_unit_collection",
       source_id: manifest.source_id,
       pdf_pages: manifest.pdf_pages,
       authority: manifest.authority,
@@ -327,6 +335,12 @@ const data = {
       coverage_ok: coverage.filter((row) => row.status === "OK").length,
       coverage_needs_review: coverage.filter((row) => row.status === "NEEDS_REVIEW").length,
       source_present: fs.existsSync(manifest.path),
+    },
+    reading: {
+      primary_book_id: "elliott-wave-principle-eleventh-edition",
+      supplement_book_id: "elliott-wave-principle-tenth-edition",
+      primary_pdf_pages: library.books.find((book) => book.role === "core")?.pdf_pages,
+      canonical_units_provenance_preserved: true,
     },
     framework: {
       source_id: framework.source_id,

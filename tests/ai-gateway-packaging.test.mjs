@@ -12,7 +12,7 @@ const yaml = createRequire(webRequire.resolve("eslint"))("js-yaml");
 const backendWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-backend-production.yml", import.meta.url), "utf8"));
 const packageStep = backendWorkflow.jobs["migrate-and-deploy"].steps.find((step) => /Package immutable gateway release/.test(step.name));
 
-test("the backend archive starts outside checkout with all three books and no PDFs or secrets", (t) => {
+test("the backend archive starts outside checkout with all four books and no PDFs or secrets", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-gateway-package-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const gateway = path.join(directory, "ai-gateway");
@@ -50,7 +50,7 @@ test("the backend archive starts outside checkout with all three books and no PD
   const smoke = spawnSync(process.execPath, [
     "--input-type=module",
     "-e",
-    'import { buildKnowledgeIndex } from "./src/knowledge/index.ts"; const index = buildKnowledgeIndex(); if (index.books.length !== 3) process.exit(1);',
+    'import { buildKnowledgeIndex } from "./src/knowledge/index.ts"; const index = buildKnowledgeIndex(); if (index.books.length !== 4 || index.books[0].bookId !== "elliott-wave-principle-eleventh-edition") process.exit(1);',
   ], { cwd: extracted, encoding: "utf8" });
   assert.equal(smoke.status, 0, smoke.stderr);
 });

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export const PUBLISHED_BOOK_IDS = [
+  "elliott-wave-principle-eleventh-edition",
   "elliott-wave-principle-tenth-edition",
   "elliott-wave-natural-law",
   "chan-theory-complete",
@@ -66,6 +67,43 @@ const KNOWLEDGE_AUTHORITIES = new Set<KnowledgeAuthority>([
 ]);
 const KNOWLEDGE_CONTENT_STATUSES = new Set<KnowledgeContentStatus>(["verified", "generated"]);
 const BOOK_ROLES = new Set(["core", "extension"] as const);
+const IMAGE_ONLY_ORIGINAL_PAGES = new Set([1, 2, 3, 231, 320, 321]);
+const SOURCE_CONTRACTS: Record<PublishedBookId, {
+  role: "core" | "extension";
+  kind: KnowledgeKind;
+  status: KnowledgeContentStatus;
+  authority: KnowledgeAuthority;
+  sources: { sourceId: string; kind: string; pageCount: number; derivation: string; edition?: number; sha256?: string }[];
+}> = {
+  "elliott-wave-principle-eleventh-edition": {
+    role: "core", kind: "page", status: "generated", authority: "primary",
+    sources: [{
+      sourceId: "ewp-11-zh-2021", kind: "original_pdf", pageCount: 321, edition: 11,
+      derivation: "original", sha256: "ecd3904b0ebd8b37dc57844b2cb8ef5365e84465874f922a7ad8cc5a73c91073",
+    }],
+  },
+  "elliott-wave-principle-tenth-edition": {
+    role: "extension", kind: "unit", status: "verified", authority: "supplement",
+    sources: [
+      { sourceId: "ewp-10-zh-2016::canonical-units", kind: "canonical_units", pageCount: 280, edition: 10, derivation: "verified" },
+      { sourceId: "ewp-11-zh-2021::canonical-units", kind: "canonical_units", pageCount: 321, edition: 11, derivation: "verified" },
+    ],
+  },
+  "elliott-wave-natural-law": {
+    role: "extension", kind: "page", status: "generated", authority: "contextual",
+    sources: [{
+      sourceId: "elliott-wave-natural-law::distilled-pdf", kind: "distilled_pdf", pageCount: 36, derivation: "distilled",
+      sha256: "1f82195dec1e89f9b5012776cc3913daf001bf04f9c077a885618a856b9b226a",
+    }],
+  },
+  "chan-theory-complete": {
+    role: "extension", kind: "page", status: "generated", authority: "contextual",
+    sources: [{
+      sourceId: "chan-theory-complete::distilled-pdf", kind: "distilled_pdf", pageCount: 25, derivation: "distilled",
+      sha256: "9bd13525f6c2ef05faf38c6f604645561ae9948cb0105d4a6ee7c6b3a2e8bc3a",
+    }],
+  },
+};
 
 function invalidArtifact(): never {
   throw new Error("invalid knowledge index artifact");
@@ -156,33 +194,57 @@ function parseChunk(value: unknown): KnowledgeChunk {
 }
 
 function validateBookRoleCoherence(books: KnowledgeBook[], chunks: KnowledgeChunk[]): void {
-  for (const [index, book] of books.entries()) {
-    const core = index === 0;
-    if (book.role !== (core ? "core" : "extension")) invalidArtifact();
-    const sourceAuthorities = new Map<string, KnowledgeAuthority>();
-    for (const source of book.sourceArtifacts) {
-      if (sourceAuthorities.has(source.sourceId)) invalidArtifact();
-      if (core ? source.authority === "contextual" : source.authority !== "contextual") {
+  const allSourceIds = new Set<string>();
+  for (const book of books) {
+    const contract = SOURCE_CONTRACTS[book.bookId];
+    const firstSource = contract.sources[0];
+    if (!firstSource) invalidArtifact();
+    if (book.role !== contract.role || book.sourceArtifacts.length !== contract.sources.length) invalidArtifact();
+    const sources = new Map<string, KnowledgeSourceArtifact>();
+    for (const [index, source] of book.sourceArtifacts.entries()) {
+      const expected = contract.sources[index];
+      if (!expected) invalidArtifact();
+      if (allSourceIds.has(source.sourceId) || source.sourceId !== expected.sourceId
+        || source.authority !== contract.authority || source.kind !== expected.kind
+        || source.pageCount !== expected.pageCount || source.derivation !== expected.derivation
+        || source.edition !== expected.edition || typeof source.sha256 !== "string"
+        || !SHA256_PATTERN.test(source.sha256) || (expected.sha256 && source.sha256 !== expected.sha256)) {
         invalidArtifact();
       }
-      sourceAuthorities.set(source.sourceId, source.authority);
+      allSourceIds.add(source.sourceId);
+      sources.set(source.sourceId, source);
     }
-    if (!sourceAuthorities.size) invalidArtifact();
     const bookChunks = chunks.filter((chunk) => chunk.bookId === book.bookId);
     if (!bookChunks.length) invalidArtifact();
     for (const chunk of bookChunks) {
-      if (sourceAuthorities.get(chunk.sourceId) !== chunk.authority) invalidArtifact();
-      if (core) {
-        if (chunk.kind !== "unit"
-          || chunk.contentStatus !== "verified"
-          || chunk.authority === "contextual") {
-          invalidArtifact();
-        }
-      } else if (chunk.kind !== "page"
-        || chunk.contentStatus !== "generated"
-        || chunk.authority !== "contextual") {
+      const source = sources.get(chunk.sourceId);
+      if (!source || chunk.authority !== contract.authority || chunk.kind !== contract.kind
+        || chunk.contentStatus !== contract.status || !chunk.pdfPages.length
+        || chunk.pdfPages.some((page) => page > Number(source.pageCount))) {
         invalidArtifact();
       }
+      if (contract.kind === "page") {
+        const page = chunk.pdfPages[0];
+        if (page === undefined) invalidArtifact();
+        if (chunk.pdfPages.length !== 1
+          || chunk.href !== `/knowledge/books/${book.bookId}#page-${page}`
+          || !chunk.chunkId.startsWith(`${book.bookId}::page::p${String(page).padStart(4, "0")}`)) invalidArtifact();
+        if (book.role === "core" && (IMAGE_ONLY_ORIGINAL_PAGES.has(page)
+          || chunk.text.includes("[本页无可提取文字，请查看原页。]"))) invalidArtifact();
+      } else if (!chunk.chunkId.startsWith(`${book.bookId}::unit::`)
+        || chunk.href !== `/knowledge/unit-${chunk.chunkId.slice(`${book.bookId}::unit::`.length)}`) invalidArtifact();
+    }
+    if (contract.kind === "page") {
+      const pageCount = firstSource.pageCount;
+      const expectedPages = Array.from({ length: pageCount }, (_, index) => index + 1)
+        .filter((page) => book.role !== "core" || !IMAGE_ONLY_ORIGINAL_PAGES.has(page));
+      const actualPages = new Set(bookChunks.flatMap((chunk) => chunk.pdfPages));
+      if (actualPages.size !== expectedPages.length || expectedPages.some((page) => !actualPages.has(page))) invalidArtifact();
+    } else {
+      const secondSource = contract.sources[1];
+      if (!secondSource || bookChunks.length !== 117
+        || bookChunks.filter((chunk) => chunk.sourceId === firstSource.sourceId).length !== 81
+        || bookChunks.filter((chunk) => chunk.sourceId === secondSource.sourceId).length !== 36) invalidArtifact();
     }
   }
 }

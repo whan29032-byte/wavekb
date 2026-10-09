@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import KnowledgeBookDetailPage from "./page";
-import { CORE_BOOK_ID } from "@/lib/knowledge/book-catalog";
+import { CORE_BOOK_ID, UNIT_BOOK_ID } from "@/lib/knowledge/book-catalog";
 
 afterEach(() => cleanup());
 beforeEach(() => {
@@ -17,7 +17,7 @@ async function renderBook(id: string, section?: string) {
 }
 
 describe("knowledge book reading pages", () => {
-  it.each([CORE_BOOK_ID, "elliott-wave-natural-law", "chan-theory-complete"])("keeps search inside %s", async (id) => {
+  it.each([CORE_BOOK_ID, UNIT_BOOK_ID, "elliott-wave-natural-law", "chan-theory-complete"])("keeps search inside %s", async (id) => {
     await renderBook(id);
 
     expect(screen.getByRole("search", { name: "搜索本书" })).toBeTruthy();
@@ -25,7 +25,7 @@ describe("knowledge book reading pages", () => {
   });
 
   it("moves the core book themes, questions, and chapters into a compact book index", async () => {
-    const view = await renderBook(CORE_BOOK_ID);
+    const view = await renderBook(UNIT_BOOK_ID);
 
     expect(screen.getByText("117 个已核验 Units")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "本书内容" })).toBeTruthy();
@@ -42,7 +42,7 @@ describe("knowledge book reading pages", () => {
   });
 
   it("opens the requested core book index section from a deep link", async () => {
-    const view = await renderBook(CORE_BOOK_ID, "questions");
+    const view = await renderBook(UNIT_BOOK_ID, "questions");
 
     expect(view.container.querySelector("#core-questions")?.hasAttribute("open")).toBe(true);
     expect(view.container.querySelector("#core-themes")?.hasAttribute("open")).toBe(false);
@@ -57,6 +57,21 @@ describe("knowledge book reading pages", () => {
     expect(screen.getByText("生成页面导航")).toBeTruthy();
     expect(screen.getByRole("link", { name: /生成 · 第 1 页/ }).getAttribute("href")).toBe("#page-1");
     expect(screen.getByRole("heading", { name: "使用边界" })).toBeTruthy();
+  });
+
+  it("renders all 321 original pages without mounting their source images before user expansion", async () => {
+    const view = await renderBook(CORE_BOOK_ID);
+    expect(screen.getByRole("link", { name: "查看 第11版原书 PDF" }).getAttribute("href")).not.toContain("distilled");
+    expect(screen.getByText(/文字来自原书文本层，未逐页人工复核/)).toBeDefined();
+    expect(view.container.querySelectorAll("[data-original-source-page]")).toHaveLength(321);
+    expect(view.container.querySelectorAll("[data-original-source-page] img")).toHaveLength(0);
+    expect(view.container.querySelectorAll("#book-text [id^=page-]")).toHaveLength(321);
+    expect(view.container.querySelector("#core-chapters")).toBeNull();
+    expect(screen.getByRole("link", { name: /第10版补充与版本对照/ }).getAttribute("href")).toBe(`/knowledge/books/${UNIT_BOOK_ID}`);
+    for (const sourcePage of view.container.querySelectorAll<HTMLElement>("[data-original-source-page]")) {
+      expect(sourcePage.dataset.sourceId).toBe("ewp-11-zh-2021");
+      expect(sourcePage.dataset.edition).toBe("11");
+    }
   });
 
   it.each(["elliott-wave-natural-law", "chan-theory-complete"])("provides real, unobscured focusable targets for every same-page link in %s", async (id) => {

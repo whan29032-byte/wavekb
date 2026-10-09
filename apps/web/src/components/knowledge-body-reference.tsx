@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { getKnowledgePage, type KnowledgePage } from "@wavekb/knowledge";
+import { matchingSourceUnitPage } from "@/lib/knowledge/source-unit-reference";
 
 const referenceClassName = "rounded-sm text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary";
 
@@ -45,12 +46,8 @@ export function KnowledgeBodyReference({
     }
   }
 
-  const matchingSources = sourceUnitPages.filter((page) => sectionTitle === "快速答案"
-    ? text.startsWith(`${page.title}：`)
-    : sectionTitle === "完整解释" && page.unit_types.length === 1
-      && text.startsWith(`${page.title}（${page.unit_types[0]}）\n`));
-  if (matchingSources.length === 1) {
-    const page = matchingSources[0];
+  const page = matchingSourceUnitPage(text, sectionTitle, sourceUnitPages);
+  if (page) {
     return <><KnowledgeReferenceLink page={page} /><InlineCodeReferences text={text.slice(page.title.length)} /></>;
   }
 
