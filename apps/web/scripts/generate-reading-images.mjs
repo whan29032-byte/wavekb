@@ -69,7 +69,13 @@ if (updateManifest) {
 const workerSource = fs.readFileSync(workerPath, "utf8");
 const sizeProjection = /\/\* BEGIN VERIFIED READING IMAGE SIZES \*\/[\s\S]*?\/\* END VERIFIED READING IMAGE SIZES \*\//g;
 if ([...workerSource.matchAll(sizeProjection)].length !== 1) throw new Error("Missing or duplicate verified worker image-size projection");
-fs.writeFileSync(workerPath, workerSource.replace(sizeProjection, readingImageSizeScript(results)));
+// Publish the unchanged public policy and byte-verification helper in the same
+// worker response, rather than two serial importScripts network round trips.
+const helperProjection = /\/\* BEGIN BUNDLED PUBLIC WORKER HELPERS \*\/[\s\S]*?\/\* END BUNDLED PUBLIC WORKER HELPERS \*\//g;
+if ([...workerSource.matchAll(helperProjection)].length !== 1) throw new Error("Missing or duplicate public worker helper projection");
+const helpers = ["sw-policy.js", "sw-reading-images.js"].map((name) => fs.readFileSync(path.join(appRoot, "public", name), "utf8")).join("\n");
+const helperBundle = `/* BEGIN BUNDLED PUBLIC WORKER HELPERS */\n${helpers}\n/* END BUNDLED PUBLIC WORKER HELPERS */`;
+fs.writeFileSync(workerPath, workerSource.replace(sizeProjection, readingImageSizeScript(results)).replace(helperProjection, () => helperBundle));
 const originalBytes = results.reduce((sum, asset) => sum + asset.source_bytes, 0);
 const derivedBytes = results.reduce((sum, asset) => sum + asset.webp_bytes, 0);
 console.log(`Verified ${results.length} native-size, pixel-identical WebP reading images: ${originalBytes} -> ${derivedBytes} bytes (${((1 - derivedBytes / originalBytes) * 100).toFixed(2)}% less); originals unchanged; ${(performance.now() - start).toFixed(0)} ms.`);

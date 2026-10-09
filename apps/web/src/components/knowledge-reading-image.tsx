@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cancelHiddenReadingImage, readingImageWorkerReady } from "@/lib/knowledge/reading-image-worker";
+import { observeReadingImage } from "@/lib/knowledge/reading-image-scheduler";
 
 type ReadingImageProps = {
   url: string;
@@ -21,6 +22,7 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
   const visible = useRef(false);
   const completed = useRef(false);
   const attempt = useRef(0);
+  const finishImage = useRef(() => {});
   const [generation, setGeneration] = useState(0);
   const [requested, setRequested] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -67,29 +69,14 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
         setFailed(false);
       }
     };
-    const cancel = () => { mounted = false; cancelPending(); };
-    const revealWithoutObserver = () => {
-      queueMicrotask(requestImage);
-      return cancel;
+    const scheduled = observeReadingImage(target, { start: requestImage, cancel: cancelPending });
+    finishImage.current = () => { controller = undefined; scheduled.finish(); };
+    return () => {
+      mounted = false;
+      scheduled.dispose();
+      cancelPending();
+      finishImage.current = () => {};
     };
-    if (typeof IntersectionObserver === "undefined") {
-      return revealWithoutObserver();
-    }
-    try {
-      const observer = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.target !== target) continue;
-          if (entry.isIntersecting) requestImage();
-          else if (visible.current) cancelPending();
-        }
-      }, { rootMargin: "120px 0px" });
-      observer.observe(target);
-      return () => { cancel(); observer.disconnect(); };
-    } catch {
-      // Do not make source material unreadable in partial browser/polyfill
-      // implementations that expose an unusable observer constructor.
-      return revealWithoutObserver();
-    }
   }, [optimizedUrl]);
 
   const useOptimized = Boolean(requested && optimizedUrl && !optimizedFailed);
@@ -103,6 +90,7 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
       <img key={generation} src={url} srcSet={useOptimized ? optimizedUrl : undefined} alt={alt} width={width} height={height} loading={requested ? "eager" : "lazy"} decoding="async" fetchPriority={requested ? "high" : "low"} className="h-auto w-full object-contain" style={{ display: requested ? "block" : "none" }} onLoad={() => {
         if (!visible.current || !requested || generation !== attempt.current) return;
         completed.current = true;
+        finishImage.current();
         setLoaded(true);
         setFailed(false);
       }} onError={() => {
@@ -113,6 +101,7 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
           setOptimizedFailed(true);
         } else {
           setFailed(true);
+          finishImage.current();
         }
       }} />
       {!loaded ? <span className="knowledge-reading-image-feedback pointer-events-none absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted-foreground" role={requested || preparing ? "status" : undefined}>

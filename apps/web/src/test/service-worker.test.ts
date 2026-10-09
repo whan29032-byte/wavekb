@@ -29,7 +29,10 @@ async function bootServiceWorker() {
 
   if (policySource) new Function("self", policySource)(scope);
   if (workerSource) new Function("self", "caches", "fetch", "importScripts", workerSource)(scope, caches, networkFetch, importScripts);
-  return { policySource, workerSource, listeners, caches, cache, networkFetch, readingFetch, readingHelper, importScripts };
+  // Keep fetch-handler tests isolated; the bundled helper's real range/SHA
+  // behavior is separately exercised by its own tests and real-browser tests.
+  scope.WaveKBReadingImages = readingHelper;
+  return { policySource, workerSource, listeners, caches, cache, networkFetch, readingFetch, readingHelper, importScripts, scope };
 }
 
 function dispatchAsset(listeners: Map<string, (event: FetchEvent & Record<string, unknown>) => void>, url = "https://wavekb.com/assets/books/cover.png") {
@@ -224,10 +227,11 @@ it("serves an existing asset cache hit without another fetch or write", async ()
   expect(cache.put).not.toHaveBeenCalled();
 });
 
-it("imports both public worker dependencies in one ordered call without replacing the asset policy", async () => {
-  const { importScripts } = await bootServiceWorker();
-  expect(importScripts).toHaveBeenCalledOnce();
-  expect(importScripts).toHaveBeenCalledWith("/sw-policy.js", "/sw-reading-images.js");
+it("retains the bundled asset policy before the reading helper without importing scripts", async () => {
+  const { policySource, workerSource, importScripts } = await bootServiceWorker();
+  expect(workerSource.indexOf(policySource)).toBeGreaterThan(0);
+  expect(workerSource.indexOf("scope.WaveKBReadingImages =")).toBeGreaterThan(workerSource.indexOf(policySource));
+  expect(importScripts).not.toHaveBeenCalled();
 });
 
 it("acknowledges only its public reading capability without fetching or accessing caches", async () => {
@@ -340,13 +344,54 @@ it.each([
   expect(clone).not.toHaveBeenCalled();
 });
 
-it("pre-caches only the account-free offline shell", async () => {
-  const { listeners, cache } = await bootServiceWorker();
+it("bundles the exact public helpers without serial importScripts requests", async () => {
+  const { policySource, workerSource, importScripts } = await bootServiceWorker();
+  const readingSource = await readFile(join(process.cwd(), "public", "sw-reading-images.js"), "utf8");
+  expect(workerSource).toContain(`/* BEGIN BUNDLED PUBLIC WORKER HELPERS */\n${policySource}\n${readingSource}\n/* END BUNDLED PUBLIC WORKER HELPERS */`);
+  expect(workerSource).not.toMatch(/\bimportScripts\s*\(/);
+  expect(importScripts).not.toHaveBeenCalled();
+});
+
+it("pre-caches only the exact account-free offline shell bytes without a network fetch", async () => {
+  const { listeners, caches, cache, networkFetch, readingFetch, scope } = await bootServiceWorker();
+  const offlineBytes = await readFile(join(process.cwd(), "public", "offline.html"));
   const waitUntil = vi.fn();
 
   listeners.get("install")?.({ waitUntil } as never);
 
   expect(waitUntil).toHaveBeenCalledOnce();
-  await waitUntil.mock.calls[0][0];
-  expect(cache.addAll).toHaveBeenCalledWith(["/offline.html"]);
+  await expect(waitUntil.mock.calls[0][0]).resolves.toBeUndefined();
+  expect(caches.open).toHaveBeenCalledExactlyOnceWith("wavekb-shell-v2");
+  expect(cache.put).toHaveBeenCalledOnce();
+  expect(cache.put.mock.calls[0][0]).toBe("/offline.html");
+  const response = cache.put.mock.calls[0][1] as Response;
+  expect(response).toBeInstanceOf(Response);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(offlineBytes);
+  expect(cache.addAll).not.toHaveBeenCalled();
+  expect(networkFetch).not.toHaveBeenCalled();
+  expect(readingFetch).not.toHaveBeenCalled();
+  expect(scope.skipWaiting).toHaveBeenCalledOnce();
+});
+
+it.each(["open", "put"] as const)("still calls skipWaiting without networking when the local offline shell cache %s rejects", async (operation) => {
+  const { listeners, caches, cache, networkFetch, readingFetch, scope } = await bootServiceWorker();
+  (operation === "open" ? caches.open : cache.put).mockRejectedValueOnce(new Error("Local shell storage unavailable"));
+  const waitUntil = vi.fn();
+
+  listeners.get("install")?.({ waitUntil } as never);
+
+  expect(waitUntil).toHaveBeenCalledOnce();
+  await expect(waitUntil.mock.calls[0][0]).resolves.toBeUndefined();
+  expect(caches.open).toHaveBeenCalledExactlyOnceWith("wavekb-shell-v2");
+  if (operation === "open") expect(cache.put).not.toHaveBeenCalled();
+  else {
+    expect(cache.put).toHaveBeenCalledOnce();
+    expect(cache.put.mock.calls[0][0]).toBe("/offline.html");
+  }
+  expect(cache.addAll).not.toHaveBeenCalled();
+  expect(networkFetch).not.toHaveBeenCalled();
+  expect(readingFetch).not.toHaveBeenCalled();
+  expect(scope.skipWaiting).toHaveBeenCalledOnce();
 });
