@@ -7,7 +7,7 @@ on:
         description: "Release diagnostics, or an explicitly authorized disposable mentor account audit (no orders/payment writes)"
         required: true
         type: choice
-        options: [release, mentor-account, integration-config]
+        options: [release, release-state, knowledge-transport, mentor-account, integration-config]
         default: release
       account_confirmation:
         description: "For mentor-account only, type CREATE_DISPOSABLE_MENTOR_AUDIT_ACCOUNT"
@@ -29,6 +29,31 @@ jobs:
     steps:
       - name: Check out diagnostic script
         uses: actions/checkout@v4
+
+      - name: Use pinned Node for the independent public transport diagnostic
+        if: inputs.operation == 'knowledge-transport'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Use pinned pnpm for disposable asset verification
+        if: inputs.operation == 'knowledge-transport'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Install pinned source-verification dependencies only in the disposable test runner
+        if: inputs.operation == 'knowledge-transport'
+        run: |
+          set -Eeuo pipefail
+          pnpm install --frozen-lockfile
+
+      - name: Verify the read-only transport probe against actual local fixtures
+        if: inputs.operation == 'knowledge-transport'
+        run: |
+          set -Eeuo pipefail
+          node --check scripts/diagnose-knowledge-transport.mjs
+          node --test tests/diagnose-knowledge-transport.test.mjs
 
       - name: Configure pinned SSH access
         env:
@@ -73,6 +98,34 @@ jobs:
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "sudo -n /usr/bin/node --input-type=module - 'gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'" < scripts/mentor-account-audit.mjs
+
+      - name: Read only release transaction and research status without starting services
+        if: inputs.operation == 'release-state'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/node --input-type=module - '${RELEASE_ID}'" < scripts/diagnose-release-state.mjs
+
+      - name: Compare fixed knowledge assets inside the origin without changes
+        if: inputs.operation == 'knowledge-transport'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_ID" =~ ^[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/node --input-type=module - origin '${RELEASE_ID}'" < scripts/diagnose-knowledge-transport.mjs
+
+      - name: Compare the same fixed assets from the independent public runner
+        if: inputs.operation == 'knowledge-transport'
+        run: node scripts/diagnose-knowledge-transport.mjs public
 
       - name: Read only mail and YouTube configuration presence
         if: inputs.operation == 'integration-config'

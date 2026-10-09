@@ -73,6 +73,33 @@ server {
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const id = "a".repeat(40) + "-123-1";
 
+// Darwin has BSD ps rather than Linux --ppid. Only the localhost fixture uses
+// this projection; the production process reader and strict worker parser stay
+// unchanged, and unrelated parents can never contribute a worker identity.
+function darwinFixtureWorkerIds(text, master) {
+  assert.equal(Number.isSafeInteger(master) && master > 0, true);
+  const rows = text.split(/\r?\n/).flatMap((line) => {
+    const fields = /^\s*([0-9]+)\s+([0-9]+)\s+(.+?)\s*$/.exec(line);
+    return fields?.[1] === String(master) ? [`${fields[2]} ${fields[3]}`] : [];
+  });
+  return nginxWorkerIds(rows.join("\n"));
+}
+
+test("Darwin fixture process projection keeps only the exact real master and the existing strict worker identities", () => {
+  assert.deepEqual(darwinFixtureWorkerIds(`
+    100 212 nginx: worker process
+    100 211 nginx: worker process (nginx)
+    100 210 nginx: worker process is shutting down
+    100 209 nginx: cache manager process
+    101 213 nginx: worker process
+    0100 214 nginx: worker process
+    1 100 nginx: master process /task-specific/nginx
+  `, 100), [211, 212]);
+  assert.throws(() => darwinFixtureWorkerIds("100 211 nginx: worker process\n100 211 nginx: worker process", 100), /worker identity/);
+  assert.throws(() => darwinFixtureWorkerIds("100 9007199254740992 nginx: worker process", 100), /worker identity/);
+  assert.throws(() => darwinFixtureWorkerIds("100 211 nginx: worker process", NaN));
+});
+
 function fixture({ fail, preflightFailure = false } = {}) {
   let bytes = Buffer.from(site), state = null, backup = null;
   const events = [], inspections = [];
@@ -582,10 +609,11 @@ test("real Nginx fixture: native bytes, gzip decode, identity/gzip ranges, missi
       assert.match(masterText, /^[1-9][0-9]*$/);
       const master = Number(masterText);
       assert.equal(Number.isSafeInteger(master), true); assert.equal(master, child.pid);
-      const workers = spawnSync("/usr/bin/ps", ["--ppid", masterText, "-ww", "-o", "pid=,args="],
+      const darwin = process.platform === "darwin";
+      const workers = spawnSync(darwin ? "/bin/ps" : "/usr/bin/ps", darwin ? ["-ax", "-ww", "-o", "ppid=,pid=,args="] : ["--ppid", masterText, "-ww", "-o", "pid=,args="],
         { encoding: "utf8", timeout: Math.max(1, Math.min(500, budget)) });
       assert.equal(workers.status, 0, workers.error?.message || workers.stderr);
-      return { master, workers: nginxWorkerIds(workers.stdout) };
+      return { master, workers: darwin ? darwinFixtureWorkerIds(workers.stdout, master) : nginxWorkerIds(workers.stdout) };
     };
     const before = readGeneration(1000);
     assert.equal(before.workers.length, 2);
