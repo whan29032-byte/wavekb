@@ -121,6 +121,7 @@ jobs:
             e2e/book-reading-navigation.spec.ts e2e/knowledge-reading-content.spec.ts \
             e2e/natural-law-illustrations.spec.ts e2e/knowledge-image-delivery.spec.ts \
             --workers=2 --retries=0
+          pnpm --filter @wavekb/web exec playwright test e2e/reading-image-worker.spec.ts --workers=2 --retries=0
           pnpm --filter @wavekb/web exec playwright test --config=playwright.ui.config.ts
 
       - name: Preserve failed local browser evidence without deployment credentials
@@ -254,6 +255,8 @@ jobs:
             e2e/book-reading-navigation.spec.ts e2e/knowledge-reading-content.spec.ts \
             e2e/natural-law-illustrations.spec.ts e2e/knowledge-image-delivery.spec.ts \
             --workers=2 --retries=0
+          pnpm --filter @wavekb/web exec playwright test e2e/reading-image-worker.spec.ts \
+            --grep 'real first-visit reading-worker delivery' --workers=2 --retries=0
 
       - name: Verify real Tline research inside the production website without posting
         env:

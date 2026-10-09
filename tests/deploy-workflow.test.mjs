@@ -52,7 +52,9 @@ test("full book and real image completion gates run before upload and before fin
       assert.ok(steps[index].run.includes(`e2e/${file}.spec.ts`), `Missing ${file} completion gate`);
     }
     assert.match(steps[index].run, /--workers=2 --retries=0/);
+    assert.match(steps[index].run, /e2e\/reading-image-worker\.spec\.ts/);
   }
+  assert.match(steps[live].run, /--grep 'real first-visit reading-worker delivery' --workers=2 --retries=0/);
 });
 
 test("candidate owns its actual Node process, validates the exact SHA and retains failed browser evidence", () => {
