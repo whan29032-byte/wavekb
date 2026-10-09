@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { Input, Label } from "@wavekb/ui";
@@ -15,6 +15,9 @@ export type BookSearchItem = {
 };
 
 const numeralAliases: Record<string, string> = { 一: "1", 二: "2", 三: "3", 四: "4", 五: "5", 六: "6", 七: "7", 八: "8", 九: "9" };
+const subscribeToHydration = () => () => undefined;
+const clientHydrationSnapshot = () => true;
+const serverHydrationSnapshot = () => false;
 
 function normalizeForSearch(value: string) {
   return value
@@ -40,6 +43,7 @@ function Highlight({ text, query }: { text: string; query: string }) {
 }
 
 export function BookSearch({ bookId, items, placeholder = "搜索本书章节、概念和正文", initialQuery = "" }: { bookId: string; items: BookSearchItem[]; placeholder?: string; initialQuery?: string }) {
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrationSnapshot, serverHydrationSnapshot);
   const [query, setQuery] = useState(initialQuery.slice(0, 80));
 
   const results = useMemo(() => {
@@ -66,7 +70,7 @@ export function BookSearch({ bookId, items, placeholder = "搜索本书章节、
           <Label id={`${bookId}-search-title`} htmlFor={`${bookId}-search`} className="text-sm font-semibold">搜索本书</Label>
           <div className="relative max-w-2xl">
             <MagnifyingGlass aria-hidden size={19} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input id={`${bookId}-search`} type="search" value={query} onChange={(event) => updateQuery(event.target.value)} placeholder={placeholder} className="pl-10" />
+            <Input id={`${bookId}-search`} type="search" disabled={!hydrated} aria-describedby={`${bookId}-search-hint`} value={query} onChange={(event) => updateQuery(event.target.value)} placeholder={placeholder} className="pl-10" />
           </div>
         </div>
         <Link href="/knowledge#knowledge-search" className="text-sm font-medium text-primary hover:underline">搜索全部知识库</Link>
@@ -86,7 +90,9 @@ export function BookSearch({ bookId, items, placeholder = "搜索本书章节、
             );
           })}
         </div>
-      ) : <p className="text-sm text-muted-foreground" role="status">没有找到匹配内容，可以尝试结构名称、规则或原书术语。</p> : <p className="text-xs text-muted-foreground">搜索结果仅来自当前图书；关键词会保存在页面地址中。</p>}
+      ) : <p className="text-sm text-muted-foreground" role="status">没有找到匹配内容，可以尝试结构名称、规则或原书术语。</p> : null}
+      <p id={`${bookId}-search-hint`} className="text-xs text-muted-foreground">{hydrated ? "搜索结果仅来自当前图书；关键词会保存在页面地址中。" : "正在加载搜索，正文和页码链接仍可阅读。"}</p>
+      <noscript><p className="text-xs text-muted-foreground">书内检索需要 JavaScript；可继续阅读正文和使用页码链接。</p></noscript>
     </section>
   );
 }
