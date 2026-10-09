@@ -34,12 +34,12 @@ export function readingImageWorkerReady(url: string | undefined, signal: AbortSi
       try {
         if (new URL(worker.scriptURL).href !== new URL("/sw.js", window.location.href).href) return;
         attempted.add(worker);
-        // Old controllers have the same script URL. Only a real reply on this
-        // private port confirms the new verified-range delivery capability.
+        // Old controllers have the same script URL. Version 2 additionally
+        // requires the worker-wide bounded image delivery, not per-image slots.
         const channel = new MessageChannel();
         ports.add(channel.port1);
         ports.add(channel.port2);
-        channel.port1.onmessage = (event) => { if (event.data?.version === 1) finish(); };
+        channel.port1.onmessage = (event) => { if (event.data?.version === 2) finish(); };
         worker.postMessage({ type: "wavekb-reading-delivery-ready" }, [channel.port2]);
       } catch { finish(); }
     };

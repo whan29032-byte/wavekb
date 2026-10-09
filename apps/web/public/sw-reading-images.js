@@ -8,6 +8,62 @@
   var MAX_CHUNKS = 4;
   var RANGE_BUDGET_MS = 12000;
   var PATH = /^\/assets\/reading-images\/([a-f0-9]{64})\.webp$/;
+  // Keep image operations in request order, not probe-completion order: a
+  // cached neighbor's quick probe must not overtake the first requested image.
+  // The second pool still bounds every Range through its complete 206 body.
+  var imagePool = fifoPool(1);
+  var rangePool = fifoPool(MAX_CHUNKS);
+
+  function fifoPool(limit) {
+    var active = 0;
+    var queue = [];
+    function drain() {
+      while (active < limit && queue.length) {
+        var entry = queue.shift();
+        entry.signal.removeEventListener("abort", entry.onAbort);
+        if (entry.signal.aborted) { entry.reject(abortReason(entry.signal)); continue; }
+        active++;
+        entry.resolve(makeRelease());
+      }
+    }
+    function makeRelease() {
+      var released = false;
+      return function () {
+        if (released) return;
+        released = true;
+        active--;
+        drain();
+      };
+    }
+    return { acquire: function (signal) {
+      return new Promise(function (resolve, reject) {
+        if (signal.aborted) { reject(abortReason(signal)); return; }
+        var entry = { signal: signal, resolve: resolve, reject: reject, onAbort: null };
+        entry.onAbort = function () {
+          var index = queue.indexOf(entry);
+          if (index === -1) return;
+          queue.splice(index, 1);
+          reject(abortReason(signal));
+        };
+        signal.addEventListener("abort", entry.onAbort, { once: true });
+        queue.push(entry);
+        drain();
+      });
+    } };
+  }
+
+  async function rangeTask(operation, task) {
+    var release = await rangePool.acquire(operation.signal);
+    try {
+      if (operation.signal.aborted) throw abortReason(operation.signal);
+      return await task();
+    } catch (error) {
+      // Abort only this image before releasing, so failed siblings cannot take
+      // queued slots ahead of another image. Other image operations survive.
+      operation.abort();
+      throw error;
+    } finally { release(); }
+  }
 
   function eligibleUrl(request) {
     try {
@@ -83,26 +139,36 @@
       return { response: await fetch(request), verified: false };
     }
     var operation = rangeOperation(request.signal);
+    var releaseImage = null;
     var forwarded = false;
     try {
-      var probe = await fetch(url.href, publicOptions(operation.signal, "bytes=0-0"));
-      if (probe.status === 200 && !probe.redirected && (!probe.url || probe.url === url.href)) {
-        // Do not time out a legitimate, forwarded full body after its headers.
-        // Keep original cancellation linked until the real fetch is collected.
-        operation.clearDeadline();
-        forwarded = true;
-        return { response: probe, verified: false };
-      }
-      var size = validateRange(probe, url, 0, 0);
-      if (size < MIN_SIZE || size > MAX_SIZE) throw new Error("Reading image outside bounded range size");
-      await readExact(probe, 1);
+      releaseImage = await imagePool.acquire(operation.signal);
+      if (operation.signal.aborted) throw abortReason(operation.signal);
+      var probeResult = await rangeTask(operation, async function () {
+        var probe = await fetch(url.href, publicOptions(operation.signal, "bytes=0-0"));
+        if (probe.status === 200 && !probe.redirected && (!probe.url || probe.url === url.href)) {
+          // Do not time out a legitimate, forwarded full body after its headers.
+          // Keep original cancellation linked until the real fetch is collected.
+          operation.clearDeadline();
+          forwarded = true;
+          return { response: probe };
+        }
+        var size = validateRange(probe, url, 0, 0);
+        if (size < MIN_SIZE || size > MAX_SIZE) throw new Error("Reading image outside bounded range size");
+        await readExact(probe, 1);
+        return { size: size };
+      });
+      if (probeResult.response) return { response: probeResult.response, verified: false };
+      var size = probeResult.size;
       var chunkSize = Math.ceil(size / MAX_CHUNKS);
       var chunks = await Promise.all(Array.from({ length: MAX_CHUNKS }, async function (_, index) {
         var start = index * chunkSize;
         var end = Math.min(size - 1, start + chunkSize - 1);
-        var response = await fetch(url.href, publicOptions(operation.signal, "bytes=" + start + "-" + end));
-        validateRange(response, url, start, end, size);
-        return { start: start, bytes: await readExact(response, end - start + 1) };
+        return rangeTask(operation, async function () {
+          var response = await fetch(url.href, publicOptions(operation.signal, "bytes=" + start + "-" + end));
+          validateRange(response, url, start, end, size);
+          return { start: start, bytes: await readExact(response, end - start + 1) };
+        });
       }));
       var complete = new Uint8Array(size);
       chunks.forEach(function (chunk) { complete.set(chunk.bytes, chunk.start); });
@@ -117,9 +183,11 @@
     } catch {
       operation.abort(); // Cancel every outstanding chunk before one full fetch.
       operation.dispose();
+      if (releaseImage) { releaseImage(); releaseImage = null; }
       if (request.signal.aborted) throw abortReason(request.signal);
       return { response: await fetch(url.href, publicOptions(request.signal)), verified: false };
     } finally {
+      if (releaseImage) releaseImage();
       if (!forwarded) operation.dispose();
     }
   }

@@ -38,6 +38,12 @@ test.describe("real first-visit reading-worker delivery", () => {
   test("a fresh first visit acquires the controller and loads real verified range bytes", async ({ page, context }) => {
     expect(context.serviceWorkers()).toHaveLength(0);
     const parts = observeParts(context);
+    const unclickedKnowledgePrefetches: string[] = [];
+    context.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/knowledge") && request.headers()["next-router-prefetch"]) {
+        unclickedKnowledgePrefetches.push(request.url());
+      }
+    });
     // No interception or readiness sleep: scroll as soon as real SSR exists.
     await page.goto(bookPath, { waitUntil: "commit" });
     await readActualImage(page);
@@ -53,6 +59,7 @@ test.describe("real first-visit reading-worker delivery", () => {
       return entry?.workerStart || 0;
     }, imagePath);
     expect(workerStart).toBeGreaterThan(0);
+    expect(unclickedKnowledgePrefetches).toEqual([]);
   });
 
   test("a second visit reuses the completed real image without downloading range parts again", async ({ page, context }) => {
@@ -89,5 +96,27 @@ test.describe("local browser without a reading worker", () => {
     expect(parts).toEqual([]);
     expect(context.serviceWorkers()).toHaveLength(0);
     await expect(page.locator('[data-core-book-figure="assets/figures-v10/page-043.png"] [data-reading-image-state]')).toHaveAttribute("data-reading-image-state", "loaded");
+  });
+
+  test.describe("parser registration before hydration", () => {
+    test.use({ serviceWorkers: "allow" });
+
+    test("real worker registration begins while all Next hydration scripts are still held", async ({ page, context }, testInfo) => {
+      expect(["127.0.0.1", "localhost", "[::1]"]).toContain(new URL(String(testInfo.project.use.baseURL)).hostname);
+      expect(context.serviceWorkers()).toHaveLength(0);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      await page.route("**/_next/static/**/*.js", async (route) => { await held; await route.continue(); });
+      try {
+        await page.goto(bookPath, { waitUntil: "commit" });
+        await expect(page.locator("#wavekb-pwa-bootstrap")).toHaveCount(1);
+        // A real installed controller, not a mocked registration or timing flag.
+        await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL))
+          .toBe(new URL("/sw.js", page.url()).href);
+        expect(context.serviceWorkers()).toHaveLength(1);
+      } finally {
+        release();
+      }
+    });
   });
 });

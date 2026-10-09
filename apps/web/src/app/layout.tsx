@@ -4,6 +4,7 @@ import { SocialDesktop } from "@/components/social-desktop";
 import { PwaRegistration } from "@/components/pwa-registration";
 import "./globals.css";
 import { APPEARANCE_BOOTSTRAP } from "@/lib/appearance-bootstrap";
+import { PWA_BOOTSTRAP } from "@/lib/pwa-bootstrap";
 import { serializeJsonLd, SITE_URL } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOTSTRAP }} />
+        <script id="wavekb-pwa-bootstrap" dangerouslySetInnerHTML={{ __html: PWA_BOOTSTRAP }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(structuredData) }} />
       </head>
       <body className="font-sans antialiased">

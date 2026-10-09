@@ -1,7 +1,7 @@
 
 import type { Metadata } from "next";
 import Image from "next/image";
-import Link from "next/link";
+import { ReadingPriorityLink as Link } from "@/components/reading-priority-link";
 import { ArrowLeft, ArrowRight, ArrowSquareOut, CaretDown, FilePdf } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { knowledgeData } from "@wavekb/knowledge";

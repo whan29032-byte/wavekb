@@ -224,16 +224,17 @@ it("serves an existing asset cache hit without another fetch or write", async ()
   expect(cache.put).not.toHaveBeenCalled();
 });
 
-it("imports the bounded reading transport without replacing the asset policy", async () => {
+it("imports both public worker dependencies in one ordered call without replacing the asset policy", async () => {
   const { importScripts } = await bootServiceWorker();
-  expect(importScripts.mock.calls).toEqual([["/sw-policy.js"], ["/sw-reading-images.js"]]);
+  expect(importScripts).toHaveBeenCalledOnce();
+  expect(importScripts).toHaveBeenCalledWith("/sw-policy.js", "/sw-reading-images.js");
 });
 
 it("acknowledges only its public reading capability without fetching or accessing caches", async () => {
   const { listeners, caches, cache, networkFetch, readingHelper } = await bootServiceWorker();
   const postMessage = vi.fn();
   listeners.get("message")?.({ data: { type: "wavekb-reading-delivery-ready" }, ports: [{ postMessage }] } as never);
-  expect(postMessage.mock.calls).toEqual([[{ version: 1 }]]);
+  expect(postMessage.mock.calls).toEqual([[{ version: 2 }]]);
   expect(networkFetch).not.toHaveBeenCalled();
   expect(readingHelper.canHandle).not.toHaveBeenCalled();
   expect(readingHelper.fetch).not.toHaveBeenCalled();
