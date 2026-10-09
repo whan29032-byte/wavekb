@@ -48,7 +48,7 @@ export default async function KnowledgeQuestionPage({ params }: PageProps) {
             <div className="grid gap-2 sm:grid-cols-2">
               {stage.unit_ids.map((unitId) => {
                 const page = getKnowledgePage(`unit-${unitId}`);
-                return page ? <Link key={unitId} href={`/knowledge/${page.id}`} className="flex items-start justify-between gap-3 rounded-lg bg-muted p-3 text-sm leading-5 hover:text-primary"><span>{page.title}</span><ArrowRight aria-hidden size={15} className="mt-0.5 shrink-0" /></Link> : null;
+                return page ? <Link key={unitId} href={`/knowledge/${page.id}`} prefetch={false} className="flex items-start justify-between gap-3 rounded-lg bg-muted p-3 text-sm leading-5 hover:text-primary"><span>{page.title}</span><ArrowRight aria-hidden size={15} className="mt-0.5 shrink-0" /></Link> : null;
               })}
             </div>
           </li>

@@ -297,7 +297,10 @@ test("a queued owner cancellation removes its task immediately without starting 
 
 test("the unchanged twelve-second budget includes FIFO waiting and expires only its own task", async () => {
   const backend = heldProbeServer(); const budgets = [];
-  const helper = load(backend.fetcher, {}, { setTimeout(fn, duration) { assert.equal(duration, 12000); budgets.push(fn); return budgets.length; }, clearTimeout() {} });
+  const helper = load(backend.fetcher, {}, { setTimeout(fn, duration) {
+    if (duration !== 12000) return setTimeout(fn, duration);
+    assert.equal(duration, 12000); budgets.push(fn); return budgets.length;
+  }, clearTimeout(handle) { if (typeof handle !== "number") clearTimeout(handle); } });
   const owners = Array.from({ length: 1 }, () => new AbortController());
   const blocking = owners.map((owner) => helper.fetch(imageRequest(imageUrl, { signal: owner.signal })));
   const settled = Promise.allSettled(blocking);
@@ -553,4 +556,298 @@ test("a view cancellation during the single real fallback's pending headers abor
   assert.equal(calls.filter((init) => !new Headers(init.headers).has("Range")).length, 1);
   assert.equal(calls.every((init) => init.signal.aborted), true);
   assert.equal(helper.cancel("tab-a", new URL(imageUrl).pathname), 0);
+});
+
+const flushStreams = async () => { await new Promise((resolve) => setImmediate(resolve)); };
+
+function controlledClock() {
+  let now = 0, sequence = 0;
+  const pending = new Map(), durations = [];
+  return {
+    performance: { now: () => now }, durations,
+    timers: { setTimeout(fn, delay) { durations.push(delay); const id = ++sequence; pending.set(id, { fn, at: now + delay }); return id; },
+      clearTimeout(id) { pending.delete(id); } },
+    get pending() { return pending.size; },
+    async advance(delta) {
+      const target = now + delta;
+      while (true) {
+        const entry = [...pending].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+        if (!entry) break;
+        now = entry[1].at; pending.delete(entry[0]); entry[1].fn(); await flushStreams();
+      }
+      now = target; await flushStreams();
+    },
+  };
+}
+
+function stragglerServer({ held = [3], replacement = "valid", invalidFirst, deferAbort = false, prefix = 1, onInitialAbort } = {}) {
+  const calls = [], events = [], counts = new Map();
+  let active = 0, maximum = 0;
+  const data = new Map([[imageUrl, bytes], [neighborUrl, neighborBytes]]);
+  const fetcher = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input.url;
+    const original = data.get(url), range = new Headers(init.headers).get("Range");
+    const call = { url, range, init }; calls.push(call);
+    if (!range) return streamedResponse(original, { "Content-Type": "image/webp", "Content-Length": String(original.length) }, 200, init.signal);
+    if (init.signal.aborted) throw init.signal.reason;
+    const [, lo, hi] = /^bytes=(\d+)-(\d+)$/.exec(range);
+    const start = Number(lo), end = Number(hi), chunkSize = Math.ceil(original.length / 4);
+    const index = Math.floor(start / chunkSize), key = `${url}:${range}`;
+    const attempt = (counts.get(key) || 0) + 1; counts.set(key, attempt);
+    Object.assign(call, { start, end, index, attempt });
+    const mode = url === imageUrl ? (attempt > 1 ? replacement : invalidFirst || "valid") : "valid";
+    if (attempt > 1 && url === imageUrl) {
+      const old = calls.find((entry) => entry.url === url && entry.range === range && entry.attempt === 1);
+      assert.equal(old.response.body.locked, false, "old pending read and releaseLock must settle before the replacement fetch");
+      events.push("replacement-start");
+    }
+    if (mode === "network-error") throw new TypeError("Replacement network failed");
+    const full = mode === "200" || mode === "unsafe200";
+    let body = full ? original : original.subarray(start, end + 1);
+    if (mode === "corrupt") { body = Buffer.from(body); body[0] ^= 1; }
+    if (mode === "truncate") body = body.subarray(0, body.length - 1);
+    if (mode === "oversize") body = Buffer.concat([body, Buffer.from([0])]);
+    const isHeld = url === imageUrl && (attempt === 1 ? held.includes(index) : mode === "stall" || full);
+    let controller, offset = 0, finished = false;
+    if (!full) { active++; maximum = Math.max(maximum, active); }
+    const finish = () => { if (!finished) { finished = true; if (!full) active--; } };
+    const stream = new ReadableStream({
+      start(value) {
+        controller = value;
+        init.signal.addEventListener("abort", () => {
+          events.push(`abort-${index}-${attempt}`);
+          if (!finished && mode === "valid" && attempt === 1 && url === imageUrl && held.includes(index)
+            && init.signal.reason?.message === "Recovering one stalled reading image range") {
+            assert.equal(calls.filter((entry) => entry.range && entry.range !== "bytes=0-0").length <= 4, true, "abort alone must not start the replacement");
+            assert.equal(call.response.body.locked, true);
+            onInitialAbort?.(call);
+          }
+          if (deferAbort && attempt === 1 && isHeld) return;
+          finish(); try { controller.error(init.signal.reason); } catch {}
+        }, { once: true });
+        if (isHeld && prefix) { controller.enqueue(body.subarray(0, prefix)); offset = prefix; }
+      },
+      pull(value) {
+        if (isHeld || finished) return;
+        if (offset < body.length) { value.enqueue(body.subarray(offset)); offset = body.length; }
+        else { finish(); value.close(); }
+      },
+      cancel() { events.push(`cancel-${index}-${attempt}`); finish(); return deferAbort ? new Promise(() => {}) : undefined; },
+    });
+    call.emit = (count) => { const next = Math.min(body.length, offset + count); controller.enqueue(body.subarray(offset, next)); offset = next; };
+    call.close = () => { finish(); controller.close(); };
+    const contentRange = `bytes ${mode === "wrong-range" ? start + 1 : start}-${end}/${original.length + (mode === "wrong-total" ? 1 : 0)}`;
+    call.response = new Response(stream, { status: full ? 200 : 206, headers: {
+      "Content-Type": mode === "wrong-mime" || mode === "unsafe200" ? "text/html" : "image/webp",
+      "Content-Length": String(full ? original.length : end - start + 1 + (mode === "wrong-length" ? 1 : 0)),
+      "Cache-Control": mode === "private" ? "private, no-store" : "public, max-age=31536000, immutable",
+      ...(!full ? { "Content-Range": contentRange } : {}), ...(mode === "cookie" ? { "Set-Cookie": "private=1" } : {}),
+    } });
+    if (mode === "redirected") Object.defineProperty(call.response, "redirected", { value: true });
+    return call.response;
+  };
+  return { fetcher, calls, events, get active() { return active; }, get maximum() { return maximum; } };
+}
+
+function recoveringHelper(backend, clock) {
+  return load(backend.fetcher, { WaveKBReadingImageSizes: sizeHints, performance: clock.performance }, clock.timers);
+}
+
+test("one idle true-206 tail replacement waits for the old read release and preserves real bytes, SHA and native dimensions", async () => {
+  const backend = stragglerServer({ deferAbort: true }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const first = helper.fetch(imageRequest(), "tab-a"); await flushStreams();
+  const old = backend.calls.find((call) => call.index === 3);
+  assert.equal(old.response.body.locked, true); assert.equal(backend.calls.length, 4);
+  await clock.advance(749); assert.equal(backend.calls.length, 4);
+  await clock.advance(1);
+  const result = await first, complete = Buffer.from(await result.response.arrayBuffer());
+  assert.equal(result.verified, true); assert.equal(backend.calls.length, 5);
+  assert.equal(backend.calls[4].range, old.range); assert.equal(backend.calls[4].attempt, 2);
+  assert.deepEqual(complete, bytes); assert.equal(createHash("sha256").update(complete).digest("hex"), digest);
+  const metadata = await sharp(complete).metadata(); assert.equal(metadata.width, 1191); assert.equal(metadata.height, 1755);
+  assert.equal(backend.calls.slice(0, 3).every((call) => !call.init.signal.aborted), true);
+  assert.equal(old.init.signal.aborted, true); assert.equal(backend.maximum, 4); assert.equal(backend.active, 0);
+  assert.equal(backend.events.indexOf("cancel-3-1") < backend.events.indexOf("replacement-start"), true);
+  assert.throws(() => old.emit(1), /closed|state/i, "late old data cannot overwrite the replacement");
+  assert.equal(clock.durations.filter((duration) => duration === 12000).length, 1); assert.equal(clock.pending, 0);
+  assert.equal(helper.cancel("tab-a", new URL(imageUrl).pathname), 0);
+  const next = await helper.fetch(imageRequest(neighborUrl), "tab-b");
+  assert.equal(next.verified, true); assert.deepEqual(Buffer.from(await next.response.arrayBuffer()), neighborBytes);
+  assert.equal(backend.maximum, 4); assert.equal(backend.active, 0); assert.equal(clock.pending, 0);
+});
+
+test("two unfinished bodies do not qualify, and complete byte length without true EOF is not a completed third part", async () => {
+  const backend = stragglerServer({ held: [2, 3] }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const pending = helper.fetch(imageRequest()); await flushStreams();
+  const third = backend.calls.find((call) => call.index === 2); third.emit(bytes.length); await flushStreams();
+  await clock.advance(750); assert.equal(backend.calls.length, 4);
+  third.close(); await flushStreams(); await clock.advance(0);
+  assert.equal(backend.calls.length, 5, "only after the third EOF may an already-idle fourth body recover");
+  const result = await pending; assert.equal(result.verified, true); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  assert.equal(backend.maximum, 4); assert.equal(clock.pending, 0);
+});
+
+test("positive body progress resets idle timing and real completion clears the watcher without a false retry", async () => {
+  const backend = stragglerServer(), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const pending = helper.fetch(imageRequest()); await flushStreams(); const tail = backend.calls.find((call) => call.index === 3);
+  await clock.advance(700); tail.emit(1); await flushStreams();
+  await clock.advance(749); assert.equal(backend.calls.length, 4);
+  tail.emit(bytes.length); tail.close(); await flushStreams();
+  const result = await pending; assert.equal(result.verified, true); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  await clock.advance(20000); assert.equal(backend.calls.length, 4); assert.equal(clock.pending, 0);
+});
+
+test("zero-byte stream chunks do not pretend to be transfer progress", async () => {
+  const backend = stragglerServer(), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const pending = helper.fetch(imageRequest()); await flushStreams(); const tail = backend.calls.find((call) => call.index === 3);
+  await clock.advance(700); tail.emit(0); await flushStreams(); await clock.advance(50);
+  assert.equal((await pending).verified, true); assert.equal(backend.calls.length, 5); assert.equal(clock.pending, 0);
+});
+
+for (const invalid of ["wrong-range", "wrong-total", "wrong-length", "wrong-mime", "private", "cookie", "redirected"]) {
+  test(`invalid initial ${invalid} is fatal rather than eligible for straggler recovery`, async () => {
+    const backend = stragglerServer({ invalidFirst: invalid }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+    const result = await helper.fetch(imageRequest()); assert.equal(result.verified, false);
+    assert.equal(backend.calls.filter((call) => !call.range).length, 1);
+    assert.equal(backend.calls.filter((call) => call.attempt === 2).length, 0);
+    assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+    await clock.advance(20000); assert.equal(backend.calls.length, 5); assert.equal(clock.pending, 0);
+  });
+}
+
+for (const phase of ["idle", "replacement"]) for (const cancelBy of ["owner", "client"]) {
+  test(`${cancelBy} cancellation during ${phase} aborts only this image with no fallback or retry leak`, async () => {
+    const backend = stragglerServer({ replacement: "stall" }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+    const owner = new AbortController(), pending = helper.fetch(imageRequest(imageUrl, { signal: owner.signal }), "tab-a");
+    const outcome = assert.rejects(pending, { name: "AbortError" }); await flushStreams();
+    if (phase === "replacement") await clock.advance(750);
+    if (cancelBy === "owner") owner.abort(new DOMException("Owner canceled", "AbortError"));
+    else assert.equal(helper.cancel("tab-a", new URL(imageUrl).pathname), 1);
+    await outcome; await clock.advance(20000);
+    assert.equal(backend.calls.length, phase === "idle" ? 4 : 5); assert.equal(backend.calls.some((call) => !call.range), false);
+    assert.equal(clock.pending, 0); assert.equal(backend.active, 0);
+    const next = await helper.fetch(imageRequest(neighborUrl), "tab-b"); assert.equal(next.verified, true);
+    assert.deepEqual(Buffer.from(await next.response.arrayBuffer()), neighborBytes); assert.equal(backend.maximum, 4); assert.equal(backend.active, 0);
+    assert.equal(backend.calls.filter((call) => call.url === neighborUrl).every((call) => !call.init.signal.aborted), true);
+  });
+}
+
+test("a second stalled attempt gets no further replacement and falls back once at the original absolute twelve-second budget", async () => {
+  const backend = stragglerServer({ replacement: "stall" }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const pending = helper.fetch(imageRequest()); await flushStreams(); await clock.advance(750);
+  assert.equal(backend.calls.length, 5); await clock.advance(11249); assert.equal(backend.calls.length, 5);
+  await clock.advance(1); const result = await pending;
+  assert.equal(result.verified, false); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  assert.equal(backend.calls.filter((call) => call.range).length, 5); assert.equal(backend.calls.filter((call) => !call.range).length, 1);
+  assert.equal(clock.durations.filter((duration) => duration === 12000).length, 1);
+  await clock.advance(20000); assert.equal(backend.calls.length, 6); assert.equal(clock.pending, 0); assert.equal(backend.active, 0);
+});
+
+for (const invalid of ["wrong-range", "wrong-total", "wrong-length", "wrong-mime", "private", "cookie", "redirected", "truncate", "oversize", "corrupt", "network-error", "unsafe200"]) {
+  test(`replacement ${invalid} preserves every validation and permits only one real full fallback`, async () => {
+    const backend = stragglerServer({ replacement: invalid }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+    const pending = helper.fetch(imageRequest()); await flushStreams(); await clock.advance(750);
+    const result = await pending; assert.equal(result.verified, false);
+    assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+    assert.equal(backend.calls.filter((call) => call.range).length, 5); assert.equal(backend.calls.filter((call) => !call.range).length, 1);
+    await clock.advance(20000); assert.equal(backend.calls.length, 6); assert.equal(clock.pending, 0);
+    assert.equal(backend.maximum, 4); assert.equal(backend.active, 0);
+  });
+}
+
+test("a genuine long replacement 200 clears timers, releases the next image lease and retains original cancellation", async () => {
+  const backend = stragglerServer({ replacement: "200" }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const owner = new AbortController(), pending = helper.fetch(imageRequest(imageUrl, { signal: owner.signal }), "tab-a");
+  await flushStreams(); await clock.advance(750); const result = await pending;
+  assert.equal(result.verified, false); assert.equal(result.response, backend.calls[4].response); assert.equal(result.response.status, 200);
+  assert.equal(backend.calls.filter((call) => !call.range).length, 0); assert.equal(clock.pending, 0);
+  const next = await helper.fetch(imageRequest(neighborUrl), "tab-b"); assert.equal(next.verified, true);
+  assert.deepEqual(Buffer.from(await next.response.arrayBuffer()), neighborBytes);
+  await clock.advance(20000); assert.equal(backend.calls[4].init.signal.aborted, false);
+  const body = result.response.arrayBuffer(); owner.abort(new DOMException("Owner canceled forwarded 200", "AbortError"));
+  await assert.rejects(body, { name: "AbortError" }); assert.equal(backend.calls[4].init.signal.aborted, true);
+  assert.equal(backend.calls.filter((call) => !call.range).length, 0); assert.equal(backend.maximum, 4); assert.equal(backend.active, 0);
+});
+
+test("replacement genuine 200 delivers its exact real complete bytes without constructed verification", async () => {
+  const backend = stragglerServer({ replacement: "200" }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const pending = helper.fetch(imageRequest()); await flushStreams(); await clock.advance(750); const result = await pending;
+  backend.calls[4].emit(bytes.length); backend.calls[4].close();
+  assert.equal(result.verified, false); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  assert.equal(backend.calls.length, 5); assert.equal(clock.pending, 0);
+});
+
+test("a valid 206 with no initial body bytes can recover only after the other three true completions", async () => {
+  const backend = stragglerServer({ prefix: 0 }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const pending = helper.fetch(imageRequest()); await flushStreams(); await clock.advance(749);
+  assert.equal(backend.calls.length, 4); await clock.advance(1); const result = await pending;
+  assert.equal(result.verified, true); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  assert.equal(backend.calls.length, 5); assert.equal(backend.active, 0); assert.equal(clock.pending, 0);
+});
+
+test("unknown-size requests retain their original true-body probe and at most one exact tail replacement", async () => {
+  const backend = stragglerServer(), clock = controlledClock();
+  const helper = load(backend.fetcher, { performance: clock.performance }, clock.timers);
+  const pending = helper.fetch(imageRequest()); await flushStreams();
+  assert.equal(backend.calls[0].range, "bytes=0-0"); assert.equal(backend.calls.length, 5);
+  await clock.advance(750); const result = await pending;
+  assert.equal(result.verified, true); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  assert.equal(backend.calls.length, 6); assert.equal(backend.maximum, 4); assert.equal(clock.pending, 0);
+});
+
+test("a neighboring image cannot acquire its lease while the first image performs its single replacement", async () => {
+  const backend = stragglerServer(), clock = controlledClock(), helper = recoveringHelper(backend, clock), completed = [];
+  const first = helper.fetch(imageRequest(), "tab-a").then((result) => { completed.push("first"); return result; });
+  const neighbor = helper.fetch(imageRequest(neighborUrl), "tab-b").then((result) => { completed.push("neighbor"); return result; });
+  await flushStreams(); await clock.advance(749); assert.equal(backend.calls.length, 4);
+  await clock.advance(1); const [one, two] = await Promise.all([first, neighbor]);
+  assert.deepEqual(completed, ["first", "neighbor"]);
+  assert.deepEqual(backend.calls.slice(0, 5).map((call) => call.url), Array(5).fill(imageUrl));
+  assert.deepEqual(backend.calls.slice(5).map((call) => call.url), Array(4).fill(neighborUrl));
+  assert.equal(one.verified, true); assert.equal(two.verified, true);
+  assert.deepEqual(Buffer.from(await one.response.arrayBuffer()), bytes); assert.deepEqual(Buffer.from(await two.response.arrayBuffer()), neighborBytes);
+  assert.equal(backend.maximum, 4); assert.equal(backend.active, 0); assert.equal(clock.pending, 0);
+});
+
+for (const cancelBy of ["owner", "client"]) {
+  test(`${cancelBy} cancellation at the internal abort boundary wins before replacement acquisition`, async () => {
+    const owner = new AbortController(), clock = controlledClock(); let helper;
+    const backend = stragglerServer({ onInitialAbort() {
+      if (cancelBy === "owner") owner.abort(new DOMException("Boundary owner cancellation", "AbortError"));
+      else assert.equal(helper.cancel("tab-a", new URL(imageUrl).pathname), 1);
+    } });
+    helper = recoveringHelper(backend, clock);
+    const pending = helper.fetch(imageRequest(imageUrl, { signal: owner.signal }), "tab-a");
+    const rejected = assert.rejects(pending, { name: "AbortError" });
+    await flushStreams(); await clock.advance(750); await rejected;
+    assert.equal(backend.calls.length, 4); assert.equal(backend.calls.some((call) => !call.range), false);
+    assert.equal(backend.active, 0); assert.equal(clock.pending, 0);
+    assert.equal((await helper.fetch(imageRequest(neighborUrl), "tab-b")).verified, true);
+  });
+}
+
+test("the original deadline wins when idle recovery becomes due at that same absolute instant", async () => {
+  const backend = stragglerServer({ held: [0, 1, 2, 3] }), clock = controlledClock(), helper = recoveringHelper(backend, clock);
+  const pending = helper.fetch(imageRequest()); await flushStreams(); await clock.advance(11250);
+  const tail = backend.calls.find((call) => call.index === 3); tail.emit(1);
+  backend.calls.filter((call) => call.index < 3).forEach((call) => { call.emit(bytes.length); call.close(); });
+  await flushStreams(); await clock.advance(750); const result = await pending;
+  assert.equal(result.verified, false); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  assert.equal(backend.calls.filter((call) => call.range).length, 4); assert.equal(backend.calls.filter((call) => !call.range).length, 1);
+  assert.equal(clock.durations.filter((duration) => duration === 12000).length, 1);
+  assert.equal(backend.active, 0); assert.equal(clock.pending, 0);
+});
+
+test("unreceived fourth headers do not qualify even after three genuine completions", async () => {
+  const backend = stragglerServer(), clock = controlledClock();
+  const helper = load(async (input, init) => {
+    const response = await backend.fetcher(input, init);
+    if (backend.calls.find((call) => call.init === init).index !== 3) return response;
+    return new Promise((_resolve, reject) => { init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }); });
+  }, { WaveKBReadingImageSizes: sizeHints, performance: clock.performance }, clock.timers);
+  const pending = helper.fetch(imageRequest()); await flushStreams(); await clock.advance(750);
+  assert.equal(backend.calls.length, 4); await clock.advance(11250); const result = await pending;
+  assert.equal(result.verified, false); assert.deepEqual(Buffer.from(await result.response.arrayBuffer()), bytes);
+  assert.equal(backend.calls.length, 5); assert.equal(backend.calls.filter((call) => !call.range).length, 1);
+  assert.equal(clock.pending, 0); assert.equal(backend.active, 0);
 });

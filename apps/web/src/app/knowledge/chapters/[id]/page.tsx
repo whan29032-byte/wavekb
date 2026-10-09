@@ -34,7 +34,7 @@ export default async function KnowledgeChapterPage({ params }: PageProps) {
       <ol className="grid gap-3">
         {chapter.unit_ids.map((unitId, index) => {
           const page = getKnowledgePage(`unit-${unitId}`);
-          return page ? <li key={unitId}><Link href={`/knowledge/${page.id}`} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-xl border bg-surface p-4 hover:border-primary/45"><span className="text-xs font-semibold text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span><strong className="block text-sm leading-5">{page.title}</strong><span className="mt-1 block text-xs text-muted-foreground">{page.unit_types.join("、")} · {knowledgePageSourceLabels(page).join(" / ")}</span></span><ArrowRight aria-hidden size={16} /></Link></li> : null;
+          return page ? <li key={unitId}><Link href={`/knowledge/${page.id}`} prefetch={false} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-xl border bg-surface p-4 hover:border-primary/45"><span className="text-xs font-semibold text-muted-foreground">{String(index + 1).padStart(2, "0")}</span><span><strong className="block text-sm leading-5">{page.title}</strong><span className="mt-1 block text-xs text-muted-foreground">{page.unit_types.join("、")} · {knowledgePageSourceLabels(page).join(" / ")}</span></span><ArrowRight aria-hidden size={16} /></Link></li> : null;
         })}
       </ol>
     </main>

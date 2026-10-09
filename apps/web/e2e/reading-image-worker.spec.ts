@@ -36,6 +36,30 @@ async function readActualImage(page: Page) {
 test.describe("real first-visit reading-worker delivery", () => {
   test.use({ serviceWorkers: "allow" });
 
+  for (const shelf of ["/knowledge", "/knowledge/books"]) {
+    test(`the ${shelf} shelf does not download unclicked books while its real client navigation completes`, async ({ page, context }) => {
+      const prefetches: string[] = [];
+      const navigations: string[] = [];
+      context.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (!path.startsWith("/knowledge")) return;
+        if (request.headers()["next-router-prefetch"]) prefetches.push(request.url());
+        if (request.isNavigationRequest()) navigations.push(path);
+      });
+      await page.goto(shelf);
+      const books = page.getByRole("region", { name: "知识库图书", exact: true }).getByRole("link");
+      // The landing shelf has a named section rather than the catalog's region.
+      const supplement = shelf === "/knowledge/books" ? books.nth(1)
+        : page.locator('[aria-labelledby="book-shelf-title"]').getByRole("link").nth(1);
+      await expect(supplement).toHaveAttribute("href", "/knowledge/books/elliott-wave-principle-tenth-edition");
+      await supplement.click();
+      await expect(page.getByText("117 个已核验 Units", { exact: true })).toBeVisible();
+      await expect(page).toHaveURL(/\/knowledge\/books\/elliott-wave-principle-tenth-edition$/);
+      expect(navigations).toEqual([shelf]);
+      expect(prefetches).toEqual([]);
+    });
+  }
+
   test("a fresh first visit acquires the controller and loads real verified range bytes", async ({ page, context }) => {
     expect(context.serviceWorkers()).toHaveLength(0);
     const parts = observeParts(context);

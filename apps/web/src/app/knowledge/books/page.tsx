@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import Link from "next/link";
+import { ReadingPriorityLink as Link } from "@/components/reading-priority-link";
 import { ArrowLeft, ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { getKnowledgeBookCatalog } from "@/lib/knowledge/book-catalog";
 import { publicMetadata } from "@/lib/seo";

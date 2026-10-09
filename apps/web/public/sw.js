@@ -36,6 +36,7 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
   var MAX_SIZE = 2 * 1024 * 1024;
   var MAX_CHUNKS = 4;
   var RANGE_BUDGET_MS = 12000;
+  var STRAGGLER_IDLE_MS = 750;
   var PATH = /^\/assets\/reading-images\/([a-f0-9]{64})\.webp$/;
   // Keep image operations in request order, not probe-completion order: a
   // cached neighbor's quick probe must not overtake the first requested image.
@@ -82,7 +83,7 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
     } };
   }
 
-  async function rangeTask(operation, task, signal) {
+  async function rangeTask(operation, task, signal, attempt) {
     signal = signal || operation.signal;
     var release = await rangePool.acquire(signal);
     try {
@@ -91,7 +92,9 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
     } catch (error) {
       // Abort only this image before releasing, so failed siblings cannot take
       // queued slots ahead of another image. Other image operations survive.
-      if (!operation.forwarded) operation.abort();
+      var recovering = attempt && attempt.recoveryReason && error === attempt.recoveryReason
+        && signal.reason === attempt.recoveryReason && !operation.signal.aborted;
+      if (!operation.forwarded && !recovering) operation.abort();
       throw error;
     } finally { release(); }
   }
@@ -127,6 +130,47 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
       dispose: function () { if (timer !== null) clearTimeout(timer); originalSignal.removeEventListener("abort", onAbort); } };
   }
 
+  function childAttempt(operation) {
+    var controller = new AbortController();
+    var onAbort = function () { controller.abort(abortReason(operation.signal)); };
+    if (operation.signal.aborted) onAbort();
+    else operation.signal.addEventListener("abort", onAbort, { once: true });
+    return { controller: controller, recoveryReason: null, valid: false, lastProgress: 0,
+      dispose: function () { operation.signal.removeEventListener("abort", onAbort); } };
+  }
+
+  function stragglerRecovery(operation, parts) {
+    var timer = null, spent = false, stopped = false;
+    function now() { return scope.performance && typeof scope.performance.now === "function" ? scope.performance.now() : Date.now(); }
+    function clear() { if (timer !== null) { clearTimeout(timer); timer = null; } }
+    function schedule() {
+      clear();
+      if (stopped || spent || operation.signal.aborted || operation.forwarded
+        || parts.filter(function (part) { return part.complete; }).length !== MAX_CHUNKS - 1) return;
+      var part = parts.find(function (entry) { return !entry.complete; });
+      var attempt = part.attempt;
+      if (!attempt.valid || attempt.controller.signal.aborted) return;
+      timer = setTimeout(function () {
+        timer = null;
+        if (stopped || spent || operation.signal.aborted || operation.forwarded || part.complete || part.attempt !== attempt) return;
+        if (now() - attempt.lastProgress < STRAGGLER_IDLE_MS) { schedule(); return; }
+        spent = true;
+        // Only this private identity may bypass rangeTask's fatal error path.
+        attempt.recoveryReason = new DOMException("Recovering one stalled reading image range", "AbortError");
+        attempt.controller.abort(attempt.recoveryReason);
+      }, Math.max(0, STRAGGLER_IDLE_MS - (now() - attempt.lastProgress)));
+    }
+    function stop() { stopped = true; clear(); operation.signal.removeEventListener("abort", stop); }
+    operation.signal.addEventListener("abort", stop, { once: true });
+    return { progress: function (part, attempt) {
+      if (part.attempt !== attempt || stopped) return;
+      attempt.valid = true; attempt.lastProgress = now(); schedule();
+    }, complete: function (part, attempt) {
+      if (part.attempt !== attempt || stopped) return;
+      part.complete = true; schedule();
+    }, stop: stop };
+  }
+
   function trustedSize(url) {
     var sizes = scope.WaveKBReadingImageSizes;
     var hash = PATH.exec(url.pathname)[1];
@@ -160,26 +204,42 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
     return Number(match[3]);
   }
 
-  async function readExact(response, length) {
+  async function readExact(response, length, attempt, operation, onProgress) {
     if (!response.body) throw new Error("Missing reading image partial body");
     var reader = response.body.getReader();
     var bytes = new Uint8Array(length);
     var offset = 0;
+    var cancelRead = function () { reader.cancel().catch(function () { /* The pending read must settle before its slot releases. */ }); };
+    if (attempt) {
+      attempt.controller.signal.addEventListener("abort", cancelRead, { once: true });
+      operation.signal.addEventListener("abort", cancelRead, { once: true });
+    }
     try {
       while (true) {
         var item = await reader.read();
+        if (operation && operation.signal.aborted) throw abortReason(operation.signal);
+        if (attempt && attempt.controller.signal.aborted) throw abortReason(attempt.controller.signal);
         if (item.done) break;
         if (!item.value || offset + item.value.byteLength > length) throw new Error("Oversized reading image partial body");
         bytes.set(item.value, offset);
         offset += item.value.byteLength;
+        if (item.value.byteLength && onProgress) onProgress();
       }
       if (offset !== length) throw new Error("Truncated reading image partial body");
       return bytes;
     } catch (error) {
       // Cancellation must not create a second unbounded wait before fallback.
       reader.cancel().catch(function () { /* Abort already canceled it. */ });
+      if (operation && operation.signal.aborted) throw abortReason(operation.signal);
+      if (attempt && attempt.recoveryReason && attempt.controller.signal.reason === attempt.recoveryReason) throw attempt.recoveryReason;
       throw error;
-    } finally { reader.releaseLock(); }
+    } finally {
+      if (attempt) {
+        attempt.controller.signal.removeEventListener("abort", cancelRead);
+        operation.signal.removeEventListener("abort", cancelRead);
+      }
+      reader.releaseLock();
+    }
   }
 
   async function download(request, clientId) {
@@ -210,8 +270,8 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
             throw abortReason(operation.signal);
           }
           if (fullImage(probe, url)) {
-          // Do not time out a legitimate, forwarded full body after its headers.
-          // Keep original cancellation linked until the real fetch is collected.
+            // Do not time out a legitimate, forwarded full body after its headers.
+            // Keep original cancellation linked until the real fetch is collected.
             operation.clearDeadline();
             operation.forwarded = true;
             forwarded = true;
@@ -228,44 +288,54 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
       }
       var chunkSize = Math.ceil(size / MAX_CHUNKS);
       var parts = Array.from({ length: MAX_CHUNKS }, function () {
-        var controller = new AbortController();
-        var parentSignal = operation.signal;
-        var onAbort = function () { controller.abort(abortReason(parentSignal)); };
-        if (parentSignal.aborted) onAbort();
-        else parentSignal.addEventListener("abort", onAbort, { once: true });
-        return { controller: controller, dispose: function () { parentSignal.removeEventListener("abort", onAbort); } };
+        return { attempt: childAttempt(operation), complete: false };
       });
+      var recovery = stragglerRecovery(operation, parts);
       var forwardResponse;
       var forwardedResponse = new Promise(function (resolve) { forwardResponse = resolve; });
-      var chunksPromise = Promise.all(parts.map(function (part, index) {
+      var chunksPromise = Promise.all(parts.map(async function (part, index) {
         var start = index * chunkSize;
         var end = Math.min(size - 1, start + chunkSize - 1);
-        return rangeTask(operation, async function () {
-          var response = await fetch(url.href, publicOptions(part.controller.signal, "bytes=" + start + "-" + end));
-          if (part.controller.signal.aborted) {
-            if (response.body) response.body.cancel().catch(function () {});
-            throw abortReason(part.controller.signal);
+        while (true) {
+          var attempt = part.attempt;
+          try {
+            var chunk = await rangeTask(operation, async function () {
+              var response = await fetch(url.href, publicOptions(attempt.controller.signal, "bytes=" + start + "-" + end));
+              if (attempt.controller.signal.aborted) {
+                if (response.body) response.body.cancel().catch(function () {});
+                throw abortReason(attempt.controller.signal);
+              }
+              if (fullImage(response, url, size)) {
+                if (!operation.forwarded) {
+                  operation.forwarded = true;
+                  operation.clearDeadline();
+                  recovery.stop();
+                  parts.forEach(function (sibling) {
+                    if (sibling !== part) { sibling.attempt.controller.abort(); sibling.attempt.dispose(); }
+                  });
+                  forwardResponse({ response: response });
+                } else if (response.body) {
+                  response.body.cancel().catch(function () { /* Superseded fetch was already aborted. */ });
+                }
+                return null;
+              }
+              validateRange(response, url, start, end, size);
+              recovery.progress(part, attempt); // Valid headers start body-idle timing.
+              return { start: start, bytes: await readExact(response, end - start + 1, attempt, operation, function () { recovery.progress(part, attempt); }) };
+            }, attempt.controller.signal, attempt);
+            if (chunk) recovery.complete(part, attempt);
+            return chunk;
+          } catch (error) {
+            if (!attempt.recoveryReason || error !== attempt.recoveryReason || operation.signal.aborted || operation.forwarded) throw error;
+            // Awaited rangeTask has settled the old read and released its slot.
+            // Keep the image lease and absolute operation deadline unchanged.
+            attempt.dispose();
+            part.attempt = childAttempt(operation);
+          } finally {
+            // A forwarded real 200 retains its original cancellation link.
+            if (attempt.controller.signal.aborted) attempt.dispose();
           }
-          if (fullImage(response, url, size)) {
-            if (!operation.forwarded) {
-              operation.forwarded = true;
-              operation.clearDeadline();
-              parts.forEach(function (sibling) {
-                if (sibling !== part) { sibling.controller.abort(); sibling.dispose(); }
-              });
-              forwardResponse({ response: response });
-            } else if (response.body) {
-              response.body.cancel().catch(function () { /* Superseded fetch was already aborted. */ });
-            }
-            return null;
-          }
-          validateRange(response, url, start, end, size);
-          return { start: start, bytes: await readExact(response, end - start + 1) };
-        }, part.controller.signal).finally(function () {
-          // A selected real 200 keeps the original request's cancellation link
-          // through its lawful long body. Other children are already finished.
-          if (part.controller.signal.aborted) part.dispose();
-        });
+        }
       }));
       var outcome = await Promise.race([chunksPromise, forwardedResponse]);
       if (operation.signal.aborted) throw abortReason(operation.signal);
@@ -302,8 +372,9 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
       return { response: fallback, verified: false };
     } finally {
       operations.delete(operation);
+      if (recovery) recovery.stop();
       if (parts) parts.forEach(function (part) {
-        if (!forwarded || part.controller.signal.aborted) part.dispose();
+        if (!forwarded || part.attempt.controller.signal.aborted) part.attempt.dispose();
       });
       if (releaseImage) releaseImage();
       if (!forwarded) operation.dispose();
