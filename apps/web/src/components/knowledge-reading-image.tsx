@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { readingImageWorkerReady } from "@/lib/knowledge/reading-image-worker";
 
 type ReadingImageProps = {
   url: string;
@@ -18,6 +19,7 @@ export function KnowledgeReadingImage(props: ReadingImageProps) {
 function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: ReadingImageProps) {
   const frame = useRef<HTMLSpanElement>(null);
   const [requested, setRequested] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [optimizedFailed, setOptimizedFailed] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -25,10 +27,24 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
   useEffect(() => {
     const target = frame.current;
     if (!target) return;
+    let mounted = true;
+    const controller = new AbortController();
+    const requestImage = () => {
+      if (!mounted) return;
+      const worker = readingImageWorkerReady(optimizedUrl, controller.signal);
+      if (!worker) { setRequested(true); return; }
+      setPreparing(true);
+      const reveal = () => {
+        if (!mounted) return;
+        setPreparing(false);
+        setRequested(true);
+      };
+      void worker.then(reveal, reveal);
+    };
+    const cancel = () => { mounted = false; controller.abort(); };
     const revealWithoutObserver = () => {
-      let mounted = true;
-      queueMicrotask(() => { if (mounted) setRequested(true); });
-      return () => { mounted = false; };
+      queueMicrotask(requestImage);
+      return cancel;
     };
     if (typeof IntersectionObserver === "undefined") {
       return revealWithoutObserver();
@@ -36,23 +52,23 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
     try {
       const observer = new IntersectionObserver((entries) => {
         if (!entries.some((entry) => entry.target === target && entry.isIntersecting)) return;
-        setRequested(true);
+        requestImage();
         observer.disconnect();
       }, { rootMargin: "120px 0px" });
       observer.observe(target);
-      return () => observer.disconnect();
+      return () => { cancel(); observer.disconnect(); };
     } catch {
       // Do not make source material unreadable in partial browser/polyfill
       // implementations that expose an unusable observer constructor.
       return revealWithoutObserver();
     }
-  }, []);
+  }, [optimizedUrl]);
 
   const useOptimized = Boolean(requested && optimizedUrl && !optimizedFailed);
-  const status = failed ? "error" : loaded ? "loaded" : requested ? "loading" : "waiting";
+  const status = failed ? "error" : loaded ? "loaded" : requested || preparing ? "loading" : "waiting";
 
   return (
-    <span ref={frame} className="knowledge-reading-image relative block w-full" style={{ aspectRatio: `${width} / ${height}` }} data-reading-image data-reading-image-state={status} aria-busy={requested && !loaded && !failed}>
+    <span ref={frame} className="knowledge-reading-image relative block w-full" style={{ aspectRatio: `${width} / ${height}` }} data-reading-image data-reading-image-state={status} aria-busy={(requested || preparing) && !loaded && !failed}>
       {/* The original src and dimensions remain auditable. Only the same-size
           lossless derivative is selected after this frame enters the viewport. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -65,8 +81,8 @@ function ViewportReadingImage({ url, optimizedUrl, alt, width, height }: Reading
           setFailed(true);
         }
       }} />
-      {!loaded ? <span className="knowledge-reading-image-feedback pointer-events-none absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted-foreground" role={requested ? "status" : undefined}>
-        {failed ? "图片加载失败，点击查看原图。" : requested ? "正在载入原图…" : "滚动到此处后加载原图"}
+      {!loaded ? <span className="knowledge-reading-image-feedback pointer-events-none absolute inset-0 grid place-items-center px-4 text-center text-xs text-muted-foreground" role={requested || preparing ? "status" : undefined}>
+        {failed ? "图片加载失败，点击查看原图。" : requested || preparing ? "正在载入原图…" : "滚动到此处后加载原图"}
       </span> : null}
       <noscript><style>{".knowledge-reading-image > img { display: block !important; } .knowledge-reading-image-feedback { display: none !important; }"}</style></noscript>
     </span>

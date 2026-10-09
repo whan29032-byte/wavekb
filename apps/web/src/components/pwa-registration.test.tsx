@@ -5,7 +5,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("registers the WaveKB service worker at the root scope after the page loads", async () => {
+it("starts non-blocking root-scope registration without waiting for page resources to load", async () => {
+  vi.spyOn(document, "readyState", "get").mockReturnValue("loading");
   const register = vi.fn().mockResolvedValue({});
   Object.defineProperty(window.navigator, "serviceWorker", {
     configurable: true,
@@ -17,7 +18,5 @@ it("registers the WaveKB service worker at the root scope after the page loads",
   expect(registrationModule).not.toBeNull();
   if (!registrationModule) return;
   render(<registrationModule.PwaRegistration />);
-  window.dispatchEvent(new Event("load"));
-
   await waitFor(() => expect(register).toHaveBeenCalledWith("/sw.js", { scope: "/", updateViaCache: "none" }));
 });
