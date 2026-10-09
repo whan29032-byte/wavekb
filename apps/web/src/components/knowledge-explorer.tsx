@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { Input, Label } from "@wavekb/ui";
@@ -14,8 +14,12 @@ type KnowledgeListItem = {
   href?: string;
   label?: string;
 };
+const subscribeToHydration = () => () => undefined;
+const clientHydrationSnapshot = () => true;
+const serverHydrationSnapshot = () => false;
 
 export function KnowledgeExplorer({ items }: { items: KnowledgeListItem[] }) {
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrationSnapshot, serverHydrationSnapshot);
   const [query, setQuery] = useState("");
   const results = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("zh-CN");
@@ -32,7 +36,7 @@ export function KnowledgeExplorer({ items }: { items: KnowledgeListItem[] }) {
         <div className="relative max-w-2xl">
           <MagnifyingGlass aria-hidden size={19} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Label htmlFor="knowledge-search-input" className="sr-only">搜索知识标题和正文</Label>
-          <Input id="knowledge-search-input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：锯齿、延长、失效条件" className="pl-10" />
+          <Input id="knowledge-search-input" type="search" disabled={!hydrated} aria-describedby="knowledge-search-hint" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：锯齿、延长、失效条件" className="pl-10" />
         </div>
       </div>
       {query.trim() ? results.length ? (
@@ -46,7 +50,9 @@ export function KnowledgeExplorer({ items }: { items: KnowledgeListItem[] }) {
         </div>
       ) : (
         <p className="text-sm text-muted-foreground" role="status">没有匹配的条目。可以换一个结构名称或规则关键词。</p>
-      ) : <p className="text-xs text-muted-foreground">可以搜索规则、结构、章节、失效条件或图书名称。</p>}
+      ) : null}
+      <p id="knowledge-search-hint" className="text-xs text-muted-foreground">{hydrated ? "可以搜索规则、结构、章节、失效条件或图书名称。" : "正在加载搜索，仍可从下方书架选择图书。"}</p>
+      <noscript><p className="text-xs text-muted-foreground">全库检索需要 JavaScript；下方图书链接仍可直接使用。</p></noscript>
     </section>
   );
 }
