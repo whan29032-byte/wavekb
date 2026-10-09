@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { BookSearch } from "./book-search";
 import { buildBookReadingModel, buildLibrarySearchDocuments } from "@/lib/knowledge/book-reading";
 import { knowledgeData } from "@wavekb/knowledge";
@@ -12,6 +13,19 @@ const items = [
 afterEach(() => cleanup());
 
 describe("BookSearch", () => {
+  it("keeps SSR search disabled until client takeover without losing initial URL results or source links", () => {
+    const html = renderToString(<BookSearch bookId="initial" items={items} initialQuery="第三浪" />);
+    const ssr = new DOMParser().parseFromString(html, "text/html");
+    expect(ssr.querySelector<HTMLInputElement>('input[type="search"]')?.disabled).toBe(true);
+    expect(ssr.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe("第三浪");
+    expect(ssr.querySelector('a[href="#page-1"]')?.textContent).toContain("第一章");
+    expect(ssr.getElementById("initial-search-hint")?.textContent).toContain("正在加载搜索");
+    expect(ssr.querySelector("noscript")?.textContent).toContain("正文和使用页码链接");
+    render(<BookSearch bookId="initial" items={items} initialQuery="第三浪" />);
+    expect((screen.getByRole("searchbox", { name: "搜索本书" }) as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByRole("link", { name: /第一章/ })).toBeDefined();
+  });
+
   it("limits results to the current book and keeps the query in the URL", () => {
     window.history.replaceState({}, "", "/knowledge/books/test");
     render(<BookSearch bookId="test" items={items} />);

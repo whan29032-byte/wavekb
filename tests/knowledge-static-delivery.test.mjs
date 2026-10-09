@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { spawnSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import test from "node:test";
 import { buildCandidate, runTransaction, validateVersion, staticLocations, requestSnapshot } from "../scripts/knowledge-static-delivery.mjs";
 
@@ -236,6 +237,139 @@ test("manual rollback never overwrites a changed target identity or unsafe/malfo
     await assert.rejects(runTransaction({ mode: "rollback", id }, f.runtime), /state|target/);
     assert.deepEqual(f.bytes, original);
   }
+});
+
+// These fixtures use actual loopback TCP/HTTP, real source bytes and the real
+// requestSnapshot implementation. The six transport cases replace neither
+// sockets, SHA nor time; the separate budget case advances only Date.now.
+// No listener or active connection survives an individual test.
+const socketProofBytes = fs.readFileSync(new URL("../assets/figures-v10/page-043.png", import.meta.url));
+
+async function withHttpSocketFixture(handler, exercise) {
+  const requests = [], connections = [], active = new Set();
+  const server = createHttpServer((request, response) => {
+    requests.push({ socket: request.socket, method: request.method, url: request.url, headers: { ...request.headers } });
+    handler(request, response, requests.length);
+  });
+  server.on("connection", (socket) => {
+    connections.push(socket);
+    active.add(socket); socket.on("close", () => active.delete(socket));
+  });
+  server.on("clientError", (_error, socket) => socket.destroy());
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try { return await exercise({ port: server.address().port, requests, connections }); }
+  finally {
+    const closed = new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    server.closeAllConnections();
+    for (const socket of active) socket.destroy();
+    await closed;
+  }
+}
+
+function sendSocketProof(response) {
+  response.writeHead(200, { "Content-Type": "image/png", "Content-Length": socketProofBytes.length });
+  response.end(socketProofBytes);
+}
+
+function assertSocketProof(snapshot) {
+  assert.equal(snapshot.status, 200);
+  assert.equal(snapshot.size, socketProofBytes.length);
+  assert.equal(snapshot.wireSize, socketProofBytes.length);
+  assert.equal(snapshot.sha256, hash(socketProofBytes));
+  assert.deepEqual(snapshot.sample, socketProofBytes.subarray(0, 65536));
+}
+
+test("real HTTP proofs always open fresh sockets and force Connection close, even for sequential successful GETs", async () => {
+  await withHttpSocketFixture((_request, response) => sendSocketProof(response), async ({ port, requests }) => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      assertSocketProof(await requestSnapshot("/source.png", { port, tls: false, headers: { Connection: "keep-alive" } }));
+    }
+    assert.equal(requests.length, 3);
+    assert.equal(new Set(requests.map((request) => request.socket)).size, 3);
+    for (const request of requests) {
+      assert.equal(request.method, "GET"); assert.equal(request.url, "/source.png");
+      assert.equal(request.headers.host, "wavekb.com"); assert.equal(request.headers.connection, "close");
+    }
+  });
+});
+
+test("two actual socket resets are retried with fresh GETs and the third complete source body is verified", async () => {
+  await withHttpSocketFixture((request, response, attempt) => {
+    if (attempt < 3) request.socket.destroy(); else sendSocketProof(response);
+  }, async ({ port, requests }) => {
+    assertSocketProof(await requestSnapshot("/source.png", { port, tls: false }));
+    assert.equal(requests.length, 3);
+    assert.equal(new Set(requests.map((request) => request.socket)).size, 3);
+    assert.equal(requests.every((request) => request.headers.connection === "close"), true);
+  });
+});
+
+test("partial response bytes from two reset sockets are discarded rather than concatenated into the successful source", async () => {
+  const partials = [Buffer.from("discarded-first-partial-body"), Buffer.from("discarded-second-different-partial-body")];
+  let sentPartials = 0;
+  await withHttpSocketFixture((_request, response, attempt) => {
+    if (attempt === 3) { sendSocketProof(response); return; }
+    response.writeHead(200, { "Content-Type": "image/png", "Content-Length": socketProofBytes.length });
+    response.flushHeaders();
+    response.write(partials[attempt - 1], () => {
+      sentPartials++;
+      // Leave a real data frame available to the client before truncating the
+      // declared body. The succeeding attempt must reset digest/size/sample.
+      setTimeout(() => response.socket?.destroy(), 10);
+    });
+  }, async ({ port, requests }) => {
+    assertSocketProof(await requestSnapshot("/source.png", { port, tls: false }));
+    assert.equal(sentPartials, 2); assert.equal(requests.length, 3);
+    assert.equal(new Set(requests.map((request) => request.socket)).size, 3);
+  });
+});
+
+test("three actual socket resets reject after exactly three GETs without an unbounded retry or invented response", async () => {
+  await withHttpSocketFixture((request) => request.socket.destroy(), async ({ port, requests }) => {
+    await assert.rejects(requestSnapshot("/source.png", { port, tls: false }), { code: "ECONNRESET" });
+    assert.equal(requests.length, 3);
+    assert.equal(new Set(requests.map((request) => request.socket)).size, 3);
+  });
+});
+
+test("an actual HTTP 500 response is returned once and never retried as a transport reset", async () => {
+  const failure = Buffer.from("fixture server failure");
+  await withHttpSocketFixture((_request, response) => {
+    response.writeHead(500, { "Content-Type": "text/plain", "Content-Length": failure.length }); response.end(failure);
+  }, async ({ port, requests }) => {
+    const snapshot = await requestSnapshot("/source.png", { port, tls: false });
+    assert.equal(snapshot.status, 500); assert.equal(snapshot.sha256, hash(failure));
+    assert.deepEqual(snapshot.sample, failure); assert.equal(requests.length, 1);
+  });
+});
+
+test("an actual invalid gzip body fails its decoder after one GET and is not retried", async () => {
+  const invalidGzip = Buffer.from("this is not a gzip stream");
+  await withHttpSocketFixture((_request, response) => {
+    response.writeHead(200, { "Content-Type": "image/png", "Content-Encoding": "gzip", "Content-Length": invalidGzip.length });
+    response.end(invalidGzip);
+  }, async ({ port, requests }) => {
+    await assert.rejects(requestSnapshot("/source.png", { port, tls: false }), { code: "Z_DATA_ERROR" });
+    assert.equal(requests.length, 1);
+  });
+});
+
+test("the fixed total proof deadline stops a new connection when a reset backoff exhausts its remaining budget", async () => {
+  const realNow = Date.now, initial = realNow();
+  let clockNow = initial, advance;
+  try {
+    await withHttpSocketFixture((request) => {
+      // No 120-second sleep: advance only the budget clock while still using
+      // actual sockets and the implementation's normal bounded backoff timer.
+      clockNow = initial + 119990;
+      advance = setTimeout(() => { clockNow = initial + 120001; }, 5);
+      request.socket.destroy();
+    }, async ({ port, requests, connections }) => {
+      Date.now = () => clockNow;
+      await assert.rejects(requestSnapshot("/source.png", { port, tls: false }), /budget exceeded/);
+      assert.equal(requests.length, 1); assert.equal(connections.length, 1);
+    });
+  } finally { Date.now = realNow; clearTimeout(advance); }
 });
 
 test("real Nginx fixture: native bytes, gzip decode, identity/gzip ranges, missing hash and unrelated proxy isolation", { skip: !process.env.KNOWLEDGE_NGINX_TEST_BIN }, async () => {
