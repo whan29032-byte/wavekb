@@ -216,18 +216,37 @@ export async function runTransaction({ mode = "audit", id } = {}, runtime) {
 
 // Explicit loopback transport ignores all proxy environment variables. TLS
 // still verifies the canonical host certificate, not a user-supplied endpoint.
-export function requestSnapshot(url, { port = 443, tls = true, headers = {} } = {}) {
+export async function requestSnapshot(url, options = {}) {
+  // Only repeat idempotent read-only probes after a transport reset/refusal.
+  // Each attempt starts new bytes/digest and a fresh connection; assertions
+  // about HTTP status, source bytes and permissions are never retried here.
+  const deadline = Date.now() + 120000;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    requireValue(Date.now() < deadline, "Public probe budget exceeded");
+    try { return await requestSnapshotOnce(url, options, deadline); }
+    catch (error) {
+      if (attempt === 2 || !["ECONNRESET", "ECONNREFUSED"].includes(error?.code) || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(50 * (attempt + 1), Math.max(0, deadline - Date.now()))));
+    }
+  }
+}
+
+function requestSnapshotOnce(url, { port = 443, tls = true, headers = {} } = {}, deadline) {
   requireValue(typeof url === "string" && url.startsWith("/") && !url.startsWith("//") && !/[\r\n]/.test(url), "Invalid probe path");
+  requireValue(Date.now() < deadline, "Public probe budget exceeded");
   return new Promise((resolve, reject) => {
     const transport = tls ? https : http;
-    const request = transport.request({ hostname: "127.0.0.1", servername: "wavekb.com", port, path: url, method: "GET", headers: { Host: "wavekb.com", ...headers } });
-    const timer = setTimeout(() => request.destroy(new Error("Public probe budget exceeded")), 120000);
+    // Nginx graceful reload retires old idle sockets. Never reuse a global
+    // agent connection from before reload, including the prior proof request.
+    const request = transport.request({ hostname: "127.0.0.1", servername: "wavekb.com", port, path: url, method: "GET", agent: false, headers: { Host: "wavekb.com", ...headers, Connection: "close" } });
+    const timer = setTimeout(() => request.destroy(new ControlledFailure("Public probe budget exceeded")), Math.max(1, deadline - Date.now()));
     request.on("error", (error) => { clearTimeout(timer); reject(error); });
     request.on("response", (response) => {
       let size = 0, wireSize = 0, sample = Buffer.alloc(0); const digest = createHash("sha256");
       const decoded = response.headers["content-encoding"] === "gzip" ? response.pipe(createGunzip()) : response;
       response.on("data", (chunk) => { wireSize += chunk.length; if (wireSize > 64 * 1024 * 1024) request.destroy(new Error("Probe wire limit exceeded")); });
-      response.on("error", reject); decoded.on("error", (error) => { clearTimeout(timer); request.destroy(); reject(error); });
+      response.on("error", (error) => { clearTimeout(timer); request.destroy(); reject(error); });
+      decoded.on("error", (error) => { clearTimeout(timer); request.destroy(); reject(error); });
       decoded.on("data", (chunk) => {
         size += chunk.length;
         if (size > 64 * 1024 * 1024) { request.destroy(new Error("Probe decoded limit exceeded")); return; }
