@@ -83,6 +83,83 @@ test("active grant, extend and revoke change rights immediately and preserve bef
   assert.equal(store.history.length,4); assert.equal(store.history[0].before_state.revision,2); assert.equal(store.history[0].after_state.status,"revoked");
   await actor(db,ids.member); assert.equal(await entitlement(db),false); assert.deepEqual((await mine(db)).grants[0].benefits,{});
 }));
+test("same-timestamp plan, grant, extend and revoke history follows generated sequence, not UUID order",()=>fixture(async(db)=>{
+  await db.exec(`reset role; begin;
+    create sequence membership_test_uuid_sequence;
+    create function membership_test_event_uuid() returns uuid language sql volatile as $$
+      select ('00000000-0000-4000-8000-'||lpad((1000000-nextval('membership_test_uuid_sequence'))::text,12,'0'))::uuid;
+    $$;
+    alter table membership_events alter column id set default membership_test_event_uuid();
+    alter table membership_events alter column created_at set default '2030-01-01T00:00:00Z'::timestamptz;`);
+  await actor(db,ids.admin);
+  await plan(db); const granted=await change(db);
+  const extended=await change(db,{action:"extend",end:new Date(Date.now()+60*864e5).toISOString(),revision:1});
+  const revoked=await change(db,{action:"revoke",end:null,revision:2});
+  const store=(await db.query("select admin_membership_store(10002,auth.uid()) as value")).rows[0].value;
+  assert.deepEqual(store.history.map((event)=>event.action),["revoked","extended","granted","plan_updated"]);
+  assert.equal(new Set(store.history.map((event)=>event.created_at)).size,1);
+  assert.equal(store.history[0].before_state.revision,2); assert.equal(store.history[0].after_state.status,"revoked");
+  assert.equal(store.history[1].before_state.revision,1); assert.equal(store.history[1].after_state.revision,2);
+  assert.equal(store.history[2].before_state,null); assert.equal(store.history[2].after_state.id,granted.id);
+  assert.ok(store.history.every((event)=>!("event_sequence" in event)));
+  assert.deepEqual(store.history.map((event)=>event.id),[...store.history.map((event)=>event.id)].sort());
+  await actor(db,ids.member); const current=await mine(db);
+  assert.deepEqual(current.history.map((event)=>event.action),["revoked","extended","granted"]);
+  assert.ok(current.history.every((event)=>!("event_sequence" in event)));
+  assert.equal(current.grants[0].id,granted.id); assert.equal(current.grants[0].status,"revoked");
+  assert.equal(revoked.id,extended.id); assert.equal(extended.id,granted.id); assert.equal(await entitlement(db),false);
+  await db.exec("reset role");
+  const rows=(await db.query("select event_sequence::text as sequence, action from membership_events order by event_sequence")).rows;
+  assert.deepEqual(rows.map((event)=>event.action),["plan_updated","granted","extended","revoked"]);
+  assert.ok(rows.every((event,index)=>index===0 || BigInt(event.sequence)>BigInt(rows[index-1].sequence)));
+  await db.exec("commit");
+}));
+test("same-timestamp history limits take the latest 50 events before aggregation for both readers",()=>fixture(async(db)=>{
+  await db.exec("reset role; begin; alter table membership_events alter column created_at set default '2030-01-01T00:00:00Z'::timestamptz;");
+  await actor(db,ids.admin); await plan(db); await change(db);
+  for(let index=1;index<=55;index++) await change(db,{action:"extend",end:new Date(Date.now()+(30+index)*864e5).toISOString(),revision:index});
+  await change(db,{action:"revoke",end:null,revision:56});
+  const store=(await db.query("select admin_membership_store(10002,auth.uid()) as value")).rows[0].value;
+  assert.equal(store.history.length,50); assert.equal(new Set(store.history.map((event)=>event.created_at)).size,1);
+  assert.deepEqual(store.history.map((event)=>event.action),["revoked",...Array(49).fill("extended")]);
+  assert.deepEqual(store.history.map((event)=>event.after_state.revision),Array.from({length:50},(_,index)=>57-index));
+  assert.equal(store.history[0].before_state.revision,56); assert.equal(store.history[0].after_state.status,"revoked");
+  await actor(db,ids.member); const current=await mine(db);
+  assert.equal(current.history.length,50); assert.deepEqual(current.history.map((event)=>event.id),store.history.map((event)=>event.id));
+  await db.exec("reset role");
+  const expected=(await db.query("select id from membership_events where user_id=$1 order by event_sequence desc limit 50",[ids.member])).rows.map((event)=>event.id);
+  assert.deepEqual(current.history.map((event)=>event.id),expected);
+  assert.equal((await db.query("select count(*)::int as count from membership_events")).rows[0].count,58);
+  await db.exec("commit");
+}));
+test("event ordering sequence is internal and cannot be assigned or consumed by browser roles",()=>fixture(async(db)=>{
+  await plan(db); await change(db); await db.exec("reset role");
+  const sequence=(await db.query("select pg_get_serial_sequence('public.membership_events','event_sequence') as name")).rows[0].name;
+  const before=(await db.query("select to_jsonb(e) as value from membership_events e order by event_sequence")).rows.map((event)=>event.value);
+  await assert.rejects(db.query("insert into membership_events(event_sequence,request_id,actor_id,plan_key,action,reason,request,after_state) values(999,$1,$2,'vip','plan_updated','测试禁止写序号','{}','{}')",[randomUUID(),ids.admin]),/cannot insert a non-DEFAULT value|generated always/i);
+  for(const [id,role] of [[ids.admin,"authenticated"],[ids.member,"authenticated"],[null,"anon"]]) {
+    await actor(db,id,role);
+    await assert.rejects(db.query("select nextval($1::regclass)",[sequence]),/permission denied/);
+    await assert.rejects(db.query("select setval($1::regclass,999)",[sequence]),/permission denied/);
+    await assert.rejects(db.query("insert into membership_events(event_sequence,request_id,actor_id,plan_key,action,reason,request,after_state) values(999,$1,$2,'vip','plan_updated','测试禁止写序号','{}','{}')",[randomUUID(),ids.admin]),/permission denied|cannot insert a non-DEFAULT value/);
+  }
+  await db.exec("reset role");
+  const after=(await db.query("select to_jsonb(e) as value from membership_events e order by event_sequence")).rows.map((event)=>event.value);
+  assert.deepEqual(after,before);
+}));
+test("additive ordering column preserves old event UUIDs and payloads and can be reapplied",()=>fixture(async(db)=>{
+  await plan(db); await change(db); await db.exec("reset role");
+  const contents=async()=> (await db.query("select to_jsonb(e)-'event_sequence' as value from membership_events e order by id")).rows.map((event)=>event.value);
+  const before=await contents();
+  await db.exec("alter table membership_events drop column event_sequence;");
+  const migration=await load("202610100002_membership_foundation.sql");
+  const addColumn=migration.match(/alter table public\.membership_events\s+add column if not exists event_sequence bigint generated always as identity;/)[0];
+  await db.exec(addColumn); assert.deepEqual(await contents(),before);
+  const sequences=(await db.query("select event_sequence::text as sequence from membership_events order by id")).rows;
+  assert.equal(new Set(sequences.map((event)=>event.sequence)).size,before.length);
+  await db.exec(addColumn); assert.deepEqual(await contents(),before);
+  assert.deepEqual((await db.query("select event_sequence::text as sequence from membership_events order by id")).rows,sequences);
+}));
 test("lost-response retries are idempotent and changed actor or parameters conflict",()=>fixture(async(db)=>{
   const planRequest=randomUUID(); const saved=await plan(db,{request:planRequest}); assert.deepEqual(await plan(db,{request:planRequest}),saved);
   await assert.rejects(plan(db,{request:planRequest,reason:"不同的操作原因"}),/request_conflict/);
@@ -153,7 +230,7 @@ test("canonical text commits once and round-trips through the actual client rece
   await actor(db,ids.member);
   assert.deepEqual((await (await databaseRepository(db,ids.member)).mine()).grants[0].benefits,saved.benefits); assert.equal(await entitlement(db),true);
   await db.exec("reset role");
-  const events=(await db.query("select action,reason,request from membership_events order by created_at")).rows;
+  const events=(await db.query("select action,reason,request from membership_events order by created_at,event_sequence")).rows;
   assert.equal(events.length,2); assert.equal(events[0].reason,"确认方案内容"); assert.equal(events[0].request.title,input.title); assert.equal(events[0].request.reason,input.reason); assert.equal(events[1].reason,"确认会员授予");
 }));
 test("maximum Unicode code-point fields, including emoji, remain readable after real RPC writes",()=>fixture(async(db)=>{

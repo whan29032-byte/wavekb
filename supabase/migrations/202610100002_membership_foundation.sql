@@ -47,7 +47,15 @@ create table public.membership_events (
   after_state jsonb not null,
   created_at timestamptz not null default now()
 );
-create index membership_events_user_time on public.membership_events(user_id,created_at desc);
+-- now() can be identical for multiple events in one transaction. UUIDs do not
+-- encode write order, so use an internally generated tiebreaker for history.
+-- This additive statement also preserves preexisting event IDs and payloads;
+-- backfilled historical ties become stable, not reconstructed commit times.
+alter table public.membership_events
+  add column if not exists event_sequence bigint generated always as identity;
+create unique index membership_events_sequence on public.membership_events(event_sequence);
+create index membership_events_user_time on public.membership_events(user_id,created_at desc,event_sequence desc);
+revoke all on sequence public.membership_events_event_sequence_seq from public,anon,authenticated;
 alter table public.membership_plans enable row level security;
 alter table public.membership_grants enable row level security;
 alter table public.membership_events enable row level security;
@@ -76,8 +84,8 @@ begin
       order by g.ends_at desc) from public.membership_grants g join public.membership_plans p on p.key=g.plan_key where g.user_id=auth.uid()
   ),'[]'::jsonb),'history',coalesce((
     select jsonb_agg(jsonb_build_object('id',e.id,'action',e.action,'title',p.title,'created_at',e.created_at,
-      'ends_at',e.after_state->>'ends_at') order by e.created_at desc)
-    from (select * from public.membership_events where user_id=auth.uid() order by created_at desc limit 50) e
+      'ends_at',e.after_state->>'ends_at') order by e.created_at desc,e.event_sequence desc)
+    from (select * from public.membership_events where user_id=auth.uid() order by created_at desc,event_sequence desc limit 50) e
     join public.membership_plans p on p.key=e.plan_key
   ),'[]'::jsonb));
 end;
@@ -95,8 +103,8 @@ begin
   return jsonb_build_object('plans',coalesce((select jsonb_agg(to_jsonb(p) order by p.key) from public.membership_plans p),'[]'::jsonb),
     'member',(select jsonb_build_object('id',id,'public_uid',public_uid,'display_name',display_name,'account_status',account_status) from public.profiles where id=v_user),
     'grants',coalesce((select jsonb_agg(to_jsonb(g) order by g.updated_at desc) from public.membership_grants g where g.user_id=v_user),'[]'::jsonb),
-    'history',coalesce((select jsonb_agg(to_jsonb(e)-'request' order by e.created_at desc) from
-      (select * from public.membership_events where user_id=v_user or user_id is null order by created_at desc limit 50) e),'[]'::jsonb));
+    'history',coalesce((select jsonb_agg(to_jsonb(e)-'request'-'event_sequence' order by e.created_at desc,e.event_sequence desc) from
+      (select * from public.membership_events where user_id=v_user or user_id is null order by created_at desc,event_sequence desc limit 50) e),'[]'::jsonb));
 end;
 $$;
 
