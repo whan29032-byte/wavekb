@@ -125,7 +125,10 @@ test("environment rollback never truncates the live file when copying its backup
       fs.writeFileSync(path.join(backup, "gateway.env"), "ORIGINAL=safe\n", { mode: 0o600 });
       const live = path.join(directory, "gateway.env");
       fs.writeFileSync(live, "CANDIDATE=safe\n", { mode: 0o600 });
-      const program = `set -eu\nbackup_root="${backup}"\nrelease_id=fixture\nsudo() { "$@"; }\n${failCopy ? 'install() { head -c 1 "$3" > "$4"; return 9; }' : ""}\n${rollback.replaceAll("/etc/elliott-wave", directory)}`;
+      // GNU mv -T is exercised unchanged on the production Linux CI runner.
+      // macOS's BSD mv omits -T; both fixture targets are verified regular files.
+      const platformMove = process.platform === "darwin" ? 'mv() { test "$1" = -Tf; command mv -f "$2" "$3"; }' : "";
+      const program = `set -eu\nbackup_root="${backup}"\nrelease_id=fixture\nsudo() { "$@"; }\n${platformMove}\n${failCopy ? 'install() { head -c 1 "$3" > "$4"; return 9; }' : ""}\n${rollback.replaceAll("/etc/elliott-wave", directory)}`;
       const result = spawnSync("bash", ["-c", program], { encoding: "utf8" });
       assert.equal(result.status, failCopy ? 9 : 0, result.stderr);
       assert.equal(fs.readFileSync(live, "utf8"), failCopy ? "CANDIDATE=safe\n" : "ORIGINAL=safe\n");
