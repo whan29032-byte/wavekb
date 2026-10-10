@@ -1,0 +1,12 @@
+// Fictional component/test data. Never use as a fallback for an actual account or catalog.
+import type { CommercePlan, MembershipCatalog, MembershipCommerceAdminStore, MembershipOrder, MyMembershipCommerce } from "@/lib/membership/commerce-types";
+export const membershipPreviewActor = "00000000-0000-4000-8000-000000000001";
+export const membershipPreviewRequest = "00000000-0000-4000-8000-000000000002";
+export const membershipPreviewPlan: CommercePlan = { key: "vip", title: "VIP 会员", description: "一次性月度或年度会员，不自动续费。", benefits: {}, enabled: true, revision: 2, ai_daily_limit: 50, mentor_discount_bps: 1000, prices: [
+  { id: "00000000-0000-4000-8000-000000000003", plan_key: "vip", term_months: 1, amount_minor: 5200, currency: "USD", published: true, revision: 1 },
+  { id: "00000000-0000-4000-8000-000000000004", plan_key: "vip", term_months: 12, amount_minor: 52000, currency: "USD", published: true, revision: 1 },
+] };
+export function membershipPreviewCatalog(purchaseAvailable = false): MembershipCatalog { return { billing_enabled: purchaseAvailable, purchase_available: purchaseAvailable, payment_mode: "test", settings_revision: 1, plans: [structuredClone(membershipPreviewPlan)] }; }
+export function membershipPreviewMine(purchaseAvailable = false): MyMembershipCommerce { return { catalog: membershipPreviewCatalog(purchaseAvailable), orders: [], purchase_grants: [], effective: { user_id: membershipPreviewActor, eligible: true, has_vip: false, ai_daily_limit: 0, mentor_discount_bps: 0 } }; }
+export function membershipPreviewOrder(): MembershipOrder { return { id: "00000000-0000-4000-8000-000000000005", buyer_id: membershipPreviewActor, request_id: membershipPreviewRequest, price_id: membershipPreviewPlan.prices[0].id, plan_key: "vip", price_revision: 1, plan_revision: 2, amount_minor: 5200, currency: "USD", term_months: 1, payment_mode: "test", livemode: false, status: "pending", title_snapshot: "购买时的 VIP 名称", description_snapshot: "购买时的说明", benefits_snapshot: {}, ai_daily_limit_snapshot: 50, mentor_discount_bps_snapshot: 1000, provider_session_id: "cs_test_preview", checkout_url: "https://checkout.stripe.com/c/pay/cs_test_preview", checkout_expires_at: "2099-11-10T00:00:00Z", paid_at: null, created_at: "2026-10-10T00:00:00Z" }; }
+export function membershipPreviewAdmin(): MembershipCommerceAdminStore { return { settings: { billing_enabled: false, payment_mode: "test", revision: 1 }, plans: [structuredClone(membershipPreviewPlan)], history: [] }; }

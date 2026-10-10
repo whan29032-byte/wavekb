@@ -1,8 +1,10 @@
+import { isDeepStrictEqual } from "node:util";
 import type { GatewayConfig } from "../config.ts";
 import { normalizeDirectoryResource } from "../directory/external-directory.ts";
 import { normalizeAiRunRequest } from "../knowledge/contracts.ts";
 import { buildKnowledgeIndex, type KnowledgeIndex } from "../knowledge/index.ts";
 import { encryptSecret } from "../secrets/crypto.ts";
+import { ManagedConnectionResolver } from "../secrets/managed-connection.ts";
 import { validateProviderUrl, validateUserProviderUrl } from "../security/provider-url.ts";
 import type { GatewayApi, GatewayUser } from "../server.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
@@ -42,16 +44,19 @@ type GatewayDatabase = {
 type GatewayApiDependencies = {
   database?: GatewayDatabase;
   knowledgePath?: string;
+  managedConnections?: Pick<ManagedConnectionResolver, "inspect">;
 };
 
 export class SupabaseGatewayApi implements GatewayApi {
   private readonly database: GatewayDatabase;
   private readonly trading: BinanceLeaderboardService;
   private readonly knowledgeIndex: KnowledgeIndex;
+  private readonly managedConnections: Pick<ManagedConnectionResolver, "inspect">;
   constructor(privateConfig: GatewayConfig, dependencies: GatewayApiDependencies = {}) {
     this.config = privateConfig;
     this.database = dependencies.database ?? new SupabaseRest(privateConfig);
     this.knowledgeIndex = buildKnowledgeIndex(dependencies.knowledgePath);
+    this.managedConnections = dependencies.managedConnections ?? new ManagedConnectionResolver(privateConfig, this.database);
     this.trading = new BinanceLeaderboardService(privateConfig);
   }
   private readonly config: GatewayConfig;
@@ -405,6 +410,19 @@ export class SupabaseGatewayApi implements GatewayApi {
     return (connections as any[]).find((item) => item.id === connectionId);
   }
 
+  async membershipAiStatus(ownerId: string): Promise<Record<string, unknown>> {
+    const usage = await this.database.request("/rest/v1/rpc/get_membership_ai_usage_for_user", {
+      method: "POST", body: { p_user_id: ownerId },
+    });
+    const enabled = this.config.MEMBERSHIP_MANAGED_AI_ENABLED === true;
+    let configured = false;
+    if (enabled) {
+      try { await this.managedConnections.inspect("wave_analysis"); configured = true; }
+      catch { configured = false; }
+    }
+    return { ...usage, enabled, configured, available: enabled && configured && usage.has_vip === true && Number(usage.remaining) > 0 };
+  }
+
   async enqueueJob(
     ownerId: string,
     analysisId: string,
@@ -414,7 +432,16 @@ export class SupabaseGatewayApi implements GatewayApi {
       throw Object.assign(new Error("invalid analysis id"), { statusCode: 400 });
     }
     const normalizedAnalysisId = analysisId.toLowerCase();
-    const normalized = normalizeAiRunRequest(input, this.knowledgeIndex.books, {
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) throw Object.assign(new Error("invalid ai run request"), { statusCode: 400 });
+    const mode = Object.hasOwn(input, "execution_mode") ? input.execution_mode : "byok";
+    if (mode !== "byok" && mode !== "managed") throw Object.assign(new Error("invalid execution mode"), { statusCode: 400 });
+    const request = { ...input };
+    delete request.execution_mode;
+    if (Reflect.ownKeys(input).length !== Reflect.ownKeys(request).length + (Object.hasOwn(input, "execution_mode") ? 1 : 0)) {
+      throw Object.assign(new Error("invalid ai run request"), { statusCode: 400 });
+    }
+    const normalized = normalizeAiRunRequest(request, this.knowledgeIndex.books, {
       ownerId,
       analysisId: normalizedAnalysisId,
     });
@@ -425,19 +452,51 @@ export class SupabaseGatewayApi implements GatewayApi {
     if (analysisRows[0].schema_version !== normalized.analysis_schema_version) {
       throw Object.assign(new Error("analysis schema mismatch"), { statusCode: 409 });
     }
+    const idempotencyKey = `${ownerId}:${normalizedAnalysisId}:${normalized.client_request_id}`;
+    if (mode === "managed") {
+      // Recover a lost acceptance receipt before checking today's flag/quota or
+      // model configuration. The original source/request must still match.
+      const existing = await this.database.request(`/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*&limit=1`);
+      if (existing.length) {
+        if (existing[0].execution_source !== "managed" || !isDeepStrictEqual(existing[0].accepted_request ?? existing[0].input_payload, normalized)) {
+          throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
+        }
+        return existing[0];
+      }
+      if (!this.config.MEMBERSHIP_MANAGED_AI_ENABLED) throw Object.assign(new Error("managed_ai_disabled"), { statusCode: 503 });
+      const model = await this.managedConnections.inspect(normalized.task_type);
+      try {
+        return await this.database.request("/rest/v1/rpc/enqueue_membership_ai_job", {
+          method: "POST", body: {
+            p_owner_id: ownerId, p_analysis_id: normalizedAnalysisId, p_idempotency_key: idempotencyKey,
+            p_task_type: normalized.task_type, p_input_payload: normalized,
+            p_knowledge_version: this.knowledgeIndex.knowledgeVersion, p_execution_source: "managed",
+            p_managed_model_id: model.id, p_user_connection_id: null,
+            p_connection_snapshot: { source: "managed", model_id: model.id, model_name: model.name },
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        const statusCode = message === "membership_ai_quota_exceeded" ? 429
+          : message === "membership_ai_vip_required" || message === "ai_job_input_invalid" ? 403
+            : message === "ai_request_conflict" ? 409 : message === "managed_ai_configuration_required" ? 503 : undefined;
+        if (statusCode) throw Object.assign(new Error(message), { statusCode });
+        throw error;
+      }
+    }
     const connections = await this.database.request(
       `/rest/v1/user_ai_connections?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&is_default=eq.true&select=id,label,adapter,base_url,model_name,max_output_tokens,context_tokens,temperature,timeout_ms&limit=1`,
     );
     if (!connections.length) {
       throw Object.assign(new Error("ai_connection_required"), { statusCode: 409 });
     }
-    const idempotencyKey = `${ownerId}:${normalizedAnalysisId}:${normalized.client_request_id}`;
     try {
       const rows = await this.database.request("/rest/v1/ai_jobs", {
         method: "POST",
         headers: { prefer: "return=representation" },
         body: {
           owner_id: ownerId,
+          execution_source: "byok",
           analysis_id: normalizedAnalysisId,
           user_connection_id: connections[0].id,
           connection_snapshot: {
@@ -463,16 +522,21 @@ export class SupabaseGatewayApi implements GatewayApi {
         || (error as { code?: string }).code === "23505";
       if (!duplicate) throw error;
       const existing = await this.database.request(
-        `/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,owner_id,analysis_id,status,input_payload,knowledge_version,created_at&limit=1`,
+        `/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,owner_id,analysis_id,status,execution_source,accepted_request,input_payload,knowledge_version,created_at&limit=1`,
       );
-      if (existing.length) return existing[0];
+      if (existing.length) {
+        if (existing[0].execution_source === "managed" || !isDeepStrictEqual(existing[0].accepted_request ?? existing[0].input_payload, normalized)) {
+          throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
+        }
+        return existing[0];
+      }
       throw Object.assign(new Error("job conflict"), { statusCode: 409 });
     }
   }
 
   async getJob(ownerId: string, jobId: string): Promise<unknown> {
     const rows = await this.database.request(
-      `/rest/v1/ai_jobs?id=eq.${encodeURIComponent(jobId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,status,output_payload,error_code,error_message,actual_model_id,user_connection_id,connection_snapshot,knowledge_version,created_at,finished_at&limit=1`,
+      `/rest/v1/ai_jobs?id=eq.${encodeURIComponent(jobId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,status,execution_source,output_payload,error_code,error_message,actual_model_id,user_connection_id,connection_snapshot,knowledge_version,created_at,finished_at&limit=1`,
     );
     if (!rows.length) throw Object.assign(new Error("job not found"), { statusCode: 404 });
     return rows[0];

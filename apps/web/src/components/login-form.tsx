@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
 import { safeReturnPath } from "@/lib/auth/forms";
+import { replaceAuthLocation } from "@/lib/auth/return-path";
 
 export function LoginForm() {
   const searchParams = useSearchParams();
@@ -30,7 +31,7 @@ export function LoginForm() {
     const destination = payload.needsUidActivation
       ? `/activate-uid?next=${encodeURIComponent(next)}`
       : next;
-    window.location.replace(destination);
+    replaceAuthLocation(destination);
   }
 
   return (

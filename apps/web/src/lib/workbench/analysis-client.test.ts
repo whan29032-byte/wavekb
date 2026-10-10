@@ -16,6 +16,13 @@ describe("review generated from analysis", () => {
 });
 
 describe("AI run request", () => {
+  it("sends explicit managed mode with the same caller-owned ID on automatic transport retries", async () => {
+    const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("ack lost")).mockResolvedValueOnce(new Response('{}'));
+    const clientRequestId = "11111111-1111-4111-8111-111111111111";
+    await submitAiRun("/api/ai/analyses/analysis/ai-run", 5, "all", fetcher, { mode: "managed", clientRequestId });
+    const bodies = fetcher.mock.calls.map((call) => JSON.parse(String(call[1].body)));
+    expect(bodies[0]).toEqual(bodies[1]); expect(bodies[0].execution_mode).toBe("managed"); expect(bodies[0].client_request_id).toBe(clientRequestId);
+  });
   it("preserves distinct eleventh-edition and comparison-book single scopes", () => {
     for (const bookId of ["elliott-wave-principle-eleventh-edition", "elliott-wave-principle-tenth-edition"] as const) {
       expect(createAiRunRequest(4, bookId, "11111111-1111-4111-8111-111111111111").knowledge_scope).toEqual({ mode: "single", book_id: bookId });

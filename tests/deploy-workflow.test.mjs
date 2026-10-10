@@ -128,7 +128,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
   assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < publicSchemaCheck && publicSchemaCheck < upload && upload < activation);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
-  for (const filename of ["admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres"]) {
+  for (const filename of ["admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres", "membership-commerce-postgres", "membership-payment-functions", "membership-benefits-postgres"]) {
     assert.ok(contractVerification.run.includes(`tests/${filename}.test.mjs`), `${filename} must gate backend migration and upload`);
   }
   assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
@@ -138,12 +138,14 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /202610080003\)[\s\S]*202610080004_youtube_auto_posts\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610080004\)[\s\S]*202610100001_admin_payment_hardening\.sql[\s\S]*202610100002_membership_foundation\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610100001\)[\s\S]*202610100002_membership_foundation\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202610100002\)[\s\S]*already applied/);
+  assert.match(backendSteps[schemaGate].run, /202610100002\)[\s\S]*202610100003_membership_commerce\.sql[\s\S]*202610100004_membership_benefits\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100003\)[\s\S]*202610100004_membership_benefits\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100004\)[\s\S]*already applied/);
   assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610100002/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610100004/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610100002/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610100004/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -164,6 +166,8 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202610080004_youtube_auto_posts.sql",
     "202610100001_admin_payment_hardening.sql",
     "202610100002_membership_foundation.sql",
+    "202610100003_membership_commerce.sql",
+    "202610100004_membership_benefits.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -180,13 +184,14 @@ ${selection}`;
   for (const [marker, offset] of [
     ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
+    ["202610100003", 8], ["202610100004", 9],
   ]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
     const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
     assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
   }
-  for (const marker of ["", "202609090001", "202610100003", "invalid"]) {
+  for (const marker of ["", "202609090001", "202610100005", "invalid"]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.notEqual(result.status, 0, marker);
     assert.doesNotMatch(result.stdout, /supabase\/migrations\//);

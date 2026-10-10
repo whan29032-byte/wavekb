@@ -5,9 +5,14 @@ import type { WorkbenchAnalysis } from "@wavekb/domain";
 import { installBrowserStorage } from "@/test/browser-storage";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
-const { supabase } = vi.hoisted(() => ({ supabase: { from: vi.fn() } }));
+const { supabase } = vi.hoisted(() => ({ supabase: { from: vi.fn(), auth: { getUser: vi.fn(), onAuthStateChange: vi.fn() } } }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => supabase }));
-beforeEach(installBrowserStorage);
+beforeEach(() => {
+  installBrowserStorage();
+  supabase.auth.getUser.mockReset(); supabase.auth.onAuthStateChange.mockReset();
+  supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "local-test" } }, error: null });
+  supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
+});
 afterEach(cleanup);
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 const next = () => fireEvent.click(screen.getByRole("button", { name: "下一步" }));
@@ -132,6 +137,41 @@ describe("AI knowledge selection", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("alert")).toBeNull();
     vi.unstubAllGlobals();
+  });
+
+  it("reuses the exact original AI request after both acknowledgement attempts are lost", async () => {
+    const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("ack lost")).mockRejectedValueOnce(new TypeError("ack lost again"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "recovered", status: "queued" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={4} />);
+    const start = screen.getByRole("button", { name: "启动 AI 候选分析" });
+    fireEvent.click(start); await screen.findByText(/结果待核实/);
+    fireEvent.click(screen.getByRole("radio", { name: /自然法则/ }));
+    fireEvent.click(start); await screen.findByText(/任务状态：/);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    const bodies = fetcher.mock.calls.map((call) => JSON.parse(String(call[1].body)));
+    expect(bodies[1]).toEqual(bodies[0]); expect(bodies[2]).toEqual(bodies[0]);
+    vi.unstubAllGlobals();
+  });
+
+  it.each(["before", "after"])("binds a new managed submission to the current actor %s its acknowledgement", async (phase) => {
+    const quota = { user_id: "local-test", usage_day: "2026-10-10", timezone: "Asia/Shanghai", has_vip: true, daily_limit: 50, used: 2, remaining: 48, enabled: true, configured: true, available: true };
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(quota)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "old-owner-job", status: "queued" } })));
+    vi.stubGlobal("fetch", fetcher); render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={4} />);
+    fireEvent.click(screen.getByRole("button", { name: "核实平台会员额度" })); await screen.findByText(/剩余 48 次/);
+    fireEvent.click(screen.getByRole("radio", { name: /平台 AI/ }));
+    supabase.from.mockClear(); supabase.auth.getUser.mockReset();
+    if (phase === "after") {
+      supabase.auth.getUser.mockResolvedValueOnce({ data: { user: { id: "local-test" } }, error: null })
+        .mockResolvedValueOnce({ data: { user: { id: "local-test" } }, error: null });
+    }
+    supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "other" } }, error: null });
+    fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" })); await screen.findByRole("alert");
+    expect(screen.getByRole("alert").textContent).toContain("登录账号已变化或退出");
+    expect(fetcher).toHaveBeenCalledTimes(phase === "before" ? 1 : 2);
+    if (phase === "before") expect(supabase.from).not.toHaveBeenCalled();
+    expect(screen.queryByText(/任务状态：/)).toBeNull(); vi.unstubAllGlobals();
   });
 
   it("keeps one selected scope for this editor mount and sends its strict v2 payload without replacing saved analysis on refresh failure", async () => {

@@ -1,0 +1,11 @@
+import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import { MembershipCommerceSummary } from "./membership-commerce";
+import { membershipPreviewMine, membershipPreviewOrder } from "./membership-commerce.fixtures";
+const meta = { title: "Membership/Purchases", component: MembershipCommerceSummary, parameters: { layout: "fullscreen" }, decorators: [(Story) => <main className="mx-auto grid max-w-5xl gap-6 px-4 py-8 md:px-6"><header><h1 className="text-3xl font-semibold">会员购买与订单</h1><p className="mt-2 text-sm text-muted-foreground">虚拟组件预览，不发起真实订单、付款或授权。</p></header><Story /></main>], args: { mine: membershipPreviewMine(), onRefresh: () => {}, onPurchase: () => {}, onRecover: () => {}, onContinue: () => {} } } satisfies Meta<typeof MembershipCommerceSummary>;
+export default meta;
+type Story = StoryObj<typeof meta>;
+export const PaymentClosed: Story = {};
+export const TestPurchasePreview: Story = { args: { mine: membershipPreviewMine(true) } };
+export const UnknownReceipt: Story = { args: { mine: { ...membershipPreviewMine(true), orders: [membershipPreviewOrder()] }, hasAttempt: true, purchaseBlocked: true, error: "未获得有效回执。", message: "结果仍不确定，原请求已保留。请先重新核对订单，再使用原请求继续；不要重新购买或重复付款。" } };
+export const ServiceUnavailable: Story = { args: { mine: null, error: "会员购买服务尚未部署，暂不可使用。" } };
+export const PaymentFailed: Story = { args: { mine: { ...membershipPreviewMine(true), orders: [{ ...membershipPreviewOrder(), status: "failed" }] }, message: "原支付失败，不授予权益。订单状态已核对，可主动选择新的购买；不会自动创建新订单。" } };

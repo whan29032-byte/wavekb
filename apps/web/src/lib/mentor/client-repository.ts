@@ -31,11 +31,29 @@ export class MentorCheckoutError extends Error {
 }
 
 export type MentorOfferQuote = { price_cents: number; currency: string; duration_days: number; weekly_questions: number };
+export type MembershipMentorQuote = MentorOfferQuote & { base_price_cents: number; discount_bps: number };
+
+export async function getMyMentorOfferQuote(client: SupabaseClient, actorId: string, offerId: string): Promise<MembershipMentorQuote> {
+  const auth = await client.auth.getUser();
+  if (auth.error || auth.data.user?.id !== actorId) throw new Error("authentication_required");
+  const result = await client.rpc("get_my_mentor_offer_quote", { p_actor_id: actorId, p_offer_id: offerId });
+  if (result.error) throw result.error;
+  const current = await client.auth.getUser();
+  if (current.error || current.data.user?.id !== actorId) throw new Error("authentication_required");
+  const value = result.data as MembershipMentorQuote | null;
+  if (!value || !Number.isSafeInteger(value.price_cents) || value.price_cents <= 0
+    || !Number.isSafeInteger(value.base_price_cents) || value.base_price_cents < value.price_cents
+    || !Number.isInteger(value.discount_bps) || value.discount_bps < 0 || value.discount_bps > 10000
+    || typeof value.currency !== "string" || !/^[A-Z]{3,10}$/.test(value.currency)
+    || !Number.isInteger(value.duration_days) || value.duration_days < 1 || value.duration_days > 366
+    || !Number.isInteger(value.weekly_questions) || value.weekly_questions < 1 || value.weekly_questions > 100) throw new Error("offer_quote_unavailable");
+  return value;
+}
 
 export function isDefiniteMentorCheckoutFailure(error: unknown): boolean {
   if (error instanceof MentorCheckoutError) return error.definite;
   const message = error instanceof Error ? error.message : String((error as { message?: string })?.message || "");
-  return /^(authentication_required|account_ineligible|offer_unavailable|offer_changed|offer_quote_required|mentor_unavailable|mentor_self_purchase|payment_method_unavailable|payment_method_required|order_payment_route_invalid|mentor_access_active|checkout_pending_exists|request_conflict|request_id_required|order_access_denied|order_not_pending|order_not_cancellable|unpaid_confirmation_required)$/.test(message);
+  return /^(authentication_required|account_ineligible|offer_unavailable|offer_changed|offer_quote_required|mentor_discount_free_checkout_unsupported|mentor_unavailable|mentor_self_purchase|payment_method_unavailable|payment_method_required|order_payment_route_invalid|mentor_access_active|checkout_pending_exists|request_conflict|request_id_required|order_access_denied|order_not_pending|order_not_cancellable|unpaid_confirmation_required)$/.test(message);
 }
 
 function checkoutFailure(error: { message: string; code?: string }) {

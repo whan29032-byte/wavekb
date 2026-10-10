@@ -94,9 +94,14 @@ export function AccountNavigation() {
 
   if (!user) {
     return (
+      <>
+      <Link href="/membership/plans" className="hidden min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground lg:flex">
+        <Certificate aria-hidden size={18} />会员方案
+      </Link>
       <Link href="/login" className="flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
         <UserCircle aria-hidden size={18} weight="duotone" />登录
       </Link>
+      </>
     );
   }
 

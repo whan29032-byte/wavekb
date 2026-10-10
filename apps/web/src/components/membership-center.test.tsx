@@ -12,12 +12,13 @@ beforeEach(()=>{vi.resetAllMocks();mocks.auth.mockReturnValue({data:{subscriptio
 afterEach(cleanup);
 it("shows dates and actual status without inventing benefits or a buy action",()=>{
   render(<MembershipSummary snapshot={snapshot} onRefresh={()=>{}} />);
-  expect(screen.getByText("生效中")).toBeDefined(); expect(screen.getByText(/当前没有生效的专属权益/)).toBeDefined();
+  expect(screen.getByText("生效中")).toBeDefined(); expect(screen.getByText(/此授权没有补充权益说明/)).toBeDefined();
   expect(screen.getByText("2026/11/10 08:00")).toBeDefined(); expect(screen.queryByRole("button",{name:/购买|续费/})).toBeNull();
 });
 it("does not render unknown service state as free or paid membership",()=>{
   render(<MembershipSummary snapshot={null} error="会员服务尚未部署" onRefresh={()=>{}} />);
   expect(screen.getByRole("alert").textContent).toContain("尚未部署"); expect(screen.queryByText("免费注册会员")).toBeNull();
+  expect(screen.queryByRole("region",{name:"免费账户可用服务"})).toBeNull();
 });
 it("clears owner data at logout and never restores a late refresh response",async()=>{
   let finish!:(value:unknown)=>void; mocks.mine.mockReturnValue(new Promise((resolve)=>{finish=resolve;}));
@@ -25,7 +26,14 @@ it("clears owner data at logout and never restores a late refresh response",asyn
   await waitFor(()=>expect(mocks.mine).toHaveBeenCalledOnce());
   await act(async()=>{mocks.auth.mock.calls[0][0]("SIGNED_OUT",null);});
   expect(screen.queryByText("测试会员")).toBeNull();
+  expect(screen.queryByRole("region",{name:"免费账户可用服务"})).toBeNull();
   await act(async()=>{finish(snapshot);}); expect(screen.queryByText("测试会员")).toBeNull(); expect(mocks.refresh).toHaveBeenCalledOnce();
+});
+it.each(["active","expired","revoked"] as const)("provides the existing free service routes without misrepresenting them as VIP benefits (%s)",(status)=>{
+  render(<MembershipSummary snapshot={{...snapshot,grants:[{...snapshot.grants[0],status}]}} onRefresh={()=>{}} />);
+  const destinations={"阅读知识库":"/knowledge","发布社区内容":"/community/idea_sharing/new","使用私人工作台":"/workbench","管理好友":"/friends","查看积分商城":"/rewards"};
+  for (const [name,href] of Object.entries(destinations)) expect(screen.getByRole("link",{name:new RegExp(name)}).getAttribute("href")).toBe(href);
+  expect(screen.getByText(/VIP 授权到期或撤销不会移除/)).toBeDefined();
 });
 it("a failed read removes stale membership claims and offers retry",async()=>{
   mocks.mine.mockRejectedValue(new Error("network failed")); render(<MembershipCenter actorId="owner" initial={snapshot} />);

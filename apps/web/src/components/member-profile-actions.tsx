@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChatCircleDots, Notebook, PencilSimple, UserPlus, UsersThree } from "@phosphor-icons/react";
+import { Certificate, ChatCircleDots, Notebook, PencilSimple, UserPlus, UsersThree } from "@phosphor-icons/react";
 import type { FriendshipConnection } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
 import { runFriendAction } from "@/lib/member/friends-api-client";
@@ -44,6 +44,7 @@ export function MemberProfileActions({ actorId, profileId, initialFollowing, ini
     return (
       <div className="grid w-full grid-cols-1 gap-2 min-[28rem]:grid-cols-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
         <Button asChild size="small" className="min-h-11 w-full sm:w-auto"><Link href="/member/profile"><PencilSimple aria-hidden size={16} />编辑资料</Link></Button>
+        <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/membership"><Certificate aria-hidden size={16} />会员中心</Link></Button>
         <Button type="button" variant="secondary" size="small" className="min-h-11 w-full sm:w-auto" onClick={() => window.dispatchEvent(new CustomEvent("wavekb:open-friends"))}><UsersThree aria-hidden size={16} />我的好友</Button>
         <Button asChild variant="secondary" size="small" className="min-h-11 w-full sm:w-auto"><Link href="/workbench"><Notebook aria-hidden size={16} />交易工作台</Link></Button>
       </div>

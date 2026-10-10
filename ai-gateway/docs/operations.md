@@ -57,8 +57,10 @@ node src/server.ts
 
 Backend 必须先发布，因为新 Gateway 同时接受版本 2 请求和未携带 `request_version` 的旧 Web
 请求；旧请求会规范化为 `knowledge_scope: { "mode": "all" }`。因此 Backend-first 窗口兼容旧 Web，
-Next-first 则没有这个保证。本次多书检索复用现有 AI 表和字段，不新增或执行数据库迁移；发布门禁只接受
-精确 schema marker `202609090001`，任何更旧或更新的未知 marker 都应 fail closed。
+Next-first 则没有这个保证。多书检索复用现有 AI 表；本次会员扩展另需按精确迁移链应用会员基础、
+购买与权益迁移，发布目标 schema marker 为 `202610100004`。工作流只接受列明的前置 marker，
+对任何未知 marker 都应 fail closed。收款函数需独立部署，平台 AI 保持默认关闭；详见
+[会员配置与上线验收](../../docs/membership-setup.md)。
 
 Backend 归档只包含 `package.json`、`src/`、`knowledge/retrieval-index.json` 和
 `DEPLOYMENT_VERSION`。上传前必须通过知识 artifact freshness、Gateway test/typecheck 和脱离源码 checkout

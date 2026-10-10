@@ -43,6 +43,7 @@ export type GatewayApi = {
   listProviders(): Promise<unknown[]>;
   createProvider(input: Record<string, unknown>, actor: GatewayUser): Promise<unknown>;
   listUserConnections(ownerId: string): Promise<unknown[]>;
+  membershipAiStatus?(ownerId: string): Promise<Record<string, unknown>>;
   createUserConnection(ownerId: string, input: Record<string, unknown>): Promise<unknown>;
   setDefaultUserConnection(ownerId: string, connectionId: string): Promise<unknown>;
   rotateUserConnectionSecret(
@@ -532,6 +533,10 @@ async function route(
       statusCode: 200,
       body: { connections: await api.listUserConnections(actor.id) },
     };
+  }
+  if (method === "GET" && path === "/v1/user/membership-ai") {
+    if (!api.membershipAiStatus) return { statusCode: 503, body: { error: "managed_ai_disabled" } };
+    return { statusCode: 200, body: await api.membershipAiStatus(actor.id) };
   }
   if (method === "GET" && path === "/v1/admin/trading-connections") {
     if (!api.listAdminExchangeConnections) return { statusCode: 503, body: { error: "gateway_not_configured" } };

@@ -4,6 +4,11 @@ import { isAllowedAiBodyLength, isAllowedAiPath } from "./paths";
 const id = "123e4567-e89b-42d3-a456-426614174000";
 
 describe("AI gateway allowlist", () => {
+  it("allows only the authenticated read endpoint for server-bound membership AI availability", () => {
+    expect(isAllowedAiPath("user/membership-ai", "GET")).toBe(true);
+    expect(isAllowedAiPath("user/membership-ai", "POST")).toBe(false);
+    expect(isAllowedAiPath("user/membership-ai/other", "GET")).toBe(false);
+  });
   it("allows only user connection and analysis job endpoints", () => {
     expect(isAllowedAiPath("user/ai-connections", "GET")).toBe(true);
     expect(isAllowedAiPath(`user/ai-connections/${id}/rotate-key`, "POST")).toBe(true);

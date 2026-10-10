@@ -52,6 +52,12 @@ it("preserves the anonymous login link's default prefetch policy outside reading
   expect(loginCalls.length).toBeGreaterThan(0);
   expect(loginCalls.every(([props]) => props.prefetch === undefined)).toBe(true);
 });
+it("lets guests discover published membership plans without requiring sign-in", async () => {
+  mocks.session.mockResolvedValue({ data: { session: null } });
+  render(<AccountNavigation />);
+  expect((await screen.findByRole("link", { name: "会员方案" })).getAttribute("href")).toBe("/membership/plans");
+  expect(screen.getByRole("link", { name: "登录" }).getAttribute("href")).toBe("/login");
+});
 
 it("preserves authenticated personal links' default prefetch policy outside reading", async () => {
   mocks.read.mockResolvedValue({ data: [{ id: "owner", public_uid: 12345, nameplate_style: "blackgold" }], error: null });

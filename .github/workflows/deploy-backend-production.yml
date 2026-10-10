@@ -55,7 +55,7 @@ jobs:
           node scripts/validate-knowledge.mjs
           pnpm --dir ai-gateway typecheck
           pnpm --dir ai-gateway test
-          node --test tests/ai-gateway-packaging.test.mjs tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/trading-leaderboard.test.mjs tests/trading-leaderboard-postgres.test.mjs tests/reward-lottery-postgres.test.mjs tests/mentor-checkout-postgres.test.mjs tests/mentor-notification-postgres.test.mjs tests/youtube-sync-postgres.test.mjs tests/admin-payment-hardening-postgres.test.mjs tests/mentor-payment-webhook.test.mjs tests/mentor-checkout-function.test.mjs tests/membership-foundation-postgres.test.mjs
+          node --test tests/ai-gateway-packaging.test.mjs tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/trading-leaderboard.test.mjs tests/trading-leaderboard-postgres.test.mjs tests/reward-lottery-postgres.test.mjs tests/mentor-checkout-postgres.test.mjs tests/mentor-notification-postgres.test.mjs tests/youtube-sync-postgres.test.mjs tests/admin-payment-hardening-postgres.test.mjs tests/mentor-payment-webhook.test.mjs tests/mentor-checkout-function.test.mjs tests/membership-foundation-postgres.test.mjs tests/membership-commerce-postgres.test.mjs tests/membership-payment-functions.test.mjs tests/membership-benefits-postgres.test.mjs
 
       - name: Package immutable gateway release
         run: |
@@ -126,6 +126,8 @@ jobs:
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080004_youtube_auto_posts.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100001_admin_payment_hardening.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100002_membership_foundation.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
               ;;
             202609100001)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080001_admin_custom_trading_display.sql
@@ -134,6 +136,8 @@ jobs:
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080004_youtube_auto_posts.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100001_admin_payment_hardening.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100002_membership_foundation.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
               ;;
             202610080001)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080002_mentor_checkout_recovery.sql
@@ -141,26 +145,43 @@ jobs:
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080004_youtube_auto_posts.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100001_admin_payment_hardening.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100002_membership_foundation.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
               ;;
             202610080002)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080003_mentor_payment_notifications.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080004_youtube_auto_posts.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100001_admin_payment_hardening.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100002_membership_foundation.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
               ;;
             202610080003)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610080004_youtube_auto_posts.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100001_admin_payment_hardening.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100002_membership_foundation.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
               ;;
             202610080004)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100001_admin_payment_hardening.sql
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100002_membership_foundation.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
               ;;
             202610100001)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100002_membership_foundation.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
               ;;
             202610100002)
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100003_membership_commerce.sql
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
+              ;;
+            202610100003)
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100004_membership_benefits.sql
+              ;;
+            202610100004)
               echo "Production migrations already applied; continuing idempotently."
               ;;
             *)
@@ -169,7 +190,7 @@ jobs:
               ;;
           esac
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema_after" = 202610100002
+          test "$schema_after" = 202610100004
           rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('exchange_connections','exchange_connection_secrets','trading_equity_snapshots','trading_return_summaries') and c.relrowsecurity;" | tr -d '[:space:]')
           test "$rls_tables" = 4
           lottery_rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('reward_lottery_campaigns','reward_lottery_prizes','reward_lottery_draws','reward_lottery_admin_audit') and c.relrowsecurity;" | tr -d '[:space:]')
@@ -189,10 +210,10 @@ jobs:
               -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
               -H 'content-type: application/json' \
               -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]') || true
-            test "$schema" = 202610100002 && break
+            test "$schema" = 202610100004 && break
             sleep 2
           done
-          test "$schema" = 202610100002
+          test "$schema" = 202610100004
 
       - name: Upload gateway archive and systemd units
         env:
