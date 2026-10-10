@@ -41,7 +41,7 @@ export function LoginForm() {
       </Field>
       <Field>
         <Label htmlFor="password">密码</Label>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required minLength={10} aria-describedby={error ? "login-error" : undefined} />
+        <Input id="password" name="password" type="password" autoComplete="current-password" required minLength={1} aria-describedby={error ? "login-error" : undefined} />
       </Field>
       {error ? <FieldMessage id="login-error" role="alert">{error}</FieldMessage> : null}
       <Button type="submit" size="large" disabled={pending}>{pending ? "正在登录" : "登录"}</Button>

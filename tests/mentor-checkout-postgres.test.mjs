@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkoutIds as ids, createCheckoutDatabase, setCheckoutActor, submitCheckout } from "./helpers/mentor-checkout-database.mjs";
+import { checkoutIds as ids, checkoutMigration, createCheckoutDatabase, setCheckoutActor, submitCheckout } from "./helpers/mentor-checkout-database.mjs";
 
 async function fixture(run) {
   const database = await createCheckoutDatabase();
-  try { await run(database); } finally { await database.close(); }
+  try {
+    await database.exec(await checkoutMigration("202610100001_admin_payment_hardening.sql"));
+    await run(database);
+  } finally { await database.close(); }
 }
 
 test("atomic checkout preserves one order, declaration and timestamp across lost-response retries", () => fixture(async (db) => {
@@ -145,8 +148,8 @@ test("generic orders reuse their hosted route but cannot be fabricated into manu
   assert.deepEqual((await db.query("select payment_method_id,payment_provider from mentor_orders where id=$1", [order])).rows[0], { payment_method_id: null, payment_provider: null });
   await assert.rejects(db.query("select submit_mentor_payment_claim($1,'fabricated manual claim')", [order]), /payment_method_required/);
   await assert.rejects(db.query("select cancel_unsubmitted_mentor_order($1,true)", [order]), /order_payment_route_invalid/);
-  await db.query("update mentor_orders set payment_provider='stripe',payment_method_id=$1 where id=$2", [ids.method, order]);
-  await assert.rejects(db.query("select submit_mentor_payment_claim($1,'still not manual')", [order]), /order_payment_route_invalid/);
+  await assert.rejects(db.query("update mentor_orders set payment_provider='stripe',payment_method_id=$1 where id=$2", [ids.method, order]), /order_terms_immutable/);
+  await assert.rejects(db.query("select submit_mentor_payment_claim($1,'still not manual')", [order]), /payment_method_required/);
   assert.equal((await db.query("select count(*)::int as count from mentor_payment_claims")).rows[0].count, 0);
 }));
 

@@ -3,6 +3,10 @@ packages:
   - packages/*
   - ai-gateway
 
+# Same-major security patch for the one remaining 5.0.9 resolution.
+overrides:
+  brace-expansion@5.0.9: 5.0.12
+
 allowBuilds:
   esbuild: true
   sharp: true

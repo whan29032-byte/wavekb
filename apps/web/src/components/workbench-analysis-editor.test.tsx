@@ -95,6 +95,45 @@ describe("AI knowledge selection", () => {
     supabase.from.mockImplementation(() => ({ update: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: saved, error: null }) }) }) }) }) }));
   });
 
+  it.each(["null", "[]", '{"draft":{"instrument":4}}', '{"draft":{"owner_id":"other"}}', "{bad json"])("rejects malformed local drafts without replacing the server analysis: %s", async (savedDraft) => {
+    localStorage.setItem("wavekb:next:analysis:local-test:saved-analysis", savedDraft);
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={0} />);
+    await screen.findByText("本地草稿无法读取，已从服务器版本继续。");
+    expect((screen.getByLabelText("分析品种") as HTMLInputElement).value).toBe("BTCUSDT");
+    expect(localStorage.getItem("wavekb:next:analysis:local-test:saved-analysis")).toBeNull();
+  });
+
+  it("continues with server data when both storage reads and removals are disabled", async () => {
+    vi.spyOn(localStorage, "getItem").mockImplementation(() => { throw new DOMException("disabled", "SecurityError"); });
+    vi.spyOn(localStorage, "removeItem").mockImplementation(() => { throw new DOMException("disabled", "SecurityError"); });
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={0} />);
+    await screen.findByText("本地草稿无法读取，已从服务器版本继续。");
+    expect((screen.getByLabelText("分析品种") as HTMLInputElement).value).toBe("BTCUSDT");
+  });
+
+  it("does not turn a committed server save into a failure when local draft removal fails", async () => {
+    vi.spyOn(localStorage, "removeItem").mockImplementation(() => { throw new DOMException("disabled", "SecurityError"); });
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={0} />);
+    await screen.findByText(/服务器版本已加载/);
+    fireEvent.click(screen.getByRole("button", { name: "保存分析" }));
+    await screen.findByText("分析已保存。");
+    expect(screen.getByText(/已保存到服务器，但本机暂存无法清除/)).toBeDefined();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("still starts the AI task after a committed save whose local cleanup is blocked", async () => {
+    vi.spyOn(localStorage, "removeItem").mockImplementation(() => { throw new DOMException("disabled", "SecurityError"); });
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job: { id: "storage-safe", status: "queued" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={4} />);
+    await screen.findByText(/服务器版本已加载/);
+    fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" }));
+    await screen.findByText(/任务状态：/);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("keeps one selected scope for this editor mount and sends its strict v2 payload without replacing saved analysis on refresh failure", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "job-1", status: "queued" } }), { status: 200 }))

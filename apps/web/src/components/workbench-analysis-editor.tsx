@@ -44,6 +44,21 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function restoredDraft(value: unknown, actorId: string): WorkbenchAnalysisDraft {
+  const candidate = objectValue(value);
+  const strings = ["instrument", "market", "primary_timeframe", "parent_timeframe", "child_timeframe", "holding_style"];
+  const objects = ["step_data", "rule_result", "score_result", "risk_result", "drawdown_result"];
+  if (candidate.owner_id !== actorId || candidate.schema_version !== "workbench-v1"
+    || !["manual", "image_recognition", "market_api"].includes(String(candidate.input_source))
+    || !["draft", "waiting", "ready", "executed", "closed"].includes(String(candidate.execution_status))
+    || strings.some((key) => typeof candidate[key] !== "string")
+    || objects.some((key) => !candidate[key] || typeof candidate[key] !== "object" || Array.isArray(candidate[key]))
+    || Object.values(objectValue(candidate.step_data)).some((step) => !step || typeof step !== "object" || Array.isArray(step))) {
+    throw new Error("invalid local analysis draft");
+  }
+  return initialDraft(actorId, candidate as unknown as WorkbenchAnalysis);
+}
+
 export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep }: { actorId: string; initialAnalysis?: WorkbenchAnalysis; initialStep: number }) {
   const router = useRouter();
   const [analysisId, setAnalysisId] = useState(initialAnalysis?.id || null);
@@ -69,12 +84,16 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
           restored.current = true;
           return;
         }
-        const parsed = JSON.parse(saved) as WorkbenchAnalysisDraft | { draft?: WorkbenchAnalysisDraft; savedAt?: string };
-        const candidate = "draft" in parsed && parsed.draft ? parsed.draft : parsed as WorkbenchAnalysisDraft;
-        const savedAt = "savedAt" in parsed ? parsed.savedAt : undefined;
+        const parsed = objectValue(JSON.parse(saved));
+        const candidate = restoredDraft("draft" in parsed ? parsed.draft : parsed, actorId);
+        const savedAt = typeof parsed.savedAt === "string" && Number.isFinite(Date.parse(parsed.savedAt)) ? parsed.savedAt : undefined;
         if (initialAnalysis && savedAt && Date.parse(savedAt) <= Date.parse(initialAnalysis.updated_at)) {
-          localStorage.removeItem(draftKey);
-          setDraftStatus("服务器版本已加载；修改会自动暂存到本机。");
+          try {
+            localStorage.removeItem(draftKey);
+            setDraftStatus("服务器版本已加载；修改会自动暂存到本机。");
+          } catch {
+            setDraftStatus("服务器版本已加载；本机存储不可用，请及时保存到服务器。");
+          }
         } else {
           setDraft(candidate);
           setDirty(true);
@@ -82,13 +101,13 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
         }
         restored.current = true;
       } catch {
-        localStorage.removeItem(draftKey);
+        try { localStorage.removeItem(draftKey); } catch { /* Storage may be disabled entirely. */ }
         restored.current = true;
-        setDraftStatus("本地草稿无法读取，已从服务器版本继续。");
+        setDraftStatus(initialAnalysis ? "本地草稿无法读取，已从服务器版本继续。" : "本地草稿无法读取，已使用空白分析；请及时保存到服务器。");
       }
     }, 0);
     return () => window.clearTimeout(restore);
-  }, [draftKey, initialAnalysis]);
+  }, [actorId, draftKey, initialAnalysis]);
 
   useEffect(() => {
     if (!restored.current || !dirty) return;
@@ -129,8 +148,12 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
     setAnalysisId(saved.id);
     setDraft(initialDraft(actorId, saved));
     setDirty(false);
-    localStorage.removeItem(draftKey);
-    setDraftStatus("已保存到服务器，本地暂存已清除。");
+    try {
+      localStorage.removeItem(draftKey);
+      setDraftStatus("已保存到服务器，本地暂存已清除。");
+    } catch {
+      setDraftStatus("已保存到服务器，但本机暂存无法清除；重新打开时请以服务器版本为准。");
+    }
     if (!analysisId) router.replace(`/workbench/analysis/${saved.id}?step=${step}`);
     return saved;
   }
@@ -240,7 +263,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
       <nav className="flex gap-2 overflow-x-auto pb-2" aria-label="分析步骤">{steps.map((label, index) => { const progress = stepProgress(index); return <button key={label} type="button" onClick={() => go(index)} aria-current={step === index ? "step" : undefined} aria-label={`第 ${index + 1} 步：${label}，${step === index ? "进行中" : progress}`} className={`grid min-w-28 gap-1 rounded-lg border px-3 py-2 text-left ${step === index ? "border-primary bg-primary text-primary-foreground" : progress === "已完成" ? "border-primary/35 bg-surface text-foreground" : "bg-surface text-muted-foreground"}`}><span className="flex items-center justify-between gap-2 text-xs"><span>第 {index + 1} 步</span><span>{step === index ? "进行中" : progress}</span></span><span className="text-sm font-semibold">{label}</span></button>; })}</nav>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section className="grid gap-6 rounded-xl border bg-surface p-5 md:p-7">
-          <header className="grid gap-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-primary">第 {step + 1} 步 · 共 {steps.length} 步</p><p className="text-xs text-muted-foreground" role="status">{dirty ? draftStatus : "已与服务器同步。"}</p></div><h1 className="text-3xl font-semibold tracking-[-0.035em]">{steps[step]}</h1><p className="text-sm leading-6 text-muted-foreground">{stepHints[step]}</p></header>
+          <header className="grid gap-2"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-primary">第 {step + 1} 步 · 共 {steps.length} 步</p><p className="text-xs text-muted-foreground" role="status">{draftStatus}</p></div><h1 className="text-3xl font-semibold tracking-[-0.035em]">{steps[step]}</h1><p className="text-sm leading-6 text-muted-foreground">{stepHints[step]}</p></header>
           {step === 0 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="analysis-market">市场分类</Label><Input id="analysis-market" value={draft.market} onChange={(event) => patchDraft({ market: event.target.value })} maxLength={80} /></Field><Field><Label htmlFor="analysis-instrument">分析品种</Label><Input id="analysis-instrument" value={draft.instrument} onChange={(event) => patchDraft({ instrument: event.target.value })} required maxLength={80} placeholder="BINANCE:BTCUSDT" /></Field></div> : null}
           {step === 1 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="analysis-parent">上一级周期</Label><select id="analysis-parent" className={selectClass} value={draft.parent_timeframe} onChange={(event) => patchDraft({ parent_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-primary">当前分析周期</Label><select id="analysis-primary" className={selectClass} value={draft.primary_timeframe} onChange={(event) => patchDraft({ primary_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-child">下一级周期</Label><select id="analysis-child" className={selectClass} value={draft.child_timeframe} onChange={(event) => patchDraft({ child_timeframe: event.target.value })}>{timeframes.map((item) => <option key={item}>{item}</option>)}</select></Field><Field><Label htmlFor="analysis-style">持有风格</Label><select id="analysis-style" className={selectClass} value={draft.holding_style} onChange={(event) => patchDraft({ holding_style: event.target.value })}>{["长线", "波段", "中线", "日内", "超短"].map((item) => <option key={item}>{item}</option>)}</select></Field></div> : null}
           {step === 2 ? <div className="grid gap-5 sm:grid-cols-2"><Field><Label htmlFor="analysis-mode">当前模式</Label><select id="analysis-mode" className={selectClass} value={String(currentData.mode || "unknown")} onChange={(event) => patchStep({ mode: event.target.value })}><option value="unknown">待确认</option><option value="motive">驱动</option><option value="corrective">调整</option></select></Field><Field><Label htmlFor="analysis-degree">当前浪级判断</Label><Input id="analysis-degree" value={String(currentData.degree || "")} onChange={(event) => patchStep({ degree: event.target.value })} placeholder="例如：分钟级浪3" /></Field></div> : null}

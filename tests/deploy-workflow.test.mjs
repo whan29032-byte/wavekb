@@ -124,23 +124,69 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
   assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < publicSchemaCheck && publicSchemaCheck < upload && upload < activation);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
+  for (const filename of ["admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres"]) {
+    assert.ok(contractVerification.run.includes(`tests/${filename}.test.mjs`), `${filename} must gate backend migration and upload`);
+  }
   assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
   assert.match(backendSteps[schemaGate].run, /202609090002\)[\s\S]*202609100001_reward_lottery_manual_fulfillment\.sql[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202609100001\)[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610080001\)[\s\S]*202610080002_mentor_checkout_recovery\.sql[\s\S]*202610080003_mentor_payment_notifications\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610080003\)[\s\S]*202610080004_youtube_auto_posts\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202610080004\)[\s\S]*already applied/);
+  assert.match(backendSteps[schemaGate].run, /202610080004\)[\s\S]*202610100001_admin_payment_hardening\.sql[\s\S]*202610100002_membership_foundation\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100001\)[\s\S]*202610100002_membership_foundation\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100002\)[\s\S]*already applied/);
   assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610080004/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610100002/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610080004/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610100002/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
   assert.match(backendSteps[activation].run, /legacy_layout/);
   assert.match(backendSteps[activation].run, /sudo mv "\$current_link" "\$previous"/);
   assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
+});
+
+test("every known backend marker selects only its unapplied migration suffix and unknown markers stop", () => {
+  const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
+  const selection = migrationStep.run.match(/case "\$schema_before" in[\s\S]*?\besac\b/)?.[0];
+  assert.ok(selection);
+  const migrations = [
+    "202609100001_reward_lottery_manual_fulfillment.sql",
+    "202610080001_admin_custom_trading_display.sql",
+    "202610080002_mentor_checkout_recovery.sql",
+    "202610080003_mentor_payment_notifications.sql",
+    "202610080004_youtube_auto_posts.sql",
+    "202610100001_admin_payment_hardening.sql",
+    "202610100002_membership_foundation.sql",
+  ];
+  const program = `set -eu
+schema_before="$WAVEKB_TEST_SCHEMA"
+SUPABASE_DB_URL=fixture
+psql() {
+  case " $* " in *" ON_ERROR_STOP=1 "*) ;; *) return 9 ;; esac
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = -f ]; then printf '%s\\n' "$2"; return 0; fi
+    shift
+  done
+  return 9
+}
+${selection}`;
+  for (const [marker, offset] of [
+    ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
+    ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
+  ]) {
+    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
+    assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
+    const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
+    assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
+  }
+  for (const marker of ["", "202609090001", "202610100003", "invalid"]) {
+    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
+    assert.notEqual(result.status, 0, marker);
+    assert.doesNotMatch(result.stdout, /supabase\/migrations\//);
+  }
 });
 
 test("mentor notification worker is packaged, installed, health-checked and included in rollback", () => {
@@ -189,11 +235,16 @@ test("release verification runs on Ubuntu for pull requests and pushes without d
   const serialized = JSON.stringify(verification);
   for (const command of [
     /pnpm test/,
+    /pnpm audit:prod/,
     /pnpm --filter @wavekb\/web test/,
     /pnpm --dir ai-gateway test/,
     /pnpm --filter @wavekb\/knowledge test/,
     /node scripts\/validate-knowledge\.mjs/,
   ]) assert.match(serialized, command);
+  const installIndex = verification.jobs.verify.steps.findIndex((step) => step.run === "pnpm install --frozen-lockfile");
+  const auditIndex = verification.jobs.verify.steps.findIndex((step) => step.run === "pnpm audit:prod");
+  assert.ok(installIndex >= 0 && auditIndex > installIndex);
+  assert.notEqual(verification.jobs.verify.steps[auditIndex]["continue-on-error"], true);
   assert.doesNotMatch(serialized, /environment|secrets\.|\bssh\b|\bscp\b|workflow_dispatch/);
 });
 

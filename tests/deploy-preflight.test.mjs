@@ -49,6 +49,20 @@ test("YouTube automatic publishing changes are classified as posting acceptance"
   }
 });
 
+test("membership grant UI, account reads and admin writes require authenticated posting acceptance", (t) => {
+  for (const filename of [
+    "apps/web/src/components/membership-panel.tsx",
+    "apps/web/src/components/admin-membership.tsx",
+    "apps/web/src/lib/membership/client-repository.ts",
+    "apps/web/src/lib/admin/membership-client-repository.ts",
+    "apps/web/src/app/member/membership/page.tsx",
+    "apps/web/src/app/membership/page.tsx",
+    "apps/web/src/app/admin/membership/page.tsx",
+    "apps/web/src/app/admin/memberships/page.tsx",
+    "apps/web/src/app/api/membership/route.ts",
+  ]) assert.equal(api.planRelease(fixture(t, filename)).postingRequired, true, filename);
+});
+
 test("shared identity and dependency changes cannot silently skip posting", (t) => {
   assert.equal(typeof api.planRelease, "function", "read-only preflight must exist");
   assert.equal(api.planRelease(fixture(t, "packages/ui/src/identity.tsx")).postingRequired, true);

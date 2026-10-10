@@ -40,8 +40,10 @@ beforeEach(() => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   Element.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal("AudioContext", class { currentTime = 0; destination = {}; constructor() { fixture.audio++; } resume() { return Promise.resolve(); } createOscillator() { return { frequency: { value: 0 }, connect: () => ({ connect() {} }), start() { fixture.tones++; }, stop() {}, addEventListener() {} }; } createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; } });
+  const authListeners = new Set<typeof fixture.authChanged>();
+  fixture.authChanged = (event, session) => authListeners.forEach((callback) => callback(event, session));
   fixture.client = {
-    auth: { getSession: async () => ({ data: { session: fixture.actorId ? { user: { id: fixture.actorId } } : null } }), onAuthStateChange: (callback: typeof fixture.authChanged) => { fixture.authChanged = callback; return { data: { subscription: { unsubscribe() {} } } }; } },
+    auth: { getSession: async () => ({ data: { session: fixture.actorId ? { user: { id: fixture.actorId } } : null } }), getUser: async () => ({ data: { user: fixture.actorId ? { id: fixture.actorId } : null }, error: null }), onAuthStateChange: (callback: typeof fixture.authChanged) => { authListeners.add(callback); return { data: { subscription: { unsubscribe() { authListeners.delete(callback); } } } }; } },
     from: () => ({ select: () => ({ eq: () => ({ order: async () => ({ data: [] }) }) }) }),
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (name === "get_public_post_profiles") return { data: fixture.identities.filter((row) => (args.p_ids as string[]).includes(String(row.id))), error: null };
@@ -54,6 +56,48 @@ beforeEach(() => {
   };
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+it.each([null, "actor-b"])("full-page clears messages, drafts and pending reads after switching to %s", async (nextActor) => {
+  render(<MessageThread actorId="actor" conversation={conversation} initialMessages={[message(1)]} initialCustomStickers={[]} />);
+  await tick();
+  const form = screen.getByLabelText("消息").closest("form")!;
+  fireEvent.change(screen.getByLabelText("消息"), { target: { value: "账号A未发出的私有内容" } });
+  let resolveOldRead!: (value: unknown) => void;
+  fixture.deferredMessages = () => new Promise((resolve) => { resolveOldRead = resolve; });
+  await tick(7000);
+  fixture.actorId = nextActor;
+  act(() => fixture.authChanged(nextActor ? "SIGNED_IN" : "SIGNED_OUT", nextActor ? { user: { id: nextActor } } : null));
+  await tick();
+  expect(screen.queryByText("消息 1")).toBeNull();
+  expect(screen.queryByDisplayValue("账号A未发出的私有内容")).toBeNull();
+  expect(screen.queryByRole("button", { name: "发送消息" })).toBeNull();
+  fireEvent.submit(form);
+  await act(async () => resolveOldRead({ data: [message(2)], error: null }));
+  await tick(7000);
+  expect(screen.queryByText("消息 2")).toBeNull();
+  expect(fixture.sends).toEqual([]);
+  expect(screen.getByRole("alert").textContent).toContain("已清空");
+});
+
+it("checks the current actor before writing even if an auth event has not arrived", async () => {
+  render(<MessageThread actorId="actor" conversation={conversation} initialMessages={[message(1)]} initialCustomStickers={[]} />);
+  await tick();
+  fireEvent.change(screen.getByLabelText("消息"), { target: { value: "旧账号草稿" } });
+  fixture.actorId = "actor-b";
+  fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+  await tick();
+  expect(fixture.sends).toEqual([]);
+  expect(screen.queryByText("消息 1")).toBeNull();
+  expect(screen.getByRole("alert").textContent).toContain("已清空");
+});
+
+it("keeps the floating desktop usable when storage writes are disabled", async () => {
+  vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new DOMException("Storage disabled", "SecurityError"); });
+  const root = await openDesktop();
+  fireEvent.click(within(root).getByRole("button", { name: "最小化" }));
+  await tick();
+  expect(screen.getByRole("region", { name: "与好友聊天" }).getAttribute("data-minimized")).toBe("true");
+});
 
 it("requires interaction to unlock one reusable audio context", async () => {
   render(<SocialDesktop />); await tick();

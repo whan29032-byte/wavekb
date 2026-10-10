@@ -10,6 +10,7 @@ import { useComposerDraft } from "@/hooks/use-composer-draft";
 import { createClient } from "@/lib/supabase/client";
 import { publicPostImageUrl } from "@/lib/env";
 import { buildTradingViewPackage, tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
+import { isUncertainMutationError } from "@/lib/mutation-recovery";
 
 type SelectedImage = { key: string; file: File; previewUrl: string; caption: string };
 type MediaDraft = { key: string; url: string };
@@ -25,6 +26,7 @@ function imageFiles(files: FileList | File[]): File[] {
 }
 
 function friendlyError(error: unknown): string {
+  if (isUncertainMutationError(error)) return error.message;
   const message = error instanceof Error ? error.message : String((error as { message?: unknown } | null)?.message ?? "");
   if (/row-level security|permission denied|not authorized|jwt|登录状态已失效/i.test(message)) return "登录状态已失效，请重新登录后再试。当前输入仍保留在本页。";
   if (/storage|upload|network|fetch/i.test(message)) return "网络或图片上传没有完成。当前输入和已选图片仍保留在本页，请检查网络后重试。";
@@ -72,6 +74,8 @@ function PostComposerForm({ board, userId, post, source }: ComposerProps) {
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [errors, setErrors] = useState<ComposerErrors>({});
   const [pending, setPending] = useState(false);
+  const [uncertainSave, setUncertainSave] = useState(false);
+  const [uncertainRecoveryPath, setUncertainRecoveryPath] = useState<string | null>(null);
   const [progress, setProgress] = useState<PostPublishingProgress | null>(null);
   const [savedPostId, setSavedPostId] = useState<string | null>(null);
   const [restoreImageNotice, setRestoreImageNotice] = useState(false);
@@ -194,7 +198,7 @@ function PostComposerForm({ board, userId, post, source }: ComposerProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submittingRef.current || publishedRef.current || !draft.loaded || draft.conflict) return;
+    if (uncertainSave || submittingRef.current || publishedRef.current || !draft.loaded || draft.conflict) return;
     const finalBody = mode === "professional" ? compileStructuredPost({ ...structured, notes: body }, board) : body;
     let chartPackage: TradingViewPackage | null = null;
     try {
@@ -258,6 +262,8 @@ function PostComposerForm({ board, userId, post, source }: ComposerProps) {
       try { window.location.assign(new URL(`/community/post/${postId}`, window.location.origin)); }
       catch { /* Keep the explicit success link below if navigation is blocked. */ }
     } catch (error) {
+      setUncertainSave(isUncertainMutationError(error));
+      setUncertainRecoveryPath(isUncertainMutationError(error) ? error.recoveryPath ?? (post ? `/community/post/${post.id}` : null) : null);
       console.error("wavekb:post-save-failed", JSON.stringify(safeErrorDiagnostic(error)));
       setErrors({ form: friendlyError(error) });
       setPending(false);
@@ -427,6 +433,7 @@ function PostComposerForm({ board, userId, post, source }: ComposerProps) {
       </div>
 
       {errors.form ? <FieldMessage role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 p-3">{errors.form}</FieldMessage> : null}
+      {uncertainSave && uncertainRecoveryPath ? <a href={uncertainRecoveryPath} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">在新窗口核对帖子，保留当前草稿</a> : null}
       <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="grid max-w-[65ch] gap-1 text-xs leading-5 text-muted-foreground">
           <p role="status" aria-live="polite" aria-atomic="true" className={draft.status === "unavailable" ? "text-destructive" : undefined}>
@@ -434,7 +441,7 @@ function PostComposerForm({ board, userId, post, source }: ComposerProps) {
           </p>
           {images.length ? <p>已选图片仅保留在本页，刷新后需要重新选择。</p> : null}
         </div>
-        <Button type="submit" size="large">{pending ? "正在保存" : post ? "保存修改" : "发布内容"}</Button>
+        <Button type="submit" size="large" disabled={uncertainSave}>{pending ? "正在保存" : post ? "保存修改" : "发布内容"}</Button>
       </div>
       </fieldset>
     </form>

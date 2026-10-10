@@ -4,6 +4,7 @@ import type { CommunityPost, PrivateEntry } from "@wavekb/domain";
 import { compileStructuredPost, type StructuredPost } from "@/lib/community/research-catalog";
 import { installBrowserStorage } from "@/test/browser-storage";
 import { PostComposer } from "./post-composer";
+import { UncertainMutationError } from "@/lib/mutation-recovery";
 
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(), createPost: vi.fn(), updatePost: vi.fn(), assign: vi.fn(),
@@ -111,6 +112,32 @@ afterEach(() => {
 });
 
 describe("PostComposer offline draft protection", () => {
+  it("preserves an uncertain-save notice and draft without inviting a duplicate submission", async () => {
+    mocks.updatePost.mockRejectedValue(new UncertainMutationError("帖子保存结果尚未确认，图片已保留，请先核对，不要直接重复提交。"));
+    render(<PostComposer board="idea_sharing" userId={actor} post={post} />);
+    await restored();
+    change("标题", "保存结果待核对的修改标题");
+    submit();
+    expect((await screen.findByRole("alert")).textContent).toContain("尚未确认");
+    expect((screen.getByRole("button", { name: "保存修改" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("link", { name: "在新窗口核对帖子，保留当前草稿" }).getAttribute("href")).toBe(`/community/post/${postId}`);
+    expect(mocks.assign).not.toHaveBeenCalled();
+    await act(async () => { submit(); });
+    expect(mocks.updatePost).toHaveBeenCalledTimes(1);
+    expect(valueOf("标题")).toBe("保存结果待核对的修改标题");
+  });
+  it("offers the generated new-post recovery link without presenting unconfirmed publication as saved", async () => {
+    mocks.createPost.mockRejectedValue(new UncertainMutationError("发布结果尚未确认，请先核对，不要直接重复提交。", `/community/post/${postId}`));
+    render(<PostComposer board="idea_sharing" userId={actor} />);
+    await restored(); fillSimple(); submit();
+    expect((await screen.findByRole("alert")).textContent).toContain("尚未确认");
+    expect(screen.getByRole("link", { name: "在新窗口核对帖子，保留当前草稿" }).getAttribute("href")).toBe(`/community/post/${postId}`);
+    expect((screen.getByRole("button", { name: "发布内容" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText("内容已保存。")).toBeNull();
+    expect(mocks.assign).not.toHaveBeenCalled();
+    await act(async () => { submit(); });
+    expect(mocks.createPost).toHaveBeenCalledTimes(1);
+  });
   it("restores text and multiple media references for the same account", async () => {
     const mounted = render(<PostComposer board="idea_sharing" userId={actor} />);
     await restored(); fillSimple();

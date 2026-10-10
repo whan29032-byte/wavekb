@@ -71,7 +71,8 @@ export function AiConnections() {
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const selected = providers[provider];
     const label = String(form.get("label") ?? "").trim();
     const baseUrl = String(form.get("baseUrl") ?? "").trim();
@@ -93,7 +94,7 @@ export function AiConnections() {
         max_output_tokens: Number(form.get("maxOutputTokens") || 4096),
         temperature: Number(form.get("temperature") || 0.2),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       setProvider("openai_compatible");
       await load();
     } catch (cause) {

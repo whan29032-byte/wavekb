@@ -30,7 +30,8 @@ test("mentor orders can be safely reconciled with explicit entitlement warnings"
   const ui = await read("admin/admin-ui.js");
   assert.match(ui, /function mentorOrderTransitions\(/);
   assert.match(ui, /async function saveMentorOrderStatus\(/);
-  assert.match(ui, /\.eq\("status", order\.status\)/);
+  assert.match(ui, /\.rpc\("admin_transition_mentor_order",/);
+  assert.match(ui, /p_expected_status:\s*order\.status/);
   assert.match(ui, /标记已支付后会立即发放辅导权益/);
   assert.match(ui, /标记已退款后会撤销辅导权益/);
   assert.match(ui, /订单状态已被其他管理员修改/);

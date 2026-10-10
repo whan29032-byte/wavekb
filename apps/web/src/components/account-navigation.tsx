@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ReadingPriorityLink as Link } from "@/components/reading-priority-link";
 import { useRouter } from "next/navigation";
-import { SignOut, UserCircle } from "@phosphor-icons/react";
+import { Certificate, SignOut, UserCircle } from "@phosphor-icons/react";
 import type { User } from "@supabase/supabase-js";
 import type { PublicProfile } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
@@ -105,11 +105,13 @@ export function AccountNavigation() {
       <details className="group relative lg:hidden">
         <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="账户菜单"><UserCircle aria-hidden size={20} /></summary>
         <nav className="absolute right-0 top-12 z-40 grid w-48 gap-1 rounded-xl border bg-surface p-2 shadow-xl" aria-label="账户导航">
+          <Link href="/membership" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><Certificate aria-hidden size={18} />会员中心</Link>
           {profile?.public_uid ? <Link href={`/member/${profile.public_uid}`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人空间 <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link> : null}
           <button type="button" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold text-destructive hover:bg-muted disabled:opacity-55" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}</button>
         </nav>
       </details>
       <span className="hidden items-center gap-1 lg:flex">
+        <Button asChild variant="ghost" size="small"><Link href="/membership"><Certificate aria-hidden size={18} /><span>会员</span></Link></Button>
         {profile?.public_uid ? <Button asChild variant="ghost" size="small"><Link href={`/member/${profile.public_uid}`}><UserCircle aria-hidden size={18} /><Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link></Button> : null}
         <Button type="button" variant="ghost" size="small" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} /><span>{pending ? "正在退出" : "退出登录"}</span></Button>
       </span>

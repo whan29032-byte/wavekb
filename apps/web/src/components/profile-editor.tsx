@@ -13,6 +13,7 @@ import type { NameplateEntitlement } from "@/lib/member/server-repository";
 import { createClient } from "@/lib/supabase/client";
 import { publicSupabaseConfig } from "@/lib/env";
 import { cropAvatarFile, profileImagePathFromPublicUrl } from "@/lib/member/profile-images";
+import { isDefiniteDatabaseRejection, isUncertainMutationError, sameJsonValue, UncertainMutationError } from "@/lib/mutation-recovery";
 
 type ProfileErrors = Partial<Record<"displayName" | "bio" | "markets" | "timeframes" | "coverStyle" | "avatar" | "cover" | "form", string>>;
 
@@ -24,6 +25,7 @@ const coverOptions = [
 ] as const;
 
 function friendlyError(error: unknown): string {
+  if (isUncertainMutationError(error)) return error.message;
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (/auth|jwt|permission|row-level/i.test(message)) return "登录状态已失效，请重新登录。";
   if (/storage|upload|fetch|network/i.test(message)) return "图片上传没有完成，请检查网络后重试。";
@@ -61,6 +63,7 @@ function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
   const [errors, setErrors] = useState<ProfileErrors>({});
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
+  const [uncertainSave, setUncertainSave] = useState(false);
   const [equipping, setEquipping] = useState<string | null>(null);
   const avatarObjectUrl = useRef("");
   const coverObjectUrl = useRef("");
@@ -116,6 +119,7 @@ function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (uncertainSave || pending) return;
     const validation = validateMemberProfile({
       displayName,
       bio,
@@ -135,6 +139,7 @@ function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
     setStatus("正在处理资料。");
     const client = createClient();
     const uploadedPaths: string[] = [];
+    let cleanupAllowed = true;
     let nextAvatarUrl = persistedAvatarUrl.current;
     let nextCoverUrl = coverRemoved ? null : persistedCoverUrl.current;
     try {
@@ -161,16 +166,42 @@ function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
       }
 
       setStatus("正在同步个人名片。");
-      const result = await client.rpc("update_my_profile_v2", {
-        new_display_name: validation.value.displayName,
-        new_bio: validation.value.bio,
-        new_markets: validation.value.markets,
-        new_timeframes: validation.value.timeframes,
-        new_avatar_url: nextAvatarUrl || null,
-        new_cover_url: nextCoverUrl || null,
-        new_cover_style: validation.value.coverStyle,
-      });
-      if (result.error) throw result.error;
+      cleanupAllowed = false;
+      try {
+        const result = await client.rpc("update_my_profile_v2", {
+          new_display_name: validation.value.displayName,
+          new_bio: validation.value.bio,
+          new_markets: validation.value.markets,
+          new_timeframes: validation.value.timeframes,
+          new_avatar_url: nextAvatarUrl || null,
+          new_cover_url: nextCoverUrl || null,
+          new_cover_style: validation.value.coverStyle,
+        });
+        if (result.error) throw result.error;
+      } catch (writeError) {
+        type Snapshot = { id: string; display_name: string; bio: string | null; markets: string[]; timeframes: string[]; avatar_url: string | null; cover_url: string | null; cover_style: string };
+        let snapshot: Snapshot | null = null;
+        try {
+          const read = await client.from("profiles").select("id,display_name,bio,markets,timeframes,avatar_url,cover_url,cover_style").eq("id", profile.id).maybeSingle();
+          if (!read.error && read.data?.id === profile.id) snapshot = read.data as Snapshot;
+        } catch { /* Unknown save results never authorize deleting uploaded objects. */ }
+        const confirmed = snapshot && snapshot.display_name === validation.value.displayName
+          && (snapshot.bio ?? "") === validation.value.bio
+          && sameJsonValue(snapshot.markets, validation.value.markets)
+          && sameJsonValue(snapshot.timeframes, validation.value.timeframes)
+          && snapshot.avatar_url === (nextAvatarUrl || null)
+          && snapshot.cover_url === (nextCoverUrl || null)
+          && snapshot.cover_style === validation.value.coverStyle;
+        if (!confirmed) {
+          const newUrls = [avatarFile ? nextAvatarUrl : null, coverFile ? nextCoverUrl : null].filter(Boolean);
+          const referenced = snapshot && newUrls.some((url) => url === snapshot.avatar_url || url === snapshot.cover_url);
+          const referencesKnown = snapshot && (snapshot.avatar_url === null || typeof snapshot.avatar_url === "string")
+            && (snapshot.cover_url === null || typeof snapshot.cover_url === "string");
+          cleanupAllowed = Boolean(referencesKnown && isDefiniteDatabaseRejection(writeError) && !referenced);
+          if (cleanupAllowed) throw writeError;
+          throw new UncertainMutationError("资料保存结果尚未确认，已保留新头像、背景图和当前输入。请先刷新个人资料核对保存结果，再继续编辑；不要直接重复提交。");
+        }
+      }
 
       const config = publicSupabaseConfig();
       const oldPaths = [
@@ -187,9 +218,10 @@ function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
       setAvatarPreview(nextAvatarUrl || "");
       setCoverPreview(nextCoverUrl || "");
       setStatus("资料已保存。");
-      refreshIdentity();
+      try { refreshIdentity(); } catch { /* Saving succeeded; navigation/invalidation is optional. */ }
     } catch (error) {
-      if (uploadedPaths.length) await client.storage.from("profile-avatars").remove(uploadedPaths).catch(() => undefined);
+      if (cleanupAllowed && uploadedPaths.length) await client.storage.from("profile-avatars").remove(uploadedPaths).catch(() => undefined);
+      setUncertainSave(isUncertainMutationError(error));
       setErrors({ form: friendlyError(error) });
       setStatus("");
     } finally {
@@ -254,7 +286,7 @@ function ProfileEditorForm({ profile, initialNameplates }: ProfileEditorProps) {
         {nameplates.length ? <div className="grid gap-3 sm:grid-cols-2">{nameplates.map((item) => <article key={item.id} className="grid gap-3 rounded-xl bg-muted p-4"><IdentityPreview style={item.style} profile={profile} /><div className="min-w-0"><strong className="block truncate text-sm">{item.product_name}</strong><span className="text-xs text-muted-foreground">有效至 {new Date(item.expires_at).toLocaleDateString("zh-CN")}</span></div><Button type="button" variant={item.equipped ? "secondary" : "primary"} size="small" disabled={item.equipped || new Date(item.expires_at).getTime() <= Date.now() || equipping !== null} onClick={() => equipNameplate(item)}>{new Date(item.expires_at).getTime() <= Date.now() ? "已到期" : item.equipped ? "当前佩戴" : equipping === item.id ? "正在切换" : "佩戴"}</Button></article>)}</div> : <div className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">目前没有可佩戴的身份铭牌，可以前往积分商城兑换。</div>}
       </section>
 
-      <footer className="flex flex-col gap-3 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"><div className="grid gap-1">{errors.form ? <FieldMessage role="alert">{errors.form}</FieldMessage> : null}{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : <p className="text-xs text-muted-foreground">保存后所有会员页面会读取同一份资料。</p>}</div><div className="flex gap-2"><Button asChild variant="secondary"><Link href={`/member/${profile.public_uid}`}>取消</Link></Button><Button type="submit" disabled={pending}>{pending ? "正在保存" : "保存资料"}</Button></div></footer>
+      <footer className="flex flex-col gap-3 rounded-xl border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between"><div className="grid gap-1">{errors.form ? <FieldMessage role="alert">{errors.form}</FieldMessage> : null}{uncertainSave ? <a href={`/member/${profile.public_uid}`} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">在新窗口核对资料，保留当前编辑页</a> : null}{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : <p className="text-xs text-muted-foreground">保存后所有会员页面会读取同一份资料。</p>}</div><div className="flex gap-2"><Button asChild variant="secondary"><Link href={`/member/${profile.public_uid}`}>取消</Link></Button><Button type="submit" disabled={pending || uncertainSave}>{pending ? "正在保存" : "保存资料"}</Button></div></footer>
     </form>
   );
 }

@@ -5,7 +5,7 @@ const transitions: Record<AdminMentorOrder["status"], AdminMentorOrder["status"]
   pending: ["pending", "paid", "cancelled", "failed"],
   failed: ["failed", "pending", "paid", "cancelled"],
   paid: ["paid", "refunded", "cancelled"],
-  cancelled: ["cancelled", "pending"],
+  cancelled: ["cancelled"],
   refunded: ["refunded"],
 };
 
@@ -28,9 +28,9 @@ export function adminMentorMutations(client: SupabaseClient) {
     async deletePayment(id: string) { const result = await client.from("mentor_payment_methods").delete().eq("id", id).select("id").maybeSingle(); if (result.error || !result.data) throw result.error || new Error("payment_delete_failed"); },
     async updateOrder(order: AdminMentorOrder, nextStatus: AdminMentorOrder["status"]) {
       if (!mentorOrderTransitions(order.status).includes(nextStatus)) throw new Error("order_transition_invalid");
-      const patch: Record<string, unknown> = { status: nextStatus, updated_at: new Date().toISOString() };
-      if (nextStatus === "paid" && !order.paid_at) patch.paid_at = new Date().toISOString();
-      const result = await client.from("mentor_orders").update(patch).eq("id", order.id).eq("status", order.status).select("id,status").maybeSingle();
+      const result = await client.rpc("admin_transition_mentor_order", {
+        p_order_id: order.id, p_expected_status: order.status, p_status: nextStatus, p_reason: "后台订单状态更新",
+      });
       if (result.error) throw result.error;
       if (!result.data) throw new Error("order_changed_concurrently");
       return result.data;

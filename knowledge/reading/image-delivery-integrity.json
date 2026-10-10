@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "encoder": {
-    "sharp": "0.35.3",
+    "sharp": "0.35.5",
     "format": "webp",
     "lossless": true,
     "effort": 6

@@ -31,6 +31,9 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Reject known production dependency vulnerabilities
+        run: pnpm audit:prod
+
       - name: Verify generated knowledge is current
         run: node scripts/validate-knowledge.mjs
 
