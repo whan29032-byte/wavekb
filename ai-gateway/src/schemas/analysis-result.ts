@@ -1,3 +1,5 @@
+import { normalizeChartSpec, type ChartInput, type ChartSpec } from "../research/wave-chart.ts";
+
 export type ScenarioResult = {
   key: string;
   pattern: string;
@@ -19,6 +21,7 @@ export type AnalysisResult = {
   knowledge_citations: string[];
   unknown_fields: string[];
   risk?: Record<string, number>;
+  chart_spec?: ChartSpec;
 };
 
 const REQUIRED_RESULT_KEYS = new Set([
@@ -26,7 +29,7 @@ const REQUIRED_RESULT_KEYS = new Set([
   "current_subwave", "valid_scenarios", "eliminated_scenarios", "knowledge_citations",
   "unknown_fields",
 ]);
-const ALLOWED_RESULT_KEYS = new Set([...REQUIRED_RESULT_KEYS, "risk"]);
+const ALLOWED_RESULT_KEYS = new Set([...REQUIRED_RESULT_KEYS, "risk", "chart_spec"]);
 const SCENARIO_KEYS = new Set(["key", "pattern", "conditions", "invalidations", "confidence"]);
 
 function schemaError(message: string): never {
@@ -64,7 +67,7 @@ function assertScenario(value: unknown): asserts value is ScenarioResult {
   exactStringArray(value.invalidations, "scenario invalidations");
 }
 
-export function assertAnalysisShape(value: unknown): asserts value is AnalysisResult {
+export function assertAnalysisShape(value: unknown, chartInput?: ChartInput | null): asserts value is AnalysisResult {
   if (!isRecord(value)) schemaError("result must be an object");
   const item = value;
   const keys = Reflect.ownKeys(item);
@@ -92,6 +95,14 @@ export function assertAnalysisShape(value: unknown): asserts value is AnalysisRe
     if (!isRecord(item.risk)
       || Object.values(item.risk).some((number) => typeof number !== "number" || !Number.isFinite(number))) {
       schemaError("risk must contain finite numbers");
+    }
+  }
+  if (Object.hasOwn(item, "chart_spec")) {
+    if (!chartInput) schemaError("chart requires validated input candles");
+    const chart = normalizeChartSpec(item.chart_spec, chartInput);
+    const validKeys = new Set((item.valid_scenarios as ScenarioResult[]).map((scenario) => scenario.key));
+    if (chart.scenarios.some((scenario) => !validKeys.has(scenario.key))) {
+      schemaError("chart must describe a valid candidate scenario");
     }
   }
 }

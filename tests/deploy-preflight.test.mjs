@@ -77,6 +77,14 @@ test("unknown base or incompatible schema aborts, without a migration fallback",
   assert.throws(() => api.planRelease({ ...input, schemaVersion: "202608140005" }), /schema/);
 });
 
+test("CLI-generated fourteen digit migrations require exact equality just like legacy markers", (t) => {
+  const input = fixture(t, "README.md");
+  assert.doesNotThrow(() => api.planRelease({ ...input, schemaVersion: "20261010223739", requiredSchema: "20261010223739" }));
+  for (const schemaVersion of ["202610102237", "202610102237390", "20261010223738", "invalid"]) {
+    assert.throws(() => api.planRelease({ ...input, schemaVersion, requiredSchema: "20261010223739" }), /schema/);
+  }
+});
+
 test("gateway source changes require a separately approved deployment", (t) => {
   assert.equal(typeof api.planRelease, "function", "read-only preflight must exist");
   assert.throws(() => api.planRelease(fixture(t, "ai-gateway/src/server.ts")), /gateway.*separate/i);

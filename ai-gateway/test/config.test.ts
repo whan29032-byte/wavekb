@@ -44,3 +44,12 @@ test("gateway validates UID auth limits and site URL", () => {
     /AUTH_SITE_URL/,
   );
 });
+
+test("private research defaults off and requires an explicit strict boolean", () => {
+  assert.equal(loadConfig(baseEnv).HERMES_PRIVATE_RESEARCH_ENABLED, false);
+  assert.equal(loadConfig({ ...baseEnv, HERMES_PRIVATE_RESEARCH_ENABLED: "true" }).HERMES_PRIVATE_RESEARCH_ENABLED, true);
+  assert.equal(loadConfig({ ...baseEnv, HERMES_PRIVATE_RESEARCH_ENABLED: "false" }).HERMES_PRIVATE_RESEARCH_ENABLED, false);
+  for (const invalid of ["1", "TRUE", "yes"]) {
+    assert.throws(() => loadConfig({ ...baseEnv, HERMES_PRIVATE_RESEARCH_ENABLED: invalid }), /invalid boolean/);
+  }
+});

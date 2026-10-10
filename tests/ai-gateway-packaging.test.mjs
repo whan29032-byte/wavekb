@@ -50,7 +50,7 @@ test("the backend archive starts outside checkout with all four books and no PDF
   const smoke = spawnSync(process.execPath, [
     "--input-type=module",
     "-e",
-    'import { buildKnowledgeIndex } from "./src/knowledge/index.ts"; import { MembershipWalletWorker } from "./src/membership-wallet-worker.ts"; const index = buildKnowledgeIndex(); if (index.books.length !== 4 || index.books[0].bookId !== "elliott-wave-principle-eleventh-edition") process.exit(1); await new MembershipWalletWorker({database:{request:async()=>{throw new Error("disabled must not claim")}},env:{},workerId:"package-smoke"}).run();',
+    'import { buildKnowledgeIndex } from "./src/knowledge/index.ts"; import { MembershipWalletWorker } from "./src/membership-wallet-worker.ts"; import { KnowledgeRuntime } from "./src/knowledge/runtime.ts"; import { buildWaveChart, assertWaveChart } from "./src/research/wave-chart.ts"; const index = buildKnowledgeIndex(); if (index.books.length !== 4 || index.books[0].bookId !== "elliott-wave-principle-eleventh-edition") process.exit(1); const db={request:async()=>{throw new Error("disabled must not claim")}}; new KnowledgeRuntime({database:db}); const chart=buildWaveChart({instrument:"BTCUSDT",primary_timeframe:"4h",step_data:{6:{direction:"up",w1_start:100,w1_end:120,w2_end:110}}},{step:6}); assertWaveChart(chart); if(chart.scenarios[0].max_retracement.amount!==10)process.exit(2); await new MembershipWalletWorker({database:db,env:{},workerId:"package-smoke"}).run();',
   ], { cwd: extracted, encoding: "utf8" });
   assert.equal(smoke.status, 0, smoke.stderr);
 });

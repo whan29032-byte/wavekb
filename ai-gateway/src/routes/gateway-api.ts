@@ -3,6 +3,7 @@ import type { GatewayConfig } from "../config.ts";
 import { normalizeDirectoryResource } from "../directory/external-directory.ts";
 import { normalizeAiRunRequest } from "../knowledge/contracts.ts";
 import { buildKnowledgeIndex, type KnowledgeIndex } from "../knowledge/index.ts";
+import { publicAiJob } from "../research/publication.ts";
 import { encryptSecret } from "../secrets/crypto.ts";
 import { ManagedConnectionResolver } from "../secrets/managed-connection.ts";
 import { validateProviderUrl, validateUserProviderUrl } from "../security/provider-url.ts";
@@ -461,12 +462,12 @@ export class SupabaseGatewayApi implements GatewayApi {
         if (existing[0].execution_source !== "managed" || !isDeepStrictEqual(existing[0].accepted_request ?? existing[0].input_payload, normalized)) {
           throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
         }
-        return existing[0];
+        return publicAiJob(existing[0], this.knowledgeIndex);
       }
       if (!this.config.MEMBERSHIP_MANAGED_AI_ENABLED) throw Object.assign(new Error("managed_ai_disabled"), { statusCode: 503 });
       const model = await this.managedConnections.inspect(normalized.task_type);
       try {
-        return await this.database.request("/rest/v1/rpc/enqueue_membership_ai_job", {
+        const job = await this.database.request("/rest/v1/rpc/enqueue_membership_ai_job", {
           method: "POST", body: {
             p_owner_id: ownerId, p_analysis_id: normalizedAnalysisId, p_idempotency_key: idempotencyKey,
             p_task_type: normalized.task_type, p_input_payload: normalized,
@@ -475,6 +476,7 @@ export class SupabaseGatewayApi implements GatewayApi {
             p_connection_snapshot: { source: "managed", model_id: model.id, model_name: model.name },
           },
         });
+        return publicAiJob(job, this.knowledgeIndex);
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
         const statusCode = message === "membership_ai_quota_exceeded" ? 429
@@ -516,7 +518,7 @@ export class SupabaseGatewayApi implements GatewayApi {
           knowledge_version: this.knowledgeIndex.knowledgeVersion,
         },
       });
-      return rows[0];
+      return publicAiJob(rows[0], this.knowledgeIndex);
     } catch (error) {
       const duplicate = Number((error as { status?: number }).status) === 409
         || (error as { code?: string }).code === "23505";
@@ -528,7 +530,7 @@ export class SupabaseGatewayApi implements GatewayApi {
         if (existing[0].execution_source === "managed" || !isDeepStrictEqual(existing[0].accepted_request ?? existing[0].input_payload, normalized)) {
           throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
         }
-        return existing[0];
+        return publicAiJob(existing[0], this.knowledgeIndex);
       }
       throw Object.assign(new Error("job conflict"), { statusCode: 409 });
     }
@@ -539,7 +541,7 @@ export class SupabaseGatewayApi implements GatewayApi {
       `/rest/v1/ai_jobs?id=eq.${encodeURIComponent(jobId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,status,execution_source,output_payload,error_code,error_message,actual_model_id,user_connection_id,connection_snapshot,knowledge_version,created_at,finished_at&limit=1`,
     );
     if (!rows.length) throw Object.assign(new Error("job not found"), { statusCode: 404 });
-    return rows[0];
+    return publicAiJob(rows[0], this.knowledgeIndex);
   }
 
   async listTradingLeaderboard(): Promise<unknown[]> {

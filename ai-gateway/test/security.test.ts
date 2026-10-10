@@ -189,7 +189,12 @@ test("a duplicate idempotency key returns only the existing owner's job", async 
     database,
     knowledgePath: retrievalIndexPath,
   });
-  assert.deepEqual(await gateway.enqueueJob(OWNER_ID, ANALYSIS_ID, runRequest()), expected);
+  const returned = await gateway.enqueueJob(OWNER_ID, ANALYSIS_ID, runRequest()) as Record<string, unknown>;
+  assert.deepEqual(returned, {
+    id: "existing-job", status: "queued", output_payload: null,
+    error_code: null, error_message: null,
+  });
+  assert.deepEqual(expected.input_payload, runRequest());
   assert.equal(lookupPaths.length, 1);
   assert.match(lookupPaths[0] ?? "", new RegExp(`owner_id=eq\\.${OWNER_ID}`));
 });

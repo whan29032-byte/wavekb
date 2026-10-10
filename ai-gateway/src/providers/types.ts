@@ -5,6 +5,7 @@ export type ProviderRequest = {
   messages: ProviderMessage[];
   maxOutputTokens: number;
   temperature: number;
+  responseFormat?: "json_object";
   responseSchema?: object;
   timeoutMs: number;
 };

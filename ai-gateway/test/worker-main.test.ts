@@ -269,11 +269,15 @@ test("a single-scope no-match succeeds without broadening or invoking a provider
   const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
   assert.equal(patch?.body?.status, "succeeded");
   assert.deepEqual(patch?.body?.output_payload, {
+    schema_version: "wavekb-public-analysis-v1",
+    source_visibility: "public_books",
     status: "insufficient_evidence",
     reason: "no_relevant_knowledge",
     scope: { mode: "single", book_id: "elliott-wave-natural-law" },
     knowledge_version: artifactKnowledgeVersion,
     citations: [],
+    knowledge_citations: [],
+    analysis_basis: [],
   });
 });
 
@@ -370,7 +374,7 @@ test("contextual-only retrieval excludes primary eleventh-edition prose while th
       finishReason: "stop",
     }],
   });
-  await fixture.worker.runJob(baseJob);
+  await fixture.worker.runJob({ ...baseJob, input_payload: { ...baseJob.input_payload, step: 6 } });
 
   const requestText = String(fixture.providerRequests[0]?.messages[0]?.content);
   assert.doesNotMatch(requestText, /PRIMARY ELEVENTH EDITION PROSE MUST NOT LEAK/);
@@ -645,7 +649,7 @@ test("unsafe encoded citation routes are rejected before provider invocation", a
   assert.equal(patch?.body?.error_code, "knowledge_unavailable");
 });
 
-test("the retrieval character budget shrinks below the chosen provider context limit", async () => {
+test("a model context too small for the rendered analysis fails before retrieval audit or billing", async () => {
   const oversized = chunk({
     text: `target ${"x".repeat(1_800)}`,
     searchable: "target",
@@ -658,9 +662,87 @@ test("the retrieval character budget shrinks below the chosen provider context l
   await fixture.worker.runJob(baseJob);
 
   assert.equal(fixture.providerCalls(), 0);
+  assert.equal(fixture.calls.some((call) => call.path === "/rest/v1/knowledge_retrievals"), false);
+  assert.equal(fixture.calls.some((call) => call.path === "/rest/v1/ai_usage_ledger"), false);
+  const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
+  assert.equal(patch?.body?.status, "failed");
+  assert.equal(patch?.body?.error_code, "input_context_too_large");
+  assert.match(String(patch?.body?.error_message), /精简/);
+});
+
+test("XML escaping expansion in all allowed historical fields cannot bypass the provider context budget", async () => {
+  const notes = "<>".repeat(256);
+  const stepData = Object.fromEntries(Array.from({ length: 11 }, (_, step) => [String(step), {
+    notes, lessons: notes, actual_result: notes, entry_condition: notes, invalidation: notes,
+  }]));
+  const fixture = workerFixture({ currentAnalysis: { ...analysis, step_data: stepData } });
+  await fixture.worker.runJob({ ...baseJob, input_payload: { ...baseJob.input_payload, step: 10 } });
+  assert.equal(fixture.providerCalls(), 0);
+  assert.equal(fixture.calls.some((call) => call.path === "/rest/v1/knowledge_retrievals"), false);
+  assert.equal(fixture.calls.some((call) => call.path === "/rest/v1/ai_usage_ledger"), false);
+  const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
+  assert.equal(patch?.body?.error_code, "input_context_too_large");
+  assert.equal(Object.hasOwn(patch?.body ?? {}, "output_payload"), false);
+});
+
+test("retrieval keeps only complete ranked chunks that fit after actual serialization and escaping", async () => {
+  const large = chunk({ chunkId: "large-escaped-chunk", text: `target ${"<>".repeat(1500)}`, searchable: "target", sequence: 1 });
+  const small = chunk({ chunkId: "small-complete-chunk", text: "target smaller complete evidence", searchable: "target", sequence: 2,
+    contentSha256: "c".repeat(64) });
+  const fixture = workerFixture({
+    currentAnalysis: { ...analysis, instrument: "target" }, contextTokens: 16_000,
+    loadIndex: () => fixtureIndex([large, small]),
+  });
+  await fixture.worker.runJob(baseJob);
+  assert.equal(fixture.providerCalls(), 1);
   const retrieval = fixture.calls.find((call) => call.path === "/rest/v1/knowledge_retrievals");
-  assert.equal(retrieval?.body?.token_budget, 856);
-  assert.deepEqual(retrieval?.body?.knowledge_ids, []);
+  assert.deepEqual(retrieval?.body?.knowledge_ids, [small.chunkId]);
+  const prompt = String(fixture.providerRequests[0]?.messages[0]?.content);
+  assert.match(prompt, /target smaller complete evidence/);
+  assert.ok(!prompt.includes(large.chunkId));
+  assert.deepEqual(fixture.events.slice(0, 2), ["audit", "provider"]);
+});
+
+test("UTF-8 rendered prompt, provider framing and the bounded same-provider repair all fit", async () => {
+  const fixture = workerFixture({
+    providerOutcomes: [
+      { text: "bad JSON", usage: { inputTokens: 1, outputTokens: 1 }, finishReason: "stop" },
+      { text: JSON.stringify(validModelResult()), usage: { inputTokens: 2, outputTokens: 2 }, finishReason: "stop" },
+    ],
+  });
+  await fixture.worker.runJob(baseJob);
+  assert.equal(fixture.providerCalls(), 2);
+  for (const request of fixture.providerRequests) {
+    const bytes = Buffer.byteLength(request.system, "utf8") + request.messages.reduce((total, message) => (
+      total + Buffer.byteLength(String(message.content), "utf8")
+    ), 0);
+    assert.ok(bytes + 2048 + request.maxOutputTokens <= 32768);
+  }
+});
+
+test("invalid or contradictory context settings fail without calling the provider", async () => {
+  for (const contextTokens of [NaN, Infinity, -1, 32768.5, 4096]) {
+    const fixture = workerFixture({ contextTokens });
+    await fixture.worker.runJob(baseJob);
+    assert.equal(fixture.providerCalls(), 0);
+    const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
+    assert.equal(patch?.body?.error_code, "input_context_too_large");
+  }
+});
+
+test("provider prompt uses JSON contract and excludes database owner, job IDs and internal records", async () => {
+  const fixture = workerFixture({ currentAnalysis: { ...analysis, private_sources: ["private-source"], connection_snapshot: { secret: "private-key" },
+    step_data: { ...analysis.step_data, "10": { lessons: "private-future-review" } } } });
+  await fixture.worker.runJob(baseJob);
+  assert.equal(fixture.providerCalls(), 1);
+  const providerRequest = fixture.providerRequests[0]!;
+  assert.equal(providerRequest.responseFormat, "json_object");
+  assert.match(providerRequest.system, /JSON shape example/);
+  const content = String(providerRequest.messages[0]?.content);
+  for (const hidden of [baseJob.owner_id, baseJob.analysis_id!, baseJob.input_payload.client_request_id as string,
+    "private-source", "private-key", "private-future-review", "connection_snapshot", "owner_id"]) {
+    assert.ok(!content.includes(hidden), "internal metadata must not enter the provider input");
+  }
 });
 
 test("the normalized payload is revalidated before retrieval or provider access", async () => {
