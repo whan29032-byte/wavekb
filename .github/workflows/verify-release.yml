@@ -12,6 +12,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      KNOWLEDGE_NGINX_TEST_BIN: /usr/sbin/nginx
+      PLAYWRIGHT_HTML_OPEN: never
     steps:
       - name: Check out the exact candidate commit
         uses: actions/checkout@v4
@@ -34,6 +37,13 @@ jobs:
       - name: Reject known production dependency vulnerabilities
         run: pnpm audit:prod
 
+      - name: Install disposable runner Nginx for real transport fixtures
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nginx
+          test -x "$KNOWLEDGE_NGINX_TEST_BIN"
+
       - name: Verify generated knowledge is current
         run: node scripts/validate-knowledge.mjs
 
@@ -54,3 +64,25 @@ jobs:
           pnpm --filter @wavekb/web lint
           pnpm --filter @wavekb/web typecheck
           pnpm --filter @wavekb/web build
+
+      - name: Build Storybook without deployment access
+        run: pnpm --filter @wavekb/web storybook:build
+
+      - name: Install Chromium for isolated UI acceptance
+        run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
+
+      - name: Verify mock UI and membership stories without production accounts
+        env:
+          STORYBOOK_TEST_BASE_URL: ""
+        run: pnpm --filter @wavekb/web exec playwright test --config=playwright.ui.config.ts --retries=0 --reporter=github,html
+
+      - name: Preserve isolated browser failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wavekb-mock-ui-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 3

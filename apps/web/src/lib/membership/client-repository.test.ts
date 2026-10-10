@@ -21,7 +21,7 @@ const grantReceipt = {
   ends_at: changeInput.endsAt, revision: 1,
 };
 const mineReceipt = { billing_enabled: false, grants: [], history: [] };
-const storeReceipt = { plans: [], member: null, grants: [], history: [] };
+const storeReceipt = { plans: [], member: { id: userId, public_uid: 10001, display_name: "会员", account_status: "active" }, grants: [], history: [] };
 
 function setup(data: unknown, error: unknown = null) {
   const getUser = vi.fn().mockResolvedValue({ data: { user: { id: actorId } }, error: null });
@@ -84,6 +84,7 @@ describe("membership repository RPC contract", () => {
     const { repository, rpc, from } = setup(storeReceipt);
     await expect(repository.adminStore(10001)).resolves.toEqual(storeReceipt);
     expect(rpc).toHaveBeenCalledWith("admin_membership_store", { p_public_uid: 10001, p_actor_id: actorId });
+    rpc.mockResolvedValueOnce({ data: { ...storeReceipt, member: null }, error: null });
     await repository.adminStore();
     expect(rpc).toHaveBeenLastCalledWith("admin_membership_store", { p_public_uid: null, p_actor_id: actorId });
     expect(from).not.toHaveBeenCalled();
@@ -102,6 +103,30 @@ describe("membership repository RPC contract", () => {
   it("accepts a plan title normalized by the database without treating it as a mismatch", async () => {
     const { repository } = setup(planReceipt);
     await expect(repository.savePlan({ ...planInput, title: `  ${planInput.title}  ` })).resolves.toEqual(planReceipt);
+  });
+
+  it("accepts Unicode whitespace normalization for titles and benefit values", async () => {
+    const { repository } = setup(planReceipt);
+    await expect(repository.savePlan({ ...planInput, title: `\u00a0\t${planInput.title}\ufeff`, benefits: { member_badge: `\u2003${planInput.benefits.member_badge}\t\u00a0` } })).resolves.toEqual(planReceipt);
+  });
+
+  it("accepts full Unicode code-point limits returned by the database", async () => {
+    const value = { ...planReceipt, title: "👑".repeat(60), description: "👑".repeat(1000), benefits: { member_badge: "👑".repeat(240) } };
+    const { repository } = setup(value);
+    await expect(repository.savePlan({ ...planInput, title: value.title, description: value.description, benefits: value.benefits })).resolves.toEqual(value);
+  });
+
+  it.each([
+    { ...storeReceipt, member: null },
+    { ...storeReceipt, member: { ...storeReceipt.member, public_uid: 10002 } },
+  ])("rejects a structurally valid query receipt for the wrong or missing UID (%#)", async (receipt) => {
+    const { repository } = setup(receipt);
+    await expect(repository.adminStore(10001)).rejects.toThrow("membership_response_invalid");
+  });
+
+  it("rejects an unexpected actionable member from a plans-only query", async () => {
+    const { repository } = setup(storeReceipt);
+    await expect(repository.adminStore()).rejects.toThrow("membership_response_invalid");
   });
 
   it("binds grants to both target and actor, with the exact requested expiry", async () => {

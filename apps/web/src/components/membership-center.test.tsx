@@ -32,3 +32,13 @@ it("a failed read removes stale membership claims and offers retry",async()=>{
   fireEvent.click(screen.getByRole("button",{name:"刷新状态"})); await screen.findByRole("alert");
   expect(screen.queryByText("测试会员")).toBeNull(); expect(screen.getByRole("button",{name:"刷新状态"})).toBeDefined();
 });
+it.each(["owner","different-owner"])("offers a full-page identity recheck without restoring old data when signing back in as %s",async(nextOwner)=>{
+  const {rerender}=render(<MembershipCenter key="owner" actorId="owner" initial={snapshot} />);
+  await act(async()=>{mocks.auth.mock.calls[0][0]("SIGNED_OUT",null);mocks.auth.mock.calls[0][0]("SIGNED_IN",{user:{id:nextOwner}});});
+  rerender(<MembershipCenter key="owner" actorId="owner" initial={{...snapshot,grants:[{...snapshot.grants[0],title:"服务器刷新返回的记录"}]}} />);
+  expect(screen.queryByText("测试会员")).toBeNull();expect(screen.queryByText("服务器刷新返回的记录")).toBeNull();
+  expect(screen.queryByRole("button",{name:"刷新状态"})).toBeNull();
+  const link=screen.getByRole("link",{name:"重新核对当前账号"});
+  expect(link.tagName).toBe("A");expect(link.getAttribute("href")).toBe("/membership");expect(link.className).toContain("min-h-11");
+  expect(mocks.mine).not.toHaveBeenCalled();
+});

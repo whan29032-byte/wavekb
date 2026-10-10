@@ -18,6 +18,10 @@ const diagnosticSteps = diagnosticWorkflow.jobs.diagnose.steps;
 const mailWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/verify-mentor-email-delivery.yml", import.meta.url), "utf8"));
 const mailSteps = mailWorkflow.jobs["verify-mail"].steps;
 const releaseVerificationWorkflowPath = new URL("../.github/workflows/verify-release.yml", import.meta.url);
+const verificationWorkflow = yaml.load(fs.readFileSync(releaseVerificationWorkflowPath, "utf8"));
+const publicVerificationWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-static-production.yml", import.meta.url), "utf8"));
+const verificationSteps = verificationWorkflow.jobs.verify.steps;
+const publicVerificationSteps = publicVerificationWorkflow.jobs.verify.steps;
 
 test("persistent candidate runs owned standalone SQLite browser and worker gates before upload", () => {
   const upload = steps.findIndex((step) => step.id === "upload");
@@ -35,7 +39,7 @@ test("persistent candidate runs owned standalone SQLite browser and worker gates
 });
 
 test("every emitted workflow shell program parses before a runner can execute it", () => {
-  for (const step of [...steps, ...backendSteps, ...diagnosticSteps, ...mailSteps].filter((item) => item.run)) {
+  for (const step of [...steps, ...backendSteps, ...diagnosticSteps, ...mailSteps, ...verificationSteps, ...publicVerificationSteps].filter((item) => item.run)) {
     const result = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
     assert.equal(result.status, 0, `${step.name}: ${result.stderr}`);
   }
@@ -246,6 +250,77 @@ test("release verification runs on Ubuntu for pull requests and pushes without d
   assert.ok(installIndex >= 0 && auditIndex > installIndex);
   assert.notEqual(verification.jobs.verify.steps[auditIndex]["continue-on-error"], true);
   assert.doesNotMatch(serialized, /environment|secrets\.|\bssh\b|\bscp\b|workflow_dispatch/);
+});
+
+test("both non-deployment verification jobs explicitly run the actual disposable Nginx fixture", () => {
+  for (const candidate of [verificationWorkflow, publicVerificationWorkflow]) {
+    const job = candidate.jobs.verify;
+    assert.equal(job.env.KNOWLEDGE_NGINX_TEST_BIN, "/usr/sbin/nginx");
+    const install = job.steps.findIndex((step) => /apt-get install[^\n]*nginx/.test(step.run ?? ""));
+    const rootTests = job.steps.findIndex((step) => step.run === "pnpm test");
+    assert.ok(install >= 0 && rootTests > install);
+    assert.match(job.steps[install].run, /set -Eeuo pipefail/);
+    assert.match(job.steps[install].run, /test -x "\$KNOWLEDGE_NGINX_TEST_BIN"/);
+    assert.notEqual(job.steps[install]["continue-on-error"], true);
+    assert.equal(job.environment, undefined);
+    assert.equal(candidate.permissions.contents, "read");
+  }
+});
+
+test("both non-deployment verification jobs execute all mock membership UI with no retries and preserve browser evidence", () => {
+  for (const candidate of [verificationWorkflow, publicVerificationWorkflow]) {
+    const jobSteps = candidate.jobs.verify.steps;
+    const nextBuild = jobSteps.findIndex((step) => /@wavekb\/web build/.test(step.run ?? ""));
+    const storyBuild = jobSteps.findIndex((step) => /@wavekb\/web storybook:build/.test(step.run ?? ""));
+    const chromium = jobSteps.findIndex((step) => /playwright install --with-deps chromium/.test(step.run ?? ""));
+    const uiIndex = jobSteps.findIndex((step) => /playwright test --config=playwright\.ui\.config\.ts/.test(step.run ?? ""));
+    assert.ok(nextBuild >= 0 && nextBuild < storyBuild && storyBuild < chromium && chromium < uiIndex);
+    assert.equal(jobSteps[uiIndex].env.STORYBOOK_TEST_BASE_URL, "");
+    assert.match(jobSteps[uiIndex].run, /--retries=0/);
+    assert.match(jobSteps[uiIndex].run, /--reporter=github,html/);
+    assert.doesNotMatch(jobSteps[uiIndex].run, /--grep|--project|e2e-ui\//);
+    assert.notEqual(jobSteps[uiIndex]["continue-on-error"], true);
+    const evidence = jobSteps.find((step) => step.uses === "actions/upload-artifact@v4");
+    assert.equal(evidence.if, "always()");
+    assert.match(evidence.with.path, /^apps\/web\/test-results\/(?:\n|$)/);
+    assert.match(evidence.with.path, /apps\/web\/playwright-report\//);
+    assert.equal(evidence.with["retention-days"], 3);
+    assert.doesNotMatch(JSON.stringify(jobSteps), /secrets\./);
+    assert.doesNotMatch(evidence.with.path, /\.env|\.sqlite/);
+  }
+  const uiConfig = fs.readFileSync(new URL("../apps/web/playwright.ui.config.ts", import.meta.url), "utf8");
+  assert.match(uiConfig, /testDir: "\.\/e2e-ui"/);
+  assert.ok(fs.existsSync(new URL("../apps/web/e2e-ui/membership.spec.ts", import.meta.url)));
+});
+
+test("non-deployment guest acceptance consumes the owned built standalone with exact SHA and no retries or account writes", () => {
+  const build = publicVerificationSteps.find((step) => step.name === "Build the Next.js application");
+  const guest = publicVerificationSteps.find((step) => step.name === "Run public route acceptance tests");
+  assert.equal(build.env.DEPLOYMENT_VERSION, "${{ github.sha }}");
+  assert.equal(guest.env.DEPLOYMENT_VERSION, build.env.DEPLOYMENT_VERSION);
+  assert.equal(guest.env.PLAYWRIGHT_BASE_URL, "http://127.0.0.1:3108");
+  assert.equal(guest.env.E2E_POSTING_IDENTIFIER, "");
+  assert.equal(guest.env.E2E_POSTING_PASSWORD, "");
+  assert.equal(guest.env.TLINE_E2E_FIXTURE, "");
+  assert.equal(guest.env.TLINE_LIVE_ACCEPTANCE, "");
+  for (const key of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"]) {
+    assert.equal(typeof publicVerificationWorkflow.env[key], "string");
+    assert.ok(publicVerificationWorkflow.env[key]);
+    assert.equal(build.env[key], undefined, `${key} is inherited from the same job for build and runtime`);
+    assert.equal(guest.env[key], undefined, `${key} is inherited from the same job for build and runtime`);
+  }
+  assert.match(publicVerificationWorkflow.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, /^sb_publishable_/);
+  assert.match(guest.run, /node apps\/web\/\.next\/standalone\/apps\/web\/server\.js[^\n]* &/);
+  assert.match(guest.run, /kill -0 "\$candidate_pid"/);
+  assert.match(guest.run, /assert\.equal\(health\.deployment, process\.env\.DEPLOYMENT_VERSION\)/);
+  assert.match(guest.run, /trap cleanup_guest_candidate EXIT/);
+  assert.match(guest.run, /exit "\$candidate_status"/);
+  assert.match(guest.run, /playwright test --retries=0/);
+  assert.match(guest.run, /--reporter=github,html/);
+  assert.doesNotMatch(guest.run, /--timeout|pnpm dev/);
+  assert.notEqual(guest["continue-on-error"], true);
+  const evidence = publicVerificationSteps.find((step) => step.uses === "actions/upload-artifact@v4");
+  assert.match(evidence.with.path, /\/tmp\/wavekb-guest-candidate\.log/);
 });
 
 test("both production workflows require reusable exact-ref verification before deployment", () => {

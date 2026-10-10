@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { stripTypeScriptTypes } from "node:module";
 import { PGlite } from "@electric-sql/pglite";
 
 const ids={admin:"11111111-1111-4111-8111-111111111111",member:"22222222-2222-4222-8222-222222222222",other:"33333333-3333-4333-8333-333333333333"};
@@ -26,14 +27,37 @@ async function fixture(run) {
   } finally { await db.close(); }
 }
 const until=new Date(Date.now()+30*864e5).toISOString();
-async function plan(db,{enabled=true,revision=1,reason="测试启用方案",request=randomUUID(),benefits={research_notes:"测试专属笔记"}}={}) {
-  return (await db.query("select admin_save_membership_plan('vip','VIP 会员','test-only',$1::jsonb,$2,$3,$4,$5,auth.uid()) as value",[JSON.stringify(benefits),enabled,revision,reason,request])).rows[0].value;
+async function plan(db,{enabled=true,revision=1,reason="测试启用方案",request=randomUUID(),benefits={research_notes:"测试专属笔记"},title="VIP 会员",description="test-only"}={}) {
+  return (await db.query("select admin_save_membership_plan('vip',$1,$2,$3::jsonb,$4,$5,$6,$7,auth.uid()) as value",[title,description,JSON.stringify(benefits),enabled,revision,reason,request])).rows[0].value;
 }
 async function change(db,{user=ids.member,action="grant",end=until,revision=0,reason="测试会员授予",request=randomUUID()}={}) {
   return (await db.query("select admin_change_membership($1,'vip',$2,$3::timestamptz,$4,$5,$6,auth.uid()) as value",[user,action,end,revision,reason,request])).rows[0].value;
 }
 async function mine(db) { return (await db.query("select get_my_membership() as value")).rows[0].value; }
 async function entitlement(db) { return (await db.query("select has_membership_entitlement('research_notes') as value")).rows[0].value; }
+
+let clientModule;
+async function databaseRepository(db,id) {
+  if (!clientModule) {
+    const types=stripTypeScriptTypes(await readFile(new URL("../apps/web/src/lib/membership/types.ts",import.meta.url),"utf8"));
+    const typesUrl=`data:text/javascript;base64,${Buffer.from(types).toString("base64")}`;
+    const source=stripTypeScriptTypes((await readFile(new URL("../apps/web/src/lib/membership/client-repository.ts",import.meta.url),"utf8")).replace('"@/lib/membership/types"',JSON.stringify(typesUrl)));
+    clientModule=import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+  }
+  const {membershipRepository}=await clientModule;
+  const client={auth:{getUser:async()=>({data:{user:{id:(await db.query("select auth.uid() as id")).rows[0].id}},error:null})},rpc:async(name,p)=>{
+    try {
+      let result;
+      if(name==="admin_save_membership_plan") result=await db.query("select admin_save_membership_plan($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9) as value",[p.p_key,p.p_title,p.p_description,JSON.stringify(p.p_benefits),p.p_enabled,p.p_expected_revision,p.p_reason,p.p_request_id,p.p_actor_id]);
+      else if(name==="admin_change_membership") result=await db.query("select admin_change_membership($1,$2,$3,$4::timestamptz,$5,$6,$7,$8) as value",[p.p_user_id,p.p_plan_key,p.p_action,p.p_ends_at,p.p_expected_revision,p.p_reason,p.p_request_id,p.p_actor_id]);
+      else if(name==="admin_membership_store") result=await db.query("select admin_membership_store($1,$2) as value",[p.p_public_uid,p.p_actor_id]);
+      else if(name==="get_my_membership") result=await db.query("select get_my_membership() as value");
+      else throw new Error("unexpected membership RPC");
+      return {data:result.rows[0].value,error:null};
+    } catch(error) { return {data:null,error}; }
+  }};
+  return membershipRepository(client,id);
+}
 
 test("membership initializes disabled, with no billing or changes to account roles",()=>fixture(async(db)=>{
   await assert.rejects(change(db),/membership_plan_disabled/);
@@ -108,4 +132,64 @@ test("an admin session switched between verification and RPC cannot execute the 
   await assert.rejects(db.query("select admin_membership_store(10002,$1)",[ids.admin]),/admin_required/);
   await assert.rejects(db.query("select admin_membership_store(10002)"),/admin_required/);
   await db.exec("reset role"); assert.equal((await db.query("select count(*)::int as count from membership_grants")).rows[0].count,0);
+}));
+
+test("SQL trims exactly the JavaScript whitespace set without stripping non-whitespace Unicode",()=>fixture(async(db)=>{
+  await db.exec("reset role");
+  const codes=[9,10,11,12,13,32,160,5760,...Array.from({length:11},(_,index)=>8192+index),8232,8233,8239,8287,12288,65279,133,6158,8203];
+  for(const code of codes) {
+    const space=String.fromCodePoint(code),value=`${space}会员👑${space}`;
+    assert.equal((await db.query("select membership_trim_text($1) as value",[value])).rows[0].value,value.trim(),`U+${code.toString(16)}`);
+  }
+}));
+test("canonical text commits once and round-trips through the actual client receipt and account parsers",()=>fixture(async(db)=>{
+  const repository=await databaseRepository(db,ids.admin);
+  const input={key:"vip",title:"\u00a0\tVIP 会员\ufeff",description:"  保留说明\r\n",benefits:{research_notes:`${" ".repeat(300)}专属笔记\u2003\u00a0`},enabled:true,revision:1,reason:"\u00a0\t确认方案内容\ufeff",requestId:randomUUID()};
+  const saved=await repository.savePlan(input);
+  assert.equal(saved.title,"VIP 会员"); assert.equal(saved.description,input.description); assert.deepEqual(saved.benefits,{research_notes:"专属笔记"});
+  assert.deepEqual(await repository.savePlan(input),saved);
+  assert.deepEqual((await repository.adminStore(10002)).plans[0].benefits,saved.benefits);
+  await repository.change({userId:ids.member,planKey:"vip",action:"grant",endsAt:until,revision:0,reason:"\u2003确认会员授予\u00a0",requestId:randomUUID()});
+  await actor(db,ids.member);
+  assert.deepEqual((await (await databaseRepository(db,ids.member)).mine()).grants[0].benefits,saved.benefits); assert.equal(await entitlement(db),true);
+  await db.exec("reset role");
+  const events=(await db.query("select action,reason,request from membership_events order by created_at")).rows;
+  assert.equal(events.length,2); assert.equal(events[0].reason,"确认方案内容"); assert.equal(events[0].request.title,input.title); assert.equal(events[0].request.reason,input.reason); assert.equal(events[1].reason,"确认会员授予");
+}));
+test("maximum Unicode code-point fields, including emoji, remain readable after real RPC writes",()=>fixture(async(db)=>{
+  const repository=await databaseRepository(db,ids.admin);
+  const input={key:"vip",title:"👑".repeat(60),description:"👑".repeat(1000),benefits:{research_notes:"👑".repeat(240)},enabled:true,revision:1,reason:"👑".repeat(500),requestId:randomUUID()};
+  const saved=await repository.savePlan(input); assert.equal(saved.title,input.title); assert.equal(saved.description,input.description); assert.deepEqual(saved.benefits,input.benefits);
+  await repository.change({userId:ids.member,planKey:"vip",action:"grant",endsAt:until,revision:0,reason:input.reason,requestId:randomUUID()});
+  assert.deepEqual((await repository.adminStore(10002)).plans[0].benefits,input.benefits);
+  await actor(db,ids.member); assert.deepEqual((await (await databaseRepository(db,ids.member)).mine()).grants[0].benefits,input.benefits);
+}));
+test("invalid normalized text and Unicode limits are rejected before any plan, grant or audit write",()=>fixture(async(db)=>{
+  for(const [input,message] of [
+    [{title:"\u00a0\t\ufeff"},/membership_input_invalid/], [{title:"👑"},/membership_input_invalid/], [{title:"👑".repeat(61)},/membership_input_invalid/],
+    [{description:"👑".repeat(1001)},/membership_input_invalid/], [{reason:"👑".repeat(501)},/membership_input_invalid/], [{reason:"\u00a0\t\ufeff"},/membership_input_invalid/],
+    [{benefits:{research_notes:"\u00a0\t\ufeff"}},/membership_benefits_invalid/], [{benefits:{research_notes:"👑".repeat(241)}},/membership_benefits_invalid/],
+  ]) await assert.rejects(plan(db,input),message);
+  const initial=(await db.query("select admin_membership_store(null,auth.uid()) as value")).rows[0].value;
+  assert.equal(initial.plans[0].revision,1); assert.equal(initial.plans[0].enabled,false); assert.deepEqual(initial.history,[]);
+  await plan(db);
+  for(const reason of ["\u00a0\t\ufeff","👑".repeat(501)]) await assert.rejects(change(db,{reason}),/membership_input_invalid/);
+  const after=(await db.query("select admin_membership_store(10002,auth.uid()) as value")).rows[0].value;
+  assert.deepEqual(after.grants,[]); assert.equal(after.history.length,1); assert.equal(after.history[0].action,"plan_updated");
+}));
+test("replayed receipts never reactivate disabled plans or revoked grants; re-enabling only resumes unrevoked rights",()=>fixture(async(db)=>{
+  const planRequest=randomUUID(),grantRequest=randomUUID();
+  const enabled=await plan(db,{request:planRequest}); const granted=await change(db,{request:grantRequest});
+  await plan(db,{enabled:false,revision:2});
+  assert.deepEqual(await plan(db,{request:planRequest}),enabled);
+  await actor(db,ids.member); assert.equal(await entitlement(db),false);
+  await actor(db,ids.admin); await plan(db,{revision:3});
+  await actor(db,ids.member); assert.equal(await entitlement(db),true);
+  await actor(db,ids.admin); await plan(db,{enabled:false,revision:4});
+  await change(db,{action:"revoke",end:null,revision:1});
+  assert.deepEqual(await change(db,{request:grantRequest}),granted);
+  const current=(await db.query("select admin_membership_store(10002,auth.uid()) as value")).rows[0].value;
+  assert.equal(current.grants[0].status,"revoked"); assert.equal(current.plans[0].enabled,false);
+  await plan(db,{revision:5}); await actor(db,ids.member); assert.equal(await entitlement(db),false);
+  await db.exec("reset role"); assert.equal((await db.query("select count(*)::int as count from membership_events")).rows[0].count,7);
 }));

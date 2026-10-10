@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { AdminMemberships, MembershipPlanForm, parseBenefitLines } from "./admin-memberships";
+import { AdminMemberships, MembershipGrantForm, MembershipPlanForm, parseBenefitLines } from "./admin-memberships";
 const mocks=vi.hoisted(()=>({auth:vi.fn(),store:vi.fn(),save:vi.fn(),change:vi.fn(),unsubscribe:vi.fn()}));
 vi.mock("next/navigation",()=>({useRouter:()=>({})}));
 vi.mock("@/lib/supabase/client",()=>({createClient:()=>({auth:{onAuthStateChange:mocks.auth}})}));
@@ -8,7 +8,7 @@ vi.mock("@/lib/membership/client-repository",()=>({membershipRepository:()=>({ad
 const plan={key:"vip",title:"VIP 会员",description:"未收费",benefits:{},enabled:false,revision:1};
 const store={plans:[plan],member:null,grants:[],history:[]};
 beforeEach(()=>{vi.clearAllMocks();mocks.auth.mockReturnValue({data:{subscription:{unsubscribe:mocks.unsubscribe}}});});
-afterEach(cleanup);
+afterEach(()=>{cleanup();vi.restoreAllMocks();});
 it("parses explicit benefit codes and rejects duplicate, malformed or excessive lines",()=>{
   expect(parseBenefitLines("notes=专属笔记\nquota=测试额度")).toEqual({notes:"专属笔记",quota:"测试额度"});
   expect(()=>parseBenefitLines("notes=a\nnotes=b")).toThrow(); expect(()=>parseBenefitLines("garbage")).toThrow(); expect(()=>parseBenefitLines("__proto__=bad")).toThrow();
@@ -45,5 +45,88 @@ it("removes the old actionable target before a new UID lookup and keeps it remov
   expect(screen.queryByText(/前一个用户/)).toBeNull(); expect(screen.queryByRole("button",{name:"提交会员变更"})).toBeNull();
   await act(async()=>{reject(new Error("member_not_found"));});
   expect(screen.getByRole("alert").textContent).toContain("没有找到"); expect(screen.queryByRole("button",{name:"提交会员变更"})).toBeNull();
+  expect(mocks.change).not.toHaveBeenCalled();
+});
+it.each(["admin","different-admin"])("offers a full-page identity recheck without restoring the old admin target when signing back in as %s",async(nextOwner)=>{
+  const initial={...store,member:{id:"previous-user",public_uid:10002,display_name:"旧用户资料",account_status:"active"}};
+  const {rerender}=render(<AdminMemberships key="admin" actorId="admin" initial={initial} />);
+  await act(async()=>{mocks.auth.mock.calls[0][0]("SIGNED_OUT",null);mocks.auth.mock.calls[0][0]("SIGNED_IN",{user:{id:nextOwner}});});
+  rerender(<AdminMemberships key="admin" actorId="admin" initial={{...initial,member:{...initial.member,display_name:"服务器刷新返回的用户"}}} />);
+  expect(screen.queryByText(/旧用户资料/)).toBeNull();expect(screen.queryByText(/服务器刷新返回的用户/)).toBeNull();
+  expect(screen.queryByRole("button",{name:"提交会员变更"})).toBeNull();
+  const link=screen.getByRole("link",{name:"重新核对当前账号"});
+  expect(link.tagName).toBe("A");expect(link.getAttribute("href")).toBe("/admin/memberships");expect(link.className).toContain("min-h-11");
+  expect(mocks.change).not.toHaveBeenCalled();
+});
+it("excludes the ignored date from native validation and the submitted revoke input",()=>{
+  const submit=vi.fn(),invalid=vi.fn(),confirm=vi.spyOn(window,"confirm").mockReturnValue(true);
+  render(<MembershipGrantForm plans={[plan]} pending={false} submit={submit} invalid={invalid} />);
+  const end=screen.getByLabelText("到期时间（本机时区；撤销时忽略）") as HTMLInputElement;
+  const reason=screen.getByLabelText("操作原因") as HTMLInputElement;
+  fireEvent.change(end,{target:{value:"2026-11-01T12:30:30"}});
+  fireEvent.change(reason,{target:{value:"测试撤销原因"}});
+  fireEvent.change(screen.getByLabelText("操作"),{target:{value:"revoke"}});
+  expect(end.disabled).toBe(true);expect(end.required).toBe(false);expect(end.willValidate).toBe(false);
+  expect(new FormData(end.form!).has("end")).toBe(false);expect(end.form!.checkValidity()).toBe(true);
+  fireEvent.click(screen.getByRole("button",{name:"提交会员变更"}));
+  expect(confirm).toHaveBeenCalledWith("确认撤销此用户的会员？记录将保留，可之后重新授予。");
+  expect(submit).toHaveBeenCalledWith({planKey:"vip",action:"revoke",endsAt:null,reason:"测试撤销原因"});
+  expect(invalid).not.toHaveBeenCalled();
+});
+it.each(["grant","extend"])("requires a date for %s and accepts second-precision native input",(action)=>{
+  const submit=vi.fn(),invalid=vi.fn();
+  render(<MembershipGrantForm plans={[plan]} pending={false} submit={submit} invalid={invalid} />);
+  fireEvent.change(screen.getByLabelText("操作"),{target:{value:action}});
+  const end=screen.getByLabelText("到期时间（本机时区；撤销时忽略）") as HTMLInputElement;
+  fireEvent.change(screen.getByLabelText("操作原因"),{target:{value:"测试授予原因"}});
+  expect(end.disabled).toBe(false);expect(end.required).toBe(true);expect(end.step).toBe("1");
+  fireEvent.click(screen.getByRole("button",{name:"提交会员变更"}));
+  expect(submit).not.toHaveBeenCalled();expect(end.validity.valueMissing).toBe(true);
+  fireEvent.change(end,{target:{value:"2026-11-01T12:30:30"}});
+  expect(end.validity.stepMismatch).toBe(false);expect(end.form!.checkValidity()).toBe(true);
+  fireEvent.click(screen.getByRole("button",{name:"提交会员变更"}));
+  expect(submit).toHaveBeenCalledWith({planKey:"vip",action,endsAt:new Date("2026-11-01T12:30:30").toISOString(),reason:"测试授予原因"});
+  expect(invalid).not.toHaveBeenCalled();
+});
+it("re-enables date validation after leaving revoke and preserves cancellation and reason requirements",()=>{
+  const submit=vi.fn(),invalid=vi.fn(),confirm=vi.spyOn(window,"confirm").mockReturnValue(false);
+  render(<MembershipGrantForm plans={[plan]} pending={false} submit={submit} invalid={invalid} />);
+  const end=screen.getByLabelText("到期时间（本机时区；撤销时忽略）") as HTMLInputElement;
+  fireEvent.change(screen.getByLabelText("操作"),{target:{value:"revoke"}});
+  fireEvent.click(screen.getByRole("button",{name:"提交会员变更"}));
+  expect(confirm).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("操作原因"),{target:{value:"测试撤销原因"}});
+  fireEvent.click(screen.getByRole("button",{name:"提交会员变更"}));
+  expect(confirm).toHaveBeenCalledOnce();expect(submit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("操作"),{target:{value:"extend"}});
+  expect(end.disabled).toBe(false);expect(end.required).toBe(true);expect(end.validity.valueMissing).toBe(true);
+});
+it("keeps the actual revoke transaction bound to the target and rereads its record",async()=>{
+  vi.spyOn(window,"confirm").mockReturnValue(true);
+  const initial={...store,member:{id:"target-user",public_uid:10002,display_name:"目标用户",account_status:"active"},grants:[{id:"grant",user_id:"target-user",plan_key:"vip",status:"active" as const,starts_at:"2026-01-01T00:00:00Z",ends_at:"2026-11-01T00:00:00Z",revision:3}]};
+  mocks.change.mockResolvedValue(undefined);mocks.store.mockResolvedValue(initial);
+  render(<AdminMemberships actorId="admin" initial={initial} />);
+  fireEvent.change(screen.getByLabelText("到期时间（本机时区；撤销时忽略）"),{target:{value:"2026-11-01T12:30:30"}});
+  fireEvent.change(screen.getByLabelText("操作"),{target:{value:"revoke"}});
+  fireEvent.change(screen.getByLabelText("操作原因"),{target:{value:"测试撤销原因"}});
+  fireEvent.click(screen.getByRole("button",{name:"提交会员变更"}));
+  await waitFor(()=>expect(mocks.change).toHaveBeenCalledOnce());
+  expect(mocks.change).toHaveBeenCalledWith({userId:"target-user",planKey:"vip",action:"revoke",endsAt:null,revision:3,reason:"测试撤销原因",requestId:expect.any(String)});
+  expect(mocks.store).toHaveBeenCalledWith(10002);
+  expect((await screen.findByRole("status")).textContent).toContain("会员变更已保存");
+});
+it("remounts grant action and fields for a new target rather than retaining the old user's input",async()=>{
+  const initial={...store,member:{id:"previous-user",public_uid:10002,display_name:"前一个用户",account_status:"active"}};
+  mocks.store.mockResolvedValue({...store,member:{id:"next-user",public_uid:10003,display_name:"新查询用户",account_status:"active"}});
+  render(<AdminMemberships actorId="admin" initial={initial} />);
+  fireEvent.change(screen.getByLabelText("操作"),{target:{value:"revoke"}});
+  fireEvent.change(screen.getByLabelText("操作原因"),{target:{value:"上个用户的原因"}});
+  fireEvent.change(screen.getByLabelText("站内 UID"),{target:{value:"10003"}});
+  fireEvent.click(screen.getByRole("button",{name:"查询用户"}));
+  await screen.findByText(/新查询用户/);
+  expect((screen.getByLabelText("操作") as HTMLSelectElement).value).toBe("grant");
+  expect((screen.getByLabelText("操作原因") as HTMLInputElement).value).toBe("");
+  const end=screen.getByLabelText("到期时间（本机时区；撤销时忽略）") as HTMLInputElement;
+  expect(end.value).toBe("");expect(end.disabled).toBe(false);expect(end.required).toBe(true);
   expect(mocks.change).not.toHaveBeenCalled();
 });

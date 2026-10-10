@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { membershipError, parseGrantReceipt, parseMembershipAdminStore, parseMyMembership, parsePlanReceipt } from "./types";
+import { membershipError, membershipTextLength, parseGrantReceipt, parseMembershipAdminStore, parseMyMembership, parsePlanReceipt } from "./types";
 
 const grant = {
   id: "40000000-0000-4000-8000-000000000001", plan_key: "vip", status: "active",
@@ -99,6 +99,21 @@ describe("membership response parsers", () => {
 });
 
 describe("standalone mutation receipt parsers", () => {
+  it("counts Unicode code points and accepts database limits for normal Chinese and emoji", () => {
+    expect(membershipTextLength("会员👑")).toBe(3);
+    const value = { ...plan, title: "👑".repeat(60), description: "👑".repeat(1000), benefits: { member_badge: "👑".repeat(240) } };
+    expect(parsePlanReceipt(value)).toEqual(value);
+    expect(parseMyMembership({ ...mine, grants: [{ ...memberGrant, benefits: value.benefits }] }).grants[0].benefits).toEqual(value.benefits);
+  });
+
+  it.each([
+    { ...plan, title: "👑" }, { ...plan, title: "👑".repeat(61) },
+    { ...plan, description: "👑".repeat(1001) }, { ...plan, benefits: { member_badge: "👑".repeat(241) } },
+    { ...plan, benefits: { member_badge: "\u00a0\t\ufeff" } },
+  ])("rejects fields outside Unicode limits or benefits containing only JS whitespace (%#)", (value) => {
+    expect(() => parsePlanReceipt(value)).toThrow("membership_response_invalid");
+  });
+
   it("accepts full plan and grant receipts, including revoked grant receipts", () => {
     expect(parsePlanReceipt(plan)).toEqual(plan);
     const value = { ...grant, user_id: member.id };

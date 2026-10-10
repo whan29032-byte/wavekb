@@ -6,7 +6,8 @@ export type MyMembership = { billing_enabled: false; grants: MemberGrant[]; hist
 export type MembershipAdminStore = { plans: MembershipPlan[]; member: { id: string; public_uid: number; display_name: string; account_status: string } | null; grants: MembershipGrant[]; history: MembershipHistory[] };
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const strings = (value: unknown): value is Record<string, string> => record(value) && Object.entries(value).length<=20 && Object.entries(value).every(([key,item]) => /^[a-z][a-z0-9_]{1,59}$/.test(key) && typeof item === "string" && item.trim().length>0 && item.length<=240);
+export const membershipTextLength = (value: string) => Array.from(value).length;
+const strings = (value: unknown): value is Record<string, string> => record(value) && Object.entries(value).length<=20 && Object.entries(value).every(([key,item]) => /^[a-z][a-z0-9_]{1,59}$/.test(key) && typeof item === "string" && item.trim().length>0 && membershipTextLength(item)<=240);
 const date = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value));
 const uuid = (value: unknown) => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const positiveInteger = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value>0;
@@ -25,7 +26,7 @@ export function parseMyMembership(value: unknown): MyMembership {
 
 export function parseMembershipAdminStore(value: unknown): MembershipAdminStore {
   if (!record(value) || !Array.isArray(value.plans) || !Array.isArray(value.grants) || !Array.isArray(value.history)
-    || !value.plans.every((item) => record(item) && planKey(item.key) && typeof item.title === "string" && item.title.trim().length>=2 && item.title.length<=60 && typeof item.description === "string" && item.description.length<=1000 && strings(item.benefits) && typeof item.enabled === "boolean" && positiveInteger(item.revision))
+    || !value.plans.every((item) => record(item) && planKey(item.key) && typeof item.title === "string" && membershipTextLength(item.title.trim())>=2 && membershipTextLength(item.title)<=60 && typeof item.description === "string" && membershipTextLength(item.description)<=1000 && strings(item.benefits) && typeof item.enabled === "boolean" && positiveInteger(item.revision))
     || !value.grants.every((item) => grant(item) && ["active", "revoked"].includes(item.status)) || !value.history.every(history)
     || !(value.member === null || (record(value.member) && uuid(value.member.id) && typeof value.member.display_name === "string" && positiveInteger(value.member.public_uid) && typeof value.member.account_status==="string" && ["active","banned"].includes(value.member.account_status)))) throw new Error("membership_response_invalid");
   return value as MembershipAdminStore;

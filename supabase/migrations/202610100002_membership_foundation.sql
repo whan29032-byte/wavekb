@@ -2,9 +2,17 @@
 -- are enabled by this migration; public content and profiles.role are unchanged.
 begin;
 
+-- Match ECMAScript String.trim() exactly, including NBSP and Unicode spaces.
+-- Membership limits count Unicode code points (PostgreSQL length), not UTF-16.
+create function public.membership_trim_text(p_value text)
+returns text language sql immutable strict set search_path='' as $$
+  select pg_catalog.btrim(p_value,U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF');
+$$;
+revoke all on function public.membership_trim_text(text) from public,anon,authenticated;
+
 create table public.membership_plans (
   key text primary key check (key ~ '^[a-z][a-z0-9_]{1,39}$'),
-  title text not null check (length(btrim(title)) between 2 and 60),
+  title text not null check (length(public.membership_trim_text(title)) between 2 and 60),
   description text not null default '' check (length(description) <= 1000),
   benefits jsonb not null default '{}' check (jsonb_typeof(benefits) = 'object'),
   enabled boolean not null default false,
@@ -33,7 +41,7 @@ create table public.membership_events (
   user_id uuid references public.profiles(id) on delete restrict,
   plan_key text not null references public.membership_plans(key) on delete restrict,
   action text not null check (action in ('plan_updated','granted','extended','revoked')),
-  reason text not null check (length(btrim(reason)) between 3 and 500),
+  reason text not null check (length(public.membership_trim_text(reason)) between 3 and 500),
   request jsonb not null,
   before_state jsonb,
   after_state jsonb not null,
@@ -94,15 +102,17 @@ $$;
 
 create function public.admin_save_membership_plan(p_key text,p_title text,p_description text,p_benefits jsonb,p_enabled boolean,p_expected_revision integer,p_reason text,p_request_id uuid,p_actor_id uuid)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
-declare v_before public.membership_plans; v_after public.membership_plans; v_event public.membership_events; v_request jsonb;
+declare v_before public.membership_plans; v_after public.membership_plans; v_event public.membership_events; v_request jsonb; v_benefits jsonb;
 begin
   if not public.is_admin() or p_actor_id is distinct from auth.uid() then raise exception 'admin_required'; end if;
-  if p_request_id is null or p_enabled is null or p_reason is null or length(btrim(p_reason)) not between 3 and 500
-    or p_key is null or p_key !~ '^[a-z][a-z0-9_]{1,39}$' or p_title is null or length(btrim(p_title)) not between 2 and 60
+  if p_request_id is null or p_enabled is null or p_reason is null or length(public.membership_trim_text(p_reason)) not between 3 and 500
+    or p_key is null or p_key !~ '^[a-z][a-z0-9_]{1,39}$' or p_title is null or length(public.membership_trim_text(p_title)) not between 2 and 60
+    or length(coalesce(p_description,''))>1000
     or p_expected_revision is null or p_expected_revision<0 then raise exception 'membership_input_invalid'; end if;
   if p_benefits is null or jsonb_typeof(p_benefits)<>'object' then raise exception 'membership_benefits_invalid'; end if;
   if (select count(*) from jsonb_each(p_benefits))>20 or exists (select 1 from jsonb_each(p_benefits) b
-    where b.key !~ '^[a-z][a-z0-9_]{1,59}$' or jsonb_typeof(b.value)<>'string' or length(btrim(b.value#>>'{}')) not between 1 and 240) then raise exception 'membership_benefits_invalid'; end if;
+    where b.key !~ '^[a-z][a-z0-9_]{1,59}$' or jsonb_typeof(b.value)<>'string' or length(public.membership_trim_text(b.value#>>'{}')) not between 1 and 240) then raise exception 'membership_benefits_invalid'; end if;
+  select coalesce(jsonb_object_agg(b.key,public.membership_trim_text(b.value#>>'{}')),'{}'::jsonb) into v_benefits from jsonb_each(p_benefits) b;
   v_request:=jsonb_build_object('key',p_key,'title',p_title,'description',p_description,'benefits',p_benefits,'enabled',p_enabled,'revision',p_expected_revision,'reason',p_reason);
   perform pg_advisory_xact_lock(hashtextextended(p_request_id::text,0));
   select * into v_event from public.membership_events where request_id=p_request_id;
@@ -113,11 +123,11 @@ begin
   perform pg_advisory_xact_lock(hashtextextended('membership_plan:'||p_key,0));
   select * into v_before from public.membership_plans where key=p_key for update;
   if coalesce(v_before.revision,0)<>coalesce(p_expected_revision,0) then raise exception 'membership_changed_concurrently'; end if;
-  insert into public.membership_plans(key,title,description,benefits,enabled) values(p_key,btrim(p_title),coalesce(p_description,''),p_benefits,p_enabled)
+  insert into public.membership_plans(key,title,description,benefits,enabled) values(p_key,public.membership_trim_text(p_title),coalesce(p_description,''),v_benefits,p_enabled)
     on conflict(key) do update set title=excluded.title,description=excluded.description,benefits=excluded.benefits,enabled=excluded.enabled,
       revision=membership_plans.revision+1,updated_at=now() returning * into v_after;
   insert into public.membership_events(request_id,actor_id,plan_key,action,reason,request,before_state,after_state)
-    values(p_request_id,auth.uid(),p_key,'plan_updated',p_reason,v_request,case when v_before.key is null then null else to_jsonb(v_before) end,to_jsonb(v_after));
+    values(p_request_id,auth.uid(),p_key,'plan_updated',public.membership_trim_text(p_reason),v_request,case when v_before.key is null then null else to_jsonb(v_before) end,to_jsonb(v_after));
   return to_jsonb(v_after);
 end;
 $$;
@@ -128,7 +138,7 @@ declare v_before public.membership_grants; v_after public.membership_grants; v_e
 begin
   if not public.is_admin() or p_actor_id is distinct from auth.uid() then raise exception 'admin_required'; end if;
   if p_request_id is null or p_action not in ('grant','extend','revoke') or p_action is null
-    or p_reason is null or length(btrim(p_reason)) not between 3 and 500 or p_expected_revision is null or p_expected_revision<0
+    or p_reason is null or length(public.membership_trim_text(p_reason)) not between 3 and 500 or p_expected_revision is null or p_expected_revision<0
     or p_user_id is null or p_plan_key is null then raise exception 'membership_input_invalid'; end if;
   v_request:=jsonb_build_object('user_id',p_user_id,'plan_key',p_plan_key,'action',p_action,'ends_at',p_ends_at,'revision',p_expected_revision,'reason',p_reason);
   perform pg_advisory_xact_lock(hashtextextended(p_request_id::text,0));
@@ -158,7 +168,7 @@ begin
         ends_at=excluded.ends_at,revision=membership_grants.revision+1,updated_at=now() returning * into v_after;
   end if;
   insert into public.membership_events(request_id,actor_id,user_id,plan_key,action,reason,request,before_state,after_state)
-    values(p_request_id,auth.uid(),p_user_id,p_plan_key,case p_action when 'grant' then 'granted' when 'extend' then 'extended' else 'revoked' end,p_reason,v_request,
+    values(p_request_id,auth.uid(),p_user_id,p_plan_key,case p_action when 'grant' then 'granted' when 'extend' then 'extended' else 'revoked' end,public.membership_trim_text(p_reason),v_request,
       case when v_before.id is null then null else to_jsonb(v_before) end,to_jsonb(v_after));
   return to_jsonb(v_after);
 end;

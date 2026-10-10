@@ -37,7 +37,7 @@ export function MembershipCenter({ actorId, initial, initialError = "" }: { acto
     catch (failure) { if (current === revision.current) { setSnapshot(null); setError(membershipError(failure)); } }
     finally { if (current === revision.current) setPending(false); }
   }
-  if (identityChanged) return <p role="status">账号已改变，正在更新会员信息…</p>;
+  if (identityChanged) return <section className="grid gap-3 rounded-xl border bg-surface p-5"><p role="status" className="text-sm leading-6">账号已变化，旧会员信息已清除。请重新核对当前账号后继续。</p><a href="/membership" className="flex min-h-11 w-fit items-center rounded-lg border px-4 py-2 text-sm font-medium text-primary underline underline-offset-4">重新核对当前账号</a></section>;
   return <MembershipSummary snapshot={snapshot} error={error} pending={pending} onRefresh={refresh} />;
 }
 
@@ -45,7 +45,7 @@ export function MembershipSummary({ snapshot, error = "", pending = false, onRef
   return <div className="grid gap-8">
     <div className="rounded-xl border bg-muted/40 p-4 text-sm leading-6 text-muted-foreground">购买与自动续费尚未开放。会员身份与管理员权限相互独立，现有公开书籍和社区阅读不会因此收费。</div>
     <section aria-labelledby="membership-status" className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="membership-status" className="text-xl font-semibold">我的会员状态</h2><Button type="button" variant="secondary" disabled={pending} onClick={onRefresh}>{pending ? "正在核对…" : "刷新状态"}</Button></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="membership-status" className="text-xl font-semibold">我的会员状态</h2><Button type="button" variant="secondary" className="min-h-11" disabled={pending} onClick={onRefresh}>{pending ? "正在核对…" : "刷新状态"}</Button></div>
       {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
       {!snapshot ? <p className="rounded-xl border border-dashed p-6 text-muted-foreground">未能核对会员记录。恢复服务后点击刷新，不会将未知状态误显示为有效会员。</p> : snapshot.grants.length ? <div className="grid gap-4 sm:grid-cols-2">{snapshot.grants.map((item) => <article key={item.id} className="grid content-start gap-4 rounded-xl border bg-surface p-5"><div className="flex items-center justify-between gap-3"><h3 className="text-lg font-semibold">{item.title}</h3><span className="rounded-md bg-muted px-2 py-1 text-sm font-medium">{labels[item.status]}</span></div><dl className="grid gap-2 text-sm"><div><dt className="text-muted-foreground">生效时间（北京时间）</dt><dd><time dateTime={item.starts_at}>{membershipDate(item.starts_at)}</time></dd></div><div><dt className="text-muted-foreground">到期时间（北京时间）</dt><dd><time dateTime={item.ends_at}>{membershipDate(item.ends_at)}</time></dd></div></dl>{Object.keys(item.benefits).length ? <ul className="list-inside list-disc space-y-2 text-sm">{Object.entries(item.benefits).map(([key, value]) => <li key={key}>{value}</li>)}</ul> : <p className="text-sm leading-6 text-muted-foreground">当前没有生效的专属权益。具体付费方案尚未发布。</p>}</article>)}</div> : <div className="grid gap-3 rounded-xl border bg-surface p-6"><h3 className="font-semibold">免费注册会员</h3><p className="text-sm leading-6 text-muted-foreground">目前没有专属会员记录，你仍然可以阅读公开知识库并使用账户已有功能。</p><Link href="/knowledge" className="w-fit font-medium text-primary underline underline-offset-4">继续阅读知识库</Link></div>}
     </section>
