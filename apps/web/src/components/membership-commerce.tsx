@@ -18,7 +18,7 @@ function orderAttempt(actorId: string, order: MembershipOrder): MembershipChecko
   return { ownerId: actorId, requestId: order.request_id, expectedQuote: { price_id: order.price_id, plan_key: order.plan_key, price_revision: order.price_revision, plan_revision: order.plan_revision, amount_minor: order.amount_minor, currency: order.currency, term_months: order.term_months } };
 }
 
-export function MembershipCommerce({ actorId, initial, initialError = "" }: { actorId: string; initial: MyMembershipCommerce | null; initialError?: string }) {
+export function MembershipCommerce({ actorId, initial, initialError = "", readOnly = false }: { actorId: string; initial: MyMembershipCommerce | null; initialError?: string; readOnly?: boolean }) {
   const [mine, setMine] = useState(initial);
   const [error, setError] = useState(initialError);
   const [message, setMessage] = useState("");
@@ -33,6 +33,7 @@ export function MembershipCommerce({ actorId, initial, initialError = "" }: { ac
     let active = true;
     const invalidate = () => { ++revision.current; };
     const restore = () => {
+      if (readOnly) { setAttempt(null); setChecked(true); return; }
       try { const value = readMembershipAttempt(actorId); setAttempt(value); setStorageBlocked(false); if (value) setMessage("已恢复原订单请求，请先核对自己的订单，再继续原请求。不要另建订单或重复付款。"); }
       catch { setStorageBlocked(true); setError(checkpointError); }
       setChecked(true);
@@ -48,7 +49,7 @@ export function MembershipCommerce({ actorId, initial, initialError = "" }: { ac
     };
     window.addEventListener("storage", onStorage);
     return () => { active = false; invalidate(); data.subscription.unsubscribe(); window.removeEventListener("storage", onStorage); };
-  }, [actorId]);
+  }, [actorId, readOnly]);
 
   async function authenticated(current: number) {
     const auth = await createClient().auth.getUser();
@@ -67,6 +68,7 @@ export function MembershipCommerce({ actorId, initial, initialError = "" }: { ac
     lock.current = true; setPending(true); setError(""); const current = revision.current;
     try {
       const value = await read(current);
+      if (readOnly) { setStorageBlocked(false); setMessage("已核对既有会员权益与历史订单。"); return; }
       const saved = readMembershipAttempt(actorId);
       if (saved) {
         const order = value.orders.find((item) => item.request_id === saved.requestId);
@@ -79,7 +81,7 @@ export function MembershipCommerce({ actorId, initial, initialError = "" }: { ac
   }
 
   async function purchase(plan?: CommercePlan, price?: MembershipPrice, existing?: MembershipOrder) {
-    if (lock.current || identityChanged || !checked || storageBlocked) return;
+    if (readOnly || lock.current || identityChanged || !checked || storageBlocked) return;
     lock.current = true; setPending(true); setError(""); setMessage(""); const current = revision.current;
     let checkpoint: MembershipCheckoutAttempt | null = null;
     let preserved = false;
@@ -147,21 +149,21 @@ export function MembershipCommerce({ actorId, initial, initialError = "" }: { ac
   }
 
   if (identityChanged) return <section className="grid gap-3 rounded-xl border bg-surface p-5"><p role="alert">账号已变化，旧购买与订单信息已清除。请重新核对当前账号。</p><a href="/membership" className="flex min-h-11 w-fit items-center rounded-lg border px-4 py-2 text-sm font-medium text-primary underline underline-offset-4">重新核对当前账号</a></section>;
-  return <MembershipCommerceSummary mine={mine} error={error} message={message} pending={pending} purchaseBlocked={!checked || storageBlocked || Boolean(attempt)} recoveryBlocked={!checked || storageBlocked} onRefresh={() => void refresh()} onPurchase={(plan, price) => void purchase(plan, price)} onRecover={() => void purchase()} onContinue={(order) => void purchase(undefined, undefined, order)} hasAttempt={Boolean(attempt)} />;
+  return <MembershipCommerceSummary mine={mine} error={error} message={message} pending={pending} purchaseBlocked={!checked || storageBlocked || Boolean(attempt)} recoveryBlocked={!checked || storageBlocked} onRefresh={() => void refresh()} onPurchase={(plan, price) => void purchase(plan, price)} onRecover={() => void purchase()} onContinue={(order) => void purchase(undefined, undefined, order)} hasAttempt={Boolean(attempt)} readOnly={readOnly} />;
 }
 
-export function MembershipCommerceSummary({ mine, error = "", message = "", pending = false, purchaseBlocked = false, recoveryBlocked = false, hasAttempt = false, onRefresh, onPurchase, onRecover, onContinue }: { mine: MyMembershipCommerce | null; error?: string; message?: string; pending?: boolean; purchaseBlocked?: boolean; recoveryBlocked?: boolean; hasAttempt?: boolean; onRefresh: () => void; onPurchase: (plan: CommercePlan, price: MembershipPrice) => void; onRecover: () => void; onContinue: (order: MembershipOrder) => void }) {
+export function MembershipCommerceSummary({ mine, error = "", message = "", pending = false, purchaseBlocked = false, recoveryBlocked = false, hasAttempt = false, readOnly = false, onRefresh, onPurchase, onRecover, onContinue }: { mine: MyMembershipCommerce | null; error?: string; message?: string; pending?: boolean; purchaseBlocked?: boolean; recoveryBlocked?: boolean; hasAttempt?: boolean; readOnly?: boolean; onRefresh: () => void; onPurchase: (plan: CommercePlan, price: MembershipPrice) => void; onRecover: () => void; onContinue: (order: MembershipOrder) => void }) {
   return <section className="grid gap-6" aria-labelledby="membership-purchases-title">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="membership-purchases-title" className="text-xl font-semibold">VIP 购买与订单</h2><div className="flex flex-wrap gap-2"><Link className="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-medium" href="/membership/plans">查看公开会员方案</Link><Button type="button" variant="secondary" className="min-h-11" disabled={pending} onClick={onRefresh}>{pending ? "正在核对…" : "核对购买与订单"}</Button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="membership-purchases-title" className="text-xl font-semibold">{readOnly ? "既有会员权益与历史订单" : "VIP 购买与订单"}</h2><div className="flex flex-wrap gap-2"><Link className="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-medium" href="/membership/plans">查看公开会员方案</Link><Button type="button" variant="secondary" className="min-h-11" disabled={pending} onClick={onRefresh}>{pending ? "正在核对…" : "核对购买与订单"}</Button></div></div>
     <p className="text-sm leading-6 text-muted-foreground">月度与年度均为一次性购买，不自动续费。支付回跳不代表开通；只显示服务端确认的订单及权益，测试付款不会授予正式权益。</p>
     <Link href="/knowledge" className="inline-flex min-h-11 w-fit items-center rounded-lg border px-4 text-sm font-medium text-primary">继续阅读公开知识库</Link>
     {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}{message ? <p role="status" className="rounded-lg border bg-muted/40 p-4 text-sm leading-6">{message}</p> : null}
-    {hasAttempt ? <Button type="button" variant="secondary" className="min-h-11 w-fit" disabled={pending || recoveryBlocked} onClick={onRecover}>核对并继续原请求</Button> : null}
+    {hasAttempt && !readOnly ? <Button type="button" variant="secondary" className="min-h-11 w-fit" disabled={pending || recoveryBlocked} onClick={onRecover}>核对并继续原请求</Button> : null}
     {!mine ? <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">购买服务暂不可用，未核实的订单与权益不会显示为已开通。</p> : <>
       <div className="grid gap-2 rounded-xl border bg-surface p-5"><h3 className="font-semibold">当前实际权益</h3><p className="text-sm">{mine.effective.has_vip ? "有效 VIP 会员" : "暂无有效 VIP 权益"}</p><p className="text-sm text-muted-foreground">AI 平台每日额度：{mine.effective.ai_daily_limit} 次 · {membershipDiscount(mine.effective.mentor_discount_bps)}</p><p className="text-xs leading-5 text-muted-foreground">不限制免费自带 Key；平台服务是否可用还须服务端配置。导师优惠以实际结算报价为准。</p></div>
-      {!mine.catalog.purchase_available ? <p role="status" className="text-sm text-muted-foreground">付款尚未开放，可先查看方案和既有订单。</p> : <div className="grid gap-4 sm:grid-cols-2">{mine.catalog.plans.map((plan) => <article key={plan.key} className="grid gap-3 rounded-xl border bg-surface p-5"><h3 className="font-semibold">{plan.title}</h3><p className="text-sm text-muted-foreground">每日平台额度 {plan.ai_daily_limit} 次 · {membershipDiscount(plan.mentor_discount_bps)}</p>{mine.catalog.payment_mode === "test" ? <p className="text-sm text-muted-foreground">测试模式：不授予正式权益</p> : null}{plan.prices.map((price) => <div key={price.id} className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm">{membershipMoney(price.amount_minor, price.currency)} / {price.term_months === 1 ? "1 个月" : "12 个月"}</p><Button type="button" className="min-h-11" disabled={pending || purchaseBlocked || mine.orders.some((order) => order.status === "pending")} onClick={() => onPurchase(plan, price)}>{mine.catalog.payment_mode === "test" ? "测试购买" : "购买"}{price.term_months === 1 ? "月度" : "年度"}</Button></div>)}</article>)}</div>}
+      {readOnly ? null : !mine.catalog.purchase_available ? <p role="status" className="text-sm text-muted-foreground">付款尚未开放，可先查看方案和既有订单。</p> : <div className="grid gap-4 sm:grid-cols-2">{mine.catalog.plans.map((plan) => <article key={plan.key} className="grid gap-3 rounded-xl border bg-surface p-5"><h3 className="font-semibold">{plan.title}</h3><p className="text-sm text-muted-foreground">每日平台额度 {plan.ai_daily_limit} 次 · {membershipDiscount(plan.mentor_discount_bps)}</p>{mine.catalog.payment_mode === "test" ? <p className="text-sm text-muted-foreground">测试模式：不授予正式权益</p> : null}{plan.prices.map((price) => <div key={price.id} className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm">{membershipMoney(price.amount_minor, price.currency)} / {price.term_months === 1 ? "1 个月" : "12 个月"}</p><Button type="button" className="min-h-11" disabled={pending || purchaseBlocked || mine.orders.some((order) => order.status === "pending")} onClick={() => onPurchase(plan, price)}>{mine.catalog.payment_mode === "test" ? "测试购买" : "购买"}{price.term_months === 1 ? "月度" : "年度"}</Button></div>)}</article>)}</div>}
       <div className="grid gap-3"><h3 className="text-lg font-semibold">购买生效记录</h3>{mine.purchase_grants.length ? <ul className="grid gap-3">{mine.purchase_grants.map((grant) => <li key={grant.id} className="grid gap-2 rounded-xl border bg-surface p-4 text-sm"><strong>{grant.title} · {grantLabels[grant.status]}</strong><span>北京时间：{membershipDate(grant.starts_at)} — {membershipDate(grant.ends_at)}</span><span className="text-muted-foreground">购买时权益：平台每日 {grant.ai_daily_limit} 次 · {membershipDiscount(grant.mentor_discount_bps)}</span></li>)}</ul> : <p className="text-sm text-muted-foreground">暂无购买生效记录。管理员手工授权在下方单独展示。</p>}</div>
-      <div className="grid gap-3"><h3 className="text-lg font-semibold">我的会员订单</h3>{mine.orders.length ? <ol className="grid gap-3">{mine.orders.map((order) => <li key={order.id} className="grid gap-3 rounded-xl border bg-surface p-4"><div className="flex flex-wrap justify-between gap-2"><strong className="text-sm">{order.title_snapshot} · {orderLabels[order.status]}</strong><span className="text-sm">{membershipMoney(order.amount_minor, order.currency)} / {order.term_months} 个月</span></div><p className="break-all text-xs text-muted-foreground">订单 {order.id} · {order.payment_mode === "test" ? "测试订单，不授予正式权益" : "正式订单"}</p><p className="text-xs text-muted-foreground"><time dateTime={order.created_at}>{membershipDate(order.created_at)}</time> · 购买时平台每日 {order.ai_daily_limit_snapshot} 次 · {membershipDiscount(order.mentor_discount_bps_snapshot)}</p>{order.status === "pending" ? <Button type="button" variant="secondary" className="min-h-11 w-fit" disabled={pending || recoveryBlocked} onClick={() => onContinue(order)}>核对并继续此订单</Button> : null}</li>)}</ol> : <p className="text-sm text-muted-foreground">暂无会员购买订单。</p>}</div>
+      <div className="grid gap-3"><h3 className="text-lg font-semibold">我的会员订单</h3>{mine.orders.length ? <ol className="grid gap-3">{mine.orders.map((order) => <li key={order.id} className="grid gap-3 rounded-xl border bg-surface p-4"><div className="flex flex-wrap justify-between gap-2"><strong className="text-sm">{order.title_snapshot} · {orderLabels[order.status]}</strong><span className="text-sm">{membershipMoney(order.amount_minor, order.currency)} / {order.term_months} 个月</span></div><p className="break-all text-xs text-muted-foreground">订单 {order.id} · {order.payment_mode === "test" ? "测试订单，不授予正式权益" : "正式订单"}</p><p className="text-xs text-muted-foreground"><time dateTime={order.created_at}>{membershipDate(order.created_at)}</time> · 购买时平台每日 {order.ai_daily_limit_snapshot} 次 · {membershipDiscount(order.mentor_discount_bps_snapshot)}</p>{order.status === "pending" && !readOnly ? <Button type="button" variant="secondary" className="min-h-11 w-fit" disabled={pending || recoveryBlocked} onClick={() => onContinue(order)}>核对并继续此订单</Button> : null}</li>)}</ol> : <p className="text-sm text-muted-foreground">暂无会员购买订单。</p>}</div>
     </>}
   </section>;
 }

@@ -50,6 +50,13 @@ jobs:
       - name: Verify root and deployment contracts
         run: pnpm test
 
+      - name: Verify wallet concurrency in disposable PostgreSQL sessions
+        run: |
+          set -Eeuo pipefail
+          task_postgres_dir=$(mktemp -d /tmp/wavekb-postgres-concurrency.XXXXXX)
+          npm install --prefix "$task_postgres_dir" --no-audit --no-fund embedded-postgres@18.4.0-beta.17 pg@8.16.3
+          env -i PATH="$PATH" WAVEKB_ISOLATED_POSTGRES_MODULE_ROOT="$task_postgres_dir" node --test tests/membership-wallet-concurrency-postgres.test.mjs
+
       - name: Verify knowledge package
         run: pnpm --filter @wavekb/knowledge test
 

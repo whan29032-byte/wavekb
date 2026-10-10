@@ -128,7 +128,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
   assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < publicSchemaCheck && publicSchemaCheck < upload && upload < activation);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
-  for (const filename of ["admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres", "membership-commerce-postgres", "membership-payment-functions", "membership-benefits-postgres"]) {
+  for (const filename of ["admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres", "membership-commerce-postgres", "membership-payment-functions", "membership-benefits-postgres", "membership-wallet-postgres", "membership-wallet-functions"]) {
     assert.ok(contractVerification.run.includes(`tests/${filename}.test.mjs`), `${filename} must gate backend migration and upload`);
   }
   assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
@@ -142,10 +142,15 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /202610100003\)[\s\S]*202610100004_membership_benefits\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610100004\)[\s\S]*already applied/);
   assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610100004/);
+  assert.match(backendSteps[schemaGate].run, /202610100005\)[\s\S]*already applied/);
+  for (const table of ["settings", "routes", "orders", "grants", "verifications", "receipts", "events"]) {
+    assert.ok(backendSteps[schemaGate].run.includes(`membership_wallet_${table}`));
+  }
+  assert.match(backendSteps[schemaGate].run, /test "\$wallet_rls_tables" = 7/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610100005/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610100004/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610100005/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -156,7 +161,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
 
 test("every known backend marker selects only its unapplied migration suffix and unknown markers stop", () => {
   const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
-  const selection = migrationStep.run.match(/case "\$schema_before" in[\s\S]*?\besac\b/)?.[0];
+  const selection = migrationStep.run.match(/case "\$schema_before" in[\s\S]*?(?=\n\s*schema_after=)/)?.[0];
   assert.ok(selection);
   const migrations = [
     "202609100001_reward_lottery_manual_fulfillment.sql",
@@ -168,6 +173,7 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202610100002_membership_foundation.sql",
     "202610100003_membership_commerce.sql",
     "202610100004_membership_benefits.sql",
+    "202610100005_membership_wallet_payments.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -184,14 +190,14 @@ ${selection}`;
   for (const [marker, offset] of [
     ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
-    ["202610100003", 8], ["202610100004", 9],
+    ["202610100003", 8], ["202610100004", 9], ["202610100005", 10],
   ]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
     const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
     assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
   }
-  for (const marker of ["", "202609090001", "202610100005", "invalid"]) {
+  for (const marker of ["", "202609090001", "202610100006", "invalid"]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.notEqual(result.status, 0, marker);
     assert.doesNotMatch(result.stdout, /supabase\/migrations\//);
@@ -255,6 +261,22 @@ test("release verification runs on Ubuntu for pull requests and pushes without d
   assert.ok(installIndex >= 0 && auditIndex > installIndex);
   assert.notEqual(verification.jobs.verify.steps[auditIndex]["continue-on-error"], true);
   assert.doesNotMatch(serialized, /environment|secrets\.|\bssh\b|\bscp\b|workflow_dispatch/);
+});
+
+test("release verification requires real isolated PostgreSQL wallet lock races without production access", () => {
+  const rootTests = verificationSteps.findIndex((step) => step.run === "pnpm test");
+  const postgres = verificationSteps.findIndex((step) => /Verify wallet concurrency/.test(step.name));
+  assert.ok(postgres > rootTests);
+  const step = verificationSteps[postgres];
+  assert.match(step.run, /mktemp -d \/tmp\/wavekb-postgres-concurrency\.XXXXXX/);
+  assert.match(step.run, /npm install --prefix "\$task_postgres_dir" --no-audit --no-fund embedded-postgres@18\.4\.0-beta\.17 pg@8\.16\.3/);
+  assert.match(step.run, /WAVEKB_ISOLATED_POSTGRES_MODULE_ROOT="\$task_postgres_dir" node --test tests\/membership-wallet-concurrency-postgres\.test\.mjs/);
+  assert.notEqual(step["continue-on-error"], true);
+  assert.doesNotMatch(JSON.stringify(step), /DATABASE_URL|SUPABASE|secrets\.|--force|\|\| true/);
+  const source = fs.readFileSync(new URL("../tests/membership-wallet-concurrency-postgres.test.mjs", import.meta.url), "utf8");
+  assert.match(source, /pg_stat_activity/);
+  assert.match(source, /assert\.notEqual\(pids\[0\],pids\[1\]\)/);
+  assert.match(source, /await pg\.stop\(\)/);
 });
 
 test("both non-deployment verification jobs explicitly run the actual disposable Nginx fixture", () => {

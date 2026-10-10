@@ -16,6 +16,12 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState(n
 async function buy() { await act(async () => { fireEvent.click(screen.getByRole("button", { name: "测试购买月度" })); }); }
 
 describe("MembershipCommerce", () => {
+  it("keeps legacy Stripe fully read-only on the real membership page even when its old gate is open", async () => {
+    const mine=membershipPreviewMine(true); mine.orders=[membershipPreviewOrder()]; render(<MembershipCommerce actorId={membershipPreviewActor} initial={mine} readOnly />);
+    expect(screen.queryByRole("button",{name:"测试购买月度"})).toBeNull(); expect(screen.queryByRole("button",{name:"核对并继续此订单"})).toBeNull();
+    expect(screen.getByRole("heading",{name:"既有会员权益与历史订单"})).toBeDefined(); expect(mocks.invoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button",{name:"核对购买与订单"})); await screen.findByText("已核对既有会员权益与历史订单。"); expect(mocks.invoke).not.toHaveBeenCalled();
+  });
   it("keeps disabled billing closed without inventing effective VIP", () => {
     render(<MembershipCommerce actorId={membershipPreviewActor} initial={membershipPreviewMine()} />);
     expect(screen.queryByRole("button", { name: "测试购买月度" })).toBeNull(); expect(screen.getByText("暂无有效 VIP 权益")).toBeDefined(); expect(mocks.invoke).not.toHaveBeenCalled();

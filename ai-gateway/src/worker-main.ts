@@ -6,6 +6,7 @@ import { KnowledgeRuntime, type KnowledgeRuntimeResult } from "./knowledge/runti
 import { UserConnectionResolver } from "./secrets/user-connection.ts";
 import { ManagedConnectionResolver } from "./secrets/managed-connection.ts";
 import { SupabaseRest } from "./storage/supabase-rest.ts";
+import { MembershipWalletWorker } from "./membership-wallet-worker.ts";
 
 type WorkerDatabase = Pick<SupabaseRest, "request">;
 type WorkerConnectionResolver = Pick<UserConnectionResolver, "resolve">;
@@ -221,8 +222,16 @@ export class AiJobWorker {
 
 const isMain = process.argv[1] ? fileURLToPath(import.meta.url) === process.argv[1] : false;
 if (isMain) {
-  const worker = new AiJobWorker(loadConfig(process.env));
-  process.once("SIGTERM", () => worker.stop());
-  process.once("SIGINT", () => worker.stop());
-  await worker.run();
+  const config = loadConfig(process.env);
+  const database = new SupabaseRest(config);
+  const worker = new AiJobWorker(config, undefined, { database });
+  const walletWorker = new MembershipWalletWorker({
+    database,
+    env: process.env,
+    workerId: `${hostname()}:${process.pid}:membership-wallet`,
+  });
+  const stop = () => { worker.stop(); walletWorker.stop(); };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+  await Promise.all([worker.run(), walletWorker.run()]);
 }
