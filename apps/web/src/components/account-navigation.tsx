@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ReadingPriorityLink as Link } from "@/components/reading-priority-link";
 import { useRouter } from "next/navigation";
-import { Certificate, SignOut, UserCircle } from "@phosphor-icons/react";
+import { SignOut, UserCircle } from "@phosphor-icons/react";
 import type { User } from "@supabase/supabase-js";
 import type { PublicProfile } from "@wavekb/domain";
 import { Button } from "@wavekb/ui";
@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Nameplate } from "@/components/nameplate";
 import { subscribeIdentityChanges } from "@/lib/member/identity-events";
 import { loadPublicIdentities } from "@/lib/member/public-identities";
+import { personalCenterPath } from "@/lib/member/personal-center-path";
 
 export function AccountNavigation() {
   const router = useRouter();
@@ -94,14 +95,9 @@ export function AccountNavigation() {
 
   if (!user) {
     return (
-      <>
-      <Link href="/membership/plans" className="hidden min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground lg:flex">
-        <Certificate aria-hidden size={18} />会员方案
-      </Link>
       <Link href="/login" className="flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
         <UserCircle aria-hidden size={18} weight="duotone" />登录
       </Link>
-      </>
     );
   }
 
@@ -110,14 +106,12 @@ export function AccountNavigation() {
       <details className="group relative lg:hidden">
         <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="账户菜单"><UserCircle aria-hidden size={20} /></summary>
         <nav className="absolute right-0 top-12 z-40 grid w-48 gap-1 rounded-xl border bg-surface p-2 shadow-xl" aria-label="账户导航">
-          <Link href="/membership" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><Certificate aria-hidden size={18} />会员中心</Link>
-          {profile?.public_uid ? <Link href={`/member/${profile.public_uid}`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人空间 <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link> : null}
+          <Link href={personalCenterPath(user.id, profile)} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人中心 {profile?.public_uid ? <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /> : null}</Link>
           <button type="button" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold text-destructive hover:bg-muted disabled:opacity-55" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}</button>
         </nav>
       </details>
       <span className="hidden items-center gap-1 lg:flex">
-        <Button asChild variant="ghost" size="small"><Link href="/membership"><Certificate aria-hidden size={18} /><span>会员</span></Link></Button>
-        {profile?.public_uid ? <Button asChild variant="ghost" size="small"><Link href={`/member/${profile.public_uid}`}><UserCircle aria-hidden size={18} /><Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link></Button> : null}
+        <Button asChild variant="ghost" size="small"><Link href={personalCenterPath(user.id, profile)}><UserCircle aria-hidden size={18} /><span>个人中心</span>{profile?.public_uid ? <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /> : null}</Link></Button>
         <Button type="button" variant="ghost" size="small" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} /><span>{pending ? "正在退出" : "退出登录"}</span></Button>
       </span>
       {error ? <span id="sign-out-error" role="alert" className="sr-only">{error}</span> : null}

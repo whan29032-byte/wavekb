@@ -7,9 +7,9 @@ const profile={display_name:"测试用户",public_uid:12345,avatar_url:null,disp
 afterEach(cleanup);
 it("offers membership only in the owner's personal-space actions",()=>{
   render(<MemberProfileActions actorId="owner" profileId="owner" initialFollowing={false} initialConnection={null} profile={profile} />);
-  const link=screen.getByRole("link",{name:"会员中心"});expect(link.getAttribute("href")).toBe("/membership");expect(link.className).toContain("min-h-11");
+  const link=screen.getByRole("link",{name:"开通 / 管理 VIP"});expect(link.getAttribute("href")).toBe("/membership");expect(link.className).toContain("min-h-11");
 });
 it.each([null,"other-owner"])("does not offer another person's private membership center (%s)",(actorId)=>{
   render(<MemberProfileActions actorId={actorId} profileId="owner" initialFollowing={false} initialConnection={null} profile={profile} />);
-  expect(screen.queryByRole("link",{name:"会员中心"})).toBeNull();
+  expect(screen.queryByRole("link",{name:"开通 / 管理 VIP"})).toBeNull();
 });

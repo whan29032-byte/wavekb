@@ -7,6 +7,6 @@ const meta = { title: "Membership/Center", component: MembershipSummary, paramet
 } satisfies Meta<typeof MembershipSummary>;
 export default meta;
 type Story=StoryObj<typeof meta>;
-export const FreeMember:Story={};
+export const NoManualGrant:Story={};
 export const ActiveMember:Story={args:{ snapshot:{ billing_enabled:false, grants:[{id:"preview",plan_key:"vip",title:"VIP 会员",status:"active",starts_at:"2026-10-10T00:00:00Z",ends_at:"2026-11-10T00:00:00Z",revision:1,benefits:{}}],history:[{id:"preview-event",action:"granted",title:"VIP 会员",created_at:"2026-10-10T00:00:00Z",ends_at:"2026-11-10T00:00:00Z"}] }}};
 export const ServiceUnavailable:Story={args:{snapshot:null,error:"会员服务尚未部署，暂时不可使用。"}};

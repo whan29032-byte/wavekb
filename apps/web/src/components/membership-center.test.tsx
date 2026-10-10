@@ -29,11 +29,16 @@ it("clears owner data at logout and never restores a late refresh response",asyn
   expect(screen.queryByRole("region",{name:"免费账户可用服务"})).toBeNull();
   await act(async()=>{finish(snapshot);}); expect(screen.queryByText("测试会员")).toBeNull(); expect(mocks.refresh).toHaveBeenCalledOnce();
 });
-it.each(["active","expired","revoked"] as const)("provides the existing free service routes without misrepresenting them as VIP benefits (%s)",(status)=>{
+it.each(["active","expired","revoked"] as const)("does not add a separate free-account product to VIP status (%s)",(status)=>{
   render(<MembershipSummary snapshot={{...snapshot,grants:[{...snapshot.grants[0],status}]}} onRefresh={()=>{}} />);
-  const destinations={"阅读知识库":"/knowledge","发布社区内容":"/community/idea_sharing/new","使用私人工作台":"/workbench","管理好友":"/friends","查看积分商城":"/rewards"};
-  for (const [name,href] of Object.entries(destinations)) expect(screen.getByRole("link",{name:new RegExp(name)}).getAttribute("href")).toBe(href);
-  expect(screen.getByText(/VIP 授权到期或撤销不会移除/)).toBeDefined();
+  expect(screen.queryByRole("region",{name:"免费账户可用服务"})).toBeNull();
+  expect(screen.queryByText("免费注册会员")).toBeNull();
+  expect(screen.getByText(/公开书籍和社区阅读保持免费/)).toBeDefined();
+});
+it("shows an empty authorization record without inventing a free-membership plan",()=>{
+  render(<MembershipSummary snapshot={{...snapshot,grants:[]}} onRefresh={()=>{}} />);
+  expect(screen.getByText(/暂无管理员授权记录/)).toBeDefined();
+  expect(screen.queryByRole("heading",{name:"免费注册会员"})).toBeNull();
 });
 it("a failed read removes stale membership claims and offers retry",async()=>{
   mocks.mine.mockRejectedValue(new Error("network failed")); render(<MembershipCenter actorId="owner" initial={snapshot} />);

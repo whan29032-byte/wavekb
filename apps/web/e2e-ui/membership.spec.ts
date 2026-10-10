@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const stories = [
-  { id:"membership-center--free-member", heading:"会员中心", expected:"免费注册会员" },
+  { id:"membership-center--no-manual-grant", heading:"会员中心", expected:"暂无管理员授权记录，VIP 权益与购买订单请在上方核对。" },
   { id:"membership-center--active-member", heading:"会员中心", expected:"生效中" },
   { id:"membership-center--service-unavailable", heading:"会员中心", expected:"会员服务尚未部署，暂时不可使用。" },
   { id:"membership-admin-plan--default-disabled", heading:"会员方案管理", expected:"允许管理员手工授予此方案" },
@@ -71,10 +71,36 @@ for (const viewport of [{width:375,height:812},{width:812,height:375},{width:768
   }
 }
 
+for (const viewport of [{ width: 375, height: 812 }, { width: 812, height: 375 }, { width: 1440, height: 1000 }]) {
+  for (const colorScheme of ["light", "dark"] as const) {
+    for (const story of ["own-public-profile", "private-profile", "other-researcher", "guest"]) {
+      test(`personal-center VIP entry ${story} at ${viewport.width}x${viewport.height} ${colorScheme}`, async ({ page }, testInfo) => {
+        const errors: string[] = []; const mutations: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        page.on("request", (request) => { if (request.method() !== "GET" && /supabase|stripe/i.test(request.url())) mutations.push(request.url()); });
+        await page.setViewportSize(viewport); await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+        await page.goto(`/iframe.html?id=member-personal-center--${story}&viewMode=story`);
+        await expect(page.getByRole("heading", { level: 1, name: "个人中心" })).toBeVisible();
+        await expect(page.getByText(/虚拟组件预览/)).toBeVisible();
+        const vip = page.getByRole("link", { name: "开通 / 管理 VIP", exact: true });
+        if (story === "own-public-profile" || story === "private-profile") {
+          await expect(vip).toHaveAttribute("href", "/membership");
+          expect(await vip.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+          await vip.focus(); await expect(vip).toBeFocused();
+        } else await expect(vip).toHaveCount(0);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await expect(page.getByRole("link", { name: "注册免费账户" })).toHaveCount(0);
+        if (viewport.width === 375 && colorScheme === "light" && story === "own-public-profile") await page.screenshot({ path: testInfo.outputPath("personal-center-own-vip-375px.png"), fullPage: true });
+        expect(errors).toEqual([]); expect(mutations).toEqual([]);
+      });
+    }
+  }
+}
+
 const commerceStories = [
   { id: "membership-publicplans--published-payment-closed", heading: "会员方案", expected: "付款尚未开放。已发布的方案可供了解，不能在此完成购买。" },
   { id: "membership-publicplans--service-unavailable", heading: "会员方案", expected: "未核实方案或价格时，不会提供购买入口。" },
-  { id: "membership-purchases--payment-closed", heading: "会员购买与订单", expected: "付款尚未开放，请查看公开方案或继续使用免费账户功能。" },
+  { id: "membership-purchases--payment-closed", heading: "会员购买与订单", expected: "付款尚未开放，可先查看方案和既有订单。" },
   { id: "membership-purchases--test-purchase-preview", heading: "会员购买与订单", expected: "测试模式：不授予正式权益" },
   { id: "membership-purchases--unknown-receipt", heading: "会员购买与订单", expected: "结果仍不确定，原请求已保留。" },
   { id: "membership-purchases--payment-failed", heading: "会员购买与订单", expected: "支付失败，未授权权益" },
@@ -97,8 +123,10 @@ for (const colorScheme of ["light", "dark"] as const) {
       for (const button of await page.getByRole("button").all()) expect(await button.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
       for (const label of await page.locator("form label[for]").all()) { const target = await label.getAttribute("for"); await expect(page.locator(`[id="${target}"]`)).toHaveCount(1); }
       if (story.id.startsWith("membership-publicplans")) {
-        await expect(page.getByRole("link", { name: "注册免费账户" })).toHaveAttribute("href", "/register?next=%2Fmembership");
-        await expect(page.getByRole("link", { name: "已有账户，登录" })).toHaveAttribute("href", "/login?next=%2Fmembership");
+        await expect(page.getByRole("heading", { name: "免费账户", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("region", { name: "免费账户可用服务" })).toHaveCount(0);
+        await expect(page.getByRole("link", { name: "注册免费账户" })).toHaveCount(0);
+        await expect(page.getByRole("link", { name: "登录后前往个人中心" })).toHaveAttribute("href", "/login?next=%2Fmember%2Fprofile");
         await expect(page.getByRole("link", { name: "前往核对并购买" })).toHaveCount(0);
       }
       if (story.id.startsWith("membership-purchases")) {

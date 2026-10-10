@@ -7,6 +7,9 @@ settings:
 overrides:
   brace-expansion@5.0.9: 5.0.12
 
+patchedDependencies:
+  braces@3.0.3: 894b6dae18878038cabe4f5469f8bedb0a78cd2d00aa70948b2b86388a492d38
+
 importers:
 
   .:
@@ -5075,7 +5078,7 @@ snapshots:
     dependencies:
       balanced-match: 4.0.4
 
-  braces@3.0.3:
+  braces@3.0.3(patch_hash=894b6dae18878038cabe4f5469f8bedb0a78cd2d00aa70948b2b86388a492d38):
     dependencies:
       fill-range: 7.1.1
 
@@ -6155,7 +6158,7 @@ snapshots:
 
   micromatch@4.0.8:
     dependencies:
-      braces: 3.0.3
+      braces: 3.0.3(patch_hash=894b6dae18878038cabe4f5469f8bedb0a78cd2d00aa70948b2b86388a492d38)
       picomatch: 2.3.2
 
   min-indent@1.0.1: {}

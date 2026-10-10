@@ -1,17 +1,23 @@
 import { expect, test } from "@playwright/test";
 
-test("guests can discover membership plans and retain their destination while joining", async ({ page }) => {
+test("guests use the original registration flow without separate free membership marketing", async ({ page }) => {
   await page.goto("/");
   const menu = page.getByRole("button", { name: "展开主导航" });
   if (await menu.isVisible()) await menu.click();
-  await page.getByRole("link", { name: "会员方案", exact: true }).filter({ visible: true }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("会员方案");
-  await expect(page.getByRole("heading", { level: 2, name: "免费账户", exact: true })).toBeVisible();
-  const registration = page.getByRole("link", { name: "注册免费账户", exact: true });
-  await expect(registration).toHaveAttribute("href", "/register?next=%2Fmembership");
+  await expect(page.getByRole("link", { name: "会员方案", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "登录", exact: true }).click();
+  await page.getByRole("link", { name: "创建账号", exact: true }).click();
+  await expect(page).toHaveURL(/\/register$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("加入 WaveKB");
+  await expect(page.getByRole("link", { name: "已有账号，返回登录" })).toHaveAttribute("href", "/login");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-  await registration.click();
-  await expect(page).toHaveURL(/\/register\?next=%2Fmembership$/);
+});
+
+test("VIP's private destination survives the original registration and login links", async ({ page }) => {
+  await page.goto("/membership");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmembership$/);
+  await expect(page.getByRole("link", { name: "创建账号", exact: true })).toHaveAttribute("href", "/register?next=%2Fmembership");
+  await page.getByRole("link", { name: "创建账号", exact: true }).click();
   await expect(page.getByRole("link", { name: "已有账号，返回登录" })).toHaveAttribute("href", "/login?next=%2Fmembership");
 });
 

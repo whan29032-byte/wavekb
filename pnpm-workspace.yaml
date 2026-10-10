@@ -27,3 +27,6 @@ onlyBuiltDependencies:
   - esbuild
   - sharp
   - unrs-resolver
+
+patchedDependencies:
+  braces@3.0.3: patches/braces@3.0.3.patch
