@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
 import { safeReturnPath } from "@/lib/auth/forms";
+import { replaceAuthLocation } from "@/lib/auth/return-path";
 
 export function LoginForm() {
   const searchParams = useSearchParams();
@@ -30,7 +31,7 @@ export function LoginForm() {
     const destination = payload.needsUidActivation
       ? `/activate-uid?next=${encodeURIComponent(next)}`
       : next;
-    window.location.replace(destination);
+    replaceAuthLocation(destination);
   }
 
   return (
@@ -41,7 +42,7 @@ export function LoginForm() {
       </Field>
       <Field>
         <Label htmlFor="password">密码</Label>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required minLength={10} aria-describedby={error ? "login-error" : undefined} />
+        <Input id="password" name="password" type="password" autoComplete="current-password" required minLength={1} aria-describedby={error ? "login-error" : undefined} />
       </Field>
       {error ? <FieldMessage id="login-error" role="alert">{error}</FieldMessage> : null}
       <Button type="submit" size="large" disabled={pending}>{pending ? "正在登录" : "登录"}</Button>

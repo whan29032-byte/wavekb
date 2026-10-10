@@ -24,12 +24,18 @@ function threadError(error: unknown): string {
   return "消息没有完成同步，请稍后重试。";
 }
 
-export function MessageThread({ actorId, conversation, initialMessages, initialCustomStickers }: {
+type MessageThreadProps = {
   actorId: string;
   conversation: DirectConversation;
   initialMessages: DirectMessage[];
   initialCustomStickers: ChatSticker[];
-}) {
+};
+
+export function MessageThread(props: MessageThreadProps) {
+  return <MessageThreadSession key={`${props.actorId}:${props.conversation.conversation_id}`} {...props} />;
+}
+
+function MessageThreadSession({ actorId, conversation, initialMessages, initialCustomStickers }: MessageThreadProps) {
   const identities = useChatIdentities([conversation.other_id]);
   const profile = { ...conversation, ...identities[conversation.other_id] };
   const [messages, setMessages] = useState(initialMessages);
@@ -39,26 +45,60 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [draggingImage, setDraggingImage] = useState(false);
+  const [sessionBlocked, setSessionBlocked] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const previousNewestId = useRef(initialMessages.at(-1)?.id ?? 0);
   const refreshing = useRef(false);
   const nearBottom = useRef(true);
   const active = useRef(true);
+  const blocked = useRef(false);
+  const revision = useRef(0);
+
+  function revokeSession() {
+    if (!active.current || blocked.current) return;
+    blocked.current = true;
+    revision.current += 1;
+    setMessages([]);
+    setCustomStickers([]);
+    setBody("");
+    setStagedSticker(null);
+    setPending(false);
+    previousNewestId.current = 0;
+    setSessionBlocked(true);
+  }
+
+  function isCurrent(version: number) {
+    return active.current && !blocked.current && revision.current === version;
+  }
+
+  async function verifiedClient() {
+    const version = revision.current;
+    if (!isCurrent(version)) throw new Error("auth changed");
+    const client = createClient();
+    const result = await client.auth.getUser();
+    if (result.error || result.data.user?.id !== actorId) {
+      revokeSession();
+      throw new Error("auth changed");
+    }
+    if (!isCurrent(version)) throw new Error("auth changed");
+    return { client, version };
+  }
 
   async function refresh(markRead = true) {
-    if (refreshing.current) return;
+    if (refreshing.current || blocked.current || !active.current) return;
     refreshing.current = true;
-    const client = createClient();
     try {
+      const { client, version } = await verifiedClient();
       const afterId = previousNewestId.current;
       let result = afterId > 0
         ? await client.rpc("list_conversation_messages_after", { p_conversation: conversation.conversation_id, p_after_id: afterId })
         : await client.rpc("list_conversation_messages", { p_conversation: conversation.conversation_id });
+      if (!isCurrent(version)) return;
       if (result.error && afterId > 0) {
         result = await client.rpc("list_conversation_messages", { p_conversation: conversation.conversation_id });
       }
       if (result.error) throw result.error;
-      if (!active.current) return;
+      if (!isCurrent(version)) return;
       const rows = (result.data ?? []) as DirectMessage[];
       if (rows.length && afterId > 0 && rows.every((row) => row.id > afterId)) {
         setMessages((current) => [...current, ...rows.filter((row) => !current.some((item) => item.id === row.id))]);
@@ -78,33 +118,50 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
 
   useEffect(() => {
     active.current = true;
-    const unregisterOpenConversation = registerOpenConversation(conversation.conversation_id);
+    blocked.current = false;
+    const client = createClient();
+    let authEventReceived = false;
+    const subscription = client.auth.onAuthStateChange((_event, session) => {
+      authEventReceived = true;
+      if (session?.user.id !== actorId) revokeSession();
+    });
+    void client.auth.getSession().then((result) => {
+      if (!authEventReceived && (!result.data.session || result.data.session.user.id !== actorId)) revokeSession();
+    }).catch(() => revokeSession());
     const newest = initialMessages.at(-1);
     if (newest) {
-      queueMicrotask(() => { if (active.current && document.visibilityState === "visible") void createClient().rpc("mark_conversation_read_v1", {
-        p_conversation: conversation.conversation_id,
-        p_through_id: newest.id,
-      }); });
+      queueMicrotask(() => {
+        if (document.visibilityState !== "visible") return;
+        void verifiedClient().then(({ client, version }) => {
+          if (isCurrent(version)) return client.rpc("mark_conversation_read_v1", { p_conversation: conversation.conversation_id, p_through_id: newest.id });
+        }).catch(() => undefined);
+      });
     }
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh().catch(() => undefined);
     }, 7000);
     const onVisible = () => { if (document.visibilityState === "visible") void refresh().catch(() => undefined); };
     document.addEventListener("visibilitychange", onVisible);
-    return () => { active.current = false; unregisterOpenConversation(); window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
+    return () => { active.current = false; revision.current += 1; subscription.data.subscription.unsubscribe(); window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
     // The conversation id is immutable for the lifetime of this route.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.conversation_id]);
+
+  useEffect(() => {
+    if (!sessionBlocked) return registerOpenConversation(conversation.conversation_id);
+  }, [conversation.conversation_id, sessionBlocked]);
 
   useEffect(() => { if (nearBottom.current) endRef.current?.scrollIntoView({ block: "end" }); }, [messages]);
 
   async function send(value: string, allowCurrentUpload = false) {
     const normalized = (stagedSticker ? customStickerToken(stagedSticker) : value).trim();
-    if (!normalized || normalized.length > 4000 || (pending && !allowCurrentUpload)) return;
+    if (blocked.current || !active.current || !normalized || normalized.length > 4000 || (pending && !allowCurrentUpload)) return;
     setPending(true);
     setError("");
     try {
-      const result = await createClient().rpc("send_direct_message", { p_conversation: conversation.conversation_id, p_body: normalized });
+      const { client, version } = await verifiedClient();
+      const result = await client.rpc("send_direct_message", { p_conversation: conversation.conversation_id, p_body: normalized });
+      if (!isCurrent(version)) return;
       if (result.error) throw result.error;
       playSocialTone(760);
       setBody("");
@@ -113,7 +170,7 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
       await refresh(false);
       window.requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
     } catch (cause) {
-      setError(threadError(cause));
+      if (active.current && !blocked.current) setError(threadError(cause));
     } finally {
       setPending(false);
     }
@@ -125,16 +182,18 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   }
 
   async function addImage(file: File) {
-    if (pending) return;
+    if (pending || blocked.current || !active.current) return;
     setPending(true);
     setError("");
     try {
-      const sticker = await uploadChatSticker(createClient(), actorId, file);
+      const { client, version } = await verifiedClient();
+      const sticker = await uploadChatSticker(client, actorId, file);
+      if (!isCurrent(version)) return;
       setCustomStickers((current) => [sticker, ...current]);
       setStagedSticker(sticker);
       setPending(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "图片上传失败，请稍后重试。");
+      if (active.current && !blocked.current) setError(cause instanceof Error ? cause.message : "图片上传失败，请稍后重试。");
       setPending(false);
     }
   }
@@ -163,18 +222,23 @@ export function MessageThread({ actorId, conversation, initialMessages, initialC
   }
 
   async function removeSticker(sticker: ChatSticker) {
+    if (blocked.current || !active.current || pending) return;
     if (!window.confirm(`从我的表情中移除“${sticker.label}”？`)) return;
     setPending(true);
     setError("");
     try {
-      await deleteChatSticker(createClient(), sticker);
+      const { client, version } = await verifiedClient();
+      await deleteChatSticker(client, sticker);
+      if (!isCurrent(version)) return;
       setCustomStickers((current) => current.filter((item) => item.id !== sticker.id));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "表情移除失败，请稍后重试。");
+      if (active.current && !blocked.current) setError(cause instanceof Error ? cause.message : "表情移除失败，请稍后重试。");
     } finally {
       setPending(false);
     }
   }
+
+  if (sessionBlocked) return <section className="grid gap-3 rounded-xl border bg-surface p-5"><FieldMessage role="alert">登录账号已变化，此会话内容已清空。请重新打开消息页面后继续。</FieldMessage><Link href="/messages" className="text-sm text-primary underline">重新打开消息</Link></section>;
 
   return (
     <section className="grid min-h-[65dvh] grid-rows-[auto_1fr_auto] overflow-hidden rounded-xl border bg-surface" aria-labelledby="conversation-title">

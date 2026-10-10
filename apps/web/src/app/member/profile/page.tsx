@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ProfileEditor } from "@/components/profile-editor";
 import { YoutubeConnectionPanel } from "@/components/youtube-connection";
+import { MembershipPersonalCenterEntry } from "@/components/membership-personal-center-entry";
 import { requireActiveMember } from "@/lib/auth/dal";
 import { getMyNameplates, getMyProfile } from "@/lib/member/server-repository";
 
@@ -13,10 +14,11 @@ export default async function EditMemberProfilePage() {
     getMyProfile(actor.id),
     getMyNameplates().catch(() => []),
   ]);
-  if (!profile) notFound();
+  if (!profile || profile.id !== actor.id) notFound();
   return (
     <main className="mx-auto grid max-w-5xl gap-8 px-4 py-10 md:px-6 md:py-14">
       <header className="grid gap-2"><h1 className="text-3xl font-semibold tracking-[-0.035em] md:text-4xl">编辑个人资料</h1><p className="max-w-[65ch] text-sm leading-6 text-muted-foreground">设置公开身份、研究偏好、头像和个人页背景。全部数据继续存放在现有 Supabase 资料表和存储桶中。</p></header>
+      <MembershipPersonalCenterEntry />
       <ProfileEditor profile={profile} initialNameplates={nameplates} />
       <YoutubeConnectionPanel actorId={actor.id} />
     </main>

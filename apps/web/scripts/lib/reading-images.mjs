@@ -6,7 +6,7 @@ const sha256Pattern = /^[a-f0-9]{64}$/;
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const assetFields = ["primary_figures", "figures", "supplement_figures", "source_images", "supplement_source_images"];
 
-export const readingImageEncoder = Object.freeze({ sharp: "0.35.3", format: "webp", lossless: true, effort: 6 });
+export const readingImageEncoder = Object.freeze({ sharp: "0.35.5", format: "webp", lossless: true, effort: 6 });
 export const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 // This is a presentation-only projection. Source paths, metadata and files are

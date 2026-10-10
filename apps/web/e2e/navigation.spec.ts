@@ -1,5 +1,32 @@
 import { expect, test } from "@playwright/test";
 
+test("guests use the original registration flow without separate free membership marketing", async ({ page }) => {
+  await page.goto("/");
+  const menu = page.getByRole("button", { name: "展开主导航" });
+  if (await menu.isVisible()) await menu.click();
+  await expect(page.getByRole("link", { name: "会员方案", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "登录", exact: true }).click();
+  await page.getByRole("link", { name: "创建账号", exact: true }).click();
+  await expect(page).toHaveURL(/\/register$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("加入 WaveKB");
+  await expect(page.getByRole("link", { name: "已有账号，返回登录" })).toHaveAttribute("href", "/login");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test("VIP's private destination survives the original registration and login links", async ({ page }) => {
+  await page.goto("/membership");
+  await expect(page).toHaveURL(/\/login\?next=%2Fmembership$/);
+  await expect(page.getByRole("link", { name: "创建账号", exact: true })).toHaveAttribute("href", "/register?next=%2Fmembership");
+  await page.getByRole("link", { name: "创建账号", exact: true }).click();
+  await expect(page.getByRole("link", { name: "已有账号，返回登录" })).toHaveAttribute("href", "/login?next=%2Fmembership");
+});
+
+test("membership AI status requires the current authenticated account", async ({ request }) => {
+  const response = await request.get("/api/ai/user/membership-ai");
+  expect(response.status()).toBe(401);
+  await expect(response.json()).resolves.toEqual({ error: "authentication_required" });
+});
+
 test("home exposes the knowledge and community paths", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText("把波浪判断写清楚，也留下证据");
@@ -95,40 +122,21 @@ test("UID activation API rejects anonymous requests", async ({ request }) => {
   await expect(response.json()).resolves.toEqual({ error: "登录状态已失效，请重新登录。" });
 });
 
-test("friends and messages remain private", async ({ page }) => {
-  await page.goto("/member/profile");
-  await expect(page).toHaveURL(/\/login\?next=%2Fmember%2Fprofile/);
-  await page.goto("/friends");
-  await expect(page).toHaveURL(/\/login\?next=%2Ffriends/);
-  await page.goto("/messages");
-  await expect(page).toHaveURL(/\/login\?next=%2Fmessages/);
-  await page.goto("/workbench");
-  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench/);
-  await page.goto("/workbench/entries/new");
-  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fentries%2Fnew/);
-  await page.goto("/workbench/analysis/new?step=0");
-  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fanalysis%2Fnew%3Fstep%3D0/);
-  await page.goto("/workbench/ai");
-  await expect(page).toHaveURL(/\/login\?next=%2Fworkbench%2Fai/);
-  await page.goto("/tutoring");
-  await expect(page).toHaveURL(/\/login\?next=%2Ftutoring/);
-  await page.goto("/mentor/manage");
-  await expect(page).toHaveURL(/\/login\?next=%2Fmentor%2Fmanage/);
-  await page.goto("/tutoring/not-a-thread");
-  await expect(page).toHaveURL(/\/login\?next=%2Ftutoring%2Fnot-a-thread/);
-  await page.goto("/rewards");
-  await expect(page).toHaveURL(/\/login\?next=%2Frewards/);
-  await page.goto("/admin/users");
-  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fusers/);
-  await page.goto("/admin/rewards");
-  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Frewards/);
-  await page.goto("/admin/directory");
-  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fdirectory/);
-  await page.goto("/admin/mentors");
-  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fmentors/);
-  await page.goto("/admin/ai");
-  await expect(page).toHaveURL(/\/login\?next=%2Fadmin%2Fai/);
-});
+// Each route has its own budget and failure evidence; do not hide a late failure
+// behind sixteen sequential navigations sharing one test timeout.
+for (const route of [
+  "/member/profile", "/friends", "/messages", "/workbench",
+  "/workbench/entries/new", "/workbench/analysis/new?step=0", "/workbench/ai",
+  "/tutoring", "/mentor/manage", "/tutoring/not-a-thread", "/rewards",
+  "/admin/users", "/admin/rewards", "/admin/directory", "/admin/mentors", "/admin/ai",
+  "/membership", "/admin/memberships",
+]) {
+  test(`anonymous access to ${route} remains private`, async ({ page }) => {
+    await page.goto(route);
+    await expect(page).toHaveURL(new RegExp(`/login\\?next=${encodeURIComponent(route)}$`));
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("登录 WaveKB");
+  });
+}
 
 test("admin API rejects anonymous requests before contacting the gateway", async ({ request }) => {
   const response = await request.get("/api/admin/users");

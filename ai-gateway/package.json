@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18"
   },
   "scripts": {
     "test": "node --test test/*.test.ts",
@@ -12,6 +12,7 @@
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts",
     "worker": "node src/worker-main.ts",
+    "membership:verify": "node src/membership-wallet-worker.ts",
     "trading:sync": "node src/trading-worker.ts",
     "mentor:notify": "node src/mentor-notification-worker.ts",
     "youtube:sync": "node src/youtube-sync-worker.ts"

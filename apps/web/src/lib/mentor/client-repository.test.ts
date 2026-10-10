@@ -1,9 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import { cancelUnsubmittedMentorOrder, isDefiniteMentorCheckoutFailure, resumeManualMentorPayment, submitManualMentorPayment } from "./client-repository";
+import { cancelUnsubmittedMentorOrder, getMyMentorOfferQuote, isDefiniteMentorCheckoutFailure, resumeManualMentorPayment, submitManualMentorPayment } from "./client-repository";
 
 const input = { offerId: "offer-id", paymentMethodId: "method-id", buyerNote: "  转账编号 94217  ", requestId: "11111111-1111-4111-8111-111111111111", expectedQuote: { price_cents: 10000, currency: "USDT", duration_days: 30, weekly_questions: 3 } };
 
 describe("atomic manual mentor payment", () => {
+  it("uses the authenticated canonical discounted quote and rechecks identity after receiving it", async () => {
+    const quote = { ...input.expectedQuote, price_cents: 9000, base_price_cents: 10000, discount_bps: 1000 };
+    const rpc = vi.fn(async () => ({ data: quote, error: null }));
+    const getUser = vi.fn().mockResolvedValueOnce({ data: { user: { id: "actor" } }, error: null }).mockResolvedValueOnce({ data: { user: { id: "other" } }, error: null });
+    await expect(getMyMentorOfferQuote({ rpc, auth: { getUser } } as never, "actor", "offer")).rejects.toThrow("authentication_required");
+    expect(getUser).toHaveBeenCalledTimes(2);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("get_my_mentor_offer_quote", { p_actor_id: "actor", p_offer_id: "offer" });
+  });
+  it("rejects malformed or unverified quote data without falling back to the offer's base price", async () => {
+    const client = { auth: { getUser: async () => ({ data: { user: { id: "actor" } }, error: null }) }, rpc: async () => ({ data: { ...input.expectedQuote, price_cents: 0 }, error: null }) };
+    await expect(getMyMentorOfferQuote(client as never, "actor", "offer")).rejects.toThrow("offer_quote_unavailable");
+  });
   it("submits the order and declaration in one RPC with a caller-owned request ID", async () => {
     const rpc = vi.fn(async () => ({ data: { order_id: "order-id", claim_id: "claim-id" }, error: null }));
     expect(await submitManualMentorPayment({ rpc } as never, input)).toEqual({ orderId: "order-id", claimId: "claim-id" });

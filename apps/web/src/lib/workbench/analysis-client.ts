@@ -18,8 +18,8 @@ export function createAiRunRequest(step: number, scope: KnowledgeScopeValue, cli
 
 type AiRunFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
-export async function submitAiRun(url: string, step: number, scope: KnowledgeScopeValue, fetcher: AiRunFetcher = fetch) {
-  const payload = createAiRunRequest(step, scope, crypto.randomUUID());
+export async function submitAiRun(url: string, step: number, scope: KnowledgeScopeValue, fetcher: AiRunFetcher = fetch, options?: { mode: "byok" | "managed"; clientRequestId?: string }) {
+  const payload = { ...createAiRunRequest(step, scope, options?.clientRequestId ?? crypto.randomUUID()), ...(options?.mode === "managed" ? { execution_mode: "managed" } : {}) };
   const request = () => fetcher(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
   try {
     return await request();

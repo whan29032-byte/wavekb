@@ -9,6 +9,8 @@ import type { MentorOffer, MentorPaymentMethod, MentorThread as Thread } from "@
 import { installBrowserStorage } from "@/test/browser-storage";
 
 const boundary = vi.hoisted(() => ({ client: {} as Record<string, unknown>, router: { refresh: vi.fn() } }));
+const quoteBoundary = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock("@/lib/mentor/client-repository", async (original) => ({ ...await original<typeof import("@/lib/mentor/client-repository")>(), getMyMentorOfferQuote: quoteBoundary.read }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => boundary.client }));
 vi.mock("next/navigation", () => ({ useRouter: () => boundary.router }));
 vi.mock("@/lib/auth/dal", () => ({ requireActiveMember: async () => ({ id: "student" }), getCurrentUser: async () => ({ id: "student" }) }));
@@ -36,6 +38,8 @@ beforeEach(() => {
   installBrowserStorage(); orders = []; authenticatedBuyer = "student";
   claims = []; readError = false; writes = []; messages = []; readCount = 0;
   boundary.router.refresh.mockReset();
+  quoteBoundary.read.mockReset();
+  quoteBoundary.read.mockResolvedValue({ price_cents: 10000, base_price_cents: 10000, discount_bps: 0, currency: "USDT", duration_days: 30, weekly_questions: 3 });
   boundary.client = {
     auth: { getUser: async () => ({ data: { user: { id: authenticatedBuyer } }, error: null }) },
     from: (table: string) => {
@@ -69,6 +73,36 @@ function checkout(paymentMethod = method) {
 }
 
 describe("mentor payment reliability", () => {
+  it("shows and freezes the authenticated discounted quote, not the offer base amount", async () => {
+    quoteBoundary.read.mockResolvedValue({ price_cents: 9000, base_price_cents: 10000, discount_bps: 1000, currency: "USDT", duration_days: 30, weekly_questions: 3 });
+    const rpc = vi.fn().mockResolvedValue({ data: { order_id: "order", claim_id: "claim" }, error: null });
+    boundary.client.rpc = rpc;
+    checkout();
+    expect(await screen.findByText(/有效 VIP 优惠 10%/)).toBeDefined();
+    const button = await screen.findByRole("button", { name: "我已付款，通知导师" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(rpc).toHaveBeenCalled());
+    expect(rpc.mock.calls[0]).toEqual(["submit_manual_mentor_payment", expect.objectContaining({ p_expected_quote: { price_cents: 9000, currency: "USDT", duration_days: 30, weekly_questions: 3 } })]);
+  });
+  it("blocks payment when the canonical quote fails rather than charging the visible base price", async () => {
+    quoteBoundary.read.mockRejectedValue(new Error("offer_quote_unavailable"));
+    checkout();
+    await waitFor(() => expect(quoteBoundary.read).toHaveBeenCalled());
+    const button = await screen.findByRole("button", { name: "我已付款，通知导师" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button); expect(writes).toEqual([]);
+  });
+  it("invalidates a verified quote immediately on auth owner change and disables payment", async () => {
+    let listener: ((event: string, session: { user: { id: string } } | null) => void) | undefined;
+    boundary.client.auth = { getUser: async () => ({ data: { user: { id: authenticatedBuyer } }, error: null }), onAuthStateChange: (callback: typeof listener) => { listener = callback; return { data: { subscription: { unsubscribe: vi.fn() } } }; } };
+    checkout();
+    const button = await screen.findByRole("button", { name: "我已付款，通知导师" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { authenticatedBuyer = "other"; listener?.("SIGNED_IN", { user: { id: "other" } }); });
+    expect((button as HTMLButtonElement).disabled).toBe(true); fireEvent.click(button); expect(writes).toEqual([]);
+    expect(screen.queryByText(/本次应付/)).toBeNull();
+  });
   it("shows only unresolved mentor-detail payment state without order identifiers", async () => {
     claims = [
       { ...claim, id: "submitted-claim", order_id: "submitted-order" },
@@ -153,7 +187,7 @@ describe("mentor payment reliability", () => {
     checkout({ ...method, network: "TRC: T111111111111111111111111111111111" });
     const button = await screen.findByRole("button", { name: /复制收款/ });
     fireEvent.click(button);
-    expect(copy).toHaveBeenCalledWith("123456789");
+    await waitFor(() => expect(copy).toHaveBeenCalledWith("123456789"));
     expect((screen.getByRole("button", { name: "我已付款，通知导师" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByText(/不作为支付路由/)).toBeDefined();
     expect(writes).toEqual([]);

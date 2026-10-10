@@ -53,7 +53,7 @@ function constantTimeEqual(left: string, right: string) {
 
 async function verify(rawBody: string, header: string) {
   const {timestamp, signatures} = parseStripeSignature(header);
-  if (!timestamp || !signatures.length) return false;
+  if (!/^\d+$/.test(timestamp) || !signatures.length || !Number.isFinite(Number(timestamp))) return false;
   if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
   const key = await crypto.subtle.importKey(
     "raw",
@@ -90,58 +90,32 @@ Deno.serve(async request => {
     const orderId = String(session.metadata?.order_id || session.client_reference_id || "");
     if (!orderId) return json({error: "missing_order_id"}, 400);
 
-    const orders = await rest(
-      `mentor_orders?id=eq.${encodeURIComponent(orderId)}&select=id,amount_cents,currency,status`
-    );
-    const order = orders?.[0];
-    if (!order) return json({error: "order_not_found"}, 404);
-    if (
-      event.type !== "checkout.session.expired"
-      && (
-        Number(session.amount_total) !== Number(order.amount_cents)
-        || String(session.currency || "").toUpperCase() !== String(order.currency).toUpperCase()
-      )
-    ) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)
+      || !/^evt_[A-Za-z0-9_]+$/.test(String(event.id || ""))
+      || !/^cs_[A-Za-z0-9_]+$/.test(String(session.id || ""))) {
+      return json({error: "payment_event_invalid"}, 400);
+    }
+    if (event.type !== "checkout.session.expired"
+      && (!Number.isSafeInteger(session.amount_total) || session.amount_total < 0)) {
       return json({error: "payment_amount_mismatch"}, 409);
     }
-
-    const eventResult = await fetch(
-      `${env("SUPABASE_URL")}/rest/v1/mentor_payment_events?on_conflict=event_id`,
-      {
-        method: "POST",
-        headers: {
-          apikey: env("SUPABASE_SERVICE_ROLE_KEY"),
-          authorization: `Bearer ${env("SUPABASE_SERVICE_ROLE_KEY")}`,
-          "content-type": "application/json",
-          prefer: "resolution=ignore-duplicates,return=representation"
-        },
-        body: JSON.stringify({
-          event_id: event.id,
-          provider: "stripe",
-          event_type: event.type,
-          order_id: order.id
-        })
-      }
-    );
-    const insertedEvents = await eventResult.json().catch(() => []);
-    if (!eventResult.ok) throw new Error("payment_event_store_failed");
-    const duplicate = !insertedEvents.length;
-
-    const paid = event.type !== "checkout.session.expired";
-    const orderFilter = paid ? "" : "&status=neq.paid";
-    await rest(`mentor_orders?id=eq.${encodeURIComponent(order.id)}${orderFilter}`, {
-      method: "PATCH",
-      headers: {prefer: "return=minimal"},
+    // Event persistence, duplicate handling, route/amount checks and the rights
+    // transition share one database transaction. An unpaid completed Session
+    // is recorded without granting access; async_payment_succeeded can follow.
+    const result = await rest("rpc/apply_verified_mentor_payment_event", {
+      method: "POST",
       body: JSON.stringify({
-        status: paid ? "paid" : "cancelled",
-        payment_provider: "stripe",
-        provider_order_id: session.id || null,
-        paid_at: paid ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString()
+        p_event_id: event.id, p_event_type: event.type, p_order_id: orderId,
+        p_provider_order_id: session.id, p_amount_cents: session.amount_total ?? null,
+        p_currency: String(session.currency || ""), p_payment_status: String(session.payment_status || "")
       })
     });
-    return json({received: true, duplicate});
+    return json({received: true, duplicate: result.duplicate, applied: result.applied});
   } catch (error) {
-    return json({error: String(error?.message || error)}, 500);
+    const code = String(error?.message || error);
+    if (code === "order_not_found") return json({error: code}, 404);
+    if (["payment_amount_mismatch", "order_payment_route_invalid", "payment_event_conflict"].includes(code)) return json({error: code}, 409);
+    if (code === "payment_event_invalid") return json({error: code}, 400);
+    return json({error: "payment_processing_failed"}, 500);
   }
 });

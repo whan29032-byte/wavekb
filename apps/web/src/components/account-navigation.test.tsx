@@ -52,6 +52,27 @@ it("preserves the anonymous login link's default prefetch policy outside reading
   expect(loginCalls.length).toBeGreaterThan(0);
   expect(loginCalls.every(([props]) => props.prefetch === undefined)).toBe(true);
 });
+it("keeps the original sign-in navigation without a separate membership product entry", async () => {
+  mocks.session.mockResolvedValue({ data: { session: null } });
+  render(<AccountNavigation />);
+  expect((await screen.findByRole("link", { name: "登录" })).getAttribute("href")).toBe("/login");
+  expect(screen.queryByRole("link", { name: /会员/ })).toBeNull();
+});
+
+it("uses the owner's personal center on desktop and mobile, without direct VIP top-level links", async () => {
+  mocks.read.mockResolvedValue({ data: [{ id: "owner", public_uid: 12345, nameplate_style: "classic" }], error: null });
+  render(<AccountNavigation />);
+  await waitFor(() => expect(screen.getAllByRole("link", { name: /个人中心/ }).every((link) => link.getAttribute("href") === "/member/12345")).toBe(true));
+  expect(screen.getAllByRole("link", { name: /个人中心/ })).toHaveLength(2);
+  expect(screen.queryByRole("link", { name: /会员|VIP/ })).toBeNull();
+});
+
+it("keeps a private personal-center fallback when the current profile is unavailable", async () => {
+  mocks.read.mockRejectedValue(new Error("profile unavailable"));
+  render(<AccountNavigation />);
+  await waitFor(() => expect(screen.getAllByRole("link", { name: "个人中心" })).toHaveLength(2));
+  expect(screen.getAllByRole("link", { name: "个人中心" }).every((link) => link.getAttribute("href") === "/member/profile")).toBe(true);
+});
 
 it("preserves authenticated personal links' default prefetch policy outside reading", async () => {
   mocks.read.mockResolvedValue({ data: [{ id: "owner", public_uid: 12345, nameplate_style: "blackgold" }], error: null });

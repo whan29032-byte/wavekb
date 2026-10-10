@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Nameplate } from "@/components/nameplate";
 import { subscribeIdentityChanges } from "@/lib/member/identity-events";
 import { loadPublicIdentities } from "@/lib/member/public-identities";
+import { personalCenterPath } from "@/lib/member/personal-center-path";
 
 export function AccountNavigation() {
   const router = useRouter();
@@ -105,12 +106,12 @@ export function AccountNavigation() {
       <details className="group relative lg:hidden">
         <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="账户菜单"><UserCircle aria-hidden size={20} /></summary>
         <nav className="absolute right-0 top-12 z-40 grid w-48 gap-1 rounded-xl border bg-surface p-2 shadow-xl" aria-label="账户导航">
-          {profile?.public_uid ? <Link href={`/member/${profile.public_uid}`} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人空间 <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link> : null}
+          <Link href={personalCenterPath(user.id, profile)} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人中心 {profile?.public_uid ? <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /> : null}</Link>
           <button type="button" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold text-destructive hover:bg-muted disabled:opacity-55" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}</button>
         </nav>
       </details>
       <span className="hidden items-center gap-1 lg:flex">
-        {profile?.public_uid ? <Button asChild variant="ghost" size="small"><Link href={`/member/${profile.public_uid}`}><UserCircle aria-hidden size={18} /><Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /></Link></Button> : null}
+        <Button asChild variant="ghost" size="small"><Link href={personalCenterPath(user.id, profile)}><UserCircle aria-hidden size={18} /><span>个人中心</span>{profile?.public_uid ? <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /> : null}</Link></Button>
         <Button type="button" variant="ghost" size="small" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} /><span>{pending ? "正在退出" : "退出登录"}</span></Button>
       </span>
       {error ? <span id="sign-out-error" role="alert" className="sr-only">{error}</span> : null}

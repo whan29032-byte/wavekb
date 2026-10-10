@@ -50,7 +50,7 @@ test("the backend archive starts outside checkout with all four books and no PDF
   const smoke = spawnSync(process.execPath, [
     "--input-type=module",
     "-e",
-    'import { buildKnowledgeIndex } from "./src/knowledge/index.ts"; const index = buildKnowledgeIndex(); if (index.books.length !== 4 || index.books[0].bookId !== "elliott-wave-principle-eleventh-edition") process.exit(1);',
+    'import { buildKnowledgeIndex } from "./src/knowledge/index.ts"; import { MembershipWalletWorker } from "./src/membership-wallet-worker.ts"; const index = buildKnowledgeIndex(); if (index.books.length !== 4 || index.books[0].bookId !== "elliott-wave-principle-eleventh-edition") process.exit(1); await new MembershipWalletWorker({database:{request:async()=>{throw new Error("disabled must not claim")}},env:{},workerId:"package-smoke"}).run();',
   ], { cwd: extracted, encoding: "utf8" });
   assert.equal(smoke.status, 0, smoke.stderr);
 });

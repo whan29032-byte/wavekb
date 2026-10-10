@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button, FieldMessage } from "@wavekb/ui";
 import { friendlyAuthError, safeReturnPath } from "@/lib/auth/forms";
+import { replaceAuthLocation } from "@/lib/auth/return-path";
 import type { UidSelectionState } from "@/lib/auth/uid-selection";
 
 async function uidRequest(action: string, body?: object) {
@@ -43,7 +44,7 @@ export function UidActivationForm() {
     try {
       const state = await resolveSelection();
       if (state.publicUid || state.status === "completed") {
-        window.location.replace(destination);
+        replaceAuthLocation(destination);
         return;
       }
       setSelection(state);
@@ -60,7 +61,7 @@ export function UidActivationForm() {
     void resolveSelection().then((state) => {
       if (!active) return;
       if (state.publicUid || state.status === "completed") {
-        window.location.replace(destination);
+        replaceAuthLocation(destination);
         return;
       }
       setSelection(state);
@@ -98,7 +99,7 @@ export function UidActivationForm() {
       await uidRequest("select", { uid: chosenUid });
       const completed = await uidRequest("complete");
       const publicUid = completed.publicUid ?? chosenUid;
-      window.location.replace(searchParams.has("next") ? destination : `/member/${publicUid}`);
+      replaceAuthLocation(searchParams.has("next") ? destination : `/member/${publicUid}`);
     } catch (confirmError) {
       setError(friendlyAuthError(confirmError));
       setPending(false);

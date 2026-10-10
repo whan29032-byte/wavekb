@@ -1,0 +1,170 @@
+diff --git a/lib/compile.js b/lib/compile.js
+index dce69beb90ece5c3b0ca234a949418f9f34eedbc..a53a9e5b6a59c4d171dec56a0bebeb5b0521013c 100644
+--- a/lib/compile.js
++++ b/lib/compile.js	
+@@ -2,8 +2,10 @@
+ 
+ const fill = require('fill-range');
+ const utils = require('./utils');
++const { assertAst } = require('./depth');
+ 
+ const compile = (ast, options = {}) => {
++  assertAst(ast);
+   const walk = (node, parent = {}) => {
+     const invalidBlock = utils.isInvalidBrace(parent);
+     const invalidNode = node.invalid === true && options.escapeInvalid === true;
+diff --git a/lib/depth.js b/lib/depth.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..651f5704481ea78b9df874c13093a4778647e85f
+--- /dev/null
++++ b/lib/depth.js	
+@@ -0,0 +1,59 @@
++'use strict';
++
++// Local backport for GHSA-vfj7-8cjw-p6xm. Keep recursive walkers well below
++// the JavaScript stack limit, including when callers pass an AST directly.
++const MAX_DEPTH = 100;
++const MAX_NODES = 20000;
++
++const assertDepth = depth => {
++  if (depth > MAX_DEPTH) {
++    const error = new SyntaxError(`Brace pattern nesting exceeds maximum depth (${MAX_DEPTH})`);
++    error.code = 'BRACES_MAX_DEPTH';
++    throw error;
++  }
++};
++
++const assertAst = ast => {
++  const active = new WeakSet();
++  const stack = [{ node: ast, depth: 0, leave: false }];
++  let count = 0;
++
++  // This validation is deliberately iterative: validating a hostile AST must
++  // not reproduce the recursive stack exhaustion it is intended to prevent.
++  while (stack.length > 0) {
++    const frame = stack.pop();
++    const node = frame.node;
++    if (!node || typeof node !== 'object') {
++      throw new TypeError('Expected an AST node');
++    }
++    if (frame.leave) {
++      active.delete(node);
++      continue;
++    }
++    if (++count > MAX_NODES) {
++      const error = new SyntaxError(`Brace AST exceeds maximum nodes (${MAX_NODES})`);
++      error.code = 'BRACES_MAX_NODES';
++      throw error;
++    }
++    if (active.has(node)) {
++      const error = new SyntaxError('Brace AST contains a cycle');
++      error.code = 'BRACES_INVALID_AST';
++      throw error;
++    }
++    if (Array.isArray(node.nodes)) {
++      assertDepth(frame.depth);
++      if (node.nodes.length + count > MAX_NODES) {
++        const error = new SyntaxError(`Brace AST exceeds maximum nodes (${MAX_NODES})`);
++        error.code = 'BRACES_MAX_NODES';
++        throw error;
++      }
++      active.add(node);
++      stack.push({ node, depth: frame.depth, leave: true });
++      for (let index = node.nodes.length - 1; index >= 0; index--) {
++        stack.push({ node: node.nodes[index], depth: frame.depth + 1, leave: false });
++      }
++    }
++  }
++};
++
++module.exports = { assertDepth, assertAst };
+diff --git a/lib/expand.js b/lib/expand.js
+index 35b2c41d6afdb8f0197959e26079f266e48370d3..b21e443a916d0a5bf4774bbd853ccc4addce81da 100644
+--- a/lib/expand.js
++++ b/lib/expand.js	
+@@ -3,6 +3,7 @@
+ const fill = require('fill-range');
+ const stringify = require('./stringify');
+ const utils = require('./utils');
++const { assertAst, assertDepth } = require('./depth');
+ 
+ const append = (queue = '', stash = '', enclose = false) => {
+   const result = [];
+@@ -31,6 +32,7 @@ const append = (queue = '', stash = '', enclose = false) => {
+ };
+ 
+ const expand = (ast, options = {}) => {
++  assertAst(ast);
+   const rangeLimit = options.rangeLimit === undefined ? 1000 : options.rangeLimit;
+ 
+   const walk = (node, parent = {}) => {
+@@ -38,8 +40,10 @@ const expand = (ast, options = {}) => {
+ 
+     let p = parent;
+     let q = parent.queue;
++    let parentDepth = 0;
+ 
+     while (p.type !== 'brace' && p.type !== 'root' && p.parent) {
++      assertDepth(++parentDepth);
+       p = p.parent;
+       q = p.queue;
+     }
+@@ -74,8 +78,10 @@ const expand = (ast, options = {}) => {
+     const enclose = utils.encloseBrace(node);
+     let queue = node.queue;
+     let block = node;
++    let blockDepth = 0;
+ 
+     while (block.type !== 'brace' && block.type !== 'root' && block.parent) {
++      assertDepth(++blockDepth);
+       block = block.parent;
+       queue = block.queue;
+     }
+diff --git a/lib/parse.js b/lib/parse.js
+index 3a6988e629f52aee6609dc5ec290a5e9ff47cecb..5e7f1ac8508fae5626cb98659d77c0dac1ac7a02 100644
+--- a/lib/parse.js
++++ b/lib/parse.js	
+@@ -1,6 +1,7 @@
+ 'use strict';
+ 
+ const stringify = require('./stringify');
++const { assertDepth } = require('./depth');
+ 
+ /**
+  * Constants
+@@ -143,6 +144,7 @@ const parse = (input, options = {}) => {
+      */
+ 
+     if (value === CHAR_LEFT_PARENTHESES) {
++      assertDepth(stack.length);
+       block = push({ type: 'paren', nodes: [] });
+       stack.push(block);
+       push({ type: 'text', value });
+@@ -195,6 +197,7 @@ const parse = (input, options = {}) => {
+      */
+ 
+     if (value === CHAR_LEFT_CURLY_BRACE) {
++      assertDepth(stack.length);
+       depth++;
+ 
+       const dollar = prev.value && prev.value.slice(-1) === '$' || block.dollar === true;
+diff --git a/lib/stringify.js b/lib/stringify.js
+index 8bcf872c31894f81a8c64d9202fd607e4fd7ea2b..acffc5f4a546e020c090dc76d3331b5f96b76102 100644
+--- a/lib/stringify.js
++++ b/lib/stringify.js	
+@@ -1,8 +1,10 @@
+ 'use strict';
+ 
+ const utils = require('./utils');
++const { assertAst } = require('./depth');
+ 
+ module.exports = (ast, options = {}) => {
++  assertAst(ast);
+   const stringify = (node, parent = {}) => {
+     const invalidBlock = options.escapeInvalid && utils.isInvalidBrace(parent);
+     const invalidNode = node.invalid === true && options.escapeInvalid === true;
+@@ -29,4 +31,3 @@ module.exports = (ast, options = {}) => {
+ 
+   return stringify(ast);
+ };
+-

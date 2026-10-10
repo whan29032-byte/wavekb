@@ -65,11 +65,15 @@ Deno.serve(async request => {
     if (!userResponse.ok || !user?.id) {
       return json({error: "authentication_required"}, 401);
     }
+    const profiles = await rest(`profiles?id=eq.${encodeURIComponent(user.id)}&select=account_status,public_uid&limit=1`);
+    if (!user.email_confirmed_at || profiles?.[0]?.account_status !== "active" || profiles[0].public_uid == null) {
+      return json({error: "account_ineligible"}, 403);
+    }
 
     const body = await request.json();
     const orderId = String(body.orderId || "");
     const orders = await rest(
-      `mentor_orders?id=eq.${encodeURIComponent(orderId)}&select=id,buyer_id,offer_id,amount_cents,currency,status,provider_order_id`
+      `mentor_orders?id=eq.${encodeURIComponent(orderId)}&select=id,buyer_id,offer_id,offer_name_snapshot,amount_cents,currency,status,payment_provider,payment_method_id,provider_order_id`
     );
     const order = orders?.[0];
     if (!order || order.buyer_id !== user.id) {
@@ -81,11 +85,14 @@ Deno.serve(async request => {
     if (order.status !== "pending") {
       return json({error: "order_not_payable"}, 409);
     }
+    if (order.payment_method_id != null || (order.payment_provider != null && order.payment_provider !== "stripe")) {
+      return json({error: "order_payment_route_invalid"}, 409);
+    }
 
     const offers = await rest(
       `mentor_offers?id=eq.${encodeURIComponent(order.offer_id)}&select=name`
     );
-    const offerName = offers?.[0]?.name || "一对一波浪辅导";
+    const offerName = order.offer_name_snapshot || offers?.[0]?.name || "一对一波浪辅导";
     const params = new URLSearchParams();
     params.set("mode", "payment");
     params.set("success_url", safeReturnUrl(body.successUrl, "#mentors=success"));
@@ -112,17 +119,17 @@ Deno.serve(async request => {
       throw new Error(session?.error?.message || "stripe_checkout_failed");
     }
 
-    await rest(`mentor_orders?id=eq.${encodeURIComponent(order.id)}`, {
-      method: "PATCH",
-      headers: {prefer: "return=minimal"},
+    await rest("rpc/register_mentor_checkout_session", {
+      method: "POST",
       body: JSON.stringify({
-        payment_provider: "stripe",
-        provider_order_id: session.id,
-        updated_at: new Date().toISOString()
+        p_actor: user.id, p_order_id: order.id, p_provider_order_id: session.id
       })
     });
     return json({checkoutUrl: session.url, orderId: order.id});
   } catch (error) {
-    return json({error: String(error?.message || error)}, 500);
+    const code = String(error?.message || error);
+    if (code === "account_ineligible") return json({error: code}, 403);
+    if (["order_not_payable", "order_payment_route_invalid"].includes(code)) return json({error: code}, 409);
+    return json({error: "checkout_unavailable"}, 500);
   }
 });

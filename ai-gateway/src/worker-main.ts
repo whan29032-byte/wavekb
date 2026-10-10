@@ -4,7 +4,9 @@ import { loadConfig, type GatewayConfig } from "./config.ts";
 import { classifyProviderError } from "./jobs/router.ts";
 import { KnowledgeRuntime, type KnowledgeRuntimeResult } from "./knowledge/runtime.ts";
 import { UserConnectionResolver } from "./secrets/user-connection.ts";
+import { ManagedConnectionResolver } from "./secrets/managed-connection.ts";
 import { SupabaseRest } from "./storage/supabase-rest.ts";
+import { MembershipWalletWorker } from "./membership-wallet-worker.ts";
 
 type WorkerDatabase = Pick<SupabaseRest, "request">;
 type WorkerConnectionResolver = Pick<UserConnectionResolver, "resolve">;
@@ -14,6 +16,8 @@ export type ClaimedJob = {
   owner_id: string;
   analysis_id: string | null;
   user_connection_id?: string | null;
+  execution_source?: "byok" | "managed";
+  managed_model_id?: string | null;
   task_type: string;
   input_payload: Record<string, unknown>;
   knowledge_version?: string | null;
@@ -34,6 +38,7 @@ export class AiJobWorker {
   private readonly workerId: string;
   private readonly database: WorkerDatabase;
   private readonly connections: WorkerConnectionResolver;
+  private readonly managedConnections: Pick<ManagedConnectionResolver, "resolve">;
   private readonly knowledgeRuntime: WorkerKnowledgeRuntime;
   private readonly now: () => number;
   private stopping = false;
@@ -44,6 +49,7 @@ export class AiJobWorker {
     dependencies: {
       database?: WorkerDatabase;
       connections?: WorkerConnectionResolver;
+      managedConnections?: Pick<ManagedConnectionResolver, "resolve">;
       now?: () => number;
       knowledgeRuntime?: WorkerKnowledgeRuntime;
     } = {},
@@ -52,6 +58,7 @@ export class AiJobWorker {
     this.workerId = workerId;
     this.database = dependencies.database ?? new SupabaseRest(config);
     this.connections = dependencies.connections ?? new UserConnectionResolver(config);
+    this.managedConnections = dependencies.managedConnections ?? new ManagedConnectionResolver(config, this.database);
     this.now = dependencies.now ?? Date.now;
     this.knowledgeRuntime = dependencies.knowledgeRuntime ?? new KnowledgeRuntime({
       database: this.database,
@@ -91,7 +98,15 @@ export class AiJobWorker {
     const attemptId = attemptRows?.[0]?.id as string | undefined;
     const started = this.now();
     try {
-      if (!job.analysis_id || !job.user_connection_id) throw new Error("job connection or analysis is missing");
+      const managed = job.execution_source === "managed";
+      if (!job.analysis_id || (managed ? !job.managed_model_id || job.user_connection_id : !job.user_connection_id)) throw new Error("job connection or analysis is missing");
+      if (managed) {
+        if (!this.config.MEMBERSHIP_MANAGED_AI_ENABLED) throw new Error("managed_ai_disabled");
+        const authorized = await this.database.request("/rest/v1/rpc/authorize_membership_ai_job", {
+          method: "POST", body: { p_job_id: job.id, p_owner_id: job.owner_id },
+        });
+        if (authorized !== true) throw new Error("membership_ai_job_invalid");
+      }
       const profiles = await this.database.request(
         `/rest/v1/profiles?id=eq.${encodeURIComponent(job.owner_id)}&account_status=eq.active&select=id&limit=1`,
       );
@@ -100,7 +115,9 @@ export class AiJobWorker {
         `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(job.analysis_id)}&owner_id=eq.${encodeURIComponent(job.owner_id)}&select=*&limit=1`,
       );
       if (!analyses.length) throw new Error("analysis not found");
-      const connection = await this.connections.resolve(job.owner_id, job.user_connection_id);
+      const connection = managed
+        ? await this.managedConnections.resolve(job.owner_id, job.task_type, job.managed_model_id!)
+        : await this.connections.resolve(job.owner_id, job.user_connection_id!);
       const result = await this.knowledgeRuntime.run({
         job,
         analysis: analyses[0],
@@ -121,6 +138,7 @@ export class AiJobWorker {
           job_id: job.id,
           attempt_id: attemptId ?? null,
           owner_id: job.owner_id,
+          model_id: managed ? job.managed_model_id : null,
           input_tokens: Math.max(0, Number(result.provider?.usage.inputTokens || 0)),
           output_tokens: Math.max(0, Number(result.provider?.usage.outputTokens || 0)),
           cost_amount: 0,
@@ -129,6 +147,7 @@ export class AiJobWorker {
       });
       await this.patchJob(job.id, {
         status: "succeeded",
+        ...(managed ? { actual_model_id: job.managed_model_id } : {}),
         input_payload: result.normalizedRequest,
         knowledge_version: result.knowledgeVersion,
         output_payload: result.output,
@@ -203,8 +222,16 @@ export class AiJobWorker {
 
 const isMain = process.argv[1] ? fileURLToPath(import.meta.url) === process.argv[1] : false;
 if (isMain) {
-  const worker = new AiJobWorker(loadConfig(process.env));
-  process.once("SIGTERM", () => worker.stop());
-  process.once("SIGINT", () => worker.stop());
-  await worker.run();
+  const config = loadConfig(process.env);
+  const database = new SupabaseRest(config);
+  const worker = new AiJobWorker(config, undefined, { database });
+  const walletWorker = new MembershipWalletWorker({
+    database,
+    env: process.env,
+    workerId: `${hostname()}:${process.pid}:membership-wallet`,
+  });
+  const stop = () => { worker.stop(); walletWorker.stop(); };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+  await Promise.all([worker.run(), walletWorker.run()]);
 }

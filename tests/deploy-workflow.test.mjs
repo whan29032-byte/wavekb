@@ -18,6 +18,10 @@ const diagnosticSteps = diagnosticWorkflow.jobs.diagnose.steps;
 const mailWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/verify-mentor-email-delivery.yml", import.meta.url), "utf8"));
 const mailSteps = mailWorkflow.jobs["verify-mail"].steps;
 const releaseVerificationWorkflowPath = new URL("../.github/workflows/verify-release.yml", import.meta.url);
+const verificationWorkflow = yaml.load(fs.readFileSync(releaseVerificationWorkflowPath, "utf8"));
+const publicVerificationWorkflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/deploy-static-production.yml", import.meta.url), "utf8"));
+const verificationSteps = verificationWorkflow.jobs.verify.steps;
+const publicVerificationSteps = publicVerificationWorkflow.jobs.verify.steps;
 
 test("persistent candidate runs owned standalone SQLite browser and worker gates before upload", () => {
   const upload = steps.findIndex((step) => step.id === "upload");
@@ -35,7 +39,7 @@ test("persistent candidate runs owned standalone SQLite browser and worker gates
 });
 
 test("every emitted workflow shell program parses before a runner can execute it", () => {
-  for (const step of [...steps, ...backendSteps, ...diagnosticSteps, ...mailSteps].filter((item) => item.run)) {
+  for (const step of [...steps, ...backendSteps, ...diagnosticSteps, ...mailSteps, ...verificationSteps, ...publicVerificationSteps].filter((item) => item.run)) {
     const result = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
     assert.equal(result.status, 0, `${step.name}: ${result.stderr}`);
   }
@@ -124,23 +128,80 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
   assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < publicSchemaCheck && publicSchemaCheck < upload && upload < activation);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
+  for (const filename of ["admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres", "membership-commerce-postgres", "membership-payment-functions", "membership-benefits-postgres", "membership-wallet-postgres", "membership-wallet-functions"]) {
+    assert.ok(contractVerification.run.includes(`tests/${filename}.test.mjs`), `${filename} must gate backend migration and upload`);
+  }
   assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
   assert.match(backendSteps[schemaGate].run, /202609090002\)[\s\S]*202609100001_reward_lottery_manual_fulfillment\.sql[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202609100001\)[\s\S]*202610080001_admin_custom_trading_display\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610080001\)[\s\S]*202610080002_mentor_checkout_recovery\.sql[\s\S]*202610080003_mentor_payment_notifications\.sql/);
   assert.match(backendSteps[schemaGate].run, /202610080003\)[\s\S]*202610080004_youtube_auto_posts\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202610080004\)[\s\S]*already applied/);
+  assert.match(backendSteps[schemaGate].run, /202610080004\)[\s\S]*202610100001_admin_payment_hardening\.sql[\s\S]*202610100002_membership_foundation\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100001\)[\s\S]*202610100002_membership_foundation\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100002\)[\s\S]*202610100003_membership_commerce\.sql[\s\S]*202610100004_membership_benefits\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100003\)[\s\S]*202610100004_membership_benefits\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202610100004\)[\s\S]*already applied/);
   assert.match(backendSteps[schemaGate].run, /Unexpected production schema marker; refusing migration/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610080004/);
+  assert.match(backendSteps[schemaGate].run, /202610100005\)[\s\S]*already applied/);
+  for (const table of ["settings", "routes", "orders", "grants", "verifications", "receipts", "events"]) {
+    assert.ok(backendSteps[schemaGate].run.includes(`membership_wallet_${table}`));
+  }
+  assert.match(backendSteps[schemaGate].run, /test "\$wallet_rls_tables" = 7/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610100005/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610080004/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610100005/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
   assert.match(backendSteps[activation].run, /legacy_layout/);
   assert.match(backendSteps[activation].run, /sudo mv "\$current_link" "\$previous"/);
   assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
+});
+
+test("every known backend marker selects only its unapplied migration suffix and unknown markers stop", () => {
+  const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
+  const selection = migrationStep.run.match(/case "\$schema_before" in[\s\S]*?(?=\n\s*schema_after=)/)?.[0];
+  assert.ok(selection);
+  const migrations = [
+    "202609100001_reward_lottery_manual_fulfillment.sql",
+    "202610080001_admin_custom_trading_display.sql",
+    "202610080002_mentor_checkout_recovery.sql",
+    "202610080003_mentor_payment_notifications.sql",
+    "202610080004_youtube_auto_posts.sql",
+    "202610100001_admin_payment_hardening.sql",
+    "202610100002_membership_foundation.sql",
+    "202610100003_membership_commerce.sql",
+    "202610100004_membership_benefits.sql",
+    "202610100005_membership_wallet_payments.sql",
+  ];
+  const program = `set -eu
+schema_before="$WAVEKB_TEST_SCHEMA"
+SUPABASE_DB_URL=fixture
+psql() {
+  case " $* " in *" ON_ERROR_STOP=1 "*) ;; *) return 9 ;; esac
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = -f ]; then printf '%s\\n' "$2"; return 0; fi
+    shift
+  done
+  return 9
+}
+${selection}`;
+  for (const [marker, offset] of [
+    ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
+    ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
+    ["202610100003", 8], ["202610100004", 9], ["202610100005", 10],
+  ]) {
+    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
+    assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
+    const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
+    assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
+  }
+  for (const marker of ["", "202609090001", "202610100006", "invalid"]) {
+    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
+    assert.notEqual(result.status, 0, marker);
+    assert.doesNotMatch(result.stdout, /supabase\/migrations\//);
+  }
 });
 
 test("mentor notification worker is packaged, installed, health-checked and included in rollback", () => {
@@ -189,12 +250,104 @@ test("release verification runs on Ubuntu for pull requests and pushes without d
   const serialized = JSON.stringify(verification);
   for (const command of [
     /pnpm test/,
+    /pnpm audit:prod/,
     /pnpm --filter @wavekb\/web test/,
     /pnpm --dir ai-gateway test/,
     /pnpm --filter @wavekb\/knowledge test/,
     /node scripts\/validate-knowledge\.mjs/,
   ]) assert.match(serialized, command);
+  const installIndex = verification.jobs.verify.steps.findIndex((step) => step.run === "pnpm install --frozen-lockfile");
+  const auditIndex = verification.jobs.verify.steps.findIndex((step) => step.run === "pnpm audit:prod");
+  assert.ok(installIndex >= 0 && auditIndex > installIndex);
+  assert.notEqual(verification.jobs.verify.steps[auditIndex]["continue-on-error"], true);
   assert.doesNotMatch(serialized, /environment|secrets\.|\bssh\b|\bscp\b|workflow_dispatch/);
+});
+
+test("release verification requires real isolated PostgreSQL wallet lock races without production access", () => {
+  const rootTests = verificationSteps.findIndex((step) => step.run === "pnpm test");
+  const postgres = verificationSteps.findIndex((step) => /Verify wallet concurrency/.test(step.name));
+  assert.ok(postgres > rootTests);
+  const step = verificationSteps[postgres];
+  assert.match(step.run, /mktemp -d \/tmp\/wavekb-postgres-concurrency\.XXXXXX/);
+  assert.match(step.run, /npm install --prefix "\$task_postgres_dir" --no-audit --no-fund embedded-postgres@18\.4\.0-beta\.17 pg@8\.16\.3/);
+  assert.match(step.run, /WAVEKB_ISOLATED_POSTGRES_MODULE_ROOT="\$task_postgres_dir" node --test tests\/membership-wallet-concurrency-postgres\.test\.mjs/);
+  assert.notEqual(step["continue-on-error"], true);
+  assert.doesNotMatch(JSON.stringify(step), /DATABASE_URL|SUPABASE|secrets\.|--force|\|\| true/);
+  const source = fs.readFileSync(new URL("../tests/membership-wallet-concurrency-postgres.test.mjs", import.meta.url), "utf8");
+  assert.match(source, /pg_stat_activity/);
+  assert.match(source, /assert\.notEqual\(pids\[0\],pids\[1\]\)/);
+  assert.match(source, /await pg\.stop\(\)/);
+});
+
+test("both non-deployment verification jobs explicitly run the actual disposable Nginx fixture", () => {
+  for (const candidate of [verificationWorkflow, publicVerificationWorkflow]) {
+    const job = candidate.jobs.verify;
+    assert.equal(job.env.KNOWLEDGE_NGINX_TEST_BIN, "/usr/sbin/nginx");
+    const install = job.steps.findIndex((step) => /apt-get install[^\n]*nginx/.test(step.run ?? ""));
+    const rootTests = job.steps.findIndex((step) => step.run === "pnpm test");
+    assert.ok(install >= 0 && rootTests > install);
+    assert.match(job.steps[install].run, /set -Eeuo pipefail/);
+    assert.match(job.steps[install].run, /test -x "\$KNOWLEDGE_NGINX_TEST_BIN"/);
+    assert.notEqual(job.steps[install]["continue-on-error"], true);
+    assert.equal(job.environment, undefined);
+    assert.equal(candidate.permissions.contents, "read");
+  }
+});
+
+test("both non-deployment verification jobs execute all mock membership UI with no retries and preserve browser evidence", () => {
+  for (const candidate of [verificationWorkflow, publicVerificationWorkflow]) {
+    const jobSteps = candidate.jobs.verify.steps;
+    const nextBuild = jobSteps.findIndex((step) => /@wavekb\/web build/.test(step.run ?? ""));
+    const storyBuild = jobSteps.findIndex((step) => /@wavekb\/web storybook:build/.test(step.run ?? ""));
+    const chromium = jobSteps.findIndex((step) => /playwright install --with-deps chromium/.test(step.run ?? ""));
+    const uiIndex = jobSteps.findIndex((step) => /playwright test --config=playwright\.ui\.config\.ts/.test(step.run ?? ""));
+    assert.ok(nextBuild >= 0 && nextBuild < storyBuild && storyBuild < chromium && chromium < uiIndex);
+    assert.equal(jobSteps[uiIndex].env.STORYBOOK_TEST_BASE_URL, "");
+    assert.match(jobSteps[uiIndex].run, /--retries=0/);
+    assert.match(jobSteps[uiIndex].run, /--reporter=github,html/);
+    assert.doesNotMatch(jobSteps[uiIndex].run, /--grep|--project|e2e-ui\//);
+    assert.notEqual(jobSteps[uiIndex]["continue-on-error"], true);
+    const evidence = jobSteps.find((step) => step.uses === "actions/upload-artifact@v4");
+    assert.equal(evidence.if, "always()");
+    assert.match(evidence.with.path, /^apps\/web\/test-results\/(?:\n|$)/);
+    assert.match(evidence.with.path, /apps\/web\/playwright-report\//);
+    assert.equal(evidence.with["retention-days"], 3);
+    assert.doesNotMatch(JSON.stringify(jobSteps), /secrets\./);
+    assert.doesNotMatch(evidence.with.path, /\.env|\.sqlite/);
+  }
+  const uiConfig = fs.readFileSync(new URL("../apps/web/playwright.ui.config.ts", import.meta.url), "utf8");
+  assert.match(uiConfig, /testDir: "\.\/e2e-ui"/);
+  assert.ok(fs.existsSync(new URL("../apps/web/e2e-ui/membership.spec.ts", import.meta.url)));
+});
+
+test("non-deployment guest acceptance consumes the owned built standalone with exact SHA and no retries or account writes", () => {
+  const build = publicVerificationSteps.find((step) => step.name === "Build the Next.js application");
+  const guest = publicVerificationSteps.find((step) => step.name === "Run public route acceptance tests");
+  assert.equal(build.env.DEPLOYMENT_VERSION, "${{ github.sha }}");
+  assert.equal(guest.env.DEPLOYMENT_VERSION, build.env.DEPLOYMENT_VERSION);
+  assert.equal(guest.env.PLAYWRIGHT_BASE_URL, "http://127.0.0.1:3108");
+  assert.equal(guest.env.E2E_POSTING_IDENTIFIER, "");
+  assert.equal(guest.env.E2E_POSTING_PASSWORD, "");
+  assert.equal(guest.env.TLINE_E2E_FIXTURE, "");
+  assert.equal(guest.env.TLINE_LIVE_ACCEPTANCE, "");
+  for (const key of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"]) {
+    assert.equal(typeof publicVerificationWorkflow.env[key], "string");
+    assert.ok(publicVerificationWorkflow.env[key]);
+    assert.equal(build.env[key], undefined, `${key} is inherited from the same job for build and runtime`);
+    assert.equal(guest.env[key], undefined, `${key} is inherited from the same job for build and runtime`);
+  }
+  assert.match(publicVerificationWorkflow.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, /^sb_publishable_/);
+  assert.match(guest.run, /node apps\/web\/\.next\/standalone\/apps\/web\/server\.js[^\n]* &/);
+  assert.match(guest.run, /kill -0 "\$candidate_pid"/);
+  assert.match(guest.run, /assert\.equal\(health\.deployment, process\.env\.DEPLOYMENT_VERSION\)/);
+  assert.match(guest.run, /trap cleanup_guest_candidate EXIT/);
+  assert.match(guest.run, /exit "\$candidate_status"/);
+  assert.match(guest.run, /playwright test --retries=0/);
+  assert.match(guest.run, /--reporter=github,html/);
+  assert.doesNotMatch(guest.run, /--timeout|pnpm dev/);
+  assert.notEqual(guest["continue-on-error"], true);
+  const evidence = publicVerificationSteps.find((step) => step.uses === "actions/upload-artifact@v4");
+  assert.match(evidence.with.path, /\/tmp\/wavekb-guest-candidate\.log/);
 });
 
 test("both production workflows require reusable exact-ref verification before deployment", () => {

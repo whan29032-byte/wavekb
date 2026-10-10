@@ -168,7 +168,7 @@ test("enqueue rejects malformed analysis ids and client retrieval controls befor
 });
 
 test("a duplicate idempotency key returns only the existing owner's job", async () => {
-  const expected = { id: "existing-job", owner_id: OWNER_ID, status: "queued" };
+  const expected = { id: "existing-job", owner_id: OWNER_ID, status: "queued", input_payload: runRequest() };
   const lookupPaths: string[] = [];
   const database = {
     async request(path: string, options?: Record<string, unknown>) {

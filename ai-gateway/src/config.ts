@@ -10,6 +10,7 @@ export type GatewayConfig = {
   ALLOWED_PROVIDER_HOSTS: string[];
   ALLOWED_LOCAL_PROVIDER_HOSTS: string[];
   AI_DAILY_USER_LIMIT: number;
+  MEMBERSHIP_MANAGED_AI_ENABLED?: boolean;
   AI_MAX_IMAGE_BYTES: number;
   ALLOWED_WEB_ORIGINS: string[];
   AUTH_SITE_URL: string;
@@ -75,6 +76,7 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
     ALLOWED_PROVIDER_HOSTS: splitHosts(env.ALLOWED_PROVIDER_HOSTS ?? ""),
     ALLOWED_LOCAL_PROVIDER_HOSTS: splitHosts(env.ALLOWED_LOCAL_PROVIDER_HOSTS ?? ""),
     AI_DAILY_USER_LIMIT: integer(env.AI_DAILY_USER_LIMIT, 20, 0, 1_000_000),
+    MEMBERSHIP_MANAGED_AI_ENABLED: boolean(env.MEMBERSHIP_MANAGED_AI_ENABLED, false),
     AI_MAX_IMAGE_BYTES: integer(env.AI_MAX_IMAGE_BYTES, 10 * 1024 * 1024, 1024, 100 * 1024 * 1024),
     ALLOWED_WEB_ORIGINS: splitHosts(
       env.ALLOWED_WEB_ORIGINS ?? "http://127.0.0.1:8765,http://localhost:8765",

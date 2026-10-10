@@ -272,7 +272,12 @@ export function SocialDesktop() {
     return () => { mounted.current = false; invalidateLoads(); window.clearTimeout(initial); auth.data.subscription.unsubscribe(); unsubscribeIdentity(); window.clearInterval(timer); document.removeEventListener("visibilitychange", rebaselineUnread); window.removeEventListener("wavekb:open-chat", customOpen); window.removeEventListener("wavekb:open-friends", openFriends); };
   }, [clearAccountState, invalidateLoads, load]);
 
-  useEffect(() => { if (actor) localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized, pinned: item.pinned })) })); }, [actor, panel, chats]);
+  useEffect(() => {
+    if (!actor) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId: actor.id, panel, chats: chats.map((item) => ({ conversation_id: item.conversation_id, minimized: item.minimized, maximized: item.maximized, pinned: item.pinned })) }));
+    } catch { /* Window controls and chat remain usable without browser persistence. */ }
+  }, [actor, panel, chats]);
 
   function openChat(conversation: DirectConversation) {
     openConversations.current.add(conversation.conversation_id);

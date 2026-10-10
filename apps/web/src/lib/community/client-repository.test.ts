@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { addPostComment, appendPostTimelineNode, createPost, deletePost, updatePost } from "./client-repository";
 import type { PostPublishingProgress } from "./client-repository";
+import { UncertainMutationError } from "../mutation-recovery";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -51,7 +52,114 @@ function updateInput(files: File[], onProgress?: (progress: PostPublishingProgre
   return { userId: "user-id", title: "编辑上传回归测试", body: "原子保存更新以后再清理已移除的旧图片。", keptImageIds: [], files, onProgress };
 }
 
+describe("edit commit acknowledgement recovery", () => {
+  function fixture(writeError: unknown) {
+    const upload = vi.fn().mockResolvedValue({ error: null });
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    const rpc = vi.fn().mockResolvedValue({ error: writeError });
+    const read = vi.fn();
+    const query = { eq: vi.fn().mockReturnThis(), maybeSingle: read };
+    const client = { rpc, from: vi.fn(() => ({ select: vi.fn(() => query) })), storage: { from: () => ({ upload, remove }) } };
+    const input = updateInput(imageFiles(1));
+    const snapshot = () => ({ id: "post-id", title: input.title, body: input.body, chart_package: null,
+      post_images: [{ storage_path: upload.mock.calls[0][0], caption: "", sort_order: 0 }], post_external_references: [] });
+    return { client, input, upload, remove, rpc, read, query, snapshot };
+  }
+
+  it("never deletes uploads while the authoritative reference read is pending, and recovers confirmed success", async () => {
+    const f = fixture(new Error("fetch response lost"));
+    const read = deferred<unknown>();
+    f.read.mockReturnValue(read.promise);
+    const save = updatePost(f.client as never, editingPost(), f.input);
+    await vi.waitFor(() => expect(f.read).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    expect(f.remove).not.toHaveBeenCalled();
+    expect(f.query.eq).toHaveBeenCalledWith("author_id", "user-id");
+    read.resolve({ data: f.snapshot(), error: null });
+    await expect(save).resolves.toEqual({ cleanupPending: false });
+    expect(f.remove).not.toHaveBeenCalled();
+  });
+
+  it.each(["unavailable", "absent", "different content", "malformed collections"])("retains uploads when a transport failure leaves an %s readback", async (state) => {
+    const f = fixture(new Error("network timeout"));
+    f.read.mockImplementation(async () => state === "unavailable" ? { data: null, error: new Error("offline") }
+      : { data: { ...f.snapshot(), title: "old title", ...(state === "absent" ? { post_images: [] } : state === "malformed collections" ? { post_images: {} } : {}) }, error: null });
+    await expect(updatePost(f.client as never, editingPost(), f.input)).rejects.toBeInstanceOf(UncertainMutationError);
+    expect(f.remove).not.toHaveBeenCalled();
+  });
+
+  it("cleans new uploads only for explicit database rejection plus verified absence of references", async () => {
+    const rejected = { code: "P0001", message: "rejected" };
+    const f = fixture(rejected);
+    f.read.mockImplementation(async () => ({ data: { ...f.snapshot(), title: "old title", post_images: [] }, error: null }));
+    await expect(updatePost(f.client as never, editingPost(), f.input)).rejects.toEqual(rejected);
+    expect(f.read).toHaveBeenCalledTimes(1);
+    expect(f.remove).toHaveBeenCalledWith([f.upload.mock.calls[0][0]]);
+  });
+
+  it("does not infer rollback from a later explicit rejection after an earlier lost acknowledgement", async () => {
+    const f = fixture({ code: "P0001", message: "rejected" });
+    f.rpc.mockResolvedValueOnce({ error: new Error("lost acknowledgement") });
+    f.read.mockImplementation(async () => ({ data: { ...f.snapshot(), title: "old title", post_images: [] }, error: null }));
+    await expect(updatePost(f.client as never, editingPost(), f.input)).rejects.toBeInstanceOf(UncertainMutationError);
+    expect(f.remove).not.toHaveBeenCalled();
+  });
+});
+
 describe("posting transaction", () => {
+  function committedPublishingGateway() {
+    const input = createInput(imageFiles(1));
+    let snapshot: Record<string, unknown> | null = null;
+    const gateway = publishingGateway({
+      insertDraft: vi.fn(async (value: Record<string, unknown>) => { snapshot = { ...value, post_images: [], post_external_references: [], post_sources: [] }; }),
+      insertImages: vi.fn(async (rows: Record<string, unknown>[]) => { snapshot!.post_images = rows; }),
+      insertReferences: vi.fn(async (rows: Record<string, unknown>[]) => { snapshot!.post_external_references = rows; }),
+      publish: vi.fn(async () => { snapshot!.status = "published"; throw new Error("publish acknowledgement lost after commit"); }),
+      readPost: vi.fn(async () => snapshot as never),
+    });
+    return { gateway, input, snapshot: () => snapshot };
+  }
+
+  it("recovers an actually published post whose acknowledgement was lost without deleting its objects or row", async () => {
+    const f = committedPublishingGateway();
+    const read = deferred<never>();
+    vi.mocked(f.gateway.readPost!).mockReturnValue(read.promise);
+    const save = createPost({} as never, f.input, f.gateway);
+    await vi.waitFor(() => expect(f.gateway.readPost).toHaveBeenCalledTimes(1));
+    expect(f.snapshot()!.status).toBe("published");
+    expect(f.gateway.removeFiles).not.toHaveBeenCalled();
+    expect(f.gateway.removePost).not.toHaveBeenCalled();
+    read.resolve(f.snapshot() as never);
+    await expect(save).resolves.toBe("post-id");
+    expect(f.gateway.removeFiles).not.toHaveBeenCalled();
+    expect(f.gateway.removePost).not.toHaveBeenCalled();
+  });
+
+  it.each(["read unavailable", "published mismatch", "still draft"])("retains the post and uploads when lost publish acknowledgement leaves %s", async (state) => {
+    const f = committedPublishingGateway();
+    vi.mocked(f.gateway.readPost!).mockImplementation(async () => {
+      if (state === "read unavailable") throw new Error("offline");
+      return { ...f.snapshot(), ...(state === "still draft" ? { status: "draft" } : { title: "a different title" }) } as never;
+    });
+    await expect(createPost({} as never, f.input, f.gateway)).rejects.toMatchObject({ name: "UncertainMutationError", recoveryPath: "/community/post/post-id" });
+    expect(f.gateway.removeFiles).not.toHaveBeenCalled();
+    expect(f.gateway.removePost).not.toHaveBeenCalled();
+  });
+
+  it("does not delete draft image references when their insert committed but its acknowledgement was lost", async () => {
+    const f = committedPublishingGateway();
+    vi.mocked(f.gateway.insertImages).mockImplementation(async (rows) => { f.snapshot()!.post_images = rows; throw new Error("image insert acknowledgement lost"); });
+    await expect(createPost({} as never, f.input, f.gateway)).rejects.toBeInstanceOf(UncertainMutationError);
+    expect(f.gateway.publish).not.toHaveBeenCalled();
+    expect(f.gateway.removeFiles).not.toHaveBeenCalled();
+    expect(f.gateway.removePost).not.toHaveBeenCalled();
+  });
+
+  it("does not falsely call an unconfirmed draft insertion a successful publish", async () => {
+    const gateway = publishingGateway({ insertDraft: vi.fn(async () => { throw new Error("draft response lost"); }), readPost: vi.fn(async () => null) });
+    await expect(createPost({} as never, createInput([]), gateway)).rejects.toBeInstanceOf(UncertainMutationError);
+    expect(gateway.publish).not.toHaveBeenCalled();
+    expect(gateway.removePost).not.toHaveBeenCalled();
+  });
   it("publishes only after every image row is saved", async () => {
     const calls: string[] = [];
     const gateway = {
@@ -377,6 +485,59 @@ describe("post editing transaction", () => {
 });
 
 describe("research timeline transaction", () => {
+  function lostTimeline(error: unknown = new Error("timeline acknowledgement lost after commit")) {
+    const input = { postId: "post-id", userId: "user-id", kind: "confirmed" as const, body: " 已确认的新节点。 ", files: imageFiles(1), captions: ["新快照"] };
+    let committed: Record<string, unknown> | null = null;
+    const upload = vi.fn().mockResolvedValue({ error: null });
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    const rpc = vi.fn(async (_name: string, args: Record<string, unknown>) => {
+      committed = { id: args.p_node_id, post_id: args.p_post_id, author_id: input.userId, kind: args.p_kind, body: args.p_body,
+        research_timeline_images: (args.p_images as Record<string, unknown>[]).map((image, sort_order) => ({ ...image, sort_order })) };
+      return { error };
+    });
+    const read = vi.fn(async () => ({ data: committed, error: null }));
+    const getUser = vi.fn().mockResolvedValue({ data: { user: { id: input.userId } }, error: null });
+    const query = { eq: vi.fn().mockReturnThis(), maybeSingle: read };
+    const client = { auth: { getUser }, rpc, from: vi.fn(() => ({ select: vi.fn(() => query) })), storage: { from: () => ({ upload, remove }) } };
+    return { input, client, upload, remove, rpc, read, getUser, committed: () => committed };
+  }
+
+  it("recovers a committed immutable node only after the readback matches its identity, content and image references", async () => {
+    const f = lostTimeline();
+    const pendingRead = deferred<never>();
+    f.read.mockReturnValue(pendingRead.promise);
+    const save = appendPostTimelineNode(f.client as never, f.input);
+    await vi.waitFor(() => expect(f.read).toHaveBeenCalledTimes(1));
+    expect(f.committed()!.id).toBe(f.rpc.mock.calls[0][1].p_node_id);
+    expect(f.remove).not.toHaveBeenCalled();
+    pendingRead.resolve({ data: f.committed(), error: null } as never);
+    await expect(save).resolves.toBe(f.committed()!.id);
+    expect(f.remove).not.toHaveBeenCalled();
+  });
+
+  it.each(["unavailable", "absent", "content mismatch"])("preserves node images if a lost acknowledgement leaves %s readback", async (state) => {
+    const f = lostTimeline();
+    f.read.mockImplementation(async () => state === "unavailable" ? { data: null, error: new Error("offline") } as never
+      : { data: state === "absent" ? null : { ...f.committed(), body: "different" }, error: null });
+    await expect(appendPostTimelineNode(f.client as never, f.input)).rejects.toBeInstanceOf(UncertainMutationError);
+    expect(f.remove).not.toHaveBeenCalled();
+  });
+
+  it("cleans only after explicit node rejection and an authorized read confirming that the node is absent", async () => {
+    const error = { code: "P0001", message: "rejected" };
+    const f = lostTimeline(error);
+    f.read.mockResolvedValue({ data: null, error: null });
+    await expect(appendPostTimelineNode(f.client as never, f.input)).rejects.toEqual(error);
+    expect(f.remove).toHaveBeenCalledWith([f.upload.mock.calls[0][0]]);
+  });
+
+  it("does not mistake a different account's unreadable node for an absent node", async () => {
+    const f = lostTimeline({ code: "P0001", message: "rejected" });
+    f.getUser.mockResolvedValue({ data: { user: { id: "other" } }, error: null });
+    await expect(appendPostTimelineNode(f.client as never, f.input)).rejects.toBeInstanceOf(UncertainMutationError);
+    expect(f.read).not.toHaveBeenCalled();
+    expect(f.remove).not.toHaveBeenCalled();
+  });
   it("stores a new immutable snapshot under the post timeline path", async () => {
     const upload = vi.fn(async () => ({ error: null }));
     const remove = vi.fn(async () => ({ error: null }));

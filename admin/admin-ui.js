@@ -1506,7 +1506,7 @@
       pending: ["pending", "paid", "cancelled", "failed"],
       failed: ["failed", "pending", "paid", "cancelled"],
       paid: ["paid", "refunded", "cancelled"],
-      cancelled: ["cancelled", "pending"],
+      cancelled: ["cancelled"],
       refunded: ["refunded"]
     };
     return transitions[status] || [status];
@@ -1517,18 +1517,20 @@
       throw new Error("不允许从当前状态切换到所选状态。请刷新订单后重试。");
     }
     if (nextStatus === order.status) return order;
-    const patch = {status: nextStatus, updated_at: new Date().toISOString()};
-    if (nextStatus === "paid" && !order.paid_at) patch.paid_at = new Date().toISOString();
-    const result = await state.client
-      .from("mentor_orders")
-      .update(patch)
-      .eq("id", order.id)
-      .eq("status", order.status)
-      .select("id,buyer_id,mentor_id,offer_id,amount_cents,currency,status,payment_provider,provider_order_id,paid_at,created_at")
-      .maybeSingle();
-    if (result.error) throw result.error;
+    const result = await state.client.rpc("admin_transition_mentor_order", {
+      p_order_id: order.id,
+      p_expected_status: order.status,
+      p_status: nextStatus,
+      p_reason: "旧版后台订单状态更新"
+    });
+    if (result.error) {
+      if (String(result.error.message || "").includes("order_changed_concurrently")) {
+        throw new Error("订单状态已被其他管理员修改，请刷新后重试。");
+      }
+      throw result.error;
+    }
     if (!result.data) throw new Error("订单状态已被其他管理员修改，请刷新后重试。");
-    return result.data;
+    return {...order, ...result.data};
   }
 
   function mentorOrdersView() {

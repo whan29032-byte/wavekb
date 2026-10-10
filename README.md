@@ -18,8 +18,10 @@
 
 安装依赖并启动 Next.js：
 
+开发与 CI 使用 Node `^22.22.2 || ^24.15.0 || >=26.0.0`，与当前 jsdom 工具链要求一致；pnpm 固定为 `11.19.0`。部署中的 Node `22.18.0` smoke 只验证独立研报 worker，不代表整个 workspace 可以在 22.18 上开发或测试。
+
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
@@ -48,11 +50,19 @@ cp ai-gateway/.env.example ai-gateway/.env
 - 数据库变更：`supabase/migrations/`，在应用切换前执行。
 - 不包含：生产数据库、用户上传内容、用户账户资料、服务器密钥、API Key、历史部署包或缓存。
 
-涉及 Gateway 与 Web 的版本必须在同一提交上按 Backend-first 顺序发布：先等待非部署型 Ubuntu
-`Verify WaveKB release` 门禁通过，再以显式生产确认发布 Backend；验收 all/single 检索、审计记录和精确
-health SHA 后，才可审批并发布 Next。Gateway 兼容旧 Web 的无版本请求并按 all scope 处理。本流程只接受
-生产 schema marker `202609090001`，未知 marker 一律关闭发布；多书检索不新增数据库迁移。Gateway 归档只带
-代码、`package.json`、`knowledge/retrieval-index.json` 与 `DEPLOYMENT_VERSION`，不带 PDF 或密钥。
+涉及数据库或 Gateway 的版本必须在同一提交上按 Backend-first 顺序发布：先等待非部署型 Ubuntu
+`Verify WaveKB release` 的生产依赖安全审计、测试、类型和构建门槛通过，再手动确认发布 Backend；数据库
+marker、Gateway 精确 health SHA 与相关接口验收通过后，才可确认并发布 Next。Next 工作流本身不执行迁移。
+本分支最新迁移目标为 `202610100002`：管理/支付安全加固 `202610100001`，随后是会员基础
+`202610100002`。这不表示线上数据库已经迁移；Backend 只接受工作流逐项列明的旧 marker，Next 必须与
+候选提交的最新 marker 完全一致，未知 marker 关闭发布。Gateway 归档只带代码、`package.json`、
+`knowledge/retrieval-index.json` 与 `DEPLOYMENT_VERSION`，不带 PDF 或密钥。
+
+会员基础与 `profiles.role` 分开管理：管理员可按原因手动授予、延长、撤销有到期时间的权益，普通用户只读
+自己的权益和记录。该基础不启用价格、收费、订阅或自动续费，也不把既有公开知识、社区与研报改成付费内容。
+
+依赖日常检查使用 `pnpm audit:prod`；该门槛要求官方 registry 返回完整、成功且零漏洞的生产依赖审计结果，
+网络或解析错误会阻止发布。开发依赖另用 `pnpm audit` 评估，不将其报告冒充生产暴露证明。
 
 完整的 smoke、审计查询、SHA 核验和 previous-symlink 回滚步骤见
 [`ai-gateway/docs/operations.md`](ai-gateway/docs/operations.md)。

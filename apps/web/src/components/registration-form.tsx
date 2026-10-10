@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
 import { createClient, onVerifiedAuthCallback } from "@/lib/supabase/client";
+import { authContinuationPath, registrationCallbackPath, replaceAuthLocation } from "@/lib/auth/return-path";
 import {
   friendlyAuthError,
   type AuthFieldErrors,
@@ -21,11 +22,11 @@ type RegistrationSession = {
   } | null;
 } | null;
 
-function registrationRedirectUrl() {
-  return `${window.location.origin}/register?auth=signup`;
+function registrationRedirectUrl(returnPath?: string | null) {
+  return `${window.location.origin}${registrationCallbackPath(returnPath)}`;
 }
 
-export function RegistrationForm() {
+export function RegistrationForm({ returnPath }: { returnPath?: string | null } = {}) {
   const [step, setStep] = useState<RegistrationStep>("identity");
   const [pending, setPending] = useState(false);
   const [fields, setFields] = useState({ displayName: "", email: "" });
@@ -68,7 +69,7 @@ export function RegistrationForm() {
       if (tokenHash && search.get("type") === "email") {
         const verified = await client.auth.verifyOtp({ token_hash: tokenHash, type: "email" });
         if (!active) return;
-        window.history.replaceState(window.history.state, "", "/register?auth=signup");
+        window.history.replaceState(window.history.state, "", registrationCallbackPath(returnPath));
         if (verified.error) {
           setStep("identity");
           setMessage(friendlyAuthError(verified.error));
@@ -91,7 +92,7 @@ export function RegistrationForm() {
       if (failureTimer !== undefined) window.clearTimeout(failureTimer);
       stopWatchingCallback();
     };
-  }, []);
+  }, [returnPath]);
 
   async function requestCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -110,7 +111,7 @@ export function RegistrationForm() {
       options: {
         shouldCreateUser: true,
         data: { display_name: next.displayName },
-        emailRedirectTo: registrationRedirectUrl(),
+        emailRedirectTo: registrationRedirectUrl(returnPath),
       },
     });
     setPending(false);
@@ -153,7 +154,7 @@ export function RegistrationForm() {
       setMessage(friendlyAuthError(updated.error));
       return;
     }
-    window.location.replace("/activate-uid");
+    replaceAuthLocation(authContinuationPath("/activate-uid", returnPath));
   }
 
   async function saveLinkedPassword(event: FormEvent<HTMLFormElement>) {
@@ -174,7 +175,7 @@ export function RegistrationForm() {
       setMessage(friendlyAuthError(updated.error));
       return;
     }
-    window.location.replace("/activate-uid");
+    replaceAuthLocation(authContinuationPath("/activate-uid", returnPath));
   }
 
   if (step === "identity") {
@@ -245,14 +246,14 @@ export function RegistrationForm() {
             options: {
               shouldCreateUser: true,
               data: { display_name: fields.displayName },
-              emailRedirectTo: registrationRedirectUrl(),
+              emailRedirectTo: registrationRedirectUrl(returnPath),
             },
           });
           setPending(false);
           setMessage(error ? friendlyAuthError(error) : `验证邮件已重新发送到 ${fields.email}`);
         }}>重新发送</Button>
       </div>
-      <Link className="text-center text-sm font-semibold text-primary hover:underline" href="/login">返回登录</Link>
+      <Link className="text-center text-sm font-semibold text-primary hover:underline" href={authContinuationPath("/login", returnPath)}>返回登录</Link>
     </form>
   );
 }

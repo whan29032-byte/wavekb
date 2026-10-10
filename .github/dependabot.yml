@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /ai-gateway
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      security-patches:
+        applies-to: security-updates
+        update-types:
+          - patch
+      routine-patches:
+        applies-to: version-updates
+        update-types:
+          - patch
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major

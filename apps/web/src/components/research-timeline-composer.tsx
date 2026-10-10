@@ -6,6 +6,7 @@ import { TIMELINE_NODE_KINDS, validateImages, type TimelineNodeKind } from "@wav
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { appendPostTimelineNode } from "@/lib/community/client-repository";
 import { createClient } from "@/lib/supabase/client";
+import { isUncertainMutationError } from "@/lib/mutation-recovery";
 
 type TimelineImageDraft = { key: string; file: File; url: string; caption: string };
 const subscribe = () => () => undefined;
@@ -25,6 +26,8 @@ export function ResearchTimelineComposer({ postId, userId }: { postId: string; u
   const [images, setImages] = useState<TimelineImageDraft[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [uncertainSave, setUncertainSave] = useState(false);
+  const [saved, setSaved] = useState(false);
   const imagesRef = useRef(images);
   useEffect(() => { imagesRef.current = images; }, [images]);
   useEffect(() => () => imagesRef.current.forEach((image) => URL.revokeObjectURL(image.url)), []);
@@ -38,6 +41,7 @@ export function ResearchTimelineComposer({ postId, userId }: { postId: string; u
   }
   function drop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    if (pending || uncertainSave || saved) return;
     addImages(Array.from(event.dataTransfer.files).filter((file) => file.type.startsWith("image/")));
   }
   function removeImage(key: string) {
@@ -49,6 +53,7 @@ export function ResearchTimelineComposer({ postId, userId }: { postId: string; u
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending || uncertainSave || saved) return;
     const normalized = body.trim();
     if (!normalized || normalized.length > 5_000) { setError("更新时间需要 1–5000 个字符。"); return; }
     setPending(true);
@@ -61,8 +66,11 @@ export function ResearchTimelineComposer({ postId, userId }: { postId: string; u
       images.forEach((image) => URL.revokeObjectURL(image.url));
       setImages([]);
       setBody("");
-      window.location.reload();
+      setSaved(true);
+      setPending(false);
+      try { window.location.reload(); } catch { /* The saved node remains successful if navigation is blocked. */ }
     } catch (cause) {
+      setUncertainSave(isUncertainMutationError(cause));
       setError(cause instanceof Error ? cause.message : "观点更新没有保存，请稍后重试。");
       setPending(false);
     }
@@ -95,7 +103,9 @@ export function ResearchTimelineComposer({ postId, userId }: { postId: string; u
         ) : null}
       </Field>
       {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
-      <div className="flex justify-end"><Button type="submit" disabled={!hydrated || pending}>{pending ? "正在保存" : "发布更新"}</Button></div>
+      {uncertainSave ? <a href={`/community/post/${postId}`} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">在新窗口核对时间线，保留当前输入</a> : null}
+      {saved ? <p role="status" className="text-sm text-muted-foreground">观点更新已保存。<a href={`/community/post/${postId}`} className="ml-2 text-primary underline">查看帖子时间线</a></p> : null}
+      <div className="flex justify-end"><Button type="submit" disabled={!hydrated || pending || uncertainSave || saved}>{pending ? "正在保存" : "发布更新"}</Button></div>
     </form>
   );
 }

@@ -25,6 +25,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      KNOWLEDGE_NGINX_TEST_BIN: /usr/sbin/nginx
+      PLAYWRIGHT_HTML_OPEN: never
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -42,6 +45,13 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install disposable runner Nginx for real transport fixtures
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nginx
+          test -x "$KNOWLEDGE_NGINX_TEST_BIN"
+
       - name: Run legacy and workspace tests
         run: pnpm test
 
@@ -52,6 +62,8 @@ jobs:
         run: pnpm --filter @wavekb/web lint
 
       - name: Build the Next.js application
+        env:
+          DEPLOYMENT_VERSION: ${{ github.sha }}
         run: pnpm --filter @wavekb/web build
 
       - name: Build Storybook
@@ -60,5 +72,52 @@ jobs:
       - name: Install the Playwright browser
         run: pnpm --filter @wavekb/web exec playwright install --with-deps chromium
 
+      - name: Verify mock UI and membership stories without production accounts
+        env:
+          STORYBOOK_TEST_BASE_URL: ""
+        run: pnpm --filter @wavekb/web exec playwright test --config=playwright.ui.config.ts --retries=0 --reporter=github,html
+
       - name: Run public route acceptance tests
-        run: pnpm --filter @wavekb/web test:e2e
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3108
+          PORT: 3108
+          HOSTNAME: 127.0.0.1
+          DEPLOYMENT_VERSION: ${{ github.sha }}
+          E2E_POSTING_IDENTIFIER: ""
+          E2E_POSTING_PASSWORD: ""
+          TLINE_E2E_FIXTURE: ""
+          TLINE_LIVE_ACCEPTANCE: ""
+        run: |
+          set -Eeuo pipefail
+          node apps/web/.next/standalone/apps/web/server.js > /tmp/wavekb-guest-candidate.log 2>&1 &
+          candidate_pid=$!
+          cleanup_guest_candidate() {
+            candidate_status=$?
+            if [ "$candidate_status" -ne 0 ]; then
+              tail -n 200 /tmp/wavekb-guest-candidate.log
+            fi
+            kill "$candidate_pid" 2>/dev/null || true
+            wait "$candidate_pid" 2>/dev/null || true
+            exit "$candidate_status"
+          }
+          trap cleanup_guest_candidate EXIT
+          for attempt in $(seq 1 30); do
+            kill -0 "$candidate_pid"
+            curl --fail --silent http://127.0.0.1:3108/api/health > /dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3108/api/health > /tmp/wavekb-guest-candidate-health.json
+          node --input-type=module -e 'import assert from "node:assert/strict"; import fs from "node:fs"; const health = JSON.parse(fs.readFileSync("/tmp/wavekb-guest-candidate-health.json", "utf8")); assert.equal(health.ok, true); assert.equal(health.deployment, process.env.DEPLOYMENT_VERSION);'
+          pnpm --filter @wavekb/web exec playwright test --retries=0 --reporter=github,html
+
+      - name: Preserve guest and mock browser failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wavekb-guest-and-mock-ui-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/web/test-results/
+            apps/web/playwright-report/
+            /tmp/wavekb-guest-candidate.log
+          if-no-files-found: ignore
+          retention-days: 3
