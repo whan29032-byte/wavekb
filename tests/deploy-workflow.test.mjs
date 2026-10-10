@@ -105,11 +105,34 @@ test("private research activation is opt-in, validated before restart and exactl
   assert.match(activation.run, /case "\$PRIVATE_RESEARCH" in preserve\|enable\|disable/);
   assert.match(activation.run, /if test "\$PRIVATE_RESEARCH" != preserve/);
   assert.match(activation.run, /configure-runtime\.ts[\s\S]*--env-file \/etc\/elliott-wave\/gateway\.env[\s\S]*--backup-file "\$\{backup_root\}\/gateway\.env"/);
-  assert.match(activation.run, /cp --preserve=mode,ownership "\$\{backup_root\}\/gateway\.env" \/etc\/elliott-wave\/gateway\.env/);
+  assert.match(activation.run, /install -m 0600 "\$\{backup_root\}\/gateway\.env" "\$environment_rollback"/);
+  assert.match(activation.run, /mv -Tf "\$environment_rollback" \/etc\/elliott-wave\/gateway\.env/);
+  assert.doesNotMatch(activation.run, /cp[^\n]*gateway\.env[^\n]* \/etc\/elliott-wave\/gateway\.env/);
   const invocation = activation.run.indexOf('sudo /usr/bin/node -- "${release_dir}/src/research/configure-runtime.ts"');
   const candidateRestart = activation.run.lastIndexOf("sudo systemctl restart elliott-wave-gateway.service");
   assert.ok(invocation > activation.run.indexOf("trap rollback ERR") && invocation < candidateRestart);
   assert.doesNotMatch(activation.run, /MEMBERSHIP_MANAGED_AI_ENABLED|AI_SECRET_MASTER_KEY|DEEPSEEK_API_KEY/);
+});
+
+test("environment rollback never truncates the live file when copying its backup fails", () => {
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const rollback = activation.run.match(/if sudo test -f "\$\{backup_root\}\/gateway\.env"; then[\s\S]*?\n\s*fi/)?.[0];
+  assert.ok(rollback);
+  for (const failCopy of [false, true]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-env-rollback-"));
+    try {
+      const backup = path.join(directory, "backup"); fs.mkdirSync(backup);
+      fs.writeFileSync(path.join(backup, "gateway.env"), "ORIGINAL=safe\n", { mode: 0o600 });
+      const live = path.join(directory, "gateway.env");
+      fs.writeFileSync(live, "CANDIDATE=safe\n", { mode: 0o600 });
+      const program = `set -eu\nbackup_root="${backup}"\nrelease_id=fixture\nsudo() { "$@"; }\n${failCopy ? 'install() { head -c 1 "$3" > "$4"; return 9; }' : ""}\n${rollback.replaceAll("/etc/elliott-wave", directory)}`;
+      const result = spawnSync("bash", ["-c", program], { encoding: "utf8" });
+      assert.equal(result.status, failCopy ? 9 : 0, result.stderr);
+      assert.equal(fs.readFileSync(live, "utf8"), failCopy ? "CANDIDATE=safe\n" : "ORIGINAL=safe\n");
+      assert.equal(fs.readFileSync(path.join(backup, "gateway.env"), "utf8"), "ORIGINAL=safe\n");
+      assert.equal(fs.statSync(live).mode & 0o777, 0o600);
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  }
 });
 
 test("one email test is opt-in, isolated from real orders and idempotent across reruns", () => {

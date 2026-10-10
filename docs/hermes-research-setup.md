@@ -56,7 +56,7 @@
 
 **数据库边界不能由前端隐藏替代。** 现有 `ai_jobs` 和 `knowledge_retrievals` 仍有 owner-readable 列与历史记录，本轮不回写历史数据。新私有来源、审计、检索与候选独立放在 `hermes_research_private`，不写进 owner-readable 检索记录、请求或连接快照。六表均启用并强制 RLS，anon/authenticated 无 schema USAGE、表权限或私有 RPC 执行权。公开 RPC 使用固定 search_path 的 INVOKER，服务端角色与 JWT role 都必须是 service_role；不由用户自报 owner。
 
-`HERMES_PRIVATE_RESEARCH_ENABLED` 默认 false。true 时 worker 必须从已激活快照取得可信摘要，完整复核 v2 结构、来源/块/转换记录和正文；缺失、损坏或无法审计则在模型调用前 `knowledge_unavailable`。明确单书模式保持该公开书范围；all 模式的第十一版主要依据与私有补充有界合并，不扩大为整个知识库或任意工具。
+`HERMES_PRIVATE_RESEARCH_ENABLED` 默认 false。true 时仅网站服务端授权的 managed 任务使用私有资料，并继续经过会员额度授权；BYOK 保留公开四书，不向用户配置的第三方模型发送私有理论。managed worker 必须从已激活快照取得可信摘要，完整复核 v2 结构、来源/块/转换记录和正文；缺失、损坏或无法审计则在模型调用前 `knowledge_unavailable`。明确单书模式保持该公开书范围；all 模式的第十一版主要依据与私有补充有界合并，不扩大为整个知识库或任意工具。
 
 ## 私有理论快照
 

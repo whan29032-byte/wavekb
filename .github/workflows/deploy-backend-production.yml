@@ -328,7 +328,10 @@ jobs:
               fi
             done
             if sudo test -f "${backup_root}/gateway.env"; then
-              sudo cp --preserve=mode,ownership "${backup_root}/gateway.env" /etc/elliott-wave/gateway.env
+              environment_rollback="/etc/elliott-wave/.gateway.env.rollback-${release_id}"
+              sudo test ! -e "$environment_rollback"
+              sudo install -m 0600 "${backup_root}/gateway.env" "$environment_rollback"
+              sudo mv -Tf "$environment_rollback" /etc/elliott-wave/gateway.env
             fi
             sudo systemctl daemon-reload
             sudo systemctl restart elliott-wave-gateway.service

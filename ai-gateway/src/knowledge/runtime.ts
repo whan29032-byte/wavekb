@@ -37,6 +37,8 @@ type RuntimeDatabase = {
 export type KnowledgeRuntimeJob = {
   id: string;
   task_type: string;
+  // Bound by the server worker/database, never by analysis or input_payload.
+  execution_source?: "managed" | "byok";
   input_payload: Record<string, unknown>;
   knowledge_version?: string | null;
 };
@@ -230,7 +232,9 @@ export class KnowledgeRuntime {
     const normalizedRequest = normalizeAiRunRequest(input.job.input_payload, index.books);
     const query = buildKnowledgeQuery(input.analysis, normalizedRequest);
     let privateSnapshot: PrivateTheorySnapshot | null = null;
-    if (this.privateResearchEnabled) {
+    // User-controlled BYOK routes must not receive website-private research.
+    // Missing execution provenance is public-only legacy compatibility.
+    if (this.privateResearchEnabled && input.job.execution_source === "managed") {
       try {
         if (!this.privateRepository) throw new Error("private_repository_unavailable");
         const active = await this.privateRepository.loadActiveArtifact();

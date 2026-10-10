@@ -61,7 +61,7 @@ test("enabled private research fails closed before audit/provider if active snap
   for (const active of [null, { artifact, expectedSha256: "a".repeat(64) }]) {
     const runtime = new KnowledgeRuntime({ database: { request: async () => { calls++; return []; } }, privateResearchEnabled: true,
       privateRepository: { loadActiveArtifact: async () => active, recordRetrieval: async () => { calls++; } } });
-    await assert.rejects(runtime.run({ job: { id: "job", task_type: "wave_analysis", input_payload: request }, analysis,
+    await assert.rejects(runtime.run({ job: { id: "job", task_type: "wave_analysis", execution_source: "managed", input_payload: request }, analysis,
       connection: { contextTokens: 131072, maxOutputTokens: 4096, provider: { invoke: async () => { calls++; } } } as unknown as ResolvedUserConnection }), { message: "knowledge_unavailable" });
   }
   assert.equal(calls, 0);
@@ -88,7 +88,7 @@ test("private research uses service-only audit, opaque prompt fragments and refe
     privateResearchEnabled: true, privateRepository: { loadActiveArtifact: async () => ({ artifact, expectedSha256: artifact.artifactSha256 }), recordRetrieval: async (value) => { audits.push(value); } } });
   const connection = { modelName: "mock", contextTokens: 131072, maxOutputTokens: 4096, temperature: .2, timeoutMs: 1000,
     provider: { invoke: async (req: any) => { requests.push(req); return { text: JSON.stringify({ ...model, knowledge_citations: [artifact.chunks[0].id] }), usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" }; } } } as ResolvedUserConnection;
-  const result = await runtime.run({ job: { id: "job", task_type: "wave_analysis", input_payload: request }, analysis, connection });
+  const result = await runtime.run({ job: { id: "job", task_type: "wave_analysis", execution_source: "managed", input_payload: request }, analysis, connection });
   assert.equal((result.output as any).source_visibility, "private_research");
   assert.deepEqual((result.output as any).knowledge_citations, []); assert.deepEqual(result.output.citations, []);
   assert.equal(result.knowledgeVersion, index.knowledgeVersion);
@@ -105,7 +105,7 @@ test("private audit failure fails closed and single-public-book scope is not bro
     provider: { invoke: async () => { providerCalls++; return { text: JSON.stringify(model), usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" }; } } } as unknown as ResolvedUserConnection;
   const repository = { loadActiveArtifact: async () => ({ artifact, expectedSha256: artifact.artifactSha256 }), recordRetrieval: async (value: any) => { audits.push(value); throw new Error("private internal source/path"); } };
   const runtime = new KnowledgeRuntime({ database: { request: async () => [] }, privateResearchEnabled: true, privateRepository: repository });
-  await assert.rejects(runtime.run({ job: { id: "job", task_type: "wave_analysis", input_payload: { ...request, knowledge_scope: { mode: "single", book_id: "elliott-wave-principle-eleventh-edition" } } }, analysis, connection }), { message: "knowledge_unavailable" });
+  await assert.rejects(runtime.run({ job: { id: "job", task_type: "wave_analysis", execution_source: "managed", input_payload: { ...request, knowledge_scope: { mode: "single", book_id: "elliott-wave-principle-eleventh-edition" } } }, analysis, connection }), { message: "knowledge_unavailable" });
   assert.equal(providerCalls, 0); assert.deepEqual(audits[0].chunkIds, []);
 });
 
@@ -117,9 +117,44 @@ test("private names and opaque source IDs in narrative are rejected with exact p
       privateRepository: { loadActiveArtifact: async () => ({ artifact, expectedSha256: artifact.artifactSha256 }), recordRetrieval: async () => {} } });
     const connection = { modelName: "mock", contextTokens: 131072, maxOutputTokens: 4096, temperature: .2, timeoutMs: 1000,
       provider: { invoke: async () => { calls++; return { text: JSON.stringify({ ...model, current_pattern: narrative }), usage: { inputTokens: 11, outputTokens: 13 }, finishReason: "stop" }; } } } as unknown as ResolvedUserConnection;
-    await assert.rejects(runtime.run({ job: { id: "job", task_type: "wave_analysis", input_payload: request }, analysis, connection }),
+    await assert.rejects(runtime.run({ job: { id: "job", task_type: "wave_analysis", execution_source: "managed", input_payload: request }, analysis, connection }),
       (error: any) => error.code === "invalid_model_output" && error.message === "invalid_model_output"
         && error.provider.usage.inputTokens === 11 && error.provider.usage.outputTokens === 13);
     assert.equal(calls, 1, "publication disclosure is not a license for extra provider attempts");
   }
+});
+
+test("BYOK and legacy jobs remain public-only even when private research is enabled, including charts", async () => {
+  for (const executionSource of ["byok", undefined] as const) {
+    const requests: any[] = [], publicAudits: any[] = [];
+    const runtime = new KnowledgeRuntime({ database: { request: async (path, options) => { publicAudits.push({ path, ...options }); return []; } },
+      privateResearchEnabled: true, privateRepository: {
+        loadActiveArtifact: async () => { throw new Error("BYOK must not read private corpus"); },
+        recordRetrieval: async () => { throw new Error("BYOK must not write private audit"); },
+      } });
+    const connection = { modelName: "user-external-model", contextTokens: 131072, maxOutputTokens: 4096, temperature: .2, timeoutMs: 1000,
+      provider: { invoke: async (req: any) => { requests.push(req); return { text: JSON.stringify(model), usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" }; } } } as unknown as ResolvedUserConnection;
+    const withChart = { ...analysis, step_data: { "5": { ...analysis.step_data["5"],
+      chart_context: { schema_version: "wavekb-chart-context-v1", instrument: "BTCUSDT", timeframe: "4h" },
+      chart_data: { schema_version: "wavekb-chart-input-v1", bars: [
+        { time: 1700000000, open: 100, high: 110, low: 90, close: 105 },
+        { time: 1700000060, open: 105, high: 115, low: 95, close: 110 },
+      ] },
+    } } };
+    const result = await runtime.run({ job: { id: "job", task_type: "wave_analysis", ...(executionSource ? { execution_source: executionSource } : {}), input_payload: request }, analysis: withChart, connection });
+    assert.equal((result.output as any).source_visibility, "public_books");
+    assert.equal((result.output as any).wave_chart.mode, "ohlc");
+    assert.equal((result.output as any).wave_chart.bars.length, 2);
+    assert.equal(publicAudits.length, 1); assert.equal(publicAudits[0].path, "/rest/v1/knowledge_retrievals");
+    assert.equal(requests.length, 1); assert.doesNotMatch(requests[0].messages[0].content, /supplementary_untrusted_fragments|h_[a-f0-9]{32}|artifactSha256|privateSourceTerms/);
+  }
+});
+
+test("client payload cannot authorize private research by claiming managed execution", async () => {
+  let accesses = 0;
+  const runtime = new KnowledgeRuntime({ database: { request: async () => { accesses++; return []; } }, privateResearchEnabled: true,
+    privateRepository: { loadActiveArtifact: async () => { accesses++; return null; }, recordRetrieval: async () => { accesses++; } } });
+  await assert.rejects(runtime.run({ job: { id: "job", task_type: "wave_analysis", execution_source: "byok", input_payload: { ...request, execution_source: "managed" } }, analysis,
+    connection: { provider: { invoke: async () => { accesses++; } } } as unknown as ResolvedUserConnection }));
+  assert.equal(accesses, 0, "client-owned execution fields fail request validation before any corpus/audit/provider access");
 });
