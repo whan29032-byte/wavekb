@@ -1,10 +1,12 @@
 import type { AnalysisResult, ScenarioResult } from "../schemas/analysis-result.ts";
+import type { WaveChart } from "../research/wave-chart.ts";
 
 type Wave = { start: number; end: number };
 type ScenarioInput = {
   pattern: string;
   direction?: "up" | "down";
   waves?: Record<string, Wave>;
+  anchors?: Record<string, number>;
 };
 type Violation = { rule_id: string; knowledge_page_id: string; message: string };
 
@@ -61,10 +63,46 @@ export function scenarioInputsFromAnalysis(
   return result;
 }
 
+/** Apply existing theory rules to the exact supplied candle anchors used on
+ * the chart. Partial/uncertain counts remain candidates, never filled in. */
+export function scenarioInputsFromWaveChart(
+  chart: WaveChart, boundedAnalysis: Record<string, unknown>, candidates: readonly ScenarioResult[] = [],
+): Record<string, ScenarioInput> {
+  const stepData = isRecord(boundedAnalysis.step_data) ? boundedAnalysis.step_data : {};
+  const pattern = isRecord(stepData["5"]) ? stepData["5"].pattern : undefined;
+  const result: Record<string, ScenarioInput> = {};
+  for (const scenario of chart.scenarios) {
+    // The contract admits one degree: 0..5 OR 0+i..v. Extra correction
+    // annotations must not bypass either complete or partial impulse rules.
+    const minorLabels = ["i", "ii", "iii", "iv", "v"];
+    const numeric = new Map<string, number>();
+    for (const point of scenario.points) {
+      if (/^[0-5]$/u.test(point.label)) numeric.set(point.label, point.price);
+      const minor = minorLabels.indexOf(point.label);
+      if (minor >= 0) numeric.set(String(minor + 1), point.price);
+    }
+    if (numeric.size < 2) continue;
+    const candidatePattern = candidates.find((candidate) => candidate.key === scenario.key)?.pattern;
+    const waves: Record<string, Wave> = {};
+    for (let wave = 1; wave <= 5; wave++) {
+      const start = numeric.get(String(wave - 1));
+      const end = numeric.get(String(wave));
+      if (start !== undefined && end !== undefined) waves[`w${wave}`] = { start, end };
+    }
+    const selectedPattern = candidatePattern === "impulse" ? candidatePattern : pattern;
+    if (typeof selectedPattern === "string") result[scenario.key] = { pattern: selectedPattern, direction: scenario.direction, waves, anchors: Object.fromEntries(numeric) };
+  }
+  return result;
+}
+
 function impulseViolations(scenario: ScenarioInput): Violation[] {
   const waves = scenario.waves ?? {};
   const { w1, w2, w3, w4, w5 } = waves;
-  if (!w1 || !w2 || !w3 || !w4 || !w5) return [];
+  const p0 = scenario.anchors?.["0"] ?? w1?.start;
+  const p1 = scenario.anchors?.["1"] ?? w1?.end;
+  const p2 = scenario.anchors?.["2"] ?? w2?.end;
+  const p3 = scenario.anchors?.["3"] ?? w3?.end;
+  const p4 = scenario.anchors?.["4"] ?? w4?.end;
   const up = scenario.direction !== "down";
   const violations: Violation[] = [];
   const add = (failed: boolean, message: string) => {
@@ -74,26 +112,27 @@ function impulseViolations(scenario: ScenarioInput): Violation[] {
       message,
     });
   };
-  add(up ? w2.end < w1.start : w2.end > w1.start, "浪2越过浪1起点。");
-  add(up ? w3.end <= w1.end : w3.end >= w1.end, "浪3未超过浪1终点。");
-  const lengths = [
-    Math.abs(w1.end - w1.start),
-    Math.abs(w3.end - w2.end),
-    Math.abs(w5.end - w4.end),
-  ];
-  add((lengths[1] ?? 0) < (lengths[0] ?? 0) && (lengths[1] ?? 0) < (lengths[2] ?? 0), "浪3成为最短浪。");
-  add(up ? w4.end < w1.end : w4.end > w1.end, "普通推动浪浪4进入浪1价格区域。");
+  // Known endpoints suffice for these comparisons; do not invent missing
+  // intermediate points, or let an omitted point bypass an observed conflict.
+  if (p0 !== undefined && p2 !== undefined) add(up ? p2 < p0 : p2 > p0, "浪2越过浪1起点。");
+  if (p1 !== undefined && p3 !== undefined) add(up ? p3 <= p1 : p3 >= p1, "浪3未超过浪1终点。");
+  if (w1 && w3 && w5) {
+    const lengths = [Math.abs(w1.end - w1.start), Math.abs(w3.end - w3.start), Math.abs(w5.end - w5.start)];
+    add(lengths[1]! < lengths[0]! && lengths[1]! < lengths[2]!, "浪3成为最短浪。");
+  }
+  if (p1 !== undefined && p4 !== undefined) add(up ? p4 < p1 : p4 > p1, "普通推动浪浪4进入浪1价格区域。");
   return violations;
 }
 
 export function applyRuleGate(
   result: AnalysisResult,
   scenarioInputs: Record<string, ScenarioInput>,
+  options: { fallbackToPrimary?: boolean } = {},
 ): AnalysisResult {
   const valid: ScenarioResult[] = [];
   const eliminated = [...result.eliminated_scenarios];
   for (const scenario of result.valid_scenarios) {
-    const input = scenarioInputs[scenario.key] ?? scenarioInputs.primary;
+    const input = scenarioInputs[scenario.key] ?? (options.fallbackToPrimary === false ? undefined : scenarioInputs.primary);
     const violations = input?.pattern === "impulse" ? impulseViolations(input) : [];
     if (violations.length) eliminated.push({ ...scenario, violations });
     else valid.push(scenario);

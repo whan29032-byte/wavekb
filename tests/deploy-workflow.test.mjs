@@ -94,6 +94,24 @@ test("YouTube worker is optional, secret-free in deployment and covered by rollb
   assert.doesNotMatch(JSON.stringify(backendSteps), /YOUTUBE_OAUTH_CLIENT_SECRET|YOUTUBE_TOKEN_MASTER_KEY/);
 });
 
+test("private research activation is opt-in, validated before restart and exactly rolled back", () => {
+  const inputs = (backendWorkflow.on ?? backendWorkflow.true).workflow_dispatch.inputs;
+  assert.equal(inputs.private_research.default, "preserve");
+  assert.deepEqual(inputs.private_research.options, ["preserve", "enable", "disable"]);
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
+  assert.match(contracts.run, /hermes-theory-artifact\.test\.mjs/);
+  assert.match(contracts.run, /hermes-private-research-postgres\.test\.mjs/);
+  assert.match(activation.run, /case "\$PRIVATE_RESEARCH" in preserve\|enable\|disable/);
+  assert.match(activation.run, /if test "\$PRIVATE_RESEARCH" != preserve/);
+  assert.match(activation.run, /configure-runtime\.ts[\s\S]*--env-file \/etc\/elliott-wave\/gateway\.env[\s\S]*--backup-file "\$\{backup_root\}\/gateway\.env"/);
+  assert.match(activation.run, /cp --preserve=mode,ownership "\$\{backup_root\}\/gateway\.env" \/etc\/elliott-wave\/gateway\.env/);
+  const invocation = activation.run.indexOf('sudo /usr/bin/node -- "${release_dir}/src/research/configure-runtime.ts"');
+  const candidateRestart = activation.run.lastIndexOf("sudo systemctl restart elliott-wave-gateway.service");
+  assert.ok(invocation > activation.run.indexOf("trap rollback ERR") && invocation < candidateRestart);
+  assert.doesNotMatch(activation.run, /MEMBERSHIP_MANAGED_AI_ENABLED|AI_SECRET_MASTER_KEY|DEEPSEEK_API_KEY/);
+});
+
 test("one email test is opt-in, isolated from real orders and idempotent across reruns", () => {
   const inputs = (mailWorkflow.on ?? mailWorkflow.true).workflow_dispatch.inputs;
   assert.equal(inputs.operation.default, "check-config");
@@ -147,10 +165,13 @@ test("backend deployment migrates only the exact predecessor schema before uploa
     assert.ok(backendSteps[schemaGate].run.includes(`membership_wallet_${table}`));
   }
   assert.match(backendSteps[schemaGate].run, /test "\$wallet_rls_tables" = 7/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610100005/);
+  assert.match(backendSteps[schemaGate].run, /test "\$private_rls_tables" = 6/);
+  assert.match(backendSteps[schemaGate].run, /test "\$private_schema_closed" = t/);
+  assert.match(backendSteps[schemaGate].run, /not has_schema_privilege\('authenticated','hermes_research_private','USAGE'\)/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 20261010223739/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610100005/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 20261010223739/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -174,6 +195,7 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202610100003_membership_commerce.sql",
     "202610100004_membership_benefits.sql",
     "202610100005_membership_wallet_payments.sql",
+    "20261010223739_hermes_private_research.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -190,7 +212,7 @@ ${selection}`;
   for (const [marker, offset] of [
     ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
-    ["202610100003", 8], ["202610100004", 9], ["202610100005", 10],
+    ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11],
   ]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);

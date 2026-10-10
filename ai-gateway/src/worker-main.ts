@@ -7,6 +7,8 @@ import { UserConnectionResolver } from "./secrets/user-connection.ts";
 import { ManagedConnectionResolver } from "./secrets/managed-connection.ts";
 import { SupabaseRest } from "./storage/supabase-rest.ts";
 import { MembershipWalletWorker } from "./membership-wallet-worker.ts";
+import { assertPublishedAnalysisOutput } from "./research/publication.ts";
+import { ResearchPrivateRepository } from "./research/private-repository.ts";
 
 type WorkerDatabase = Pick<SupabaseRest, "request">;
 type WorkerConnectionResolver = Pick<UserConnectionResolver, "resolve">;
@@ -62,6 +64,8 @@ export class AiJobWorker {
     this.now = dependencies.now ?? Date.now;
     this.knowledgeRuntime = dependencies.knowledgeRuntime ?? new KnowledgeRuntime({
       database: this.database,
+      privateResearchEnabled: config.HERMES_PRIVATE_RESEARCH_ENABLED === true,
+      ...(config.HERMES_PRIVATE_RESEARCH_ENABLED === true ? { privateRepository: new ResearchPrivateRepository(this.database) } : {}),
     });
   }
 
@@ -123,6 +127,8 @@ export class AiJobWorker {
         analysis: analyses[0],
         connection,
       });
+      try { assertPublishedAnalysisOutput(result.output); }
+      catch (error) { throw Object.assign(error instanceof Error ? error : new Error("invalid_public_analysis"), { provider: result.provider }); }
       const finishedAt = new Date(this.now()).toISOString();
       if (attemptId) {
         await this.database.request(`/rest/v1/ai_job_attempts?id=eq.${encodeURIComponent(attemptId)}`, {
@@ -160,7 +166,7 @@ export class AiJobWorker {
       const retry = classification === "retryable" && attemptNumber < 3;
       const runtimeCode = (error as { code?: unknown })?.code;
       const provider = (error as { provider?: KnowledgeRuntimeResult["provider"] })?.provider;
-      const errorCode = runtimeCode === "knowledge_unavailable" || runtimeCode === "invalid_model_output"
+      const errorCode = runtimeCode === "knowledge_unavailable" || runtimeCode === "invalid_model_output" || runtimeCode === "input_context_too_large" || runtimeCode === "invalid_chart_input"
         ? runtimeCode
         : classification;
       const finishedAt = new Date(this.now()).toISOString();
@@ -201,7 +207,10 @@ export class AiJobWorker {
       } : {
         status: "failed",
         error_code: errorCode,
-        error_message: "AI 候选分析未完成，请检查模型连接后重试。",
+        error_message: errorCode === "input_context_too_large"
+          ? "分析输入超过当前模型的上下文预算，请精简已有步骤的备注后重试。"
+          : errorCode === "invalid_chart_input" ? "K 线或标的／周期绑定未通过校验，请核对当前分析并重新导入 1–128 根有效 K 线，时间使用 Unix 秒。"
+            : "AI 候选分析未完成，请检查模型连接后重试。",
         finished_at: finishedAt,
       });
     }

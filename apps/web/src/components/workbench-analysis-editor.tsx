@@ -10,7 +10,11 @@ import { createReviewFromAnalysis, saveWorkbenchAnalysis, submitAiRun, type Know
 import { calculateMaxDrawdown, calculateRisk, evaluateImpulse } from "@/lib/workbench/analysis-calculators";
 import { KnowledgeScopeSelector } from "./knowledge-scope-selector";
 import { KnowledgeCitations } from "./knowledge-citations";
+import { AnalysisBasis, hasPublicAnalysisContract, isPublicAnalysisText } from "./analysis-basis";
 import { ManagedAiModeSelector, type AiExecutionMode } from "./managed-ai-mode-selector";
+import { WaveChartInput } from "./wave-chart-input";
+import { WaveAnalysisChart } from "./wave-analysis-chart";
+import { normalizeChartInput, selectChartInput } from "../../../../ai-gateway/src/research/wave-chart";
 
 const steps = ["市场环境过滤", "确认分析级别", "确认当前浪级", "回撤确认", "调整结构识别", "驱动结构检查", "规则检查", "方案选择", "风险收益评估", "执行计划", "复盘系统"];
 const stepHints = [
@@ -60,6 +64,19 @@ function restoredDraft(value: unknown, actorId: string): WorkbenchAnalysisDraft 
   return initialDraft(actorId, candidate as unknown as WorkbenchAnalysis);
 }
 
+function selectedChartState(analysis: WorkbenchAnalysisDraft, step: number) {
+  for (let index = step; index >= 0; index--) {
+    const data = objectValue(analysis.step_data[String(index)]);
+    if (!Object.hasOwn(data, "chart_data")) continue;
+    let count = 0;
+    try { count = normalizeChartInput(data.chart_data).bars.length; }
+    catch { return { step: index, count, status: "invalid" as const }; }
+    try { selectChartInput(analysis, index, { requireContext: true }); return { step: index, count, status: "valid" as const }; }
+    catch { return { step: index, count, status: "inactive" as const }; }
+  }
+  return null;
+}
+
 export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep }: { actorId: string; initialAnalysis?: WorkbenchAnalysis; initialStep: number }) {
   const router = useRouter();
   const [analysisId, setAnalysisId] = useState(initialAnalysis?.id || null);
@@ -76,6 +93,8 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const [draftStatus, setDraftStatus] = useState(initialAnalysis ? "服务器版本已加载。" : "正在检查本地草稿。");
   const [aiJob, setAiJob] = useState<{ id: string; status: string; knowledge_version?: string | null; output_payload?: unknown; error_message?: string } | null>(null);
   const currentData = useMemo(() => objectValue(draft.step_data[String(step)]), [draft.step_data, step]);
+  const chartState = selectedChartState(draft, step);
+  const earlierChart = chartState && chartState.step < step ? chartState : null;
   const draftKey = `wavekb:next:analysis:${actorId}${analysisId ? `:${analysisId}` : ""}`;
   const restored = useRef(false);
 
@@ -133,15 +152,19 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
     setDraft((current) => ({ ...current, ...(contextChanged ? { rule_result: {}, score_result: {}, risk_result: {}, drawdown_result: {} } : {}), ...value }));
   }
 
-  function patchStep(value: Record<string, unknown>) {
+  function patchStep(value: Record<string, unknown>, removeFields: string[] = []) {
     setDirty(true);
-    setDraft((current) => ({
-      ...current,
-      ...(step === 3 ? { drawdown_result: {} } : {}),
-      ...(step === 8 ? { risk_result: {} } : {}),
-      ...(step <= 7 ? { rule_result: {}, score_result: {} } : {}),
-      step_data: { ...current.step_data, [String(step)]: { ...objectValue(current.step_data[String(step)]), ...value } },
-    }));
+    setDraft((current) => {
+      const nextStep = { ...objectValue(current.step_data[String(step)]), ...value };
+      for (const field of removeFields) delete nextStep[field];
+      return {
+        ...current,
+        ...(step === 3 ? { drawdown_result: {} } : {}),
+        ...(step === 8 ? { risk_result: {} } : {}),
+        ...(step <= 7 ? { rule_result: {}, score_result: {} } : {}),
+        step_data: { ...current.step_data, [String(step)]: nextStep },
+      };
+    });
   }
 
   async function persist() {
@@ -208,6 +231,9 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
     setPending(true); setError(""); setStatus("正在保存并提交 AI 候选分析。");
     try {
       const original = unresolvedAiRequest.current?.owner === actorId ? unresolvedAiRequest.current : null;
+      if (!original && chartState && chartState.status !== "valid") {
+        throw new Error(chartState.status === "inactive" ? "绘图行情属于其他或未确认标的／周期，已停用。请重新导入并核对，或明确清除后继续文字分析。" : "已有绘图行情格式无效。请重新导入或明确清除后再启动 AI。");
+      }
       const mode = original?.mode ?? aiMode;
       const verifyManagedActor = async () => {
         if (mode !== "managed") return;
@@ -258,11 +284,14 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const ruleStatus = ({ valid: "已通过已实现规则", eliminated: "未通过规则", invalid_input: "输入无效", not_checked: "尚未检查" } as Record<string, string>)[String(ruleResult.status)] || "尚未检查";
   const calculationErrors = [ruleResult.error, draft.drawdown_result.error, draft.risk_result.error].filter(Boolean);
   const aiOutput = objectValue(aiJob?.output_payload);
-  const aiDiagnostics = Object.fromEntries(Object.entries(aiOutput).filter(([key]) => key !== "citations" && key !== "knowledge_citations"));
+  const safeSummary = (aiOutput.source_visibility === undefined && aiOutput.schema_version === undefined)
+    || hasPublicAnalysisContract(aiOutput);
+  const publicCitations = (aiOutput.source_visibility === undefined || aiOutput.source_visibility === "public_books")
+    && (aiOutput.schema_version === undefined || hasPublicAnalysisContract(aiOutput));
   const aiSummary = [
     ["品种", aiOutput.instrument], ["周期", aiOutput.timeframe], ["分析级别", aiOutput.analysis_level],
     ["当前结构", aiOutput.current_pattern], ["当前子浪", aiOutput.current_subwave],
-  ].filter(([, value]) => typeof value === "string" && value) as Array<[string, string]>;
+  ].filter(([, value]) => safeSummary && isPublicAnalysisText(value, 180)) as Array<[string, string]>;
   const hasValue = (value: unknown) => value !== null && value !== undefined && String(value).trim() !== "" && value !== "unknown";
   const stepProgress = (index: number) => {
     const value = objectValue(draft.step_data[String(index)]);
@@ -297,7 +326,28 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
           {step === 9 ? <div className="grid gap-5"><Field><Label htmlFor="execution-status">执行状态</Label><select id="execution-status" className={selectClass} value={draft.execution_status} onChange={(event) => patchDraft({ execution_status: event.target.value as WorkbenchAnalysisDraft["execution_status"] })}><option value="draft">草稿</option><option value="waiting">等待条件</option><option value="ready">可以执行</option><option value="executed">已执行</option><option value="closed">已结束</option></select></Field><Field><Label htmlFor="entry-condition">入场条件</Label><Textarea id="entry-condition" value={String(currentData.entry_condition || "")} onChange={(event) => patchStep({ entry_condition: event.target.value })} /></Field><Field><Label htmlFor="invalidation">结构失效条件</Label><Textarea id="invalidation" value={String(currentData.invalidation || "")} onChange={(event) => patchStep({ invalidation: event.target.value })} /></Field></div> : null}
           {step === 10 ? <div className="grid gap-5"><Field><Label htmlFor="actual-result">实际走势与执行结果</Label><Textarea id="actual-result" value={String(currentData.actual_result || "")} onChange={(event) => patchStep({ actual_result: event.target.value })} /></Field><Field><Label htmlFor="lessons">经验与改进</Label><Textarea id="lessons" value={String(currentData.lessons || "")} onChange={(event) => patchStep({ lessons: event.target.value })} /></Field><Button type="button" variant="secondary" className="w-fit" disabled={pending} onClick={() => void createReview()}>生成完整私人复盘记录</Button></div> : null}
           <Field><Label htmlFor="analysis-notes">分析记录</Label><Textarea id="analysis-notes" rows={8} value={notes} onChange={(event) => patchStep({ notes: event.target.value })} placeholder="记录判断、证据、未知项和下一步确认条件" /></Field>
-          {step >= 2 && step <= 7 ? <div className="grid gap-3 rounded-xl bg-muted p-4"><ManagedAiModeSelector key={actorId} actorId={actorId} value={aiMode} onChange={(mode) => setAiModeSelection({ owner: actorId, mode })} disabled={pending} /><KnowledgeScopeSelector value={knowledgeScope} onChange={setKnowledgeScope} disabled={pending} /><Button type="button" className="w-fit" disabled={pending} onClick={() => void startAi()}>启动 AI 候选分析</Button><p className="text-xs leading-5 text-muted-foreground">{aiMode === "managed" ? "使用平台配置的会员模型，服务器原子核实有效 VIP 与每日额度。" : "使用 AI 控制中心选定的自带 Key，不扣会员每日额度。"}知识检索和硬规则闸门仍由服务器处理。</p>{aiJob ? <div className="grid gap-2 text-sm"><p>任务状态：<strong>{aiJob.status}</strong></p><Button type="button" variant="secondary" size="small" className="w-fit" disabled={pending} onClick={() => void refreshAi()}>刷新 AI 状态</Button>{aiJob.output_payload ? <><section className="grid gap-2 rounded-lg bg-background p-3" aria-label="AI 分析摘要">{aiSummary.map(([label, value]) => <p key={label}><span className="text-muted-foreground">{label}：</span>{value}</p>)}{Array.isArray(aiOutput.valid_scenarios) ? <p><span className="text-muted-foreground">有效候选：</span>{aiOutput.valid_scenarios.length}</p> : null}</section><KnowledgeCitations citations={aiOutput.citations} jobKnowledgeVersion={aiJob.knowledge_version} outputKnowledgeVersion={aiOutput.knowledge_version} /><details><summary className="cursor-pointer text-xs text-muted-foreground">原始 JSON 诊断</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-background p-3 text-xs">{JSON.stringify(aiDiagnostics, null, 2)}</pre></details></> : null}{aiJob.error_message ? <FieldMessage>{aiJob.error_message}</FieldMessage> : null}</div> : null}</div> : null}
+          {step >= 2 && step <= 7 ? <div className="grid gap-3 rounded-xl bg-muted p-4">
+            <WaveChartInput key={`${actorId}:${analysisId || "new"}:${step}`} value={currentData.chart_data} instrument={draft.instrument} timeframe={draft.primary_timeframe} inactive={chartState?.step === step && chartState.status === "inactive"} onChange={(chart_data) => chart_data ? patchStep({ chart_data, chart_context: { schema_version: "wavekb-chart-context-v1", instrument: draft.instrument, timeframe: draft.primary_timeframe } }) : patchStep({}, ["chart_data", "chart_context"])} disabled={pending} />
+            {earlierChart ? <div className="grid gap-2 rounded-lg border bg-background p-3 text-sm">
+              <p role="status" className="leading-6">{earlierChart.status === "invalid" ? `第 ${earlierChart.step + 1} 步已有行情格式无效；不会退回更早的数据。请重新导入，或到该步骤清除。` : earlierChart.status === "inactive" ? `第 ${earlierChart.step + 1} 步行情属于其他或未确认标的／周期，已停用。保留草稿数据；请重新导入并核对，不会退回更早的数据。` : `本步骤未单独提供行情；AI 将沿用第 ${earlierChart.step + 1} 步的 ${earlierChart.count} 根用户输入 K 线。后续步骤的行情不会参与本次分析。`}</p>
+              <Button type="button" variant="secondary" className="w-fit" onClick={() => go(earlierChart.step)}>查看第 {earlierChart.step + 1} 步绘图输入</Button>
+            </div> : null}
+            <ManagedAiModeSelector key={actorId} actorId={actorId} value={aiMode} onChange={(mode) => setAiModeSelection({ owner: actorId, mode })} disabled={pending} />
+            <KnowledgeScopeSelector value={knowledgeScope} onChange={setKnowledgeScope} disabled={pending} />
+            <Button type="button" className="w-fit" disabled={pending} onClick={() => void startAi()}>启动 AI 候选分析</Button>
+            <p className="text-xs leading-5 text-muted-foreground">{aiMode === "managed" ? "使用平台配置的会员模型，服务器原子核实有效 VIP 与每日额度。" : "使用 AI 控制中心选定的自带 Key，不扣会员每日额度。"}知识检索和硬规则闸门仍由服务器处理。</p>
+            {aiJob ? <div className="grid gap-2 text-sm">
+              <p>任务状态：<strong>{aiJob.status}</strong></p>
+              <Button type="button" variant="secondary" size="small" className="w-fit" disabled={pending} onClick={() => void refreshAi()}>刷新 AI 状态</Button>
+              {aiJob.output_payload ? <>
+                {aiSummary.length ? <section className="grid gap-2 rounded-lg bg-background p-3" aria-label="AI 分析摘要">{aiSummary.map(([label, value]) => <p key={label}><span className="text-muted-foreground">{label}：</span>{value}</p>)}</section> : null}
+                <AnalysisBasis output={aiOutput} />
+                {hasPublicAnalysisContract(aiOutput) ? <WaveAnalysisChart value={aiOutput.wave_chart} /> : null}
+                {publicCitations ? <KnowledgeCitations citations={aiOutput.citations} jobKnowledgeVersion={aiJob.knowledge_version} outputKnowledgeVersion={aiOutput.knowledge_version} /> : null}
+              </> : null}
+              {aiJob.error_message ? <FieldMessage>{isPublicAnalysisText(aiJob.error_message, 280) ? aiJob.error_message : "AI 任务暂时不可用，请稍后刷新状态。"}</FieldMessage> : null}
+            </div> : null}
+          </div> : null}
           {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
           <footer className="flex flex-wrap items-center justify-between gap-3 border-t pt-5"><Button type="button" variant="secondary" disabled={step === 0} onClick={() => go(step - 1)}>上一步</Button><div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" disabled={pending} onClick={() => void save()}>{pending ? "正在处理" : "保存分析"}</Button>{step < 10 ? <Button type="button" onClick={() => go(step + 1)}>下一步</Button> : null}</div></footer>
         </section>

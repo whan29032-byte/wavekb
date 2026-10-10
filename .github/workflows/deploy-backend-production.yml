@@ -7,6 +7,15 @@ on:
         description: "Type DEPLOY_WAVEKB_BACKEND to apply the exact database migration and release the gateway"
         required: true
         type: string
+      private_research:
+        description: "Preserve configuration, or enable/disable the reviewed private research artifact (never enables the model)"
+        required: true
+        type: choice
+        default: preserve
+        options:
+          - preserve
+          - enable
+          - disable
 
 permissions:
   contents: read
@@ -55,7 +64,7 @@ jobs:
           node scripts/validate-knowledge.mjs
           pnpm --dir ai-gateway typecheck
           pnpm --dir ai-gateway test
-          node --test tests/ai-gateway-packaging.test.mjs tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/trading-leaderboard.test.mjs tests/trading-leaderboard-postgres.test.mjs tests/reward-lottery-postgres.test.mjs tests/mentor-checkout-postgres.test.mjs tests/mentor-notification-postgres.test.mjs tests/youtube-sync-postgres.test.mjs tests/admin-payment-hardening-postgres.test.mjs tests/mentor-payment-webhook.test.mjs tests/mentor-checkout-function.test.mjs tests/membership-foundation-postgres.test.mjs tests/membership-commerce-postgres.test.mjs tests/membership-payment-functions.test.mjs tests/membership-benefits-postgres.test.mjs tests/membership-wallet-postgres.test.mjs tests/membership-wallet-functions.test.mjs
+          node --test tests/ai-gateway-packaging.test.mjs tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/hermes-theory-artifact.test.mjs tests/hermes-private-research-postgres.test.mjs tests/trading-leaderboard.test.mjs tests/trading-leaderboard-postgres.test.mjs tests/reward-lottery-postgres.test.mjs tests/mentor-checkout-postgres.test.mjs tests/mentor-notification-postgres.test.mjs tests/youtube-sync-postgres.test.mjs tests/admin-payment-hardening-postgres.test.mjs tests/mentor-payment-webhook.test.mjs tests/mentor-checkout-function.test.mjs tests/membership-foundation-postgres.test.mjs tests/membership-commerce-postgres.test.mjs tests/membership-payment-functions.test.mjs tests/membership-benefits-postgres.test.mjs tests/membership-wallet-postgres.test.mjs tests/membership-wallet-functions.test.mjs
 
       - name: Package immutable gateway release
         run: |
@@ -185,6 +194,9 @@ jobs:
               echo "Existing membership migrations already applied; adding wallet payments."
               ;;
             202610100005)
+              echo "Wallet migrations already applied; adding private research."
+              ;;
+            20261010223739)
               echo "Production migrations already applied; continuing idempotently."
               ;;
             *)
@@ -192,11 +204,14 @@ jobs:
               exit 1
               ;;
           esac
-          if test "$schema_before" != 202610100005; then
+          if test "$schema_before" != 202610100005 && test "$schema_before" != 20261010223739; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100005_membership_wallet_payments.sql
           fi
+          if test "$schema_before" != 20261010223739; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261010223739_hermes_private_research.sql
+          fi
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema_after" = 202610100005
+          test "$schema_after" = 20261010223739
           rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('exchange_connections','exchange_connection_secrets','trading_equity_snapshots','trading_return_summaries') and c.relrowsecurity;" | tr -d '[:space:]')
           test "$rls_tables" = 4
           lottery_rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('reward_lottery_campaigns','reward_lottery_prizes','reward_lottery_draws','reward_lottery_admin_audit') and c.relrowsecurity;" | tr -d '[:space:]')
@@ -205,6 +220,10 @@ jobs:
           test "$youtube_rls_tables" = 5
           wallet_rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('membership_wallet_settings','membership_wallet_routes','membership_wallet_orders','membership_wallet_grants','membership_wallet_verifications','membership_wallet_receipts','membership_wallet_events') and c.relrowsecurity;" | tr -d '[:space:]')
           test "$wallet_rls_tables" = 7
+          private_rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='hermes_research_private' and c.relname in ('artifacts','source_lineage','active_snapshot','retrieval_audits','learning_candidates','candidate_reviews') and c.relrowsecurity;" | tr -d '[:space:]')
+          test "$private_rls_tables" = 6
+          private_schema_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select not has_schema_privilege('anon','hermes_research_private','USAGE') and not has_schema_privilege('authenticated','hermes_research_private','USAGE');" | tr -d '[:space:]')
+          test "$private_schema_closed" = t
 
       - name: Verify the public schema marker before release upload
         env:
@@ -218,10 +237,10 @@ jobs:
               -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
               -H 'content-type: application/json' \
               -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]') || true
-            test "$schema" = 202610100005 && break
+            test "$schema" = 20261010223739 && break
             sleep 2
           done
-          test "$schema" = 202610100005
+          test "$schema" = 20261010223739
 
       - name: Upload gateway archive and systemd units
         env:
@@ -250,10 +269,12 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          PRIVATE_RESEARCH: ${{ inputs.private_research }}
         run: |
           set -Eeuo pipefail
+          case "$PRIVATE_RESEARCH" in preserve|enable|disable) ;; *) exit 1 ;; esac
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' bash -s" <<'REMOTE'
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           release_root=/opt/elliott-wave-gateway
@@ -306,6 +327,9 @@ jobs:
                 sudo cp --preserve=mode,ownership,timestamps "${backup_root}/${unit}" "/etc/systemd/system/${unit}"
               fi
             done
+            if sudo test -f "${backup_root}/gateway.env"; then
+              sudo cp --preserve=mode,ownership "${backup_root}/gateway.env" /etc/elliott-wave/gateway.env
+            fi
             sudo systemctl daemon-reload
             sudo systemctl restart elliott-wave-gateway.service
             sudo systemctl try-restart elliott-wave-ai-worker.service || true
@@ -314,6 +338,14 @@ jobs:
             exit "$status"
           }
           trap rollback ERR
+
+          if test "$PRIVATE_RESEARCH" != preserve; then
+            private_enabled=false
+            test "$PRIVATE_RESEARCH" != enable || private_enabled=true
+            sudo /usr/bin/node -- "${release_dir}/src/research/configure-runtime.ts" \
+              --env-file /etc/elliott-wave/gateway.env \
+              --backup-file "${backup_root}/gateway.env" --enable-private "$private_enabled"
+          fi
 
           if test "$legacy_layout" -eq 1; then
             sudo mv "$current_link" "$previous"

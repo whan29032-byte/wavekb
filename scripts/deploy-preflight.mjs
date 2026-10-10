@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 export function planRelease({ cwd, baseSha, sha, schemaVersion, requiredSchema, readOnlyApproved = false, gatewayReleaseApproved = false }) {
   if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error("Live base SHA is missing or invalid; acceptance scope cannot be inferred");
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("Candidate SHA is invalid");
-  if (!/^[0-9]{12}$/.test(schemaVersion) || !/^[0-9]{12}$/.test(requiredSchema) || schemaVersion !== requiredSchema) {
+  if (!/^(?:[0-9]{12}|[0-9]{14})$/.test(schemaVersion) || !/^(?:[0-9]{12}|[0-9]{14})$/.test(requiredSchema) || schemaVersion !== requiredSchema) {
     throw new Error("Production schema is not the explicitly supported version; stop for separately approved schema compatibility review");
   }
   const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -48,7 +48,10 @@ async function main() {
   const schemaVersion = await readJson(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/wavekb_schema_version`, {
     method: "POST", headers: { apikey: key, "content-type": "application/json" }, body: "{}",
   });
-  const versions = fs.readdirSync(path.join(cwd, "supabase/migrations")).filter((name) => /^[0-9]{12}_.*\.sql$/.test(name)).map((name) => name.slice(0, 12)).sort();
+  const versions = fs.readdirSync(path.join(cwd, "supabase/migrations")).flatMap((name) => {
+    const match = /^([0-9]{12}|[0-9]{14})_.*\.sql$/.exec(name);
+    return match ? [match[1]] : [];
+  }).sort();
   const result = planRelease({ cwd, baseSha: health.deployment, sha: process.env.GITHUB_SHA, schemaVersion, requiredSchema: versions.at(-1), readOnlyApproved: process.env.READ_ONLY_ACCEPTANCE_APPROVED === "true", gatewayReleaseApproved: process.env.GATEWAY_RELEASE_APPROVED === "true" });
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `base_sha=${result.baseSha}\nposting_required=${result.postingRequired}\n`);
   console.log(`Read-only compatibility passed. Posting acceptance required: ${result.postingRequired}. Gateway changed: ${result.gatewayChanged}. Gateway release approved: ${result.gatewayReleaseApproved}.`);
