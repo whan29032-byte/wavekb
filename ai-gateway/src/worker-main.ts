@@ -2,7 +2,7 @@ import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { loadConfig, type GatewayConfig } from "./config.ts";
 import { classifyProviderError } from "./jobs/router.ts";
-import { KnowledgeRuntime, type KnowledgeRuntimeResult } from "./knowledge/runtime.ts";
+import { KnowledgeRuntime, modelOutputDiagnostic, type KnowledgeRuntimeResult } from "./knowledge/runtime.ts";
 import { UserConnectionResolver } from "./secrets/user-connection.ts";
 import { ManagedConnectionResolver } from "./secrets/managed-connection.ts";
 import { SupabaseRest } from "./storage/supabase-rest.ts";
@@ -130,7 +130,14 @@ export class AiJobWorker {
         connection,
       });
       try { assertPublishedAnalysisOutput(result.output); }
-      catch (error) { throw Object.assign(error instanceof Error ? error : new Error("invalid_public_analysis"), { provider: result.provider }); }
+      catch (error) {
+        const diagnostic = modelOutputDiagnostic(error);
+        throw Object.assign(new Error("invalid_model_output"), {
+          code: "invalid_model_output",
+          diagnostic: diagnostic === "privacy_disclosure" ? diagnostic : "write_side",
+          provider: result.provider,
+        });
+      }
       const finishedAt = new Date(this.now()).toISOString();
       if (attemptId) {
         await this.database.request(`/rest/v1/ai_job_attempts?id=eq.${encodeURIComponent(attemptId)}`, {
@@ -210,7 +217,8 @@ export class AiJobWorker {
       } : {
         status: "failed",
         error_code: errorCode,
-        error_message: errorCode === "input_context_too_large"
+        error_message: errorCode === "invalid_model_output" ? `invalid_model_output:${modelOutputDiagnostic(error)}`
+          : errorCode === "input_context_too_large"
           ? "分析输入超过当前模型的上下文预算，请精简已有步骤的备注后重试。"
           : errorCode === "invalid_chart_input" ? "K 线或标的／周期绑定未通过校验，请核对当前分析并重新导入 1–128 根有效 K 线，时间使用 Unix 秒。"
             : "AI 候选分析未完成，请检查模型连接后重试。",

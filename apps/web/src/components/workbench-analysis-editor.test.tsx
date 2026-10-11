@@ -426,6 +426,7 @@ describe("AI knowledge selection", () => {
     await waitFor(() => expect(refresh.disabled).toBe(false));
     fireEvent.click(refresh);
     await screen.findByText("completed");
+    expect(screen.queryByText("AI 任务已进入服务器队列，将经过知识检索和规则闸门。")).toBeNull();
   }
 
   it("renders a validated wave chart only inside the public analysis contract", async () => {

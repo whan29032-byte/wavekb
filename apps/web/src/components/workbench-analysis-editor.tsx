@@ -291,6 +291,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
       const payload = await response.json() as { error?: string; job?: typeof aiJob };
       if (!response.ok || !payload.job) throw new Error(payload.error || "AI 状态读取失败。");
       setAiJob(payload.job);
+      setStatus("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "AI 状态读取失败。"); }
     finally { setPending(false); }
   }

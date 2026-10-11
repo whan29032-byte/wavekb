@@ -442,6 +442,7 @@ test("invalid JSON gets one same-provider repair and never succeeds with the raw
   const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
   assert.equal(patch?.body?.status, "failed");
   assert.equal(patch?.body?.error_code, "invalid_model_output");
+  assert.equal(patch?.body?.error_message, "invalid_model_output:json");
   assert.equal(Object.hasOwn(patch?.body ?? {}, "output_payload"), false);
   const attemptPatch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_job_attempts?id="));
   assert.equal(attemptPatch?.body?.provider_request_id, "bad-2");
@@ -597,6 +598,7 @@ test("a forged citation cannot succeed after the single format repair", async ()
   const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
   assert.equal(patch?.body?.status, "failed");
   assert.equal(patch?.body?.error_code, "invalid_model_output");
+  assert.equal(patch?.body?.error_message, "invalid_model_output:citation_ids");
   assert.equal(Object.hasOwn(patch?.body ?? {}, "output_payload"), false);
   const attemptPatch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_job_attempts?id="));
   assert.equal(attemptPatch?.body?.provider_request_id, "forged-2");
