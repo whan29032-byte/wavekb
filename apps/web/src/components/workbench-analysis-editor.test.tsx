@@ -429,6 +429,98 @@ describe("AI knowledge selection", () => {
     expect(screen.queryByText("AI 任务已进入服务器队列，将经过知识检索和规则闸门。")).toBeNull();
   }
 
+  it("shows the complete image observation summary beyond the old 180-character limit", async () => {
+    const observations = "截图标题为图形验收，标记为 marker 7319；可见蓝色折线和绿色方块。";
+    const explanation = "这里只记录图中可见形状，不把示意图识别为已验证行情，也不确认波浪计数。";
+    const current_pattern = `${observations}${explanation.repeat(8)}`.slice(0, 232) + "完整结尾可见。";
+    expect(current_pattern).toHaveLength(239);
+    await loadAiOutput({
+      schema_version: "wavekb-public-analysis-v1", source_visibility: "private_research",
+      instrument: "BTCUSDT", current_pattern,
+    });
+    const summary = screen.getByRole("region", { name: "AI 分析摘要" });
+    expect(within(summary).getByText(current_pattern)).toBeDefined();
+    expect(summary.textContent).toContain("marker 7319");
+    expect(summary.textContent).toContain("蓝色折线和绿色方块");
+    expect(summary.textContent).toContain("完整结尾可见。");
+    vi.unstubAllGlobals();
+  });
+
+  it.each([2000, 2001])("uses the full current-pattern boundary at %i characters without truncating", async (length) => {
+    const current_pattern = `结构长度边界${"观".repeat(length - "结构长度边界".length)}`;
+    expect(current_pattern).toHaveLength(length);
+    await loadAiOutput({
+      schema_version: "wavekb-public-analysis-v1", source_visibility: "public_books",
+      instrument: "BTCUSDT", current_pattern,
+    });
+    const summary = screen.getByRole("region", { name: "AI 分析摘要" });
+    if (length === 2000) expect(within(summary).getByText(current_pattern)).toBeDefined();
+    else expect(summary.textContent).not.toContain("结构长度边界");
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["private path", "/Users/private/book.pdf"],
+    ["remote URL", "https://private.example/source"],
+    ["file URL", "file:///tmp/theory.pdf"],
+    ["bidirectional control", "\u202e"],
+    ["ASCII control", "\u0001"],
+  ])("rejects a long current-pattern string with a %s beyond the old display limit", async (_kind, suffix) => {
+    const prefix = "不应显示的结构观察：" + "可见图形不代表已验证行情。".repeat(20);
+    expect(prefix.length).toBeGreaterThan(180);
+    const current_pattern = prefix + suffix;
+    expect(current_pattern.length).toBeLessThanOrEqual(2000);
+    await loadAiOutput({
+      schema_version: "wavekb-public-analysis-v1", source_visibility: "private_research",
+      instrument: "BTCUSDT", current_pattern,
+    });
+    const summary = screen.getByRole("region", { name: "AI 分析摘要" });
+    expect(summary.textContent).not.toContain("不应显示的结构观察");
+    expect(document.body.textContent).not.toContain(suffix);
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["instrument", 180], ["instrument", 181],
+    ["timeframe", 180], ["timeframe", 181],
+    ["analysis_level", 180], ["analysis_level", 181],
+    ["current_subwave", 180], ["current_subwave", 181],
+  ] as const)("preserves the short-field limit for %s at %i characters", async (field, length) => {
+    const marker = `短字段边界${field}`;
+    const value = marker + "值".repeat(length - marker.length);
+    expect(value).toHaveLength(length);
+    await loadAiOutput({
+      schema_version: "wavekb-public-analysis-v1", source_visibility: "private_research",
+      current_pattern: "安全的结构观察仍然可见。", [field]: value,
+    });
+    const summary = screen.getByRole("region", { name: "AI 分析摘要" });
+    if (length === 180) expect(within(summary).getByText(value)).toBeDefined();
+    else expect(summary.textContent).not.toContain(marker);
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { schema_version: "wavekb-public-analysis-v999", source_visibility: "private_research" },
+    { schema_version: "wavekb-public-analysis-v1", source_visibility: "private_research " },
+    { schema_version: "wavekb-public-analysis-v1", source_visibility: "unknown" },
+    { schema_version: undefined, source_visibility: "private_research" },
+  ])("does not expose longer summaries through an unsupported contract %j", async (contract) => {
+    const current_pattern = "不支持契约的结构观察" + "观".repeat(200);
+    await loadAiOutput({ ...contract, instrument: "不支持契约的品种", current_pattern });
+    expect(screen.queryByRole("region", { name: "AI 分析摘要" })).toBeNull();
+    expect(document.body.textContent).not.toContain("不支持契约的结构观察");
+    expect(document.body.textContent).not.toContain("不支持契约的品种");
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the legacy unversioned current-pattern display at 180 characters", async () => {
+    await loadAiOutput({ instrument: "BTCUSDT", current_pattern: "旧契约长结构观察" + "观".repeat(180) });
+    const summary = screen.getByRole("region", { name: "AI 分析摘要" });
+    expect(within(summary).getByText("BTCUSDT")).toBeDefined();
+    expect(summary.textContent).not.toContain("旧契约长结构观察");
+    vi.unstubAllGlobals();
+  });
+
   it("renders a validated wave chart only inside the public analysis contract", async () => {
     const wave_chart = buildWaveChart({ instrument: "BTCUSDT", primary_timeframe: "4小时", step_data: { "4": { chart_data: chartInput } } }, { step: 4 });
     await loadAiOutput({ schema_version: "wavekb-public-analysis-v1", source_visibility: "private_research", wave_chart });

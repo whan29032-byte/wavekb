@@ -317,7 +317,11 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
   const aiSummary = [
     ["品种", aiOutput.instrument], ["周期", aiOutput.timeframe], ["分析级别", aiOutput.analysis_level],
     ["当前结构", aiOutput.current_pattern], ["当前子浪", aiOutput.current_subwave],
-  ].filter(([, value]) => safeSummary && isPublicAnalysisText(value, 180)) as Array<[string, string]>;
+  ].filter(([label, value]) => safeSummary && isPublicAnalysisText(value,
+    // The public DTO permits longer structure/image observations. Keep the
+    // same privacy guard; short metadata and legacy output retain their limit.
+    label === "当前结构" && hasPublicAnalysisContract(aiOutput) ? 2_000 : 180,
+  )) as Array<[string, string]>;
   const hasValue = (value: unknown) => value !== null && value !== undefined && String(value).trim() !== "" && value !== "unknown";
   const stepProgress = (index: number) => {
     const value = objectValue(draft.step_data[String(index)]);
@@ -367,7 +371,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
               <p>任务状态：<strong>{aiJob.status}</strong></p>
               <Button type="button" variant="secondary" size="small" className="w-fit" disabled={pending} onClick={() => void refreshAi()}>刷新 AI 状态</Button>
               {aiJob.output_payload ? <>
-                {aiSummary.length ? <section className="grid gap-2 rounded-lg bg-background p-3" aria-label="AI 分析摘要">{aiSummary.map(([label, value]) => <p key={label}><span className="text-muted-foreground">{label}：</span>{value}</p>)}</section> : null}
+                {aiSummary.length ? <section className="grid min-w-0 gap-2 rounded-lg bg-background p-3" aria-label="AI 分析摘要">{aiSummary.map(([label, value]) => <p className="break-words" key={label}><span className="text-muted-foreground">{label}：</span>{value}</p>)}</section> : null}
                 <AnalysisBasis output={aiOutput} />
                 {hasPublicAnalysisContract(aiOutput) ? <WaveAnalysisChart value={aiOutput.wave_chart} /> : null}
                 {publicCitations ? <KnowledgeCitations citations={aiOutput.citations} jobKnowledgeVersion={aiJob.knowledge_version} outputKnowledgeVersion={aiOutput.knowledge_version} /> : null}
