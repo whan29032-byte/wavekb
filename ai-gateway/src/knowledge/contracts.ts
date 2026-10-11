@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
 import type { BookCatalog, PublishedBookId } from "./index.ts";
+import { normalizeVisionImageIds } from "../research/vision-input.ts";
 
 export type KnowledgeScope =
   | { mode: "all" }
   | { mode: "single"; book_id: PublishedBookId };
 
 export type NormalizedAiRunRequest = {
-  request_version: 2;
+  request_version: 2 | 3;
   client_request_id: string;
   task_type: "wave_analysis";
   step: number;
   analysis_schema_version: "workbench-v1";
   knowledge_scope: KnowledgeScope;
+  vision_image_ids?: string[];
+  vision_context?: { instrument: string; timeframe: string };
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -28,6 +31,7 @@ const LEGACY_KEYS = new Set([
   "step",
   "schema_version",
 ]);
+const VISION_KEYS = new Set([...VERSIONED_KEYS, "vision_image_ids", "vision_context"]);
 const ALL_SCOPE_KEYS = new Set(["mode"]);
 const SINGLE_SCOPE_KEYS = new Set(["mode", "book_id"]);
 
@@ -94,8 +98,9 @@ export function normalizeAiRunRequest(
 ): NormalizedAiRunRequest {
   if (!isRecord(input)) invalidRequest();
   const legacy = !Object.hasOwn(input, "request_version");
-  exactKeys(input, legacy ? LEGACY_KEYS : VERSIONED_KEYS);
-  if (!legacy && input.request_version !== 2) invalidRequest("request_version is invalid");
+  const vision = !legacy && input.request_version === 3;
+  exactKeys(input, legacy ? LEGACY_KEYS : vision ? VISION_KEYS : VERSIONED_KEYS);
+  if (!legacy && input.request_version !== 2 && !vision) invalidRequest("request_version is invalid");
   if (!legacy && (typeof input.client_request_id !== "string"
     || input.client_request_id.length > 64
     || !UUID_PATTERN.test(input.client_request_id))) {
@@ -108,8 +113,22 @@ export function normalizeAiRunRequest(
   if ((legacy ? input.schema_version : input.analysis_schema_version) !== "workbench-v1") {
     invalidRequest("analysis_schema_version is invalid");
   }
+  let visionFields: Pick<NormalizedAiRunRequest, "vision_image_ids" | "vision_context"> = {};
+  if (vision) {
+    let imageIds: string[];
+    try { imageIds = normalizeVisionImageIds(input.vision_image_ids); }
+    catch { invalidRequest("invalid_image_input"); }
+    const context = input.vision_context;
+    if (!imageIds.length || Number(input.step) < 2 || Number(input.step) > 7 || !isRecord(context)
+      || Reflect.ownKeys(context).length !== 2 || !Object.hasOwn(context, "instrument") || !Object.hasOwn(context, "timeframe")
+      || typeof context.instrument !== "string" || !context.instrument.trim() || context.instrument.length > 80
+      || typeof context.timeframe !== "string" || !context.timeframe.trim() || context.timeframe.length > 80) {
+      invalidRequest("invalid_image_input");
+    }
+    visionFields = { vision_image_ids: imageIds, vision_context: { instrument: context.instrument, timeframe: context.timeframe } };
+  }
   return {
-    request_version: 2,
+    request_version: vision ? 3 : 2,
     client_request_id: legacy
       ? legacyRequestId(legacyContext, input)
       : (input.client_request_id as string).toLowerCase(),
@@ -119,5 +138,6 @@ export function normalizeAiRunRequest(
     knowledge_scope: legacy
       ? { mode: "all" }
       : normalizeScope(input.knowledge_scope, catalog),
+    ...visionFields,
   };
 }

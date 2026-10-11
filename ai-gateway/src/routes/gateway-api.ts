@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import type { GatewayConfig } from "../config.ts";
 import { normalizeDirectoryResource } from "../directory/external-directory.ts";
 import { normalizeAiRunRequest } from "../knowledge/contracts.ts";
+import type { NormalizedAiRunRequest } from "../knowledge/contracts.ts";
+import { normalizeVisionImageIds } from "../research/vision-input.ts";
 import { buildKnowledgeIndex, type KnowledgeIndex } from "../knowledge/index.ts";
 import { publicAiJob } from "../research/publication.ts";
 import { encryptSecret } from "../secrets/crypto.ts";
@@ -10,6 +12,18 @@ import { validateProviderUrl, validateUserProviderUrl } from "../security/provid
 import type { GatewayApi, GatewayUser } from "../server.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
 import { BinanceLeaderboardService } from "../trading/leaderboard-service.ts";
+
+function assertSelectedVision(request: NormalizedAiRunRequest, analysis: Record<string, any>): void {
+  if (request.request_version !== 3) return;
+  let selected: string[];
+  try { selected = normalizeVisionImageIds(analysis.step_data?.[String(request.step)]?.vision_image_ids); }
+  catch { throw Object.assign(new Error("invalid_image_input"), { statusCode: 400 }); }
+  if (!isDeepStrictEqual(selected, request.vision_image_ids)
+    || analysis.instrument !== request.vision_context?.instrument
+    || analysis.primary_timeframe !== request.vision_context?.timeframe) {
+    throw Object.assign(new Error("invalid_image_input"), { statusCode: 409 });
+  }
+}
 
 function requiredString(input: Record<string, unknown>, key: string): string {
   const value = String(input[key] ?? "").trim();
@@ -464,6 +478,7 @@ export class SupabaseGatewayApi implements GatewayApi {
         }
         return publicAiJob(existing[0], this.knowledgeIndex);
       }
+      assertSelectedVision(normalized, analysisRows[0]);
       if (!this.config.MEMBERSHIP_MANAGED_AI_ENABLED) throw Object.assign(new Error("managed_ai_disabled"), { statusCode: 503 });
       const model = await this.managedConnections.inspect(normalized.task_type);
       try {
@@ -485,6 +500,18 @@ export class SupabaseGatewayApi implements GatewayApi {
         if (statusCode) throw Object.assign(new Error(message), { statusCode });
         throw error;
       }
+    }
+    if (normalized.request_version === 3) {
+      // Recover the original receipt even if the owner subsequently removes a
+      // screenshot from the draft. The original accepted evidence is immutable.
+      const existing = await this.database.request(`/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*&limit=1`);
+      if (existing.length) {
+        if (existing[0].execution_source === "managed" || !isDeepStrictEqual(existing[0].accepted_request ?? existing[0].input_payload, normalized)) {
+          throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
+        }
+        return publicAiJob(existing[0], this.knowledgeIndex);
+      }
+      assertSelectedVision(normalized, analysisRows[0]);
     }
     const connections = await this.database.request(
       `/rest/v1/user_ai_connections?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&is_default=eq.true&select=id,label,adapter,base_url,model_name,max_output_tokens,context_tokens,temperature,timeout_ms&limit=1`,

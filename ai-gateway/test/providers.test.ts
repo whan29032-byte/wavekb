@@ -4,6 +4,8 @@ import test from "node:test";
 import { AnthropicProvider } from "../src/providers/anthropic.ts";
 import { GeminiProvider } from "../src/providers/gemini.ts";
 import { OpenAICompatibleProvider } from "../src/providers/openai-compatible.ts";
+import { DeepSeekProvider } from "../src/providers/deepseek.ts";
+import { VISION_MAX_BYTES } from "../src/research/vision-input.ts";
 
 async function mockServer(body: unknown, inspect: (requestBody: any, headers: any) => void) {
   const server = createServer((request, response) => {
@@ -97,4 +99,101 @@ test("provider adapters never follow redirects", async () => {
   });
   await assert.rejects(() => provider.invoke(request), /redirects are not allowed/);
   await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+// Genuine 2x3 PNG. Never use remote assets or real provider credentials in tests.
+const pngDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWPgUbLgUbJgQKEAGCcCZRaxQyQAAAAASUVORK5CYII=";
+const imagePart = (url = pngDataUrl) => ({ type: "image_url", image_url: { url, detail: "original" } });
+
+test("DeepSeek Flash sends genuine image parts and text with bounded JSON settings", async () => {
+  let received = 0;
+  const messages = [{ role: "user" as const, content: [{ type: "text", text: "分析我选择的行情截图" }, imagePart()] }];
+  const mock = await mockServer({
+    id: "vision-1", choices: [{ message: { content: "{\"observed\":true}" }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 1028, completion_tokens: 14 },
+  }, (body, headers) => {
+    received += 1;
+    assert.equal(headers.authorization, "Bearer test-key");
+    assert.equal(body.model, "deepseek-flash");
+    assert.deepEqual(body.messages.slice(1), messages);
+    assert.deepEqual(body.response_format, { type: "json_object" });
+    assert.deepEqual(body.thinking, { type: "disabled" });
+    assert.equal(body.stream, false);
+  });
+  try {
+    const provider = new DeepSeekProvider({ baseUrl: mock.baseUrl, apiKey: "test-key", allowedLocalHosts: [new URL(mock.baseUrl).host] });
+    const result = await provider.invoke({ ...request, model: "deepseek-flash", messages, responseFormat: "json_object" });
+    assert.equal(received, 1);
+    assert.deepEqual(result.structured, { observed: true });
+    assert.deepEqual(result.usage, { inputTokens: 1028, outputTokens: 14 });
+    assert.equal(result.providerRequestId, "vision-1");
+  } finally { await mock.close(); }
+});
+
+test("DeepSeek image capabilities are explicit and V4 Pro rejects images before network", async () => {
+  let received = 0;
+  const mock = await mockServer({}, () => { received += 1; });
+  try {
+    const provider = new DeepSeekProvider({ baseUrl: mock.baseUrl, apiKey: "test-key", allowedLocalHosts: [new URL(mock.baseUrl).host] });
+    assert.equal(provider.supportsImages("deepseek-flash"), true);
+    for (const model of ["deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner", "deepseek-flash-unknown", "DEEPSEEK-FLASH"]) {
+      assert.equal(provider.supportsImages(model), false);
+      await assert.rejects(() => provider.invoke({ ...request, model, messages: [{ role: "user", content: [imagePart()] }] }),
+        (error: any) => error.message === "invalid_image_input" && error.code === "invalid_image_input" && error.status === 400);
+    }
+    assert.equal(received, 0);
+  } finally { await mock.close(); }
+});
+
+test("DeepSeek refuses external images, malformed protocol parts and excessive frames before network", async () => {
+  let received = 0;
+  const mock = await mockServer({}, () => { received += 1; });
+  const substitutedContent = [imagePart("https://example.com/private.png")];
+  Object.defineProperty(substitutedContent, Symbol.iterator, { value: function* () { yield { type: "text", text: "benign" }; } });
+  const inheritedIteratorContent = [imagePart("https://example.com/private.png")];
+  Object.setPrototypeOf(inheritedIteratorContent, { [Symbol.iterator]: function* () { yield { type: "text", text: "benign" }; } });
+  const invalid = [
+    [{ role: "assistant", content: [imagePart()] }],
+    [{ role: { toString: () => "user" }, content: [imagePart()] }],
+    [{ role: "user", content: [imagePart("https://example.com/private.png")] }],
+    [{ role: "user", content: [imagePart("javascript:alert(1)")] }],
+    [{ role: "user", content: [imagePart("file:///tmp/private.png")] }],
+    [{ role: "user", content: [imagePart("data:image/svg+xml;base64,PHN2Zy8+")] }],
+    [{ role: "user", content: [imagePart(pngDataUrl.replace("image/png", "image/jpeg"))] }],
+    [{ role: "user", content: [imagePart(pngDataUrl.replace("base64,", "base64,\n"))] }],
+    [{ role: "user", content: [imagePart("data:image/png;base64,AAB=")] }],
+    [{ role: "user", content: [imagePart("data:image/png;base64," + "A".repeat(Math.ceil(VISION_MAX_BYTES / 3) * 4 + 4))] }],
+    [{ role: "user", content: [{ type: "image_url", image_url: { url: pngDataUrl, detail: "original", source_path: "/private/book.pdf" } }] }],
+    [{ role: "user", content: [{ type: "image_url", image_url: { url: pngDataUrl, detail: { toString: () => "original" } } }] }],
+    [{ role: "user", content: [{ type: "image_url", image_url: { url: pngDataUrl }, file_id: "hidden-file" }] }],
+    [{ role: "user", content: [{ type: "file", file_id: "hidden-file" }] }],
+    [{ role: "user", content: [{ type: "text", text: "hello", image_url: { url: pngDataUrl } }] }],
+    [{ role: "user", content: [imagePart(), imagePart(), imagePart(), imagePart()] }],
+    [{ role: "user", content: [imagePart(), imagePart()] }, { role: "user", content: [imagePart(), imagePart()] }],
+    [{ role: "user", content: substitutedContent }],
+    [{ role: "user", content: inheritedIteratorContent }],
+    [{ role: "user", content: new Array(1) }],
+  ];
+  try {
+    const provider = new DeepSeekProvider({ baseUrl: mock.baseUrl, apiKey: "test-key", allowedLocalHosts: [new URL(mock.baseUrl).host] });
+    for (const messages of invalid) {
+      await assert.rejects(() => provider.invoke({ ...request, model: "deepseek-flash", messages: messages as any }),
+        (error: any) => error.message === "invalid_image_input" && error.code === "invalid_image_input" && error.status === 400);
+    }
+    assert.equal(received, 0);
+  } finally { await mock.close(); }
+});
+
+test("DeepSeek text-only V4 Pro requests remain supported", async () => {
+  const mock = await mockServer({
+    choices: [{ message: { content: "普通文本" }, finish_reason: "stop" }], usage: { prompt_tokens: 9, completion_tokens: 4 },
+  }, (body) => {
+    assert.equal(body.model, "deepseek-v4-pro");
+    assert.deepEqual(body.messages[1], request.messages[0]);
+    assert.equal(body.response_format, undefined);
+  });
+  try {
+    const provider = new DeepSeekProvider({ baseUrl: mock.baseUrl, apiKey: "test-key", allowedLocalHosts: [new URL(mock.baseUrl).host] });
+    assert.equal((await provider.invoke({ ...request, model: "deepseek-v4-pro" })).text, "普通文本");
+  } finally { await mock.close(); }
 });

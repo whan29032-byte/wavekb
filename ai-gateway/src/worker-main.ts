@@ -9,6 +9,7 @@ import { SupabaseRest } from "./storage/supabase-rest.ts";
 import { MembershipWalletWorker } from "./membership-wallet-worker.ts";
 import { assertPublishedAnalysisOutput } from "./research/publication.ts";
 import { ResearchPrivateRepository } from "./research/private-repository.ts";
+import { VisionImageReader } from "./research/vision-images.ts";
 
 type WorkerDatabase = Pick<SupabaseRest, "request">;
 type WorkerConnectionResolver = Pick<UserConnectionResolver, "resolve">;
@@ -64,6 +65,7 @@ export class AiJobWorker {
     this.now = dependencies.now ?? Date.now;
     this.knowledgeRuntime = dependencies.knowledgeRuntime ?? new KnowledgeRuntime({
       database: this.database,
+      imageReader: new VisionImageReader({ config, database: this.database }),
       privateResearchEnabled: config.HERMES_PRIVATE_RESEARCH_ENABLED === true,
       ...(config.HERMES_PRIVATE_RESEARCH_ENABLED === true ? { privateRepository: new ResearchPrivateRepository(this.database) } : {}),
     });
@@ -167,6 +169,7 @@ export class AiJobWorker {
       const runtimeCode = (error as { code?: unknown })?.code;
       const provider = (error as { provider?: KnowledgeRuntimeResult["provider"] })?.provider;
       const errorCode = runtimeCode === "knowledge_unavailable" || runtimeCode === "invalid_model_output" || runtimeCode === "input_context_too_large" || runtimeCode === "invalid_chart_input"
+        || runtimeCode === "vision_model_required" || runtimeCode === "invalid_image_input" || runtimeCode === "image_unavailable"
         ? runtimeCode
         : classification;
       const finishedAt = new Date(this.now()).toISOString();

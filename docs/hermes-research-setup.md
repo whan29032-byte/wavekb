@@ -21,7 +21,20 @@
 - SVG/PNG 在浏览器本地生成，主计数/备选切换、手机布局、图表说明与可展开数据表可用。导出再执行元素/属性白名单，拒绝脚本、外部资源和事件。
 - 导出成功提示只表示文件已生成，不冒充浏览器已保存；受浏览器下载限制时提供本地 Blob 保存链接和 PNG 预览。更换计数或图表后旧导出释放，不展示失效文件。
 
-合成端到端测试覆盖输入→受限模型规格→规则淘汰→发布→轮询→前端绘图；浏览器预览数据明确标为合成。**绘图代码接入完成不等于已经进行真实 DeepSeek 分析。** 本版没有服务器行情抓取或截图自动识图，也不迁移本机图片目录。绘图迁移不读取或修改本机 Hermes 的交易、微信或 Discord 状态。
+合成端到端测试覆盖输入→受限模型规格→规则淘汰→发布→轮询→前端绘图；浏览器预览数据明确标为合成。**绘图代码接入完成不等于已经进行真实 DeepSeek 分析。** 本版没有服务器行情抓取，也不迁移本机图片目录。截图输入另有下述受限接入，不把输出绘图等同于已经识图。绘图迁移不读取或修改本机 Hermes 的交易、微信或 Discord 状态。
+
+## 截图输入与最新视觉模型
+
+2026-10-11 核对官方文档：`deepseek-flash` 对应 **DeepSeek V4.1 Flash**，支持视觉；`deepseek-v4-pro` 当时不支持视觉。使用现有 Chat Completions `user.content` 中的 `text` 与 `image_url`，不因识图迁移 API 产品。型号能力以部署时官方文档为准，适配器只对已核对的精确模型名启用视觉，不能仅凭名字包含 DeepSeek 放行。
+
+- Workbench 的 AI 分析步骤 2–7 可明确选择最多 3 张 JPEG、PNG 或静态 WebP，每张最多 2 MiB、每边最多 4096 像素；动画、SVG、外部图片 URL、文件 ID 与脚本拒绝。预览使用短期私有链接，不公开图片。
+- 原图保存到私有 `wave-analysis-images` bucket；metadata 先绑定真实 owner、analysis、步骤、标的与周期后，才允许不可覆盖的 Storage 上传。RLS 同时约束表与对象，匿名、跨账号、覆盖和直接删除拒绝；即使存在旧的宽泛 Storage policy，也不能绕过该 bucket 的 restrictive policy。每个分析最多 72 次上传，每个步骤/标的/周期最多 12 次，移除选择不会擦除在途任务的证据。
+- 草稿与 v3 请求只保存显式所选图片 UUID 及标的/周期，数据库不保存 base64 或远端下载 URL。新任务必须匹配已保存选择，worker 再次核对所有者、metadata、上下文和格式；旧 v2 任务绝不自动带上后来上传的图片。同一请求的丢回执重试复用既有任务，不因后续取消选择再扣额度。
+- Gateway 只从固定 Supabase 私有对象地址下载，无外部跳转，下载和解码有大小/时间界限。外发副本移除已支持的 EXIF、文本和 XMP 元数据，原始 Storage 字节不改写；这不是画面匿名化，用户仍需避免上传账号或隐私信息。
+- 图片是**不可信的视觉参考**：不接受图中指令，无法确认的价格/坐标标为不确定；没有经过验证的真实 K 线输入，不从截图猜测 OHLC 或生成价格锚点 `chart_spec`。理论规则、公开结果隐私与候选复核合同继续生效。
+- 按官方视觉上界预留每张 1024 Token，并纳入上下文与格式修复预算；最终 usage 仍由模型供应商返回。模型不支持视觉、原图不可读或上下文失效会返回明确安全错误，不静默删图改为纯文本分析。
+
+这条链路的合成与权限测试不冒充真实模型验收。网站独立 Key、模型及 `wave_analysis` 路由配置完成前，托管模型保持关闭；只有受控真实图片请求成功且额度/usage/隐私复核通过，才确认“线上识图可用”。官方依据：[模型与视觉能力](https://api-docs.deepseek.com/quick_start/pricing/)、[视觉协议](https://api-docs.deepseek.com/guides/vision/)。
 
 ## DeepSeek 接入与配置门槛
 
@@ -35,7 +48,7 @@
 
 1. 先部署兼容适配。生产后端工作流新增 `private_research: preserve|enable|disable`，默认 preserve 不改现有环境；enable/disable 通过服务端工具只追加精确允许主机 `api.deepseek.com` 和私有资料开关。enable 在写入前校验已激活资料；原始环境以 0600 字节备份，失败与代码/服务配置一起回滚。**不修改 master key 或 `MEMBERSHIP_MANAGED_AI_ENABLED`。** 未确认允许名单前，不要求用户在生产后台盲目保存 Key。
 2. 之后在现有 `/admin/ai` 加密密钥入口保存 **独立的网站服务端 Key**。提供商名称 `DeepSeek`，适配器 `OpenAI 兼容`，API 地址 `https://api.deepseek.com/v1`。不要把 Key 放进聊天、代码、Git、SQL、前端环境变量或截图。后台“测试并保存”目前校验的是地址与加密保存，**不是实际模型调用成功证明**。
-3. 为该 provider 配置 `ai_models` 与 `wave_analysis` 的 `ai_task_routes`。现有后台表单还不能创建模型和路由，不能假设只保存 Key 就自动完成。可先用当前官方推荐名称 `deepseek-flash`，初始服务端上下文上限 32,768、最终输出上限 4,096、超时 60,000ms；这是应用预算，不是模型的官方最大能力。成本与月预算仍须按部署时官方价格配置，不把数据库默认零成本当成免费；当前 worker 的 `cost_confirmed=false` 也不构成真实账单或月费用硬限额已生效的证据。
+3. 为该 provider 配置 `ai_models` 与 `wave_analysis` 的 `ai_task_routes`。现有后台表单还不能创建模型和路由，不能假设只保存 Key 就自动完成。视觉模型使用当前已核对的 `deepseek-flash`（DeepSeek V4.1 Flash），初始服务端上下文上限 32,768、最终输出上限 4,096、超时 60,000ms；这是应用预算，不是模型的官方最大能力。成本与月预算仍须按部署时官方价格配置，不把数据库默认零成本当成免费；当前 worker 的 `cost_confirmed=false` 也不构成真实账单或月费用硬限额已生效的证据。
 4. 先保持 `MEMBERSHIP_MANAGED_AI_ENABLED=false`，完成鉴权、每日额度、单次格式修复、空内容／截断、429／超时、费用记账和不泄露引用的受控真实请求验收后再启用。不能借用户 Key 或替换提供商来绕过未配置状态。
 
 此前生产只读检查：启用的 provider、model、`wave_analysis` route 及已配置 secret 数量均为 **0**；没有读取密钥值。此结果不代表本轮实时状态，部署时必须重新核对，不能据此宣称云端 DeepSeek 已接通。
@@ -117,7 +130,7 @@ node scripts/export-hermes-theory.mjs --curate --source-root /approved-private-t
 ## 发布次序与验收门槛
 
 1. 跑导出、loader/runtime、私有仓库、实际 PostgreSQL 语义权限/事务/幂等测试及 Gateway/Web 总回归，验证原书目录和图片不被改写；合成测试与线上真实分析分开记录。
-2. 合并精确提交；应用 CLI 创建的 `20261010223739_hermes_private_research.sql`，检查六表 RLS、角色权限、RPC marker 与安全 advisors。旧网关可兼容新附加 schema，数据库不做破坏性降级。
+2. 合并精确提交；依次应用 CLI 创建的 `20261010223739_hermes_private_research.sql` 与 `20261011001354_wave_analysis_images.sql`，检查六表 RLS、图片 owner/context/不可覆盖权限、私有 bucket、RPC marker 与安全 advisors。旧网关可兼容新附加 schema，数据库不做破坏性降级。
 3. 私有导出在 Git 外；用受信来源摘要注册，云端独立校验后显式 activate。只保留审查理论与原始哈希/版本等审计，不复制原始全文、图片、微信、交易或模型密钥。
 4. 后端同 SHA 发布，并明确选择 private_research=enable；工具验证 active artifact 后写两个允许的配置键，服务失败会恢复原配置和前一版本。后端验收成功后才能发布同 SHA Next。
 5. 核对线上 `/api/health`、Gateway SHA、工作台资源和未登录/越权请求拒绝；匿名不能调用任何私有 RPC，私有 artifact 不在静态产物中。此时可以确认代码和私有资料部署，不能凭空确认模型可用。
@@ -130,6 +143,7 @@ node scripts/export-hermes-theory.mjs --curate --source-root /approved-private-t
 ```sh
 node --test tests/hermes-theory-artifact.test.mjs
 node --test tests/hermes-private-research-postgres.test.mjs
+node --test tests/wave-analysis-images-postgres.test.mjs
 pnpm --dir ai-gateway test
 pnpm --dir ai-gateway typecheck
 pnpm --dir apps/web test

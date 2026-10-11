@@ -194,10 +194,13 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /test "\$private_rls_tables" = 6/);
   assert.match(backendSteps[schemaGate].run, /test "\$private_schema_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /not has_schema_privilege\('authenticated','hermes_research_private','USAGE'\)/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 20261010223739/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 20261011001354/);
+  assert.match(backendSteps[schemaGate].run, /test "\$image_rls_closed" = t/);
+  assert.match(backendSteps[schemaGate].run, /test "\$image_bucket_closed" = t/);
+  assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 20261010223739/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 20261011001354/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -222,6 +225,7 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202610100004_membership_benefits.sql",
     "202610100005_membership_wallet_payments.sql",
     "20261010223739_hermes_private_research.sql",
+    "20261011001354_wave_analysis_images.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -238,7 +242,7 @@ ${selection}`;
   for (const [marker, offset] of [
     ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
-    ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11],
+    ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11], ["20261011001354", 12],
   ]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);

@@ -168,10 +168,14 @@ export function publicAiJob(value: unknown, index: KnowledgeIndex): RecordValue 
   }
   if (value.error_code !== null && value.error_code !== undefined) {
     job.error_code = value.error_code === "input_context_too_large" ? "input_context_too_large"
-      : value.error_code === "invalid_chart_input" ? "invalid_chart_input" : "analysis_unavailable";
+      : ["invalid_chart_input", "invalid_image_input", "image_unavailable", "vision_model_required"].includes(String(value.error_code))
+        ? String(value.error_code) : "analysis_unavailable";
     job.error_message = job.error_code === "input_context_too_large"
       ? "分析输入超过当前模型的上下文预算，请精简已有步骤的备注后重试。"
       : job.error_code === "invalid_chart_input" ? "K 线或标的／周期绑定未通过校验，请核对当前分析并重新导入 1–128 根有效 K 线，时间使用 Unix 秒。"
+        : job.error_code === "vision_model_required" ? "当前模型不支持图片，请选择 DeepSeek V4.1 Flash（deepseek-flash）或移除截图后重试。"
+          : job.error_code === "invalid_image_input" ? "截图格式、大小或分析绑定未通过校验，请核对当前标的与周期并重新上传有效 JPG、PNG 或 WebP 截图。"
+            : job.error_code === "image_unavailable" ? "截图暂时无法读取，本次未发送图片给模型。请检查上传结果后重试。"
         : "AI 候选分析未完成，请稍后重试或检查模型连接。";
   } else { job.error_code = null; job.error_message = null; }
   if (value.output_payload === null || value.output_payload === undefined) job.output_payload = null;

@@ -39,7 +39,7 @@
       hint: "使用 DeepSeek 官方 OpenAI 兼容接口，API Key 由用户自行提供",
       adapter: "openai_compatible",
       baseUrl: "https://api.deepseek.com",
-      modelName: "deepseek-v4-flash"
+      modelName: "deepseek-flash"
     },
     anthropic: {
       label: "Claude / Anthropic",

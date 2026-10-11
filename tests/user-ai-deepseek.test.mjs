@@ -14,7 +14,7 @@ test("DeepSeek is exposed as an OpenAI-compatible user-owned provider preset", (
   assert.equal(preset.label, "DeepSeek");
   assert.equal(preset.adapter, "openai_compatible");
   assert.equal(preset.baseUrl, "https://api.deepseek.com");
-  assert.equal(preset.modelName, "deepseek-v4-flash");
+  assert.equal(preset.modelName, "deepseek-flash");
 });
 
 test("DeepSeek connections pass the existing backend validation contract", () => {

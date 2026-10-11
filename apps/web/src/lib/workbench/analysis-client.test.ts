@@ -16,6 +16,26 @@ describe("review generated from analysis", () => {
 });
 
 describe("AI run request", () => {
+  it("binds explicitly selected images and context in an exact version-3 request", () => {
+    const imageIds = ["22222222-2222-4222-8222-222222222222"];
+    expect(createAiRunRequest(4, "all", "11111111-1111-4111-8111-111111111111", { imageIds, instrument: "BTCUSDT", timeframe: "4小时" })).toEqual({
+      request_version: 3, client_request_id: "11111111-1111-4111-8111-111111111111", task_type: "wave_analysis", step: 4, analysis_schema_version: "workbench-v1",
+      knowledge_scope: { mode: "all" }, vision_image_ids: imageIds, vision_context: { instrument: "BTCUSDT", timeframe: "4小时" },
+    });
+  });
+  it("keeps no-image requests version 2 and rejects future/non-AI steps and arbitrary URLs", () => {
+    const vision = { imageIds: ["22222222-2222-4222-8222-222222222222"], instrument: "BTCUSDT", timeframe: "4小时" };
+    expect(createAiRunRequest(4, "all", "request", { ...vision, imageIds: [] }).request_version).toBe(2);
+    for (const step of [0, 1, 8, 9, 10]) expect(() => createAiRunRequest(step, "all", "request", vision)).toThrow("invalid_image_input");
+    expect(() => createAiRunRequest(4, "all", "request", { ...vision, imageIds: ["https://private.example/image.png"] })).toThrow("invalid_image_input");
+  });
+  it("retries identical opt-in image IDs, context and client request ID after a lost acknowledgement", async () => {
+    const vision = { imageIds: ["22222222-2222-4222-8222-222222222222"], instrument: "BTCUSDT", timeframe: "4小时" };
+    const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("ack lost")).mockResolvedValueOnce(new Response("{}"));
+    await submitAiRun("/api/ai/analyses/analysis/ai-run", 4, "all", fetcher, { mode: "byok", clientRequestId: "11111111-1111-4111-8111-111111111111", vision });
+    expect(fetcher.mock.calls[0][1].body).toEqual(fetcher.mock.calls[1][1].body);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ request_version: 3, vision_image_ids: vision.imageIds, vision_context: { instrument: vision.instrument, timeframe: vision.timeframe } });
+  });
   it("sends explicit managed mode with the same caller-owned ID on automatic transport retries", async () => {
     const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("ack lost")).mockResolvedValueOnce(new Response('{}'));
     const clientRequestId = "11111111-1111-4111-8111-111111111111";

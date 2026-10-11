@@ -1,25 +1,31 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { WorkbenchAnalysis } from "@wavekb/domain";
+import { normalizeVisionImageIds } from "../../../../../ai-gateway/src/research/vision-input.ts";
 
 export type WorkbenchAnalysisDraft = Omit<WorkbenchAnalysis, "id" | "created_at" | "updated_at">;
 
 export type KnowledgeScopeValue = "all" | "elliott-wave-principle-eleventh-edition" | "elliott-wave-principle-tenth-edition" | "elliott-wave-natural-law" | "chan-theory-complete";
 
-export function createAiRunRequest(step: number, scope: KnowledgeScopeValue, clientRequestId: string) {
+export type AiRunVision = { imageIds: string[]; instrument: string; timeframe: string };
+
+export function createAiRunRequest(step: number, scope: KnowledgeScopeValue, clientRequestId: string, vision?: AiRunVision) {
+  const ids = normalizeVisionImageIds(vision?.imageIds);
+  if (ids.length && (!Number.isInteger(step) || step < 2 || step > 7 || !vision?.instrument.trim() || !vision.timeframe.trim())) throw new Error("invalid_image_input");
   return {
-    request_version: 2 as const,
+    request_version: ids.length ? 3 as const : 2 as const,
     client_request_id: clientRequestId,
     task_type: "wave_analysis" as const,
     step,
     analysis_schema_version: "workbench-v1" as const,
     knowledge_scope: scope === "all" ? { mode: "all" as const } : { mode: "single" as const, book_id: scope },
+    ...(ids.length ? { vision_image_ids: ids, vision_context: { instrument: vision!.instrument, timeframe: vision!.timeframe } } : {}),
   };
 }
 
 type AiRunFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
-export async function submitAiRun(url: string, step: number, scope: KnowledgeScopeValue, fetcher: AiRunFetcher = fetch, options?: { mode: "byok" | "managed"; clientRequestId?: string }) {
-  const payload = { ...createAiRunRequest(step, scope, options?.clientRequestId ?? crypto.randomUUID()), ...(options?.mode === "managed" ? { execution_mode: "managed" } : {}) };
+export async function submitAiRun(url: string, step: number, scope: KnowledgeScopeValue, fetcher: AiRunFetcher = fetch, options?: { mode: "byok" | "managed"; clientRequestId?: string; vision?: AiRunVision }) {
+  const payload = { ...createAiRunRequest(step, scope, options?.clientRequestId ?? crypto.randomUUID(), options?.vision), ...(options?.mode === "managed" ? { execution_mode: "managed" } : {}) };
   const request = () => fetcher(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
   try {
     return await request();

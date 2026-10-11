@@ -18,7 +18,7 @@ type AiConnection = {
 
 const providers = {
   openai_compatible: { label: "OpenAI 兼容接口", baseUrl: "https://api.openai.com/v1", model: "" },
-  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", adapter: "openai_compatible" },
+  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-flash", adapter: "openai_compatible" },
   anthropic: { label: "Claude / Anthropic", baseUrl: "https://api.anthropic.com", model: "", adapter: "anthropic" },
   gemini: { label: "Gemini", baseUrl: "https://generativelanguage.googleapis.com", model: "", adapter: "gemini" },
 } as const;
