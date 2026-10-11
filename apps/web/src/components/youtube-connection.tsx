@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowsClockwise, CheckCircle, LinkBreak, Pause, Play, YoutubeLogo } from "@phosphor-icons/react";
 import { Button } from "@wavekb/ui";
 import { authorizeYoutube, disconnectYoutube, importYoutubeHistory, readYoutubeConnection, setYoutubeSync } from "@/lib/youtube/client";
-import { sanitizeYoutubeErrorCode, youtubeErrorMessage, type YoutubeConnectionStatus } from "@/lib/youtube/contracts";
+import { sanitizeYoutubeErrorCode, youtubeErrorMessage, youtubePolicyVersion, type YoutubeConnectionStatus } from "@/lib/youtube/contracts";
 
 type Props = {
   actorId: string | null;
@@ -24,6 +24,7 @@ function YoutubeConnectionState({ actorId, initialStatus, preview = false, onAut
   const [pending, setPending] = useState(false);
   const [importHistory, setImportHistory] = useState(true);
   const [autoSync, setAutoSync] = useState(false);
+  const [privacyTermsAccepted, setPrivacyTermsAccepted] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [callbackResult, setCallbackResult] = useState("");
@@ -74,11 +75,12 @@ function YoutubeConnectionState({ actorId, initialStatus, preview = false, onAut
   async function action(kind: "authorize" | "pause" | "resume" | "history" | "disconnect") {
     if (busy.current || pending || loading || preview || !actorId || (!snapshot?.configured && kind !== "disconnect")) return;
     if (kind !== "disconnect" && connection?.status === "revocation_pending") return;
+    if (kind === "authorize" && !privacyTermsAccepted) { setError(youtubeErrorMessage("youtube_policy_consent_required")); return; }
     if (kind === "disconnect" && !window.confirm("确认解绑 YouTube？这会停止同步并移除本连接同步生成的帖子；你手工发布的帖子不会被删除。需要时可重新授权。")) return;
     busy.current = true; setPending(true); setError(""); setNotice(""); setCallbackResult("");
     try {
       if (kind === "authorize") {
-        const url = await authorizeYoutube({ importHistory, autoSync });
+        const url = await authorizeYoutube({ importHistory, autoSync, privacyTermsAccepted: true, policyVersion: youtubePolicyVersion });
         if (!mounted.current) return;
         setNotice("即将前往 Google 授权。只有完成授权后才会显示已绑定。");
         (onAuthorizeNavigate ?? ((target: string) => window.location.assign(target)))(url);
@@ -86,7 +88,7 @@ function YoutubeConnectionState({ actorId, initialStatus, preview = false, onAut
         const result = await disconnectYoutube();
         if (mounted.current) {
           setSnapshot({ configured: snapshot?.configured ?? false, connection: result.remoteRevocationPending && connection
-            ? { ...connection, channelId: "", channelTitle: "", syncEnabled: false, status: "revocation_pending", lastErrorCode: "youtube_revocation_pending" } : null }); setAutoSync(false);
+            ? { ...connection, channelId: "", channelTitle: "", syncEnabled: false, status: "revocation_pending", lastErrorCode: "youtube_revocation_pending" } : null }); setAutoSync(false); setPrivacyTermsAccepted(false);
           setNotice(result.remoteRevocationPending
             ? `站内已解除，移除了 ${result.removedPosts} 篇同步帖子；Google 授权撤销处理中，可在 Google 安全页检查。手工帖子保持不变。`
             : `已解绑，移除了 ${result.removedPosts} 篇由该连接同步生成的帖子；手工帖子保持不变。`);
@@ -112,8 +114,15 @@ function YoutubeConnectionState({ actorId, initialStatus, preview = false, onAut
   const disabled = pending || loading || preview || !snapshot?.configured;
   const historyLabel = !connection?.importHistory && connection?.historyStatus === "pending" ? "未请求历史导入" : connection?.historyStatus === "complete" ? "历史导入完成" : connection?.historyStatus === "running" ? "正在导入历史视频" : "历史导入等待处理";
   const consentOptions = <>
-    <label className="flex min-h-11 cursor-pointer items-start gap-3 py-2 text-sm leading-6"><input type="checkbox" className="mt-1.5 accent-primary" checked={importHistory} disabled={disabled} onChange={(event) => setImportHistory(event.target.checked)} /><span><span className="font-medium">授权后导入已有公开视频</span><span className="block text-muted-foreground">从历史视频开始逐批导入，可以取消勾选，只处理后续新视频。</span></span></label>
+    <label className="flex min-h-11 cursor-pointer items-start gap-3 py-2 text-sm leading-6"><input type="checkbox" className="mt-1.5 accent-primary" checked={importHistory} disabled={disabled} onChange={(event) => setImportHistory(event.target.checked)} /><span><span className="font-medium">授权后导入已有公开视频</span><span className="block text-muted-foreground">将全部历史公开视频的标题、说明和播放链接，分批以你的站内账号发布到“观点分享”。取消后不导入历史；新视频还需单独允许同步。</span></span></label>
     <label className="flex min-h-11 cursor-pointer items-start gap-3 py-2 text-sm leading-6"><input type="checkbox" className="mt-1.5 accent-primary" checked={autoSync} disabled={disabled} onChange={(event) => setAutoSync(event.target.checked)} /><span><span className="font-medium">我允许后台持续同步并发布频道的新公开视频</span><span className="block text-muted-foreground">默认关闭，需要你明确勾选；绑定后可随时暂停或解绑。</span></span></label>
+    <div className="grid gap-2 rounded-lg border bg-muted/30 p-4 text-sm leading-6">
+      <p className="font-medium">绑定前请确认数据用途</p>
+      <p className="text-muted-foreground">本站读取频道 ID、名称、上传列表及公开视频的 ID、标题、说明、发布时间、公开状态和可嵌入状态，用于核验本人频道和同步发帖。只读权限不能上传、修改或删除 YouTube 视频。</p>
+      <p className="text-muted-foreground">持续访问凭据仅在服务端加密保存；本同步功能不会把 YouTube 数据用于 AI 训练或广告画像。选择导入或同步后，生成帖子会公开展示；私有和不公开列出的视频不会导入。</p>
+      <p className="text-muted-foreground">暂停只停止新视频同步；解绑会停止全部同步并移除生成帖子。Google 授权撤销可能需要后台重试，处理状态会单独显示。</p>
+    </div>
+    <label className="flex min-h-11 cursor-pointer items-start gap-3 py-2 text-sm leading-6"><input type="checkbox" className="mt-1.5 accent-primary" checked={privacyTermsAccepted} disabled={disabled} onChange={(event) => setPrivacyTermsAccepted(event.target.checked)} /><span>我已阅读并同意 <Link className="font-medium text-primary underline underline-offset-4" href="/privacy#youtube" target="_blank" rel="noopener noreferrer">隐私政策</Link>、<Link className="font-medium text-primary underline underline-offset-4" href="/terms" target="_blank" rel="noopener noreferrer">服务条款</Link>及 <a className="font-medium text-primary underline underline-offset-4" href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube 服务条款</a>，并确认上方同步选择。</span></label>
   </>;
 
   return <section className="grid min-w-0 gap-5 rounded-xl border bg-surface p-5 sm:p-6" aria-labelledby="youtube-connection-title" aria-busy={loading || pending}>
@@ -131,11 +140,11 @@ function YoutubeConnectionState({ actorId, initialStatus, preview = false, onAut
         <div className="grid min-w-0 gap-2 rounded-lg border p-4"><div className="flex flex-wrap items-start justify-between gap-2"><h3 className="flex min-w-0 items-start gap-2 font-semibold"><CheckCircle size={20} aria-hidden className="mt-0.5 shrink-0 text-primary" /><span className="break-words">{connection.channelTitle.trim() || "YouTube 连接"}</span></h3><span className="text-sm font-medium">{connection.status === "connected" ? "已通过 Google 授权" : connection.status === "revocation_pending" ? "Google 授权撤销处理中" : "需要重新授权"}</span></div>{connection.channelId ? <a className="w-fit break-all text-sm text-primary underline-offset-4 hover:underline" href={`https://www.youtube.com/channel/${connection.channelId}`} target="_blank" rel="noopener noreferrer">查看频道</a> : null}</div>
         <dl className="grid gap-4 text-sm sm:grid-cols-2"><div><dt className="text-muted-foreground">新视频自动同步</dt><dd className="mt-1 font-medium">{connection.syncEnabled && connection.status === "connected" ? "已启用" : "已暂停"}</dd></div><div><dt className="text-muted-foreground">历史导入进度</dt><dd className="mt-1 font-medium">{historyLabel} · 累计导入 <span className="tabular-nums">{connection.historyImported}</span> 条</dd></div><div className="sm:col-span-2"><dt className="text-muted-foreground">最近同步</dt><dd className="mt-1">{connection.lastSyncedAt ? <time dateTime={connection.lastSyncedAt}>{new Date(connection.lastSyncedAt).toLocaleString("zh-CN")}</time> : "尚未完成首次同步"}</dd></div></dl>
         {connection.lastErrorCode ? <p role="alert" className="text-sm leading-6 text-destructive">{youtubeErrorMessage(connection.lastErrorCode)}</p> : null}
-        {connection.status === "revocation_pending" || connection.lastErrorCode === "youtube_manual_revocation_required" ? <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" className="flex min-h-11 w-fit items-center text-sm font-medium text-primary underline-offset-4 hover:underline">在 Google 安全页检查授权</a> : connection.status === "reconnect_required" ? <div className="grid gap-4">{consentOptions}<Button type="button" className="min-h-11 w-full sm:w-fit" disabled={disabled} onClick={() => void action("authorize")}>重新通过 Google 授权</Button></div> : <><div className="flex flex-wrap gap-3"><Button type="button" variant="secondary" className="min-h-11 w-full sm:w-fit" disabled={disabled} onClick={() => void action(connection.syncEnabled ? "pause" : "resume")}>{connection.syncEnabled ? <Pause size={18} aria-hidden /> : <Play size={18} aria-hidden />}{connection.syncEnabled ? "暂停新视频同步" : "恢复新视频同步"}</Button><Button type="button" variant="secondary" className="min-h-11 w-full sm:w-fit" disabled={disabled || connection.importHistory && connection.historyStatus !== "complete"} onClick={() => void action("history")}><ArrowsClockwise size={18} aria-hidden />补导历史视频</Button></div><p className="text-sm leading-6 text-muted-foreground">暂停只停止新视频自动发布，已请求的历史导入仍继续；解绑可停止全部同步并移除生成的帖子。</p></>}
+        {connection.status === "revocation_pending" || connection.lastErrorCode === "youtube_manual_revocation_required" ? <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" className="flex min-h-11 w-fit items-center text-sm font-medium text-primary underline-offset-4 hover:underline">在 Google 安全页检查授权</a> : connection.status === "reconnect_required" ? <div className="grid gap-4">{consentOptions}<Button type="button" className="min-h-11 w-full sm:w-fit" disabled={disabled || !privacyTermsAccepted} onClick={() => void action("authorize")}>重新通过 Google 授权</Button></div> : <><div className="flex flex-wrap gap-3"><Button type="button" variant="secondary" className="min-h-11 w-full sm:w-fit" disabled={disabled} onClick={() => void action(connection.syncEnabled ? "pause" : "resume")}>{connection.syncEnabled ? <Pause size={18} aria-hidden /> : <Play size={18} aria-hidden />}{connection.syncEnabled ? "暂停新视频同步" : "恢复新视频同步"}</Button><Button type="button" variant="secondary" className="min-h-11 w-full sm:w-fit" disabled={disabled || connection.importHistory && connection.historyStatus !== "complete"} onClick={() => void action("history")}><ArrowsClockwise size={18} aria-hidden />补导历史视频</Button></div><p className="text-sm leading-6 text-muted-foreground">暂停只停止新视频自动发布，已请求的历史导入仍继续；解绑可停止全部同步并移除生成的帖子。</p></>}
         <div className="border-t pt-4"><Button type="button" variant="ghost" className="min-h-11 w-full text-destructive sm:w-fit" disabled={pending || loading || preview} onClick={() => void action("disconnect")}><LinkBreak size={18} aria-hidden />{connection.status === "revocation_pending" ? "重试撤销 Google 授权" : "解绑并移除同步帖子"}</Button><p className="mt-2 text-sm leading-6 text-muted-foreground">解绑只移除这项连接生成的帖子，不影响你手工发布的内容。</p></div>
       </> : <div className="grid gap-4">
         {consentOptions}
-        <Button type="button" className="min-h-11 w-full sm:w-fit" disabled={disabled} onClick={() => void action("authorize")}>{pending ? "正在准备 Google 授权…" : "通过 Google 只读授权绑定"}</Button>
+        <Button type="button" className="min-h-11 w-full sm:w-fit" disabled={disabled || !privacyTermsAccepted} onClick={() => void action("authorize")}>{pending ? "正在准备 Google 授权…" : "通过 Google 只读授权绑定"}</Button>
       </div>}
       {!preview ? <Button type="button" variant="ghost" className="min-h-11 w-full sm:w-fit" disabled={pending} onClick={() => void refresh()}><ArrowsClockwise size={18} aria-hidden />刷新连接状态</Button> : null}
     </>}
@@ -143,5 +152,6 @@ function YoutubeConnectionState({ actorId, initialStatus, preview = false, onAut
     {notice ? <p role="status" className="text-sm leading-6 text-muted-foreground">{notice}</p> : null}
     {callbackResult ? <p role={callbackResult === "youtube_oauth_denied" ? "status" : "alert"} className="text-sm leading-6 text-muted-foreground">{youtubeErrorMessage(callbackResult)}</p> : null}
     {error ? <p role="alert" className="text-sm leading-6 text-destructive">{error}</p> : null}
+    <nav aria-label="YouTube 数据与授权说明" className="flex flex-wrap gap-x-5 gap-y-1 border-t pt-3 text-sm"><Link className="flex min-h-11 items-center text-primary underline-offset-4 hover:underline" href="/privacy#youtube">数据使用与删除</Link><Link className="flex min-h-11 items-center text-primary underline-offset-4 hover:underline" href="/terms">服务条款</Link><a className="flex min-h-11 items-center text-primary underline-offset-4 hover:underline" href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google 第三方连接</a></nav>
   </section>;
 }

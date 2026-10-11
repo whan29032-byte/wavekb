@@ -1,5 +1,5 @@
-import { isGoogleYoutubeAuthorization, parseYoutubeConnection, parseYoutubeStatus } from "./contracts";
-import type { YoutubeConnection, YoutubeConnectionStatus } from "./contracts";
+import { isGoogleYoutubeAuthorization, parseYoutubeConnection, parseYoutubeStatus, youtubePolicyVersion } from "./contracts";
+import type { YoutubeAuthorizationOptions, YoutubeConnection, YoutubeConnectionStatus } from "./contracts";
 
 async function request(action: string, body?: object): Promise<Record<string, unknown>> {
   let response: Response;
@@ -19,7 +19,8 @@ async function request(action: string, body?: object): Promise<Record<string, un
 export async function readYoutubeConnection(): Promise<YoutubeConnectionStatus> {
   return parseYoutubeStatus(await request("connection"));
 }
-export async function authorizeYoutube(options: { importHistory: boolean; autoSync: boolean }): Promise<string> {
+export async function authorizeYoutube(options: YoutubeAuthorizationOptions): Promise<string> {
+  if (options.privacyTermsAccepted !== true || options.policyVersion !== youtubePolicyVersion) throw new Error("youtube_policy_consent_required");
   const payload = await request("authorize", options);
   if (!isGoogleYoutubeAuthorization(payload.authorizationUrl)) throw new Error("youtube_response_invalid");
   return payload.authorizationUrl;

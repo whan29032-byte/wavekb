@@ -1,5 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+test("privacy and terms are public, connected to the footer and readable without horizontal overflow", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  for (const [path, title] of [["/privacy", "隐私政策"], ["/terms", "服务条款"]]) {
+    const response = await page.goto(path);
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+    await expect(page.getByText("2026-10-11-youtube-v1", { exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "网站数据与服务说明" }).getByRole("link", { name: "隐私政策" })).toHaveAttribute("href", "/privacy");
+    await expect(page.getByRole("navigation", { name: "网站数据与服务说明" }).getByRole("link", { name: "服务条款" })).toHaveAttribute("href", "/terms");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  }
+  expect(errors).toEqual([]);
+});
+
 test("guests use the original registration flow without separate free membership marketing", async ({ page }) => {
   await page.goto("/");
   const menu = page.getByRole("button", { name: "展开主导航" });

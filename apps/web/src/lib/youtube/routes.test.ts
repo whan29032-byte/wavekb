@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as connectionGet, POST } from "@/app/api/youtube/[action]/route";
 import { GET as callbackGet } from "@/app/api/youtube/callback/route";
 import { youtubeStateCookie } from "./server";
-import { parseYoutubeConnection, youtubeReadonlyScope } from "./contracts";
+import { parseYoutubeConnection, youtubePolicyVersion, youtubeReadonlyScope } from "./contracts";
 
 const boundary = vi.hoisted(() => ({ owner: "11111111-1111-4111-8111-111111111111", token: "private-user-token", configured: true }));
 vi.mock("@/lib/env", () => ({ publicSupabaseConfig: () => ({ configured: boundary.configured }) }));
@@ -16,6 +16,7 @@ const authorizeUrl = (scope = youtubeReadonlyScope) => `https://accounts.google.
 const context = (action: string) => ({ params: Promise.resolve({ action }) });
 const response = (body: object, status = 200) => new Response(JSON.stringify(body), { status });
 const post = (action: string, body: object, origin = "https://wavekb.com") => new NextRequest(`https://wavekb.com/api/youtube/${action}`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body) });
+const policyConsent = { privacyTermsAccepted: true, policyVersion: youtubePolicyVersion };
 beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); boundary.owner = "11111111-1111-4111-8111-111111111111"; boundary.token = "private-user-token"; boundary.configured = true; vi.stubEnv("AUTH_GATEWAY_INTERNAL_URL", "http://127.0.0.1:8787"); vi.stubEnv("AUTH_GATEWAY_PUBLIC_ORIGIN", "https://wavekb.com"); });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
@@ -35,17 +36,22 @@ describe("YouTube proxy privacy and OAuth state", () => {
   });
   it("stores owner-bound state only in a short-lived secure HttpOnly Lax cookie", async () => {
     fetchMock.mockResolvedValue(response({ authorizationUrl: authorizeUrl(), state, accessToken: "never-forward" }));
-    const result = await POST(post("authorize", { autoSync: false, importHistory: true, actorId: "different-user", returnTo: "https://evil.example" }), context("authorize"));
+    const result = await POST(post("authorize", { autoSync: false, importHistory: true, ...policyConsent, actorId: "different-user", returnTo: "https://evil.example" }), context("authorize"));
     expect(result.status).toBe(200); expect(await result.json()).toEqual({ authorizationUrl: authorizeUrl() });
     const cookie = result.headers.get("set-cookie")!; expect(cookie).toContain(`${youtubeStateCookie}=${boundary.owner}.${state}`);
     for (const flag of ["HttpOnly", "Secure", "SameSite=lax", "Max-Age=600", "Path=/api/youtube/callback"]) expect(cookie).toContain(flag);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ autoSync: false, importHistory: true }); expect(fetchMock.mock.calls[0][1].redirect).toBe("error");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ autoSync: false, importHistory: true, ...policyConsent }); expect(fetchMock.mock.calls[0][1].redirect).toBe("error");
   });
   it.each(["https://evil.example/authorize", authorizeUrl(`${youtubeReadonlyScope} https://www.googleapis.com/auth/youtube.force-ssl`), authorizeUrl().replace(state, "b".repeat(43)), authorizeUrl().replace(encodeURIComponent("https://wavekb.com/api/youtube/callback"), encodeURIComponent("https://evil.example/callback"))])("rejects unsafe authorization response %s", async (url) => {
     fetchMock.mockResolvedValue(response({ authorizationUrl: url, state }));
-    const result = await POST(post("authorize", { autoSync: false, importHistory: true }), context("authorize"));
+    const result = await POST(post("authorize", { autoSync: false, importHistory: true, ...policyConsent }), context("authorize"));
     expect(result.status).toBe(503); expect(result.headers.get("set-cookie")).toBeNull();
     expect(JSON.stringify(await result.json())).not.toContain(url);
+  });
+  it.each([{}, { privacyTermsAccepted: false, policyVersion: youtubePolicyVersion }, { privacyTermsAccepted: "true", policyVersion: youtubePolicyVersion }, { privacyTermsAccepted: true, policyVersion: "old" }])("rejects absent, implicit or stale policy consent without forwarding: %j", async (consent) => {
+    const result = await POST(post("authorize", { importHistory: true, autoSync: false, ...consent }), context("authorize"));
+    expect(result.status).toBe(400); expect(await result.json()).toEqual({ error: "youtube_policy_consent_required" });
+    expect(result.headers.get("set-cookie")).toBeNull(); expect(fetchMock).not.toHaveBeenCalled();
   });
   it("only completes OAuth for the same logged-in owner/state and clears the cookie", async () => {
     fetchMock.mockResolvedValue(response({ connection: { ...connection, refreshToken: "never-forward" } }));

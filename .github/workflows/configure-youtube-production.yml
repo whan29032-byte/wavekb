@@ -60,6 +60,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --dir ai-gateway typecheck
           node --test ai-gateway/test/youtube-configure-runtime.test.ts
+          node --test tests/youtube-configuration-receipt.test.mjs
 
   configure-youtube:
     needs: verify-configuration-contract
@@ -195,7 +196,8 @@ jobs:
               parseYouTubeConfigurationInput(Buffer.from(text), operation);
               process.stdout.write(text);
             } catch { console.error("youtube_configuration_input_invalid"); process.exitCode = 1; }
-          ' | ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "$remote_command"
+          ' | ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "$remote_command" 2>/dev/null \
+            | node scripts/project-youtube-configuration.mjs --operation "$OPERATION"
 
       - name: Clean runner SSH material
         if: always()

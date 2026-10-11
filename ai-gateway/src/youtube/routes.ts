@@ -1,6 +1,8 @@
+import { YOUTUBE_POLICY_VERSION, type YouTubeAuthorizationInput } from "./contracts.ts";
+
 export type YouTubeRouteApi = {
   getConnection(ownerId: string): Promise<object>;
-  authorize(ownerId: string, input: { importHistory: boolean; autoSync: boolean }): Promise<object>;
+  authorize(ownerId: string, input: YouTubeAuthorizationInput): Promise<object>;
   callback(ownerId: string, input: { code: string; state: string }): Promise<object>;
   settings(ownerId: string, input: { syncEnabled: boolean }): Promise<object>;
   importHistory(ownerId: string): Promise<object>;
@@ -12,6 +14,7 @@ const headers = { "cache-control": "no-store", "x-content-type-options": "nosnif
 const knownErrors = new Set([
   "youtube_unconfigured", "invalid_request", "confirmation_required",
   "authentication_required", "youtube_not_configured", "youtube_options_invalid",
+  "youtube_policy_consent_required",
   "youtube_state_invalid", "youtube_scope_missing", "youtube_refresh_token_missing",
   "youtube_channel_missing", "youtube_channel_selection_required", "youtube_not_connected",
   "youtube_account_ineligible", "youtube_reconnect_required", "youtube_disconnect_confirmation_required",
@@ -41,8 +44,9 @@ export async function youtubeRoute(api: YouTubeRouteApi | undefined, ownerId: st
   try {
     if (method === "GET" && path === "/v1/youtube/connection") return result(200, await api.getConnection(ownerId));
     if (method === "POST" && path === "/v1/youtube/authorize") {
+      if (input.privacyTermsAccepted !== true || input.policyVersion !== YOUTUBE_POLICY_VERSION) return result(400, { error: "youtube_policy_consent_required" });
       if (typeof input.importHistory !== "boolean" || typeof input.autoSync !== "boolean") return result(400, { error: "invalid_request" });
-      return result(200, await api.authorize(ownerId, { importHistory: input.importHistory, autoSync: input.autoSync }));
+      return result(200, await api.authorize(ownerId, { importHistory: input.importHistory, autoSync: input.autoSync, privacyTermsAccepted: true, policyVersion: input.policyVersion }));
     }
     if (method === "POST" && path === "/v1/youtube/callback") {
       if (typeof input.code !== "string" || !input.code || input.code.length > 2048

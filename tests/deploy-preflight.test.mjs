@@ -85,6 +85,15 @@ test("CLI-generated fourteen digit migrations require exact equality just like l
   }
 });
 
+test("YouTube policy-consent frontend waits for the exact new database marker and approved gateway release", (t) => {
+  const input = { ...fixture(t, "ai-gateway/src/youtube/service.ts"), requiredSchema: "20261011152711", gatewayReleaseApproved: true };
+  assert.equal(api.planRelease({ ...input, schemaVersion: "20261011152711" }).gatewayChanged, true);
+  for (const schemaVersion of ["20261011001354", "20261011152710", "20261011152712", "202610111527110", "unknown"]) {
+    assert.throws(() => api.planRelease({ ...input, schemaVersion }), /schema/);
+  }
+  assert.throws(() => api.planRelease({ ...input, schemaVersion: "20261011152711", gatewayReleaseApproved: false }), /gateway/);
+});
+
 test("gateway source changes require a separately approved deployment", (t) => {
   assert.equal(typeof api.planRelease, "function", "read-only preflight must exist");
   assert.throws(() => api.planRelease(fixture(t, "ai-gateway/src/server.ts")), /gateway.*separate/i);

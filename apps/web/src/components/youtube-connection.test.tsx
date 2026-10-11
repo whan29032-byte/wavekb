@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { YoutubeConnectionPanel } from "./youtube-connection";
 import type { YoutubeConnection } from "@/lib/youtube/contracts";
+import { youtubePolicyVersion } from "@/lib/youtube/contracts";
 
 const connection: YoutubeConnection = { id: "11111111-1111-4111-8111-111111111111", channelId: "UCabcdefghijklmnopqrstuv", channelTitle: "结构研究频道", syncEnabled: false, importHistory: true, historyStatus: "complete", historyImported: 42, status: "connected", lastSyncedAt: "2026-10-08T09:00:00Z", lastErrorCode: null };
 const state = "a".repeat(43);
@@ -26,11 +27,12 @@ describe("YouTube connection consent and truthful status", () => {
     fetchMock.mockResolvedValue(response({ authorizationUrl })); const navigate = vi.fn();
     render(<YoutubeConnectionPanel actorId="owner" initialStatus={{ configured: true, connection: null }} onAuthorizeNavigate={navigate} />);
     const checks = screen.getAllByRole("checkbox") as HTMLInputElement[];
-    expect(checks[0].checked).toBe(true); expect(checks[1].checked).toBe(false);
-    fireEvent.click(checks[0]); fireEvent.click(checks[1]);
+    expect(checks[0].checked).toBe(true); expect(checks[1].checked).toBe(false); expect(checks[2].checked).toBe(false);
+    expect((screen.getByRole("button", { name: "通过 Google 只读授权绑定" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(checks[0]); fireEvent.click(checks[1]); fireEvent.click(checks[2]);
     fireEvent.click(screen.getByRole("button", { name: "通过 Google 只读授权绑定" }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith(authorizationUrl));
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ importHistory: false, autoSync: true });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ importHistory: false, autoSync: true, privacyTermsAccepted: true, policyVersion: youtubePolicyVersion });
     expect(screen.queryByText("已通过 Google 授权")).toBeNull();
   });
   it("displays actual channel history progress and never presents pending as complete", () => {
@@ -104,8 +106,9 @@ describe("YouTube connection consent and truthful status", () => {
   it("shows explicit history and ongoing posting consent again for reconnection", () => {
     render(<YoutubeConnectionPanel actorId="owner" initialStatus={{ configured: true, connection: { ...connection, status: "reconnect_required", lastErrorCode: "youtube_reconnect_required" } }} />);
     const checks = screen.getAllByRole("checkbox") as HTMLInputElement[];
-    expect(checks[0].checked).toBe(true); expect(checks[1].checked).toBe(false);
-    expect(screen.getByRole("button", { name: "重新通过 Google 授权" })).toBeDefined();
+    expect(checks[0].checked).toBe(true); expect(checks[1].checked).toBe(false); expect(checks[2].checked).toBe(false);
+    const reauthorize = screen.getByRole("button", { name: "重新通过 Google 授权" }) as HTMLButtonElement;
+    expect(reauthorize.disabled).toBe(true); fireEvent.click(checks[2]); expect(reauthorize.disabled).toBe(false);
   });
   it("imports history only on an explicit request and keeps progress from its response", async () => {
     fetchMock.mockResolvedValue(response({ connection: { ...connection, historyStatus: "pending", historyImported: 42 } }));
@@ -153,5 +156,21 @@ describe("YouTube connection consent and truthful status", () => {
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     expect(fetchMock).not.toHaveBeenCalled(); expect((screen.getByRole("button", { name: "恢复新视频同步" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("note").textContent).toContain("不代表真实 OAuth");
+  });
+  it("never authorizes before policy consent and always exposes deletion and Google controls", () => {
+    render(<YoutubeConnectionPanel actorId="owner" initialStatus={{ configured: true, connection: null }} />);
+    fireEvent.click(screen.getByRole("button", { name: "通过 Google 只读授权绑定" }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "隐私政策" }).getAttribute("href")).toBe("/privacy#youtube");
+    expect(screen.getByRole("link", { name: "Google 第三方连接" }).getAttribute("href")).toBe("https://myaccount.google.com/permissions");
+    expect(screen.getByText(/标题、说明和播放链接/)).toBeDefined();
+  });
+  it("clears policy consent when switching the account", () => {
+    const view = render(<YoutubeConnectionPanel actorId="first" initialStatus={{ configured: true, connection: null }} />);
+    fireEvent.click(screen.getAllByRole("checkbox")[2]);
+    expect((screen.getByRole("button", { name: "通过 Google 只读授权绑定" }) as HTMLButtonElement).disabled).toBe(false);
+    view.rerender(<YoutubeConnectionPanel actorId="second" initialStatus={{ configured: true, connection: null }} />);
+    expect((screen.getAllByRole("checkbox")[2] as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("button", { name: "通过 Google 只读授权绑定" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

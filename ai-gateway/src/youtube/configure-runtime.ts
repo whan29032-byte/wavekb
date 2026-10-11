@@ -328,7 +328,15 @@ export function parseYouTubeConfigurationArguments(args: readonly string[]): You
   if (!envFile || !backupFile || !operation || !operations.has(operation) || verification !== undefined && verification !== "true" || Boolean(verification) !== Boolean(expectedSha)) fail("invalid_arguments");
   return { envFile, backupFile, operation: operation as YouTubeConfigurationOperation, ...(verification ? { verifyServices: true, expectedSha: expectedSha! } : {}) };
 }
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+function isCliEntrypoint(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    // Node resolves imported module URLs through release symlinks. argv retains
+    // /current, so compare filesystem identities rather than path spellings.
+    return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(path.resolve(process.argv[1]));
+  } catch { return false; }
+}
+if (isCliEntrypoint()) {
   try {
     const options = parseYouTubeConfigurationArguments(process.argv.slice(2));
     const chunks: Buffer[] = []; let length = 0;

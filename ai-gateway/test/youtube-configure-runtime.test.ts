@@ -317,6 +317,37 @@ test("CLI stdin configures without exposing credentials in safe result or static
   const oversized = spawnSync(process.execPath, [script, "--env-file", bad.envFile, "--backup-file", bad.backupFile, "--operation", "stage"], { input: Buffer.alloc(YOUTUBE_CONFIG_INPUT_MAX_BYTES + 1), encoding: "utf8", timeout: 10_000 });
   assert.equal(oversized.status, 1); assert.deepEqual(JSON.parse(oversized.stderr), { ok: false, code: "invalid_configuration_input" }); unchanged(bad);
 });
+test("direct and current-symlink CLI entrypoints both run and cannot silently succeed without a receipt", (t) => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  for (const symbolic of [false, true]) {
+    const f = fixture(t);
+    const current = path.join(f.directory, "current");
+    if (symbolic) fs.symlinkSync(root, current);
+    const script = symbolic ? path.join(current, "src/youtube/configure-runtime.ts") : path.join(root, "src/youtube/configure-runtime.ts");
+    const invalid = spawnSync(process.execPath, ["--", script], { input: "{}", encoding: "utf8", timeout: 10_000 });
+    assert.equal(invalid.status, 1);
+    assert.equal(invalid.stdout, "");
+    assert.deepEqual(JSON.parse(invalid.stderr), { ok: false, code: "invalid_arguments" });
+    const result = spawnSync(process.execPath, ["--", script, "--env-file", f.envFile, "--backup-file", f.backupFile, "--operation", "stage"],
+      { input: JSON.stringify(credentials), encoding: "utf8", timeout: 10_000 });
+    assert.equal(result.status, 0); assert.equal(result.stderr, "");
+    assert.equal(JSON.parse(result.stdout).configured, true);
+    assert.equal(JSON.parse(result.stdout).enabled, false);
+    assert.ok(fs.existsSync(f.backupFile));
+    assert.equal(result.stdout.includes(credentials.clientSecret), false);
+  }
+});
+test("importing configuration does not read stdin, invoke services, write env or emit a CLI receipt", (t) => {
+  const f = fixture(t), module = fileURLToPath(new URL("../src/youtube/configure-runtime.ts", import.meta.url));
+  const code = `import { pathToFileURL } from 'node:url';
+    process.argv = [process.execPath, '/nonexistent-importing-program', '--env-file', ${JSON.stringify(f.envFile)}, '--backup-file', ${JSON.stringify(f.backupFile)}, '--operation', 'stage'];
+    globalThis.fetch = () => { throw new Error('must not request'); };
+    await import(pathToFileURL(${JSON.stringify(module)}).href);
+    console.log('imported_without_configuration');`;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], { input: JSON.stringify(credentials), encoding: "utf8", timeout: 10_000 });
+  assert.equal(result.status, 0); assert.equal(result.stdout, "imported_without_configuration\n"); assert.equal(result.stderr, "");
+  unchanged(f);
+});
 test("CLI emergency disable uncertainty is nonzero and reports closed-but-unverified without any secret values", (t) => {
   const script = fileURLToPath(new URL("../src/youtube/configure-runtime.ts", import.meta.url)), running = CONFIGURED_ENV.replace("YOUTUBE_SYNC_ENABLED=false", "YOUTUBE_SYNC_ENABLED=true"), f = fixture(t, running);
   const program = `
@@ -379,6 +410,7 @@ test("workflow bounds stage secret presence before SSH; secrets travel only in p
   assert.match(ssh.run!, /test "\$actual_fingerprint" = "\$DEPLOY_HOST_FINGERPRINT"/);
   assert.match(apply.run!, /process\.stdout\.write\(text\);[\s\S]*' \| ssh /);
   assert.match(apply.run!, /StrictHostKeyChecking=yes/);
+  assert.match(apply.run!, /"\$remote_command" 2>\/dev\/null[\s\S]*\| node scripts\/project-youtube-configuration\.mjs --operation "\$OPERATION"/);
   assert.match(apply.run!, /--verify-services true --expected-sha \$\{GITHUB_SHA\}/);
   assert.match(apply.run!, /--backup-file \/var\/backups\/elliott-wave-gateway\/youtube-config-\$\{GITHUB_RUN_ID\}-\$\{GITHUB_RUN_ATTEMPT\}\.env/);
   const remoteCommand = apply.run!.split("\n").find((line) => line.trimStart().startsWith("remote_command="))!;
@@ -414,13 +446,27 @@ test("actual workflow relay sends exact bounded operation JSON through stdin, ne
       import { parseYouTubeConfigurationInput } from "./ai-gateway/src/youtube/configure-runtime.ts";
       const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk);
       const input = parseYouTubeConfigurationInput(Buffer.concat(chunks), process.env.OPERATION);
-      console.log(JSON.stringify({ stageFields: Object.keys(input).length, parsed: true }));
+      if (Object.keys(input).length !== (process.env.OPERATION === "stage" ? 2 : 0)) throw new Error("invalid fixture input");
+      console.log(JSON.stringify({ ok: true, configured: process.env.OPERATION === "disable" ? null : true,
+        enabled: process.env.OPERATION === "enable", generatedMasterKey: process.env.OPERATION === "stage",
+        changed: true, appliedToRunningServices: true, workerActive: true }));
     '
   }
 `;
   for (const operation of ["stage", "enable", "disable"] as const) {
     const result = spawnSync("bash", ["-c", mockSsh + apply.run!], { cwd, env: { PATH: process.env.PATH, HOME: process.env.HOME, OPERATION: operation, GITHUB_SHA: sha, GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", DEPLOY_USER: "fixture", DEPLOY_HOST: "example.invalid", YOUTUBE_OAUTH_CLIENT_ID: credentials.clientId, YOUTUBE_OAUTH_CLIENT_SECRET: credentials.clientSecret }, encoding: "utf8", timeout: 10_000 });
-    assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), { stageFields: operation === "stage" ? 2 : 0, parsed: true });
+    assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), { ok: true, operation, enabled: operation === "enable",
+      readiness: operation === "stage" ? "staged_not_enabled" : operation === "enable" ? "enabled_services_verified" : "disabled_services_verified" });
     assert.equal(result.stdout.includes(credentials.clientSecret), false);
+  }
+});
+test("actual workflow rejects an exit-zero remote no-op and never echoes raw remote output or stderr", () => {
+  const apply = configurationSteps.find((step) => /Apply bounded stdin/.test(step.name))!, cwd = fileURLToPath(new URL("../..", import.meta.url));
+  for (const output of ["", "private upstream secret text", '{"ok":true}', '{"ok":false,"code":"private-upstream-error"}']) {
+    const mockSsh = `ssh() { cat >/dev/null; printf '%s' "$WAVEKB_TEST_REMOTE_OUTPUT"; printf '%s' 'private remote stderr' >&2; return 0; }\n`;
+    const result = spawnSync("bash", ["-c", mockSsh + apply.run!], { cwd, env: { PATH: process.env.PATH, HOME: process.env.HOME,
+      OPERATION: "stage", GITHUB_SHA: sha, GITHUB_RUN_ID: "123", GITHUB_RUN_ATTEMPT: "1", DEPLOY_USER: "fixture", DEPLOY_HOST: "example.invalid",
+      YOUTUBE_OAUTH_CLIENT_ID: credentials.clientId, YOUTUBE_OAUTH_CLIENT_SECRET: credentials.clientSecret, WAVEKB_TEST_REMOTE_OUTPUT: output }, encoding: "utf8", timeout: 10_000 });
+    assert.equal(result.status, 1); assert.equal(result.stdout, ""); assert.equal(result.stderr, "youtube_configuration_receipt_invalid\n");
   }
 });

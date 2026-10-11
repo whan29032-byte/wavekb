@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { loadYouTubeSyncConfig } from "../src/youtube/config.ts";
-import { YouTubeError, type YouTubeConnectionView, type YouTubeProvider, type YouTubeSecret } from "../src/youtube/contracts.ts";
+import { YOUTUBE_POLICY_VERSION, YouTubeError, type YouTubeAuthorizationInput, type YouTubeConnectionView, type YouTubeProvider, type YouTubeSecret } from "../src/youtube/contracts.ts";
 import { encryptYouTubeSecret, decryptYouTubeSecret } from "../src/youtube/crypto.ts";
 import { YouTubeRepository, YouTubeRestDatabase, type YouTubeServiceRepository } from "../src/youtube/repository.ts";
 import { YouTubeService } from "../src/youtube/service.ts";
@@ -11,11 +11,12 @@ const owner="11111111-1111-4111-8111-111111111111", other="22222222-2222-4222-82
 const channel=`UC${"a".repeat(22)}`, key=Buffer.alloc(32,27);
 const env={YOUTUBE_SYNC_ENABLED:"true",YOUTUBE_OAUTH_CLIENT_ID:"test.apps.googleusercontent.com",YOUTUBE_OAUTH_CLIENT_SECRET:"synthetic-client-secret",YOUTUBE_OAUTH_REDIRECT_URI:"https://wavekb.com/api/youtube/callback",YOUTUBE_TOKEN_MASTER_KEY:key.toString("base64"),SUPABASE_URL:"https://database.example.test",SUPABASE_SERVICE_ROLE_KEY:"synthetic-service-role"};
 const config=loadYouTubeSyncConfig(env);
+const acceptedPolicy={privacyTermsAccepted:true,policyVersion:YOUTUBE_POLICY_VERSION} as const;
 const view:YouTubeConnectionView={id:"33333333-3333-4333-8333-333333333333",channelId:channel,channelTitle:"Verified channel",syncEnabled:true,importHistory:true,historyStatus:"pending",historyImported:0,status:"connected",lastSyncedAt:null,lastErrorCode:null};
 
 function fixture(options:{config?:typeof config;provider?:Partial<YouTubeProvider>;repository?:Partial<YouTubeServiceRepository>}={}){
   const calls:{name:string;owner?:string;value?:unknown}[]=[];
-  let stateHash="",verifierSecret:YouTubeSecret|null=null,consumed=false,codeChallenge="";
+  let stateHash="",verifierSecret:YouTubeSecret|null=null,consumed=false,codeChallenge="",authorizationCalls=0;
   const repository:YouTubeServiceRepository={
     async getConnection(actor){calls.push({name:"get",owner:actor});return view;},
     async beginOAuth(actor,hash,secret,choices){calls.push({name:"begin",owner:actor,value:choices});stateHash=hash;verifierSecret=secret;return "state-id";},
@@ -26,7 +27,7 @@ function fixture(options:{config?:typeof config;provider?:Partial<YouTubeProvide
     ...options.repository,
   };
   const provider:YouTubeProvider={
-    authorizationUrl(input){codeChallenge=input.codeChallenge;const url=new URL("https://accounts.google.com/o/oauth2/v2/auth");url.search=new URLSearchParams({state:input.state,code_challenge:input.codeChallenge}).toString();return url.href;},
+    authorizationUrl(input){authorizationCalls++;codeChallenge=input.codeChallenge;const url=new URL("https://accounts.google.com/o/oauth2/v2/auth");url.search=new URLSearchParams({state:input.state,code_challenge:input.codeChallenge}).toString();return url.href;},
     async exchangeCode(input){calls.push({name:"exchange",value:input});assert.equal(createHash("sha256").update(input.codeVerifier).digest("base64url"),codeChallenge);return{accessToken:"synthetic-access-token",refreshToken:"synthetic-refresh-token",expiresIn:3600,scope:"https://www.googleapis.com/auth/youtube.readonly"};},
     async refreshToken(){throw new Error("unexpected refresh");},async revokeToken(){calls.push({name:"revoke"});},
     async ownedChannels(){calls.push({name:"channels"});return[{id:channel,title:"Verified channel",uploadsPlaylistId:"UUaaaaaaaaaaaaaaaaaaaaaa"}];},
@@ -34,7 +35,7 @@ function fixture(options:{config?:typeof config;provider?:Partial<YouTubeProvide
     ...options.provider,
   };
   const service=new YouTubeService(options.config??config,{provider,repository});
-  return{service,calls,repository,storedVerifier:()=>verifierSecret,challenge:()=>codeChallenge};
+  return{service,calls,repository,storedVerifier:()=>verifierSecret,challenge:()=>codeChallenge,authorizationCalls:()=>authorizationCalls};
 }
 
 test("YouTube encryption uses random GCM IV and authenticated owner/channel separation",()=>{
@@ -50,7 +51,7 @@ test("YouTube encryption uses random GCM IV and authenticated owner/channel sepa
 test("default disabled/unconfigured integration never starts authorization or hides existing binding cleanup",async()=>{
   const f=fixture({config:loadYouTubeSyncConfig({...env,YOUTUBE_SYNC_ENABLED:"false"})});
   assert.deepEqual(await f.service.getConnection(owner),{configured:false,connection:view});
-  await assert.rejects(f.service.authorize(owner,{importHistory:true,autoSync:true}),/youtube_not_configured/);
+  await assert.rejects(f.service.authorize(owner,{importHistory:true,autoSync:true,...acceptedPolicy}),/youtube_not_configured/);
   const result=await f.service.disconnect(owner,{confirmRemoveSyncedPosts:true});
   assert.deepEqual(result,{disconnected:true,removedPosts:1,remoteRevocationPending:true});
   assert.ok(!JSON.stringify(result).includes("private-job-id"));assert.ok(!f.calls.some(call=>call.name==="revoke"));
@@ -58,17 +59,29 @@ test("default disabled/unconfigured integration never starts authorization or hi
   assert.deepEqual(await empty.service.getConnection(owner),{configured:false,connection:null});assert.equal(empty.calls.length,0);
 });
 
-test("authorize persists owner-bound state hash and encrypted PKCE with explicit import choices",async()=>{
-  const f=fixture();const result=await f.service.authorize(owner,{importHistory:true,autoSync:false});
+test("authorize persists owner-bound state hash, encrypted PKCE and explicit policy/import choices",async()=>{
+  const f=fixture();const result=await f.service.authorize(owner,{importHistory:true,autoSync:false,...acceptedPolicy});
   assert.match(result.state,/^[A-Za-z0-9_-]{43}$/);
   const verifier=decryptYouTubeSecret(f.storedVerifier()!,key,owner,"oauth-state");
   assert.equal(createHash("sha256").update(verifier).digest("base64url"),f.challenge());
-  assert.equal(f.calls[0]?.owner,owner);assert.deepEqual(f.calls[0]?.value,{importHistory:true,autoSync:false});
+  assert.equal(f.calls[0]?.owner,owner);assert.deepEqual(f.calls[0]?.value,{importHistory:true,autoSync:false,...acceptedPolicy});
   assert.ok(!JSON.stringify(f.calls).includes(verifier));
 });
 
+test("missing, false, coerced or outdated policy consent cannot create state or an OAuth URL",async()=>{
+  for(const consent of [{},{privacyTermsAccepted:true},{policyVersion:YOUTUBE_POLICY_VERSION},
+    {privacyTermsAccepted:false,policyVersion:YOUTUBE_POLICY_VERSION},
+    {privacyTermsAccepted:"true",policyVersion:YOUTUBE_POLICY_VERSION},
+    {privacyTermsAccepted:1,policyVersion:YOUTUBE_POLICY_VERSION},
+    {privacyTermsAccepted:true,policyVersion:"2026-10-10-youtube-v0"}]){
+    const f=fixture();
+    await assert.rejects(f.service.authorize(owner,{importHistory:true,autoSync:true,...consent} as YouTubeAuthorizationInput),error=>error instanceof YouTubeError&&error.code==="youtube_policy_consent_required"&&error.status===400);
+    assert.deepEqual(f.calls,[]);assert.equal(f.authorizationCalls(),0);assert.equal(f.storedVerifier(),null);
+  }
+});
+
 test("callback consumes state before exchange, uses fixed redirect, persists only encrypted refresh token",async()=>{
-  const f=fixture();const start=await f.service.authorize(owner,{importHistory:true,autoSync:true});
+  const f=fixture();const start=await f.service.authorize(owner,{importHistory:true,autoSync:true,...acceptedPolicy});
   assert.deepEqual(await f.service.callback(owner,{state:start.state,code:"synthetic-code"}),{connection:view});
   assert.deepEqual(f.calls.map(call=>call.name),["begin","consume","exchange","channels","complete"]);
   const exchange=f.calls.find(call=>call.name==="exchange")!.value as {redirectUri:string};assert.equal(exchange.redirectUri,config.redirectUri);
@@ -80,11 +93,11 @@ test("callback consumes state before exchange, uses fixed redirect, persists onl
 });
 
 test("wrong owner, malformed state, invalid user and implicit boolean choices never persist a binding",async()=>{
-  const f=fixture();const start=await f.service.authorize(owner,{importHistory:false,autoSync:false});
+  const f=fixture();const start=await f.service.authorize(owner,{importHistory:false,autoSync:false,...acceptedPolicy});
   await assert.rejects(f.service.callback(other,{state:start.state,code:"synthetic-code"}),/youtube_state_invalid/);
   await assert.rejects(f.service.callback(owner,{state:"bad",code:"synthetic-code"}),/youtube_state_invalid/);
   await assert.rejects(f.service.getConnection("not-a-uuid"),/authentication_required/);
-  await assert.rejects(f.service.authorize(owner,{importHistory:undefined as unknown as boolean,autoSync:true}),/youtube_options_invalid/);
+  await assert.rejects(f.service.authorize(owner,{importHistory:undefined as unknown as boolean,autoSync:true,...acceptedPolicy}),/youtube_options_invalid/);
   assert.ok(!f.calls.some(call=>call.name==="exchange"||call.name==="complete"));
 });
 
@@ -95,7 +108,7 @@ test("missing readonly scope, refresh token or channel ownership cannot create c
     [{ownedChannels:async()=>[]},"youtube_channel_missing"],
     [{ownedChannels:async()=>[{id:channel,title:"a",uploadsPlaylistId:"UUaaaaaaaaaaaaaaaaaaaaaa"},{id:`UC${"b".repeat(22)}`,title:"b",uploadsPlaylistId:"UUbbbbbbbbbbbbbbbbbbbbbb"}]},"youtube_channel_selection_required"],
   ] as [Partial<YouTubeProvider>,string][]){
-    const f=fixture({provider:override});const start=await f.service.authorize(owner,{importHistory:true,autoSync:true});
+    const f=fixture({provider:override});const start=await f.service.authorize(owner,{importHistory:true,autoSync:true,...acceptedPolicy});
     await assert.rejects(f.service.callback(owner,{state:start.state,code:"synthetic-code"}),new RegExp(code));
     assert.ok(!f.calls.some(call=>call.name==="complete"));
   }
@@ -117,4 +130,14 @@ test("repository uses fixed service-only RPC arguments and strips unsafe error t
   await assert.rejects(database.request("/rest/v1/rpc/youtube_get_connection",{method:"POST",body:{p_owner_id:owner}}),error=>error instanceof YouTubeError&&error.code==="youtube_unavailable"&&!error.message.includes("secret-test"));
   const denied=new YouTubeRestDatabase(config,async()=>new Response(JSON.stringify({message:"youtube_account_ineligible"}),{status:400}));
   await assert.rejects(denied.request("/rest/v1/rpc/youtube_settings"),error=>error instanceof YouTubeError&&error.status===403);
+});
+
+test("repository forwards policy consent with owner and maps database refusal to safe 400",async()=>{
+  const calls:{path:string;body:unknown}[]=[];
+  const repo=new YouTubeRepository(config,{async request(path,options){calls.push({path,body:options?.body});return "state-id";}});
+  const verifier=encryptYouTubeSecret("test-verifier",key,owner,"oauth-state");
+  await repo.beginOAuth(owner,"a".repeat(64),verifier,{importHistory:false,autoSync:true,...acceptedPolicy});
+  assert.deepEqual(calls,[{path:"/rest/v1/rpc/youtube_begin_oauth",body:{p_owner_id:owner,p_state_hash:"a".repeat(64),p_verifier_secret:verifier,p_import_history:false,p_auto_sync:true,p_privacy_terms_accepted:true,p_policy_version:YOUTUBE_POLICY_VERSION}}]);
+  const denied=new YouTubeRestDatabase(config,async()=>new Response(JSON.stringify({message:"youtube_policy_consent_required"}),{status:400}));
+  await assert.rejects(denied.request("/rest/v1/rpc/youtube_begin_oauth"),error=>error instanceof YouTubeError&&error.code==="youtube_policy_consent_required"&&error.status===400);
 });
