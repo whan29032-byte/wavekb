@@ -52,6 +52,8 @@ it("lists every generated knowledge route and only canonical public URLs", async
     "https://wavekb.com/",
     "https://wavekb.com/knowledge",
     "https://wavekb.com/knowledge/books",
+    "https://wavekb.com/privacy",
+    "https://wavekb.com/terms",
     ...data.pages.map((page) => `https://wavekb.com/knowledge/${page.id}`),
     ...getKnowledgeBookCatalog(data).map((book) => `https://wavekb.com/knowledge/books/${book.id}`),
     ...data.themes.map((theme) => `https://wavekb.com/knowledge/themes/${theme.id}`),

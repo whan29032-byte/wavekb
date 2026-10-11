@@ -1,6 +1,6 @@
 import { type NextRequest } from "next/server";
 import { gatewayRequestOrigin } from "@/lib/auth/gateway-origin";
-import { isGoogleYoutubeAuthorization, parseYoutubeConnection, parseYoutubeStatus, youtubeStatePattern } from "@/lib/youtube/contracts";
+import { isGoogleYoutubeAuthorization, parseYoutubeConnection, parseYoutubeStatus, youtubePolicyVersion, youtubeStatePattern } from "@/lib/youtube/contracts";
 import { sanitizedYoutubeError, youtubeActor, youtubeCookieOptions, youtubeGateway, youtubeJson, youtubeStateCookie } from "@/lib/youtube/server";
 
 type Context = { params: Promise<{ action: string }> };
@@ -31,8 +31,9 @@ export async function POST(request: NextRequest, context: Context) {
     body = JSON.parse(text) as Record<string, unknown>;
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
   } catch { return youtubeJson({ error: "invalid_request" }, 400); }
+  if (action === "authorize" && (body.privacyTermsAccepted !== true || body.policyVersion !== youtubePolicyVersion)) return youtubeJson({ error: "youtube_policy_consent_required" }, 400);
   let safeBody: object;
-  if (action === "authorize" && typeof body.importHistory === "boolean" && typeof body.autoSync === "boolean") safeBody = { importHistory: body.importHistory, autoSync: body.autoSync };
+  if (action === "authorize" && typeof body.importHistory === "boolean" && typeof body.autoSync === "boolean") safeBody = { importHistory: body.importHistory, autoSync: body.autoSync, privacyTermsAccepted: true, policyVersion: youtubePolicyVersion };
   else if (action === "settings" && typeof body.syncEnabled === "boolean") safeBody = { syncEnabled: body.syncEnabled };
   else if (action === "import-history") safeBody = {};
   else if (action === "disconnect" && body.confirmRemoveSyncedPosts === true) safeBody = { confirmRemoveSyncedPosts: true };

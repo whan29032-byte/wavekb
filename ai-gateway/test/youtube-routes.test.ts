@@ -3,6 +3,9 @@ import test from "node:test";
 import { youtubeRoute, type YouTubeRouteApi } from "../src/youtube/routes.ts";
 import { buildServer } from "../src/server.ts";
 import { loadConfig } from "../src/config.ts";
+import { YOUTUBE_POLICY_VERSION } from "../src/youtube/contracts.ts";
+
+const acceptedPolicy = { privacyTermsAccepted: true, policyVersion: YOUTUBE_POLICY_VERSION } as const;
 
 function fake() {
   const calls: unknown[][] = [];
@@ -12,15 +15,28 @@ function fake() {
 }
 test("YouTube routes use only the authenticated actor, not request posting authority", async () => {
   const { api, calls } = fake();
-  const response = await youtubeRoute(api, "verified-owner", "POST", "/v1/youtube/authorize", { ownerId: "attacker", channelId: "unverified", importHistory: true, autoSync: false });
+  const response = await youtubeRoute(api, "verified-owner", "POST", "/v1/youtube/authorize", { ownerId: "attacker", channelId: "unverified", importHistory: true, autoSync: false, ...acceptedPolicy });
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(calls, [["authorize", "verified-owner", { importHistory: true, autoSync: false }]]);
+  assert.deepEqual(calls, [["authorize", "verified-owner", { importHistory: true, autoSync: false, ...acceptedPolicy }]]);
   assert.equal(response.headers["cache-control"], "no-store");
+});
+test("authorize refuses absent, false, coerced and old policy consent without calling the service", async () => {
+  const { api, calls } = fake();
+  for (const consent of [{}, { privacyTermsAccepted: true }, { policyVersion: YOUTUBE_POLICY_VERSION },
+    { privacyTermsAccepted: false, policyVersion: YOUTUBE_POLICY_VERSION },
+    { privacyTermsAccepted: "true", policyVersion: YOUTUBE_POLICY_VERSION },
+    { privacyTermsAccepted: 1, policyVersion: YOUTUBE_POLICY_VERSION },
+    { privacyTermsAccepted: true, policyVersion: "2026-10-10-youtube-v0" }]) {
+    const result = await youtubeRoute(api, "owner", "POST", "/v1/youtube/authorize", { importHistory: true, autoSync: false, ...consent });
+    assert.equal(result.statusCode, 400);
+    assert.deepEqual(result.body, { error: "youtube_policy_consent_required" });
+  }
+  assert.deepEqual(calls, []);
 });
 test("bad consent, callback and unlink inputs cause no service mutation", async () => {
   const { api, calls } = fake();
   const inputs = [
-    ["authorize", { importHistory: "true", autoSync: true }],
+    ["authorize", { importHistory: "true", autoSync: true, ...acceptedPolicy }],
     ["callback", { code: "private-code", state: "bad" }],
     ["callback", { code: "x".repeat(2049), state: "a".repeat(43) }],
     ["settings", { syncEnabled: 1 }],
@@ -28,6 +44,13 @@ test("bad consent, callback and unlink inputs cause no service mutation", async 
   ] as const;
   for (const [action, payload] of inputs) assert.equal((await youtubeRoute(api, "owner", "POST", `/v1/youtube/${action}`, payload)).statusCode, 400);
   assert.deepEqual(calls, []);
+});
+test("settings, history and confirmed disconnect remain available without authorize consent", async () => {
+  const { api, calls } = fake();
+  assert.equal((await youtubeRoute(api, "owner", "POST", "/v1/youtube/settings", { syncEnabled: false })).statusCode, 200);
+  assert.equal((await youtubeRoute(api, "owner", "POST", "/v1/youtube/import-history", {})).statusCode, 202);
+  assert.equal((await youtubeRoute(api, "owner", "POST", "/v1/youtube/disconnect", { confirmRemoveSyncedPosts: true })).statusCode, 200);
+  assert.deepEqual(calls, [["settings", "owner", { syncEnabled: false }], ["history", "owner"], ["disconnect", "owner", { confirmRemoveSyncedPosts: true }]]);
 });
 test("only exact supported methods and paths are exposed", async () => {
   const { api, calls } = fake();
@@ -69,7 +92,9 @@ test("integrated Gateway authenticates owner and enforces the site origin before
   assert.equal((await server.inject({ url: "/v1/youtube/connection" })).statusCode, 401);
   assert.equal((await server.inject({ method: "POST", url: "/v1/youtube/authorize", headers: { authorization: "Bearer valid-user", origin: "https://evil.example" }, payload: { importHistory: true, autoSync: true } })).statusCode, 403);
   assert.deepEqual(calls, []);
-  const response = await server.inject({ method: "POST", url: "/v1/youtube/authorize", headers: { authorization: "Bearer valid-user", origin: "https://wavekb.example" }, payload: { ownerId: "other-owner", importHistory: true, autoSync: true } });
+  const refusal = await server.inject({ method: "POST", url: "/v1/youtube/authorize", headers: { authorization: "Bearer valid-user", origin: "https://wavekb.example" }, payload: { ownerId: "other-owner", importHistory: true, autoSync: true } });
+  assert.equal(refusal.statusCode, 400);assert.deepEqual(refusal.json(), { error: "youtube_policy_consent_required" });assert.deepEqual(calls, []);
+  const response = await server.inject({ method: "POST", url: "/v1/youtube/authorize", headers: { authorization: "Bearer valid-user", origin: "https://wavekb.example" }, payload: { ownerId: "other-owner", importHistory: true, autoSync: true, ...acceptedPolicy } });
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(calls, [["authorize", "actual-owner", { importHistory: true, autoSync: true }]]);
+  assert.deepEqual(calls, [["authorize", "actual-owner", { importHistory: true, autoSync: true, ...acceptedPolicy }]]);
 });

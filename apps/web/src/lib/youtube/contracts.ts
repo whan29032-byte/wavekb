@@ -12,9 +12,11 @@ export type YoutubeConnection = {
 };
 export type YoutubeConnectionStatus = { configured: boolean; connection: YoutubeConnection | null };
 export const youtubeReadonlyScope = "https://www.googleapis.com/auth/youtube.readonly";
+export const youtubePolicyVersion = "2026-10-11-youtube-v1" as const;
+export type YoutubeAuthorizationOptions = { importHistory: boolean; autoSync: boolean; privacyTermsAccepted: true; policyVersion: typeof youtubePolicyVersion };
 export const youtubeStatePattern = /^[A-Za-z0-9_-]{32,256}$/;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const publicErrorCodes = new Set(["youtube_not_configured", "authentication_required", "youtube_options_invalid", "youtube_state_invalid", "youtube_scope_missing", "youtube_refresh_token_missing", "youtube_channel_missing", "youtube_channel_selection_required", "youtube_not_connected", "youtube_account_ineligible", "youtube_reconnect_required", "youtube_disconnect_confirmation_required", "youtube_unavailable", "youtube_channel_already_bound", "youtube_quota_exceeded", "youtube_oauth_denied", "youtube_oauth_failed", "youtube_history_running", "youtube_revocation_pending", "youtube_manual_revocation_required"]);
+const publicErrorCodes = new Set(["youtube_not_configured", "authentication_required", "youtube_options_invalid", "youtube_policy_consent_required", "youtube_state_invalid", "youtube_scope_missing", "youtube_refresh_token_missing", "youtube_channel_missing", "youtube_channel_selection_required", "youtube_not_connected", "youtube_account_ineligible", "youtube_reconnect_required", "youtube_disconnect_confirmation_required", "youtube_unavailable", "youtube_channel_already_bound", "youtube_quota_exceeded", "youtube_oauth_denied", "youtube_oauth_failed", "youtube_history_running", "youtube_revocation_pending", "youtube_manual_revocation_required"]);
 
 export function sanitizeYoutubeErrorCode(error: unknown) {
   return typeof error === "string" && publicErrorCodes.has(error) ? error : "youtube_request_failed";
@@ -79,6 +81,7 @@ export function youtubeErrorMessage(code: string) {
     youtube_scope_missing: "Google 没有授予所需的 YouTube 只读权限，请重新授权并确认读取频道的权限。",
     youtube_refresh_token_missing: "Google 没有提供后台续期授权，未建立持续同步连接。请重新授权。",
     youtube_options_invalid: "授权选项未提交完整，请重新确认历史导入与自动同步选项。",
+    youtube_policy_consent_required: "请阅读并同意当前隐私政策、服务条款及 YouTube 服务条款，再开始授权。",
     youtube_not_connected: "还没有绑定 YouTube 频道，请先完成 Google 只读授权。",
     youtube_account_ineligible: "当前站内账号不能建立连接，请先完成账号激活或联系管理员。",
     youtube_unavailable: "YouTube 服务暂时不可用，请稍后刷新状态或重试。",

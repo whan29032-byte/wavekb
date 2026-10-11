@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { SocialDesktop } from "@/components/social-desktop";
 import { PwaRegistration } from "@/components/pwa-registration";
@@ -52,6 +53,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <a href="#wavekb-main" className="skip-link">跳到主要内容</a>
         <SiteHeader />
         <div id="wavekb-main">{children}</div>
+        <footer className="border-t px-4 py-5 text-sm text-muted-foreground md:px-6"><nav aria-label="网站数据与服务说明" className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-1"><span>WaveKB</span><Link className="flex min-h-11 items-center underline-offset-4 hover:underline" href="/privacy">隐私政策</Link><Link className="flex min-h-11 items-center underline-offset-4 hover:underline" href="/terms">服务条款</Link><a className="flex min-h-11 items-center break-all underline-offset-4 hover:underline" href="mailto:whan29032@gmail.com">联系网站</a></nav></footer>
         <SocialDesktop />
         <PwaRegistration />
       </body>

@@ -1,3 +1,7 @@
+export const YOUTUBE_POLICY_VERSION = "2026-10-11-youtube-v1" as const;
+export type YouTubeAuthorizationInput = {
+  importHistory: boolean; autoSync: boolean; privacyTermsAccepted: true; policyVersion: typeof YOUTUBE_POLICY_VERSION;
+};
 export type OAuthTokens = { accessToken: string; refreshToken?: string; expiresIn: number; scope: string };
 export type OwnedChannel = { id: string; title: string; uploadsPlaylistId: string };
 export type UploadPage = { videoIds: string[]; nextPageToken: string | null };

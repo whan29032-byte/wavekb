@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { YouTubeSyncConfig } from "./config.ts";
-import { YouTubeError, type YouTubeProvider } from "./contracts.ts";
+import { YOUTUBE_POLICY_VERSION, YouTubeError, type YouTubeAuthorizationInput, type YouTubeProvider } from "./contracts.ts";
 import { decryptYouTubeSecret, encryptYouTubeSecret } from "./crypto.ts";
 import { YouTubeRepository, type YouTubeServiceRepository } from "./repository.ts";
 
@@ -23,8 +23,10 @@ export class YouTubeService {
     if (!this.databaseConfigured()) return { configured: false, connection: null };
     return { configured: this.config.readiness === "ready", connection: await this.repository.getConnection(ownerId) };
   }
-  async authorize(ownerId: string, input: { importHistory: boolean; autoSync: boolean }) {
-    this.ready(); this.owner(ownerId);
+  async authorize(ownerId: string, input: YouTubeAuthorizationInput) {
+    this.owner(ownerId);
+    if (input?.privacyTermsAccepted !== true || input.policyVersion !== YOUTUBE_POLICY_VERSION) throw new YouTubeError("youtube_policy_consent_required");
+    this.ready();
     if (typeof input.importHistory !== "boolean" || typeof input.autoSync !== "boolean") throw new YouTubeError("youtube_options_invalid");
     const state = randomBytes(32).toString("base64url");
     const verifier = randomBytes(32).toString("base64url");

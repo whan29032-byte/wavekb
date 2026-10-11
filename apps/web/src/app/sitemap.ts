@@ -7,7 +7,7 @@ const origin = "https://wavekb.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const data = knowledgeData();
-  const publicRoots = ["/", "/knowledge", "/knowledge/books", "/research", "/leaderboard", "/mentors"];
+  const publicRoots = ["/", "/knowledge", "/knowledge/books", "/research", "/leaderboard", "/mentors", "/privacy", "/terms"];
   const knowledgeRoutes = [
     ...data.pages.map((page) => `/knowledge/${page.id}`),
     ...getKnowledgeBookCatalog(data).map((book) => `/knowledge/books/${book.id}`),

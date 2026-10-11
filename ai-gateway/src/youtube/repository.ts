@@ -1,5 +1,5 @@
 import type { YouTubeSyncConfig } from "./config.ts";
-import { YouTubeError, type PublicVideo, type SyncConnection, type YouTubeConnectionView, type YouTubeSecret, type YouTubeRevocation } from "./contracts.ts";
+import { YouTubeError, type PublicVideo, type SyncConnection, type YouTubeAuthorizationInput, type YouTubeConnectionView, type YouTubeSecret, type YouTubeRevocation } from "./contracts.ts";
 
 export type YouTubeDatabase = { request(path: string, options?: { method?: string; body?: unknown; headers?: Record<string, string> }): Promise<any> };
 export type CommitYouTubePage = { expectedCursor: string | null; nextCursor: string | null; videos: PublicVideo[]; historyComplete: boolean; mode: "history" | "poll" };
@@ -19,7 +19,7 @@ export interface YouTubeSyncRepository {
 }
 export type YouTubeServiceRepository = Pick<YouTubeRepository, "getConnection" | "beginOAuth" | "consumeOAuth" | "completeOAuth" | "settings" | "disconnect">;
 
-const SAFE_ERRORS = new Set(["youtube_account_ineligible", "youtube_state_invalid", "youtube_channel_invalid", "youtube_already_connected", "youtube_channel_already_bound", "youtube_not_connected", "youtube_reconnect_required", "youtube_revocation_pending", "youtube_disconnect_confirmation_required", "youtube_worker_invalid", "youtube_lease_lost", "youtube_page_invalid", "youtube_cursor_conflict", "youtube_sync_disabled", "youtube_channel_mismatch", "youtube_video_invalid"]);
+const SAFE_ERRORS = new Set(["youtube_policy_consent_required", "youtube_account_ineligible", "youtube_state_invalid", "youtube_channel_invalid", "youtube_already_connected", "youtube_channel_already_bound", "youtube_not_connected", "youtube_reconnect_required", "youtube_revocation_pending", "youtube_disconnect_confirmation_required", "youtube_worker_invalid", "youtube_lease_lost", "youtube_page_invalid", "youtube_cursor_conflict", "youtube_sync_disabled", "youtube_channel_mismatch", "youtube_video_invalid"]);
 
 export class YouTubeRestDatabase implements YouTubeDatabase {
   private readonly config: YouTubeSyncConfig;
@@ -37,7 +37,7 @@ export class YouTubeRestDatabase implements YouTubeDatabase {
     const payload = await response.json().catch(() => null) as { message?: string } | null;
     if (!response.ok) {
       const code = SAFE_ERRORS.has(payload?.message ?? "") ? payload!.message! : "youtube_unavailable";
-      throw new YouTubeError(code, code === "youtube_unavailable" ? 503 : code === "youtube_account_ineligible" ? 403 : 409);
+      throw new YouTubeError(code, code === "youtube_unavailable" ? 503 : code === "youtube_account_ineligible" ? 403 : code === "youtube_policy_consent_required" ? 400 : 409);
     }
     return payload;
   }
@@ -50,8 +50,8 @@ export class YouTubeRepository implements YouTubeSyncRepository {
     return this.database.request(`/rest/v1/rpc/${name}`, { method: "POST", body }) as Promise<T>;
   }
   getConnection(ownerId: string): Promise<YouTubeConnectionView | null> { return this.rpc("youtube_get_connection", { p_owner_id: ownerId }); }
-  beginOAuth(ownerId: string, stateHash: string, verifierSecret: YouTubeSecret, options: { importHistory: boolean; autoSync: boolean }): Promise<string> {
-    return this.rpc("youtube_begin_oauth", { p_owner_id: ownerId, p_state_hash: stateHash, p_verifier_secret: verifierSecret, p_import_history: options.importHistory, p_auto_sync: options.autoSync });
+  beginOAuth(ownerId: string, stateHash: string, verifierSecret: YouTubeSecret, options: YouTubeAuthorizationInput): Promise<string> {
+    return this.rpc("youtube_begin_oauth", { p_owner_id: ownerId, p_state_hash: stateHash, p_verifier_secret: verifierSecret, p_import_history: options.importHistory, p_auto_sync: options.autoSync, p_privacy_terms_accepted: options.privacyTermsAccepted, p_policy_version: options.policyVersion });
   }
   consumeOAuth(ownerId: string, stateHash: string): Promise<{ id: string; verifierSecret: YouTubeSecret }> {
     return this.rpc("youtube_consume_oauth", { p_owner_id: ownerId, p_state_hash: stateHash });

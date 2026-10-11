@@ -6,6 +6,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { PGlite } from "@electric-sql/pglite";
+import { createYouTubeDatabase } from "./helpers/youtube-sync-database.mjs";
 
 // Reuse ESLint's already-installed YAML parser; no new runtime dependency.
 const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
@@ -85,6 +86,7 @@ test("YouTube worker is optional, secret-free in deployment and covered by rollb
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
   const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
   assert.match(contracts.run, /youtube-sync-postgres\.test\.mjs/);
+  assert.match(contracts.run, /youtube-policy-consent-postgres\.test\.mjs/);
   assert.match(activation.run, /units=\([^)]*elliott-wave-youtube-sync\.service/);
   assert.match(activation.run, /try-restart elliott-wave-youtube-sync\.service \|\| true/);
   assert.match(activation.run, /is-active elliott-wave-youtube-sync\.service/);
@@ -256,15 +258,20 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   }
   assert.match(backendSteps[schemaGate].run, /test "\$wallet_rls_tables" = 7/);
   assert.match(backendSteps[schemaGate].run, /test "\$private_rls_tables" = 6/);
+  assert.match(backendSteps[schemaGate].run, /test "\$youtube_policy_receipt_columns" = 4/);
+  assert.match(backendSteps[schemaGate].run, /test "\$youtube_policy_rpc_closed" = t/);
+  for (const signature of ["public.youtube_begin_oauth(uuid,text,jsonb,boolean,boolean,boolean,text)", "public.youtube_begin_oauth(uuid,text,jsonb,boolean,boolean)"]) {
+    assert.ok(backendSteps[schemaGate].run.includes(signature), "both new and legacy consent RPC permissions must be verified before upload");
+  }
   assert.match(backendSteps[schemaGate].run, /test "\$private_schema_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /not has_schema_privilege\('authenticated','hermes_research_private','USAGE'\)/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 20261011001354/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 20261011152711/);
   assert.match(backendSteps[schemaGate].run, /test "\$image_rls_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$image_bucket_closed" = t/);
   assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 20261011001354/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 20261011152711/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -292,6 +299,7 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202610100005_membership_wallet_payments.sql",
     "20261010223739_hermes_private_research.sql",
     "20261011001354_wave_analysis_images.sql",
+    "20261011152711_youtube_policy_consent.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -309,6 +317,7 @@ ${selection}`;
     ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
     ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11], ["20261011001354", 12],
+    ["20261011152711", 13],
   ]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
@@ -320,6 +329,36 @@ ${selection}`;
     assert.notEqual(result.status, 0, marker);
     assert.doesNotMatch(result.stdout, /supabase\/migrations\//);
   }
+});
+
+test("exact deployment consent metadata checks reject the old schema and unexpected RPC grants", async () => {
+  const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
+  const columnsQuery = migrationStep.run.match(/youtube_policy_receipt_columns=\$\([^\n]*-c "([^"]+)"/)?.[1];
+  const privilegesQuery = migrationStep.run.match(/youtube_policy_rpc_closed=\$\([^\n]*-c "([^"]+)"/)?.[1];
+  assert.ok(columnsQuery); assert.ok(privilegesQuery);
+  for (const query of [columnsQuery, privilegesQuery]) {
+    assert.match(query, /^select /);
+    assert.doesNotMatch(query, /\b(?:insert|update|delete|alter|drop)\b/i);
+  }
+  const db = await createYouTubeDatabase();
+  try {
+    assert.equal((await db.query(columnsQuery)).rows[0].count, 0);
+    await assert.rejects(db.query(privilegesQuery), /does not exist/);
+    await db.exec(fs.readFileSync(new URL("../supabase/migrations/20261011152711_youtube_policy_consent.sql", import.meta.url), "utf8"));
+    assert.equal((await db.query(columnsQuery)).rows[0].count, 4);
+    assert.equal((await db.query(privilegesQuery)).rows[0]["?column?"], true);
+    for (const role of ["anon", "authenticated", "service_role"]) {
+      await db.exec(`grant execute on function public.youtube_begin_oauth(uuid,text,jsonb,boolean,boolean) to ${role}`);
+      assert.equal((await db.query(privilegesQuery)).rows[0]["?column?"], false, `legacy RPC must remain closed to ${role}`);
+      await db.exec(`revoke execute on function public.youtube_begin_oauth(uuid,text,jsonb,boolean,boolean) from ${role}`);
+    }
+    for (const role of ["anon", "authenticated"]) {
+      await db.exec(`grant execute on function public.youtube_begin_oauth(uuid,text,jsonb,boolean,boolean,boolean,text) to ${role}`);
+      assert.equal((await db.query(privilegesQuery)).rows[0]["?column?"], false, `new RPC must remain closed to ${role}`);
+      await db.exec(`revoke execute on function public.youtube_begin_oauth(uuid,text,jsonb,boolean,boolean,boolean,text) from ${role}`);
+    }
+    assert.equal((await db.query(privilegesQuery)).rows[0]["?column?"], true);
+  } finally { await db.close(); }
 });
 
 test("every known backend marker repairs the drawdown baseline and validates its shape before suffix migrations", () => {
@@ -353,7 +392,7 @@ printf 'BASELINE_READY\\n'`;
   function run(marker, count = "1", exit = "0") {
     return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
   }
-  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354"];
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711"];
   for (const marker of markers) {
     const result = run(marker);
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
@@ -365,11 +404,11 @@ printf 'BASELINE_READY\\n'`;
     assert.doesNotMatch(result.stdout, /WRITE:|BASELINE_READY/);
   }
   for (const count of ["", "0", "2", "t"]) {
-    const result = run("20261011001354", count);
+    const result = run("20261011152711", count);
     assert.notEqual(result.status, 0, `invalid column count ${count}`);
     assert.doesNotMatch(result.stdout, /BASELINE_READY/);
   }
-  const failedMigration = run("20261011001354", "1", "7");
+  const failedMigration = run("20261011152711", "1", "7");
   assert.equal(failedMigration.status, 7);
   assert.doesNotMatch(failedMigration.stdout, /BASELINE_READY/);
 });
