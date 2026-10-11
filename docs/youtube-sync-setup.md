@@ -2,7 +2,8 @@
 
 ## 当前交付边界
 
-这是默认关闭的接入代码，不是已经获得 Google 授权或已经上线的同步服务。
+代码发布与 Google 授权是两项独立门槛。未完成服务器配置和真实验收时，接入默认关闭；
+部署成功不能作为已经绑定频道、同步成功或面向所有用户开放的证据。
 绑定入口位于「个人资料」。通过 Google 只读授权验证频道归属，只支持每个站内账号一个频道，
 频道也不能同时绑定不同站内账号；不能仅粘贴频道链接冒用他人频道。
 仅支持当前 OAuth 账号通过 YouTube API 可确认拥有的频道，不将 Studio 的编辑/经理权限当作所有者。
@@ -26,6 +27,12 @@
    OAuth 验证。外部应用停留在 Testing 时，相关 refresh token 通常 7 天到期，不能视为长期无人值守部署。
 6. **上线前补齐实际公开隐私政策**，说明 Google/YouTube API 数据、加密 refresh token 的使用、
    服务端存储、同步帖子、暂停/解绑、删除期限、Google 授权撤销入口；本清单不是已发布的隐私政策。
+   政策必须使用运营方确认的真实名称和可公开联系邮箱，不能发布猜测的主体、私人邮箱或占位文字。
+   同时提供可访问的站内服务条款、YouTube 服务条款链接，并在功能启用前展示同意入口。
+
+启用 API 时检查 Google 当前页面要求的产品条款，创建 OAuth 凭据和授予频道读取权限时分别确认。
+仅创建项目或启用 API 不等于已经授权读取频道；不要为了配置此功能启用其他 Google 产品或账单。
+Google 当前只在创建时展示新的 Client Secret；在创建前准备好安全保存入口，不能先截图或写入 Git 再补救。
 
 官方依据：[Web server OAuth](https://developers.google.com/youtube/v3/guides/auth/server-side-web-apps)、
 [频道归属查询](https://developers.google.com/youtube/v3/docs/channels/list)、
@@ -53,6 +60,31 @@
 改变主密钥前必须制定 token 重加密/重新授权方案；不能随便替换后仍假定既有授权可用。
 Next 仅使用已有服务端 `AUTH_GATEWAY_INTERNAL_URL` 访问 Gateway，不持有 Google Secret 或数据库 service role。
 
+### 独立安全配置工作流
+
+使用 `.github/workflows/configure-youtube-production.yml`，不要把 OAuth 配置混进理论库、模型或钱包发布开关。
+该工作流只允许当前 `main`，必须先由正常后端发布流程把**同一 SHA** 部署到 Gateway。
+
+- 将新 Client ID 与 Client Secret 保存为 GitHub `production` 环境的
+  `YOUTUBE_OAUTH_CLIENT_ID`、`YOUTUBE_OAUTH_CLIENT_SECRET`；保存前确认接收服务及用途。
+  不使用明文 workflow input、命令行参数、Issue、PR、截图或聊天传递凭据。
+- 输入明确确认值 `CONFIGURE_WAVEKB_YOUTUBE`，首次选 `stage`：验证候选配置、在服务器内部首次生成主密钥，
+  保存凭据但保持同步关闭。工作流通过 SSH stdin 传入有严格字段和大小限制的 JSON，不上传凭据文件。
+  只有原配置尚无任何 OAuth 凭据时才允许首次生成；已有凭据但主密钥丢失必须恢复原密钥，不能当作初装重建。
+- 之后受控验收需要另行选择 `enable`，只使用服务器现有凭据，不读取或替换新的 Secret。
+  只有已安装且正在运行的 Gateway 与 YouTube worker 才允许启用；此工作流不偷偷安装、启动或设自启动。
+- `disable` 关闭新绑定／导入，保留凭据和主密钥；已有撤销及本地过期清理按现有 worker 规则继续。
+  已启用状态不能用 `stage` 隐式改凭据；不同的既有凭据会被拒绝，轮换须另有授权与迁移方案。
+- 每次实际文件变更保留 root-only `0600` 原始备份，和后端发布共用互斥锁；只改五个 YouTube 配置键。
+  仅重启原本 active 的 Gateway／YouTube worker，不触碰其他服务。服务验证失败时按候选字节进行 CAS 回滚，
+  不覆盖其他写入者的新配置；回滚冲突必须人工处理，不能反复强写。
+  上述自动回滚只用于 `stage`／`enable`。安全收窄的 `disable` 不要求旧配置能够启用，
+  写入关闭后不会自动回到开启；服务应用未证实时返回 `youtube_disable_not_verified` 并以失败状态结束，
+  此时只证明配置开关已写为关闭，不能宣称运行中的服务已完成停用，必须继续检查固定两个服务。
+
+`configured:true` 只表示候选配置通过本地契约验证，**不是 Google 接受客户端、授权成功或帖子已同步的证明**。
+工作流不创建 Google 凭据、不授予频道读取权限、不代替下方真实回调与同步验收。
+
 默认后台每 10 分钟启动一轮，历史和增量分页游标分别保存，有全局调用预算、租约、退避和超时。
 这是**轮询首版，不是实时 WebSub 推送**，10 分钟不是所有用户的保证延迟。
 用户数/历史量增加时须根据真实配额和积压调大预算或设计分区 worker，不能无限缩短间隔。
@@ -76,9 +108,12 @@ Next 仅使用已有服务端 `AUTH_GATEWAY_INTERNAL_URL` 访问 Gateway，不�
 
 ## 发布与真实验收
 
-1. 先合并导师流程依赖 PR，再审核本批 PR；当前 PR/本地测试不等于上线。
-2. 同一 SHA 的 Ubuntu release 检查全部通过后，先执行后端工作流：精确迁移到
-   `202610080004_youtube_auto_posts.sql`，最终公共 marker 为 `202610080004`。
+1. 审核实际发布 SHA 及其变更，确认该 SHA 包含 YouTube 接入和当前所需依赖；
+   旧 PR 的合并状态、当前 PR 或本地测试均不能代替生产发布证明。
+2. 同一 SHA 的 Ubuntu release 检查全部通过后，先执行后端工作流。
+   `202610080004_youtube_auto_posts.sql` 是 YouTube 功能迁移，不是始终有效的最终公共 marker：
+   必须按该 SHA 的迁移清单和部署 preflight 确定最新 marker，校验生产已有 marker 后仅应用未完成的后缀。
+   部署工作流、schema preflight 和实际数据库读回必须一致；遇到未知 marker 停止，不降级或强行改写。
 3. 发布同一 SHA 的 Gateway 与 `elliott-wave-youtube-sync.service`，保留旧代码和 systemd unit 回滚副本。
    配置缺失时保持关闭，不领取新同步任务，不产生 Google 绑定/扫描流量。
 4. 最后发布同一 SHA 的 Next 前端，再在 HTTPS、已登录的受控站内账号上完成真实 Google 回调。

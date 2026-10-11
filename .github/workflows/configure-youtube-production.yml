@@ -1,0 +1,203 @@
+name: Configure WaveKB YouTube production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type CONFIGURE_WAVEKB_YOUTUBE; requires the same commit already deployed to the Gateway"
+        required: true
+        type: string
+      operation:
+        description: "Stage credentials without enabling; enable an existing configured worker; or disable new linking/imports (never creates Google credentials)"
+        required: true
+        type: choice
+        options:
+          - stage
+          - enable
+          - disable
+        default: stage
+
+permissions:
+  contents: read
+
+# Serialize with backend releases: both configure the same EnvironmentFile and
+# may restart Gateway. Never cancel a transaction midway through its rollback.
+concurrency:
+  group: wavekb-backend-production
+  cancel-in-progress: false
+
+jobs:
+  verify-configuration-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require main and explicit configuration confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRMATION" = CONFIGURE_WAVEKB_YOUTUBE
+          case "$OPERATION" in stage|enable|disable) ;; *) exit 1 ;; esac
+
+      - name: Check out the reviewed commit
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Verify local safe configuration contracts without credentials
+        run: |
+          set -Eeuo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --dir ai-gateway typecheck
+          node --test ai-gateway/test/youtube-configure-runtime.test.ts
+
+  configure-youtube:
+    needs: verify-configuration-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Require main and explicit configuration confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRMATION" = CONFIGURE_WAVEKB_YOUTUBE
+          case "$OPERATION" in stage|enable|disable) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+
+      - name: Check out the reviewed commit
+        uses: actions/checkout@v4
+
+      - name: Require the current main revision
+        run: |
+          set -Eeuo pipefail
+          current_main=$(git ls-remote origin refs/heads/main | cut -f1)
+          test "$current_main" = "$GITHUB_SHA"
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate credential presence and exact bounded input without output
+        env:
+          OPERATION: ${{ inputs.operation }}
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ inputs.operation == 'stage' && secrets.YOUTUBE_OAUTH_CLIENT_ID || '' }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ inputs.operation == 'stage' && secrets.YOUTUBE_OAUTH_CLIENT_SECRET || '' }}
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import { parseYouTubeConfigurationInput } from './ai-gateway/src/youtube/configure-runtime.ts';
+          try {
+            const operation = process.env.OPERATION;
+            const input = operation === 'stage'
+              ? { clientId: process.env.YOUTUBE_OAUTH_CLIENT_ID, clientSecret: process.env.YOUTUBE_OAUTH_CLIENT_SECRET }
+              : {};
+            parseYouTubeConfigurationInput(Buffer.from(JSON.stringify(input)), operation);
+          } catch { console.error('youtube_configuration_input_invalid'); process.exitCode = 1; }
+          NODE
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          test -n "$DEPLOY_SSH_KEY"
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Verify the installed immutable Gateway before sending credentials
+        env:
+          OPERATION: ${{ inputs.operation }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s -- "$GITHUB_SHA" "$OPERATION" <<'REMOTE'
+          set -Eeuo pipefail
+          expected_sha=$1
+          operation=$2
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]
+          case "$operation" in stage|enable|disable) ;; *) exit 1 ;; esac
+          /usr/bin/node --input-type=module - "$expected_sha" "$operation" <<'NODE'
+          import fs from 'node:fs';
+          try {
+            const expected = process.argv[2];
+            const version = fs.readFileSync('/opt/elliott-wave-gateway/current/DEPLOYMENT_VERSION', 'utf8').trim();
+            if (version !== expected || !fs.existsSync('/opt/elliott-wave-gateway/current/src/youtube/configure-runtime.ts')) throw new Error();
+            // Emergency disable may close a broken Gateway; immutable installed
+            // code must match, but a healthy service is not a closing prerequisite.
+            if (process.argv[3] !== 'disable') {
+              const response = await fetch('http://127.0.0.1:8787/health', { redirect: 'error', signal: AbortSignal.timeout(5000), cache: 'no-store' });
+              const body = await response.json();
+              if (!response.ok || body.ok !== true || body.deployment !== expected) throw new Error();
+            }
+            console.log('youtube_configuration_revision_verified');
+          } catch { console.error('youtube_configuration_revision_mismatch'); process.exitCode = 1; }
+          NODE
+          sudo -n true
+          sudo -n test -d /var/backups/elliott-wave-gateway
+          REMOTE
+
+      - name: Apply bounded stdin configuration and verify or CAS rollback
+        env:
+          OPERATION: ${{ inputs.operation }}
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ inputs.operation == 'stage' && secrets.YOUTUBE_OAUTH_CLIENT_ID || '' }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ inputs.operation == 'stage' && secrets.YOUTUBE_OAUTH_CLIENT_SECRET || '' }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          case "$OPERATION" in stage|enable|disable) ;; *) exit 1 ;; esac
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          remote_command="sudo -n /usr/bin/node -- /opt/elliott-wave-gateway/current/src/youtube/configure-runtime.ts --env-file /etc/elliott-wave/gateway.env --backup-file /var/backups/elliott-wave-gateway/youtube-config-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env --operation ${OPERATION} --verify-services true --expected-sha ${GITHUB_SHA}"
+          # The only credential payload goes directly to the installed program's
+          # stdin through SSH. No argv, heredoc, temp JSON, output or artifact.
+          node --input-type=module -e '
+            import { parseYouTubeConfigurationInput } from "./ai-gateway/src/youtube/configure-runtime.ts";
+            process.stdout.on("error", () => { console.error("youtube_configuration_transport_failed"); process.exitCode = 1; });
+            try {
+              const operation = process.env.OPERATION;
+              const input = operation === "stage"
+                ? { clientId: process.env.YOUTUBE_OAUTH_CLIENT_ID, clientSecret: process.env.YOUTUBE_OAUTH_CLIENT_SECRET }
+                : {};
+              const text = JSON.stringify(input);
+              parseYouTubeConfigurationInput(Buffer.from(text), operation);
+              process.stdout.write(text);
+            } catch { console.error("youtube_configuration_input_invalid"); process.exitCode = 1; }
+          ' | ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "$remote_command"
+
+      - name: Clean runner SSH material
+        if: always()
+        run: |
+          rm -f "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
