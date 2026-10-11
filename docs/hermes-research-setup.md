@@ -47,7 +47,7 @@
 后续配置清单：
 
 1. 先部署兼容适配。生产后端工作流新增 `private_research: preserve|enable|disable`，默认 preserve 不改现有环境；enable/disable 通过服务端工具只追加精确允许主机 `api.deepseek.com` 和私有资料开关。enable 在写入前校验已激活资料；原始环境以 0600 字节备份，失败与代码/服务配置一起回滚。**不修改 master key 或 `MEMBERSHIP_MANAGED_AI_ENABLED`。** 未确认允许名单前，不要求用户在生产后台盲目保存 Key。
-2. 之后在现有 `/admin/ai` 加密密钥入口保存 **独立的网站服务端 Key**。提供商名称 `DeepSeek`，适配器 `OpenAI 兼容`，API 地址 `https://api.deepseek.com/v1`。不要把 Key 放进聊天、代码、Git、SQL、前端环境变量或截图。后台“测试并保存”目前校验的是地址与加密保存，**不是实际模型调用成功证明**。
+2. 之后在现有 `/admin/ai` 加密密钥入口保存 **独立的网站服务端 Key**。提供商名称 `DeepSeek`，适配器 `OpenAI 兼容`，API 地址 `https://api.deepseek.com/v1`；`deepseek-flash` 是模型名，不能填在 API 地址栏。不要把 Key 放进聊天、代码、Git、SQL、前端环境变量或截图。后台“安全保存”只校验地址并加密保存，**不是实际模型调用成功证明**。网址、允许名单、重名和写入失败返回固定安全错误；保存后刷新失败与保存失败分开显示，结果未知先刷新核实，不自动重复创建。
 3. 为该 provider 配置 `ai_models` 与 `wave_analysis` 的 `ai_task_routes`。现有后台表单还不能创建模型和路由，不能假设只保存 Key 就自动完成。视觉模型使用当前已核对的 `deepseek-flash`（DeepSeek V4.1 Flash），初始服务端上下文上限 32,768、最终输出上限 4,096、超时 60,000ms；这是应用预算，不是模型的官方最大能力。成本与月预算仍须按部署时官方价格配置，不把数据库默认零成本当成免费；当前 worker 的 `cost_confirmed=false` 也不构成真实账单或月费用硬限额已生效的证据。
 4. 先保持 `MEMBERSHIP_MANAGED_AI_ENABLED=false`，完成鉴权、每日额度、单次格式修复、空内容／截断、429／超时、费用记账和不泄露引用的受控真实请求验收后再启用。不能借用户 Key 或替换提供商来绕过未配置状态。
 

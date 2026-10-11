@@ -249,30 +249,44 @@ export class SupabaseGatewayApi implements GatewayApi {
   }
 
   async createProvider(input: Record<string, unknown>, actor: GatewayUser): Promise<unknown> {
-    const name = requiredString(input, "name");
-    const adapter = requiredString(input, "adapter");
-    const baseUrl = requiredString(input, "base_url");
-    const apiKey = requiredString(input, "api_key");
-    if (!["openai_compatible", "anthropic", "gemini"].includes(adapter)) {
-      throw Object.assign(new Error("unsupported adapter"), { statusCode: 400 });
+    function fail(code: string, statusCode: number): never { throw Object.assign(new Error(code), { code, statusCode }); }
+    if (!input || typeof input !== "object" || Array.isArray(input)) fail("invalid_request", 400);
+    if (typeof input.name !== "string" || Array.from(input.name.trim()).length < 2 || Array.from(input.name.trim()).length > 80
+      || typeof input.adapter !== "string" || !["openai_compatible", "anthropic", "gemini"].includes(input.adapter)) fail("invalid_request", 400);
+    if (typeof input.base_url !== "string" || !input.base_url.trim()) fail("invalid_provider_url", 400);
+    if (typeof input.api_key !== "string" || !input.api_key.trim() || input.api_key.length > 16_384
+      || /[\u0000-\u001f\u007f]/u.test(input.api_key)) fail("invalid_api_key", 400);
+    const name = input.name.trim(), adapter = input.adapter, baseUrl = input.base_url.trim(), apiKey = input.api_key.trim();
+    try {
+      const url = validateProviderUrl(baseUrl, this.config.ALLOWED_PROVIDER_HOSTS, this.config.ALLOWED_LOCAL_PROVIDER_HOSTS);
+      // Base endpoints are not credential carriers or arbitrary request URLs.
+      if (url.search || url.hash) fail("invalid_provider_url", 400);
+      validateUserProviderUrl(baseUrl, this.config.ALLOWED_LOCAL_PROVIDER_HOSTS);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "";
+      if (["provider host is not allowlisted", "local provider is not allowlisted", "local provider is not allowlisted by the site operator",
+        "private provider hosts are blocked"].includes(reason)) fail("provider_host_not_allowed", 403);
+      fail("invalid_provider_url", 400);
     }
-    validateProviderUrl(
-      baseUrl,
-      this.config.ALLOWED_PROVIDER_HOSTS,
-      this.config.ALLOWED_LOCAL_PROVIDER_HOSTS,
-    );
-    const providerRows = await this.database.request("/rest/v1/ai_providers", {
-      method: "POST",
-      headers: { prefer: "return=representation" },
-      body: {
-        name,
-        adapter,
-        base_url: baseUrl,
-        created_by: actor.id,
-      },
-    });
+    let encrypted: ReturnType<typeof encryptSecret>;
+    try { encrypted = encryptSecret(apiKey, this.config.AI_SECRET_MASTER_KEY, 1); }
+    catch { return fail("provider_save_failed", 502); }
+    let providerRows: unknown;
+    try {
+      providerRows = await this.database.request("/rest/v1/ai_providers", {
+        method: "POST",
+        headers: { prefer: "return=representation" },
+        body: { name, adapter, base_url: baseUrl, created_by: actor.id },
+      });
+    } catch (error) {
+      // This table's user-entered unique field is name. Never parse or echo
+      // PostgREST message/details (which may contain submitted credentials).
+      if ((error as { status?: unknown })?.status === 409 || (error as { code?: unknown })?.code === "23505") fail("provider_name_conflict", 409);
+      return fail("provider_save_failed", 502);
+    }
+    if (!Array.isArray(providerRows) || providerRows.length !== 1 || !providerRows[0]
+      || typeof providerRows[0].id !== "string" || !UUID_PATTERN.test(providerRows[0].id)) fail("provider_save_failed", 502);
     const provider = providerRows[0];
-    const encrypted = encryptSecret(apiKey, this.config.AI_SECRET_MASTER_KEY, 1);
     try {
       await this.database.request("/rest/v1/ai_provider_secrets", {
         method: "POST",
@@ -281,12 +295,12 @@ export class SupabaseGatewayApi implements GatewayApi {
           ...encrypted,
         },
       });
-    } catch (error) {
+    } catch {
       await this.database.request(
         `/rest/v1/ai_providers?id=eq.${encodeURIComponent(provider.id)}`,
         { method: "DELETE" },
       ).catch(() => undefined);
-      throw error;
+      fail("provider_save_failed", 502);
     }
     return {
       id: provider.id,
