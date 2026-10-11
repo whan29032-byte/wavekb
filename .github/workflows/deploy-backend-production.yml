@@ -135,6 +135,19 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
           schema_before=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
+          # Validate the marker before any DDL, then repair this marker-neutral
+          # baseline even when the latest version has already been recorded.
+          case "$schema_before" in
+            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354) ;;
+            *)
+              echo "Unexpected production schema marker; refusing migration."
+              exit 1
+              ;;
+          esac
+          psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202608030003_workbench_drawdown.sql
+          workbench_drawdown_columns=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from information_schema.columns where table_schema='public' and table_name='workbench_analyses' and column_name='drawdown_result' and data_type='jsonb' and is_nullable='NO';" | tr -d '[:space:]')
+          test "$workbench_drawdown_columns" = 1
+          # Apply only the unapplied marker suffix after baseline verification.
           case "$schema_before" in
             202609090002)
               psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202609100001_reward_lottery_manual_fulfillment.sql

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
+import { PGlite } from "@electric-sql/pglite";
 
 // Reuse ESLint's already-installed YAML parser; no new runtime dependency.
 const webRequire = createRequire(new URL("../apps/web/package.json", import.meta.url));
@@ -274,7 +275,9 @@ test("backend deployment migrates only the exact predecessor schema before uploa
 
 test("every known backend marker selects only its unapplied migration suffix and unknown markers stop", () => {
   const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
-  const selection = migrationStep.run.match(/case "\$schema_before" in[\s\S]*?(?=\n\s*schema_after=)/)?.[0];
+  const suffixStart = migrationStep.run.indexOf("# Apply only the unapplied marker suffix after baseline verification.");
+  assert.ok(suffixStart > 0);
+  const selection = migrationStep.run.slice(suffixStart).match(/case "\$schema_before" in[\s\S]*?(?=\n\s*schema_after=)/)?.[0];
   assert.ok(selection);
   const migrations = [
     "202609100001_reward_lottery_manual_fulfillment.sql",
@@ -317,6 +320,114 @@ ${selection}`;
     assert.notEqual(result.status, 0, marker);
     assert.doesNotMatch(result.stdout, /supabase\/migrations\//);
   }
+});
+
+test("every known backend marker repairs the drawdown baseline and validates its shape before suffix migrations", () => {
+  const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
+  const start = migrationStep.run.indexOf('case "$schema_before" in');
+  const end = migrationStep.run.indexOf("# Apply only the unapplied marker suffix after baseline verification.");
+  assert.ok(start > 0 && end > start);
+  const baseline = migrationStep.run.slice(start, end);
+  assert.equal((baseline.match(/-f supabase\/migrations\/202608030003_workbench_drawdown\.sql/g) ?? []).length, 1);
+  assert.match(baseline, /ON_ERROR_STOP=1 -f supabase\/migrations\/202608030003_workbench_drawdown\.sql/);
+  for (const condition of ["table_schema='public'", "table_name='workbench_analyses'", "column_name='drawdown_result'", "data_type='jsonb'", "is_nullable='NO'"]) assert.ok(baseline.includes(condition), condition);
+  assert.match(baseline, /test "\$workbench_drawdown_columns" = 1/);
+  assert.doesNotMatch(baseline, /wavekb_schema_version\(\)|\|\| true|continue-on-error/);
+  const program = `set -euo pipefail
+schema_before="$WAVEKB_TEST_SCHEMA"
+SUPABASE_DB_URL=fixture
+psql() {
+  case " $* " in *" ON_ERROR_STOP=1 "*) ;; *) return 9 ;; esac
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = -f ]; then
+      printf 'WRITE:%s\\n' "$2"
+      return "$WAVEKB_TEST_MIGRATION_EXIT"
+    fi
+    if [ "$1" = -c ]; then printf '%s\\n' "$WAVEKB_TEST_COLUMN_COUNT"; return 0; fi
+    shift
+  done
+  return 9
+}
+${baseline}
+printf 'BASELINE_READY\\n'`;
+  function run(marker, count = "1", exit = "0") {
+    return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
+  }
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354"];
+  for (const marker of markers) {
+    const result = run(marker);
+    assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
+    assert.deepEqual(result.stdout.trim().split("\n"), ["WRITE:supabase/migrations/202608030003_workbench_drawdown.sql", "BASELINE_READY"], marker);
+  }
+  for (const marker of ["", "202609090001", "202610100006", "invalid"]) {
+    const result = run(marker);
+    assert.notEqual(result.status, 0, marker);
+    assert.doesNotMatch(result.stdout, /WRITE:|BASELINE_READY/);
+  }
+  for (const count of ["", "0", "2", "t"]) {
+    const result = run("20261011001354", count);
+    assert.notEqual(result.status, 0, `invalid column count ${count}`);
+    assert.doesNotMatch(result.stdout, /BASELINE_READY/);
+  }
+  const failedMigration = run("20261011001354", "1", "7");
+  assert.equal(failedMigration.status, 7);
+  assert.doesNotMatch(failedMigration.stdout, /BASELINE_READY/);
+});
+
+test("actual marker-neutral drawdown migration preserves records and owner isolation across repeated application", async () => {
+  const db = new PGlite();
+  const owner = "11111111-1111-4111-8111-111111111111";
+  const other = "22222222-2222-4222-8222-222222222222";
+  const analysis = "33333333-3333-4333-8333-333333333333";
+  const second = "44444444-4444-4444-8444-444444444444";
+  const baseline = fs.readFileSync(new URL("../supabase/migrations/202607260004_workbench.sql", import.meta.url), "utf8");
+  const drawdown = fs.readFileSync(new URL("../supabase/migrations/202608030003_workbench_drawdown.sql", import.meta.url), "utf8");
+  assert.doesNotMatch(drawdown, /wavekb_schema_version|drop table|delete from|update public\./i);
+  try {
+    await db.exec(`create role authenticated; create role anon; create schema auth;
+      create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.actor',true),'')::uuid $$;
+      grant usage on schema auth to authenticated,anon;
+      create table public.profiles(id uuid primary key);
+      create function public.touch_updated_at() returns trigger language plpgsql as $$ begin new.updated_at=now(); return new; end $$;
+      create function public.wavekb_schema_version() returns text language sql as $$ select '20261011001354'::text $$;
+      insert into profiles values('${owner}'),('${other}');`);
+    await db.exec(baseline);
+    await db.exec(`grant select,insert,update,delete on public.workbench_analyses,public.workbench_scenarios,public.workbench_reviews to authenticated;
+      insert into public.workbench_analyses(id,owner_id,instrument,primary_timeframe,parent_timeframe,child_timeframe,holding_style,step_data,rule_result,risk_result)
+        values('${analysis}','${owner}','BTCUSDT','1h','4h','15m','intraday','{"2":{"note":"preserve"}}','{"valid":true}','{"limit":5}');
+      insert into public.workbench_scenarios(analysis_id,owner_id,scenario_key,pattern) values('${analysis}','${owner}','primary','candidate');
+      insert into public.workbench_reviews(analysis_id,owner_id,analysis_snapshot,lessons) values('${analysis}','${owner}','{"instrument":"BTCUSDT"}','preserve review');`);
+    const original = (await db.query("select to_jsonb(a) as value from workbench_analyses a where id=$1", [analysis])).rows[0].value;
+    const scenarios = (await db.query("select to_jsonb(s) as value from workbench_scenarios s")).rows;
+    const reviews = (await db.query("select to_jsonb(r) as value from workbench_reviews r")).rows;
+    const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
+    const guard = migrationStep.run.match(/-c "(select count\(\*\) from information_schema\.columns[^"\n]+)"/)?.[1];
+    assert.ok(guard, "exercise the exact deployment column query against PostgreSQL");
+    assert.equal((await db.query(guard)).rows[0].count, 0);
+    await db.exec(drawdown);
+    await db.exec(drawdown);
+    assert.equal((await db.query(guard)).rows[0].count, 1);
+    assert.deepEqual((await db.query("select data_type,is_nullable,column_default from information_schema.columns where table_schema='public' and table_name='workbench_analyses' and column_name='drawdown_result'")).rows[0], { data_type: "jsonb", is_nullable: "NO", column_default: "'{}'::jsonb" });
+    assert.equal((await db.query("select wavekb_schema_version() as marker")).rows[0].marker, "20261011001354");
+    const after = (await db.query("select to_jsonb(a) as value from workbench_analyses a where id=$1", [analysis])).rows[0].value;
+    assert.deepEqual(after.drawdown_result, {});
+    delete after.drawdown_result;
+    assert.deepEqual(after, original);
+    assert.deepEqual((await db.query("select to_jsonb(s) as value from workbench_scenarios s")).rows, scenarios);
+    assert.deepEqual((await db.query("select to_jsonb(r) as value from workbench_reviews r")).rows, reviews);
+    await db.exec("set role authenticated");
+    await db.query("select set_config('test.actor',$1,false)", [owner]);
+    await db.query("insert into workbench_analyses(id,owner_id,instrument,primary_timeframe,parent_timeframe,child_timeframe,holding_style,drawdown_result) values($1,$2,'ETHUSDT','1h','4h','15m','intraday',$3::jsonb)", [second, owner, JSON.stringify({ reviewed: true })]);
+    await db.query("update workbench_analyses set drawdown_result=$1::jsonb where id=$2", [JSON.stringify({ reviewed: true }), analysis]);
+    assert.deepEqual((await db.query("select drawdown_result from workbench_analyses where id=$1", [analysis])).rows[0].drawdown_result, { reviewed: true });
+    await assert.rejects(db.query("update workbench_analyses set drawdown_result=null where id=$1", [analysis]), /not-null constraint/);
+    await db.query("select set_config('test.actor',$1,false)", [other]);
+    assert.equal((await db.query("select id from workbench_analyses")).rows.length, 0);
+    assert.equal((await db.query("update workbench_analyses set drawdown_result='{}' where id=$1 returning id", [analysis])).rows.length, 0);
+    await assert.rejects(db.query("insert into workbench_analyses(owner_id,instrument,primary_timeframe,parent_timeframe,child_timeframe,holding_style,drawdown_result) values($1,'SOLUSDT','1h','4h','15m','intraday','{}')", [owner]), /row-level security/);
+    await db.exec("reset role; set role anon");
+    await assert.rejects(db.query("select drawdown_result from workbench_analyses"), /permission denied/);
+  } finally { await db.close(); }
 });
 
 test("mentor notification worker is packaged, installed, health-checked and included in rollback", () => {
