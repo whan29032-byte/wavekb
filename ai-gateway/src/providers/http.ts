@@ -1,9 +1,22 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { isIP } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
 import { validateProviderUrl } from "../security/provider-url.ts";
 import { assertSafeProviderDestination } from "../security/provider-url.ts";
 import type { ProviderConfig } from "./types.ts";
+
+/** Adapt only an already validated, pinned IP to Node's two lookup contracts.
+ * `all` does not authorize another DNS resolution or a fallback destination. */
+export function createPinnedProviderLookup(address: string): LookupFunction {
+  const family = isIP(address);
+  if (family !== 4 && family !== 6) {
+    throw Object.assign(new Error("invalid pinned provider address"), { code: "REQUEST" });
+  }
+  return (_hostname, options, callback) => {
+    if (options.all === true) callback(null, [{ address, family }]);
+    else callback(null, address, family);
+  };
+}
 
 export function endpoint(config: ProviderConfig, path: string): URL {
   const base = validateProviderUrl(
@@ -35,7 +48,7 @@ export async function postJson(
         ...headers,
       },
       ...(pinnedAddress ? {
-        lookup: (_hostname, _options, callback) => callback(null, pinnedAddress, isIP(pinnedAddress)),
+        lookup: createPinnedProviderLookup(pinnedAddress),
       } : {}),
     }, (incoming) => {
       const chunks: Buffer[] = [];

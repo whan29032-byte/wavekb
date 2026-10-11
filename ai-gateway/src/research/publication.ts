@@ -17,22 +17,54 @@ const RESULT_STRINGS = ["instrument", "timeframe", "analysis_level", "parent_tre
 // Only rule IDs actually emitted by the public rule gate, never arbitrary
 // identifiers supplied by a model or future private research runtime.
 const PUBLIC_RULE_IDS = new Set(["ewp-rule-impulse-core"]);
+const MAX_DISCLOSURE_DECODE_PASSES = 8;
+const RESIDUAL_ENCODING = /%[0-9a-f]{2}|&#(?:x[0-9a-f]+|[0-9]+);?|&[a-z][a-z0-9]+;/iu;
+const STRUCTURAL_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
+  amp: "&", percnt: "%", sol: "/", bsol: "\\", colon: ":", period: ".", lowbar: "_", underbar: "_",
+  num: "#", quot: '"', apos: "'", lt: "<", gt: ">", tab: "\t", newline: "\n", nbsp: " ",
+});
 
 function record(value: unknown): value is RecordValue {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
     && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 }
+function disclosure(): never {
+  throw Object.assign(new Error("private_source_disclosure"), { code: "private_source_disclosure" });
+}
+function disclosureText(value: string): string {
+  let normalized = value.normalize("NFKC").toLocaleLowerCase("und");
+  for (let pass = 0; pass < MAX_DISCLOSURE_DECODE_PASSES; pass++) {
+    const decoded = normalized
+      .replace(/(?:%[0-9a-f]{2})+/gu, (encoded) => {
+        try { return decodeURIComponent(encoded); }
+        catch {
+          // Decode ASCII markers even beside malformed UTF-8. Any remaining
+          // encoded bytes are rejected below rather than treated as safe text.
+          return encoded.replace(/%([0-9a-f]{2})/gu, (match, hex: string) => {
+            const number = Number.parseInt(hex, 16);
+            return number <= 127 ? String.fromCharCode(number) : match;
+          });
+        }
+      })
+      .replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));?/gu, (match, hex: string | undefined, decimal: string | undefined) => {
+        const number = Number.parseInt(hex ?? decimal ?? "", hex ? 16 : 10);
+        return number <= 0x10ffff && (number < 0xd800 || number > 0xdfff) ? String.fromCodePoint(number) : match;
+      })
+      .replace(/&([a-z][a-z0-9]+);/gu, (match, name: string) => Object.hasOwn(STRUCTURAL_ENTITIES, name) ? STRUCTURAL_ENTITIES[name]! : match)
+      .normalize("NFKC").toLocaleLowerCase("und");
+    if (decoded === normalized) break;
+    normalized = decoded;
+  }
+  // Deep nesting, unknown entities and malformed encoded bytes fail closed.
+  // Ordinary percentages (5%) and unencoded text remain untouched in output.
+  if (RESIDUAL_ENCODING.test(normalized)) disclosure();
+  return normalized;
+}
 function safeText(value: unknown, maximum: number, terms: readonly string[]): string | null {
   if (typeof value !== "string" || value.length > maximum) return null;
-  const normalized = value.normalize("NFKC").toLocaleLowerCase("und")
-    .replace(/%([0-9a-f]{2})/gu, (match, hex: string) => Number.parseInt(hex, 16) <= 127 ? String.fromCharCode(Number.parseInt(hex, 16)) : match)
-    .replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));/gu, (match, hex: string | undefined, decimal: string | undefined) => {
-      const number = Number.parseInt(hex ?? decimal ?? "", hex ? 16 : 10);
-      return number <= 127 ? String.fromCharCode(number) : match;
-    });
-  if (CONTROL.test(value) || CONTROL.test(normalized) || SOURCE_MARKER.test(normalized) || terms.some((term) => term && normalized.includes(term.normalize("NFKC").toLocaleLowerCase("und")))) {
-    throw Object.assign(new Error("private_source_disclosure"), { code: "private_source_disclosure" });
-  }
+  const normalized = disclosureText(value);
+  if (CONTROL.test(value) || CONTROL.test(normalized) || SOURCE_MARKER.test(normalized)
+    || terms.some((term) => term && normalized.includes(disclosureText(term)))) disclosure();
   return value;
 }
 function textList(value: unknown, maximum: number, length: number, terms: readonly string[]): string[] | null {
@@ -158,8 +190,11 @@ export function publicAiJob(value: unknown, index: KnowledgeIndex): RecordValue 
   if (!record(value)) return {};
   const job: RecordValue = {};
   for (const key of ["id", "analysis_id", "created_at", "updated_at", "finished_at"] as const) {
-    if (typeof value[key] === "string" && value[key].length <= 120 && !SOURCE_MARKER.test(value[key])) job[key] = value[key];
-    else if (value[key] === null) job[key] = null;
+    if (value[key] === null) job[key] = null;
+    else {
+      try { if (safeText(value[key], 120, []) !== null) job[key] = value[key]; }
+      catch { /* Unsafe historical metadata is omitted, never echoed as an error. */ }
+    }
   }
   if (typeof value.status === "string" && JOB_STATUSES.has(value.status)) job.status = value.status;
   if (value.execution_source === "byok" || value.execution_source === "managed") job.execution_source = value.execution_source;
