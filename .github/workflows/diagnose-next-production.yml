@@ -127,7 +127,7 @@ jobs:
         if: inputs.operation == 'knowledge-transport'
         run: node scripts/diagnose-knowledge-transport.mjs public
 
-      - name: Read only mail and YouTube configuration presence
+      - name: Read only mail YouTube and wallet configuration presence
         if: inputs.operation == 'integration-config'
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -137,3 +137,25 @@ jobs:
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "sudo -n /usr/bin/node --input-type=module -" < scripts/integration-config-audit.mjs
+
+      - name: Use pinned Node for safe integration status projection
+        if: inputs.operation == 'integration-config'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read only fixed AI worker service state
+        if: inputs.operation == 'integration-config'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          service_state=""
+          if service_state=$(ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo -n /usr/bin/systemctl show elliott-wave-ai-worker.service --property=LoadState --property=ActiveState --property=SubState" 2>/dev/null); then
+            printf '%s\n' "$service_state" | node scripts/integration-config-audit.mjs --worker-state
+          else
+            printf '' | node scripts/integration-config-audit.mjs --worker-state
+          fi
