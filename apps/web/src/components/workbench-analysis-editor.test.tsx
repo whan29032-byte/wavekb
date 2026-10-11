@@ -7,12 +7,17 @@ import { buildWaveChart } from "../../../../ai-gateway/src/research/wave-chart";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
 const { supabase } = vi.hoisted(() => ({ supabase: { from: vi.fn(), auth: { getUser: vi.fn(), onAuthStateChange: vi.fn() } } }));
+const { visionServices } = vi.hoisted(() => ({ visionServices: { verifyOwner: vi.fn(), load: vi.fn(), upload: vi.fn() } }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => supabase }));
+vi.mock("@/lib/workbench/analysis-images", async (original) => ({ ...await original<typeof import("@/lib/workbench/analysis-images")>(), browserAnalysisImageServices: () => visionServices }));
 beforeEach(() => {
   installBrowserStorage();
   supabase.auth.getUser.mockReset(); supabase.auth.onAuthStateChange.mockReset();
   supabase.auth.getUser.mockResolvedValue({ data: { user: { id: "local-test" } }, error: null });
   supabase.auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
+  visionServices.verifyOwner.mockReset(); visionServices.verifyOwner.mockResolvedValue(undefined);
+  visionServices.load.mockReset(); visionServices.load.mockImplementation(async (_context, ids: string[]) => ids.map((id) => ({ id, signedUrl: "https://project.supabase.co/storage/v1/object/sign/private.png?token=synthetic", byteSize: 3, mimeType: "image/png" })));
+  visionServices.upload.mockReset();
 });
 afterEach(cleanup);
 const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -104,6 +109,54 @@ describe("AI knowledge selection", () => {
 
   beforeEach(() => {
     supabase.from.mockImplementation(() => ({ update: () => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: saved, error: null }) }) }) }) }) }));
+  });
+
+  const imageId = "33333333-3333-4333-8333-333333333333";
+  const otherImageId = "44444444-4444-4444-8444-444444444444";
+  it("sends only explicitly selected current-step screenshots in v3, not earlier or future step references", async () => {
+    const update = vi.fn((value) => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: { ...saved, ...value }, error: null }) }) }) }) }));
+    supabase.from.mockImplementation(() => ({ update }));
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job: { id: "vision-job", status: "queued" } })));
+    vi.stubGlobal("fetch", fetcher);
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={{ ...saved, step_data: { "2": { vision_image_ids: [otherImageId] }, "4": { notes: "保留文字", vision_image_ids: [imageId] }, "5": { vision_image_ids: [otherImageId] } } }} initialStep={4} />);
+    await screen.findByAltText("本步骤行情截图 1"); fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" })); await screen.findByText(/任务状态：/);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ request_version: 3, step: 4, vision_image_ids: [imageId], vision_context: { instrument: "BTCUSDT", timeframe: "4小时" } });
+    expect(JSON.stringify(fetcher.mock.calls)).not.toContain(otherImageId); expect(JSON.stringify(fetcher.mock.calls)).not.toContain("token=");
+    expect(update.mock.calls[0][0].step_data["4"]).toEqual({ notes: "保留文字", vision_image_ids: [imageId] }); vi.unstubAllGlobals();
+  });
+  it("does not inherit earlier/future image references into a no-image v2 action", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job: { id: "text-job", status: "queued" } }))); vi.stubGlobal("fetch", fetcher);
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={{ ...saved, step_data: { "2": { vision_image_ids: [imageId] }, "5": { vision_image_ids: [otherImageId] } } }} initialStep={4} />);
+    fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" })); await screen.findByText(/任务状态：/);
+    const request = JSON.parse(fetcher.mock.calls[0][1].body); expect(request.request_version).toBe(2); expect(request).not.toHaveProperty("vision_image_ids"); expect(visionServices.load).not.toHaveBeenCalled(); vi.unstubAllGlobals();
+  });
+  it.each(["instrument", "timeframe"])("clears all old screenshot references when the %s changes, preserving notes and other step fields", async (context) => {
+    const update = vi.fn((value) => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: { ...saved, ...value }, error: null }) }) }) }) }));
+    supabase.from.mockImplementation(() => ({ update }));
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={{ ...saved, step_data: { "2": { vision_image_ids: [otherImageId], mode: "motive" }, "4": { notes: "不可丢失", vision_image_ids: [imageId] } } }} initialStep={context === "instrument" ? 0 : 1} />);
+    await screen.findByText(/服务器版本已加载/);
+    if (context === "instrument") change("分析品种", "ETHUSDT"); else { change("当前分析周期", "1小时"); change("下一级周期", "15分钟"); }
+    fireEvent.click(screen.getByRole("button", { name: "保存分析" })); await screen.findByText("分析已保存。");
+    expect(update.mock.calls[0][0].step_data).toEqual({ "2": { mode: "motive" }, "4": { notes: "不可丢失" } });
+  });
+  it("blocks unverified screenshot input instead of silently submitting a text-only task", async () => {
+    visionServices.load.mockRejectedValue(new Error("image_unavailable")); const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={{ ...saved, step_data: { "4": { vision_image_ids: [imageId] } } }} initialStep={4} />);
+    await screen.findByRole("alert"); fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" })); await screen.findByText(/截图加载失败时不会静默改为文字分析/);
+    expect(fetcher).not.toHaveBeenCalled(); vi.unstubAllGlobals();
+  });
+  it("retries the exact accepted screenshot selection after lost acknowledgements even after local removal", async () => {
+    supabase.from.mockImplementation(() => ({ update: (value: Record<string, unknown>) => ({ eq: () => ({ eq: () => ({ select: () => ({ single: async () => ({ data: { ...saved, ...value }, error: null }) }) }) }) }) }));
+    const fetcher = vi.fn().mockRejectedValueOnce(new TypeError("ack lost")).mockRejectedValueOnce(new TypeError("ack lost again")).mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "recovered-vision", status: "queued" } })));
+    vi.stubGlobal("fetch", fetcher); render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={{ ...saved, step_data: { "4": { vision_image_ids: [imageId] } } }} initialStep={4} />);
+    await screen.findByAltText("本步骤行情截图 1"); fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" })); await screen.findByText(/结果待核实/);
+    fireEvent.click(screen.getByRole("button", { name: "清除本步骤截图" })); fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" })); await screen.findByText(/任务状态：/);
+    const bodies = fetcher.mock.calls.map((call) => call[1].body); expect(bodies[1]).toBe(bodies[0]); expect(bodies[2]).toBe(bodies[0]); expect(JSON.parse(bodies[2]).vision_image_ids).toEqual([imageId]); vi.unstubAllGlobals();
+  });
+  it.each(["vision_model_required", "invalid_image_input", "image_unavailable"])("explains the fixed screenshot rejection %s without raw codes", async (code) => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: code }), { status: 400 })); vi.stubGlobal("fetch", fetcher);
+    render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={4} />); fireEvent.click(screen.getByRole("button", { name: "启动 AI 候选分析" }));
+    const alert = await screen.findByRole("alert"); expect(alert.textContent).not.toContain(code); expect(alert.textContent).toMatch(/截图/); vi.unstubAllGlobals();
   });
 
   it("saves optional chart data inside the current step without changing notes or AI request shape", async () => {

@@ -220,6 +220,11 @@ function routeFailure(error: unknown): RouteResult {
   const code = String(candidate?.message || "");
   const allowed = new Set([
     "ai_connection_required",
+    "invalid_provider_url",
+    "provider_host_not_allowed",
+    "provider_name_conflict",
+    "provider_save_failed",
+    "invalid_image_input",
     "admin_required",
     "administration_failed",
     "user_not_found",

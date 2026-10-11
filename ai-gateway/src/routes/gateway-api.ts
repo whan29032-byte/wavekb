@@ -2,6 +2,8 @@ import { isDeepStrictEqual } from "node:util";
 import type { GatewayConfig } from "../config.ts";
 import { normalizeDirectoryResource } from "../directory/external-directory.ts";
 import { normalizeAiRunRequest } from "../knowledge/contracts.ts";
+import type { NormalizedAiRunRequest } from "../knowledge/contracts.ts";
+import { normalizeVisionImageIds } from "../research/vision-input.ts";
 import { buildKnowledgeIndex, type KnowledgeIndex } from "../knowledge/index.ts";
 import { publicAiJob } from "../research/publication.ts";
 import { encryptSecret } from "../secrets/crypto.ts";
@@ -10,6 +12,18 @@ import { validateProviderUrl, validateUserProviderUrl } from "../security/provid
 import type { GatewayApi, GatewayUser } from "../server.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
 import { BinanceLeaderboardService } from "../trading/leaderboard-service.ts";
+
+function assertSelectedVision(request: NormalizedAiRunRequest, analysis: Record<string, any>): void {
+  if (request.request_version !== 3) return;
+  let selected: string[];
+  try { selected = normalizeVisionImageIds(analysis.step_data?.[String(request.step)]?.vision_image_ids); }
+  catch { throw Object.assign(new Error("invalid_image_input"), { statusCode: 400 }); }
+  if (!isDeepStrictEqual(selected, request.vision_image_ids)
+    || analysis.instrument !== request.vision_context?.instrument
+    || analysis.primary_timeframe !== request.vision_context?.timeframe) {
+    throw Object.assign(new Error("invalid_image_input"), { statusCode: 409 });
+  }
+}
 
 function requiredString(input: Record<string, unknown>, key: string): string {
   const value = String(input[key] ?? "").trim();
@@ -235,30 +249,44 @@ export class SupabaseGatewayApi implements GatewayApi {
   }
 
   async createProvider(input: Record<string, unknown>, actor: GatewayUser): Promise<unknown> {
-    const name = requiredString(input, "name");
-    const adapter = requiredString(input, "adapter");
-    const baseUrl = requiredString(input, "base_url");
-    const apiKey = requiredString(input, "api_key");
-    if (!["openai_compatible", "anthropic", "gemini"].includes(adapter)) {
-      throw Object.assign(new Error("unsupported adapter"), { statusCode: 400 });
+    function fail(code: string, statusCode: number): never { throw Object.assign(new Error(code), { code, statusCode }); }
+    if (!input || typeof input !== "object" || Array.isArray(input)) fail("invalid_request", 400);
+    if (typeof input.name !== "string" || Array.from(input.name.trim()).length < 2 || Array.from(input.name.trim()).length > 80
+      || typeof input.adapter !== "string" || !["openai_compatible", "anthropic", "gemini"].includes(input.adapter)) fail("invalid_request", 400);
+    if (typeof input.base_url !== "string" || !input.base_url.trim()) fail("invalid_provider_url", 400);
+    if (typeof input.api_key !== "string" || !input.api_key.trim() || input.api_key.length > 16_384
+      || /[\u0000-\u001f\u007f]/u.test(input.api_key)) fail("invalid_api_key", 400);
+    const name = input.name.trim(), adapter = input.adapter, baseUrl = input.base_url.trim(), apiKey = input.api_key.trim();
+    try {
+      const url = validateProviderUrl(baseUrl, this.config.ALLOWED_PROVIDER_HOSTS, this.config.ALLOWED_LOCAL_PROVIDER_HOSTS);
+      // Base endpoints are not credential carriers or arbitrary request URLs.
+      if (url.search || url.hash) fail("invalid_provider_url", 400);
+      validateUserProviderUrl(baseUrl, this.config.ALLOWED_LOCAL_PROVIDER_HOSTS);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "";
+      if (["provider host is not allowlisted", "local provider is not allowlisted", "local provider is not allowlisted by the site operator",
+        "private provider hosts are blocked"].includes(reason)) fail("provider_host_not_allowed", 403);
+      fail("invalid_provider_url", 400);
     }
-    validateProviderUrl(
-      baseUrl,
-      this.config.ALLOWED_PROVIDER_HOSTS,
-      this.config.ALLOWED_LOCAL_PROVIDER_HOSTS,
-    );
-    const providerRows = await this.database.request("/rest/v1/ai_providers", {
-      method: "POST",
-      headers: { prefer: "return=representation" },
-      body: {
-        name,
-        adapter,
-        base_url: baseUrl,
-        created_by: actor.id,
-      },
-    });
+    let encrypted: ReturnType<typeof encryptSecret>;
+    try { encrypted = encryptSecret(apiKey, this.config.AI_SECRET_MASTER_KEY, 1); }
+    catch { return fail("provider_save_failed", 502); }
+    let providerRows: unknown;
+    try {
+      providerRows = await this.database.request("/rest/v1/ai_providers", {
+        method: "POST",
+        headers: { prefer: "return=representation" },
+        body: { name, adapter, base_url: baseUrl, created_by: actor.id },
+      });
+    } catch (error) {
+      // This table's user-entered unique field is name. Never parse or echo
+      // PostgREST message/details (which may contain submitted credentials).
+      if ((error as { status?: unknown })?.status === 409 || (error as { code?: unknown })?.code === "23505") fail("provider_name_conflict", 409);
+      return fail("provider_save_failed", 502);
+    }
+    if (!Array.isArray(providerRows) || providerRows.length !== 1 || !providerRows[0]
+      || typeof providerRows[0].id !== "string" || !UUID_PATTERN.test(providerRows[0].id)) fail("provider_save_failed", 502);
     const provider = providerRows[0];
-    const encrypted = encryptSecret(apiKey, this.config.AI_SECRET_MASTER_KEY, 1);
     try {
       await this.database.request("/rest/v1/ai_provider_secrets", {
         method: "POST",
@@ -267,12 +295,12 @@ export class SupabaseGatewayApi implements GatewayApi {
           ...encrypted,
         },
       });
-    } catch (error) {
+    } catch {
       await this.database.request(
         `/rest/v1/ai_providers?id=eq.${encodeURIComponent(provider.id)}`,
         { method: "DELETE" },
       ).catch(() => undefined);
-      throw error;
+      fail("provider_save_failed", 502);
     }
     return {
       id: provider.id,
@@ -464,6 +492,7 @@ export class SupabaseGatewayApi implements GatewayApi {
         }
         return publicAiJob(existing[0], this.knowledgeIndex);
       }
+      assertSelectedVision(normalized, analysisRows[0]);
       if (!this.config.MEMBERSHIP_MANAGED_AI_ENABLED) throw Object.assign(new Error("managed_ai_disabled"), { statusCode: 503 });
       const model = await this.managedConnections.inspect(normalized.task_type);
       try {
@@ -485,6 +514,18 @@ export class SupabaseGatewayApi implements GatewayApi {
         if (statusCode) throw Object.assign(new Error(message), { statusCode });
         throw error;
       }
+    }
+    if (normalized.request_version === 3) {
+      // Recover the original receipt even if the owner subsequently removes a
+      // screenshot from the draft. The original accepted evidence is immutable.
+      const existing = await this.database.request(`/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*&limit=1`);
+      if (existing.length) {
+        if (existing[0].execution_source === "managed" || !isDeepStrictEqual(existing[0].accepted_request ?? existing[0].input_payload, normalized)) {
+          throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
+        }
+        return publicAiJob(existing[0], this.knowledgeIndex);
+      }
+      assertSelectedVision(normalized, analysisRows[0]);
     }
     const connections = await this.database.request(
       `/rest/v1/user_ai_connections?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&is_default=eq.true&select=id,label,adapter,base_url,model_name,max_output_tokens,context_tokens,temperature,timeout_ms&limit=1`,

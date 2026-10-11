@@ -52,6 +52,37 @@ test("managed lost receipt recovers same bound request despite disabled flag, ex
   assert.equal((await gateway.enqueueJob(owner,analysis,{...request,execution_mode:'managed'}) as typeof stored).id,'original');
   await assert.rejects(gateway.enqueueJob(owner,analysis,{...request,step:6,execution_mode:'managed'}),(error:unknown)=>(error as {statusCode:number}).statusCode===409);
 });
+test("vision enqueue binds the explicit saved selection and preserves it in the atomic reservation",async()=>{
+  const image="55555555-5555-4555-8555-555555555555";
+  const vision={...request,request_version:3,vision_image_ids:[image],vision_context:{instrument:"BTCUSDT",timeframe:"4h"}};
+  const bodies:Record<string,unknown>[]=[];
+  const database={userForJwt:async()=>null,request:async(path:string,options?:{body?:unknown})=>{
+    if(path.startsWith('/rest/v1/workbench_analyses?'))return[{schema_version:'workbench-v1',instrument:'BTCUSDT',primary_timeframe:'4h',step_data:{'5':{vision_image_ids:[image]}}}];
+    if(path.startsWith('/rest/v1/ai_jobs?'))return[];
+    if(path==='/rest/v1/rpc/enqueue_membership_ai_job'){bodies.push(options!.body as Record<string,unknown>);return{id:'vision-job',execution_source:'managed'};}
+    throw Error('unexpected');
+  }};
+  const gateway=new SupabaseGatewayApi(config,{database,managedConnections:{inspect:async()=>model}});
+  await gateway.enqueueJob(owner,analysis,{...vision,execution_mode:'managed'});
+  assert.deepEqual(bodies[0]?.p_input_payload,vision);
+  await assert.rejects(gateway.enqueueJob(owner,analysis,{...vision,vision_image_ids:[modelId],execution_mode:'managed'}),/invalid_image_input/);
+  await assert.rejects(gateway.enqueueJob(owner,analysis,{...vision,vision_context:{instrument:'SOLUSDT',timeframe:'4h'},execution_mode:'managed'}),/invalid_image_input/);
+  assert.equal(bodies.length,1);
+});
+test("lost v3 receipts recover before inspecting a later removed selection and never change original images",async()=>{
+  const vision={...request,request_version:3,vision_image_ids:[modelId],vision_context:{instrument:'BTCUSDT',timeframe:'4h'}};
+  for(const source of ['managed','byok'] as const){
+    const original={id:'original-vision',execution_source:source,accepted_request:vision};
+    const database={userForJwt:async()=>null,request:async(path:string)=>{
+      if(path.startsWith('/rest/v1/workbench_analyses?'))return[{schema_version:'workbench-v1',instrument:'SOLUSDT',primary_timeframe:'1d',step_data:{}}];
+      if(path.startsWith('/rest/v1/ai_jobs?'))return[original];
+      throw Error('new metadata/model/quota lookup must not occur');
+    }};
+    const gateway=new SupabaseGatewayApi({...config,MEMBERSHIP_MANAGED_AI_ENABLED:false},{database,managedConnections:{inspect:async()=>{throw Error('must not inspect');}}});
+    assert.equal((await gateway.enqueueJob(owner,analysis,{...vision,execution_mode:source}) as typeof original).id,'original-vision');
+    await assert.rejects(gateway.enqueueJob(owner,analysis,{...vision,vision_image_ids:[owner],execution_mode:source}),/ai_request_conflict/);
+  }
+});
 test("managed availability exposes only service-derived rights/usage and never reports disabled mode available",async()=>{
   const usage={user_id:owner,has_vip:true,daily_limit:50,used:5,remaining:45,timezone:'Asia/Shanghai'};
   const gateway=new SupabaseGatewayApi({...config,MEMBERSHIP_MANAGED_AI_ENABLED:false},{database:{userForJwt:async()=>null,request:async()=>usage},managedConnections:{inspect:async()=>{throw Error('no read');}}});

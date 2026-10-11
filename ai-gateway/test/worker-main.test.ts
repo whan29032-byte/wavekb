@@ -6,6 +6,7 @@ import { classifyProviderError } from "../src/jobs/router.ts";
 import { buildKnowledgeIndex, type KnowledgeChunk, type KnowledgeIndex } from "../src/knowledge/index.ts";
 import type { ProviderRequest, ProviderResult } from "../src/providers/types.ts";
 import { AiJobWorker, type ClaimedJob } from "../src/worker-main.ts";
+import { publicAiJob } from "../src/research/publication.ts";
 
 const config = loadConfig({
   SUPABASE_URL: "https://example.supabase.co",
@@ -131,6 +132,8 @@ function workerFixture(options: {
   previousAttempts?: number;
   contextTokens?: number;
   usageLedgerFails?: boolean;
+  supportsImages?: boolean;
+  imageReaderFailure?: Error;
 } = {}) {
   const events: string[] = [];
   const calls: RecordedCall[] = [];
@@ -186,6 +189,7 @@ function workerFixture(options: {
         contextTokens: options.contextTokens ?? 32768,
         temperature: 0.2,
         provider: {
+          supportsImages: () => options.supportsImages ?? false,
           async invoke(request: ProviderRequest) {
             providerCalls += 1;
             events.push("provider");
@@ -202,6 +206,7 @@ function workerFixture(options: {
   const knowledgeRuntime = new KnowledgeRuntime({
     database,
     ...(options.loadIndex ? { loadIndex: options.loadIndex } : {}),
+    ...(options.imageReaderFailure ? { imageReader: { load: async () => { throw options.imageReaderFailure; } } } : {}),
   });
   const worker = new AiJobWorker(config, "worker-1", {
     database,
@@ -247,6 +252,30 @@ test("an audit write failure prevents every provider invocation", async () => {
   const patch = fixture.calls.find((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
   assert.equal(patch?.body?.status, "failed");
 });
+
+for (const code of ["vision_model_required", "invalid_image_input", "image_unavailable"] as const) {
+  test(`the real worker preserves ${code} from visual runtime failure through failed PATCH and public polling`, async () => {
+    const visionJob = { ...baseJob, input_payload: { ...baseJob.input_payload, request_version: 3,
+      vision_image_ids: ["55555555-5555-4555-8555-555555555555"],
+      vision_context: { instrument: code === "invalid_image_input" ? "foreign-instrument" : analysis.instrument, timeframe: analysis.primary_timeframe } } };
+    const fixture = workerFixture({
+      supportsImages: code !== "vision_model_required",
+      ...(code === "image_unavailable" ? { imageReaderFailure: Object.assign(new Error("private storage response /Users/private/secret"), { code }) } : {}),
+    });
+    await fixture.worker.runJob(visionJob);
+    assert.equal(fixture.providerCalls(), 0);
+    const patches = fixture.calls.filter((call) => call.path.startsWith("/rest/v1/ai_jobs?id="));
+    assert.equal(patches.length, 1);
+    assert.equal(patches[0]?.body?.status, "failed");
+    assert.equal(patches[0]?.body?.error_code, code);
+    assert.equal(patches[0]?.body?.available_at, undefined, "invalid visual evidence does not schedule provider retries");
+    assert.equal(fixture.calls.filter((call) => call.path === "/rest/v1/ai_usage_ledger").length, 0);
+    const published = publicAiJob({ id: visionJob.id, ...patches[0]!.body }, buildKnowledgeIndex());
+    assert.equal(published.error_code, code);
+    assert.match(String(published.error_message), /截图|DeepSeek/u);
+    assert.doesNotMatch(JSON.stringify(published), /private storage|\/Users\/|secret|data:image/u);
+  });
+}
 
 test("a single-scope no-match succeeds without broadening or invoking a provider", async () => {
   const fixture = workerFixture({

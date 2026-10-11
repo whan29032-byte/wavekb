@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import type { CSSProperties } from "react";
-import { MentorCheckout } from "./mentor-checkout";
+import { useState, type ComponentProps, type CSSProperties } from "react";
+import { MentorCheckout, MentorOfferComparison } from "./mentor-checkout";
+import { MentorPaymentSummary } from "./mentor-payment-status";
 
 const lightTheme = {
   colorScheme: "light",
@@ -40,3 +41,18 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ReadyToPay: Story = {};
+
+// Pure display fixture: no checkout mount, Supabase reads, order writes or mail.
+function PendingComparisonPreview({ offers }: Pick<ComponentProps<typeof MentorCheckout>, "offers">) {
+  const [selectedOfferId, setSelectedOfferId] = useState(offers[0]?.id || "");
+  return <div className="grid gap-4"><p role="note" className="text-sm text-muted-foreground">本地合成待核对记录，仅用于方案比较验收，不会发起付款或修改订单。</p><MentorOfferComparison offers={offers} selectedOfferId={selectedOfferId} onSelect={setSelectedOfferId} blockedReason="你已有待核对付款，请继续处理原订单。" /><MentorPaymentSummary claims={[{
+    id: "claim-preview", order_id: "order-preview", buyer_id: "buyer-preview", mentor_id: "mentor-preview", payment_method_id: null,
+    status: "submitted", submitted_at: "2026-08-04T03:00:00Z", reviewed_at: null,
+    order: { offer_name_snapshot: "原辅导方案", amount_cents: 1000, currency: "USDT", duration_days_snapshot: 30, weekly_questions_snapshot: 3 },
+  }]} pendingOrders={[1, 2].map((index) => ({
+    id: `legacy-order-preview-${index}`, buyer_id: "buyer-preview", mentor_id: "mentor-preview", offer_id: "legacy-offer-preview", payment_method_id: null,
+    payment_provider: "legacy", status: "pending" as const, created_at: "2026-08-04T03:00:00Z", amount_cents: 29900, currency: "USDT",
+  }))} error="" refresh={async () => undefined} /></div>;
+}
+
+export const PendingCanCompare: Story = { render: (args) => <PendingComparisonPreview offers={args.offers} /> };

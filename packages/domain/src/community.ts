@@ -249,6 +249,11 @@ export type PrivateEntryInput = {
   reviewData: PrivateEntryReviewData;
 };
 
+export type WorkbenchAnalysisStep = Record<string, unknown> & {
+  /** Private image references only; never file bytes or signed preview URLs. */
+  vision_image_ids?: string[];
+};
+
 export type WorkbenchAnalysis = {
   id: string;
   owner_id: string;
@@ -260,7 +265,7 @@ export type WorkbenchAnalysis = {
   parent_timeframe: string;
   child_timeframe: string;
   holding_style: string;
-  step_data: Record<string, Record<string, unknown>>;
+  step_data: Record<string, WorkbenchAnalysisStep>;
   rule_result: Record<string, unknown>;
   score_result: Record<string, unknown>;
   risk_result: Record<string, unknown>;
