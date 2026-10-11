@@ -53,6 +53,22 @@ function fixture(t: TestContext, input: string | Buffer = BASE_ENV) {
 }
 const safeError = (code: string) => (error: unknown): boolean => error instanceof RuntimeConfigurationError && error.code === code && error.message === code;
 const validRepository = () => ({ loadActiveArtifact: async () => artifactFixture() });
+const MANAGED_ENV = BASE_ENV.replace("ALLOWED_PROVIDER_HOSTS=api.openai.com", "ALLOWED_PROVIDER_HOSTS=api.deepseek.com");
+const modelId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", providerId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+function managedMetadata(options: { missing?: "route" | "model" | "provider" | "secret"; modelName?: string; baseUrl?: string; costs?: unknown } = {}) {
+  const calls: string[] = [];
+  const model = { id: modelId, provider_id: providerId, name: options.modelName ?? "deepseek-flash", timeout_ms: 60_000, max_output_tokens: 4096, context_tokens: 32768, temperature: 0.2 };
+  const database = { request: async (endpoint: string, init?: unknown) => {
+    calls.push(endpoint); assert.equal(init, undefined, "activation metadata requests must be GET-only");
+    if (endpoint.includes("input_cost_per_million")) return options.costs ?? [{ id: modelId, provider_id: providerId, name: model.name, input_cost_per_million: 0.3, output_cost_per_million: 1.2 }];
+    if (endpoint.startsWith("/rest/v1/ai_task_routes?")) return options.missing === "route" ? [] : [{ primary_model_id: modelId }];
+    if (endpoint.startsWith("/rest/v1/ai_models?")) return options.missing === "model" ? [] : [model];
+    if (endpoint.startsWith("/rest/v1/ai_providers?")) return options.missing === "provider" ? [] : [{ id: providerId, adapter: "openai_compatible", base_url: options.baseUrl ?? "https://api.deepseek.com/v1" }];
+    if (endpoint.startsWith("/rest/v1/ai_provider_secrets?")) return options.missing === "secret" ? [] : [{ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }];
+    throw new Error("unexpected fixture metadata read");
+  } };
+  return { database, calls };
+}
 function assertUnchanged(f: ReturnType<typeof fixture>, expected: string | Buffer = BASE_ENV): void {
   assert.deepEqual(fs.readFileSync(f.envFile), Buffer.from(expected));
   assert.deepEqual(fs.readdirSync(f.directory), ["gateway.env"]);
@@ -249,4 +265,115 @@ test("real CLI emits only safe success JSON or fixed failure JSON, never env/pat
   const failed = spawnSync(process.execPath, ["--", filename, "--env-file", "never-print-this-private-path"], { encoding: "utf8", timeout: 10_000 });
   assert.equal(failed.status, 1); assert.equal(failed.stdout, ""); assert.deepEqual(JSON.parse(failed.stderr), { ok: false, code: "invalid_arguments" });
   assert.ok(!failed.stderr.includes("never-print-this")); assert.ok(!result.stdout.includes(f.directory));
+});
+
+test("managed enable validates the real resolver and costs, then changes only its flag with exact backup", async (t) => {
+  const f = fixture(t, MANAGED_ENV), metadata = managedMetadata();
+  const result = await configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, {
+    createDatabase: (config) => { assert.equal(config.MEMBERSHIP_MANAGED_AI_ENABLED, true); return metadata.database; },
+    createRepository: () => { throw new Error("private research remains disabled"); },
+  });
+  assert.equal(fs.readFileSync(f.envFile, "utf8"), MANAGED_ENV.replace("MEMBERSHIP_MANAGED_AI_ENABLED=false", "MEMBERSHIP_MANAGED_AI_ENABLED=true"));
+  assert.equal(fs.readFileSync(f.backupFile, "utf8"), MANAGED_ENV);
+  assert.deepEqual(result, { ok: true, privateResearchEnabled: false, deepseekHostAllowed: true, artifactValidated: false, managedAiEnabled: true, managedAiValidated: true });
+  assert.equal(metadata.calls.length, 5);
+  assert.ok(metadata.calls.every((endpoint) => !/ciphertext|iv,|auth_tag|last_four|rpc|membership|trading|chat\/completions/u.test(endpoint)));
+  assert.ok(metadata.calls.some((endpoint) => endpoint.endsWith("active=eq.true&select=id&limit=1")));
+  assert.ok(!JSON.stringify(result).includes(modelId));
+});
+test("managed enable with existing private research validates but never rewrites the private flag or allowlist", async (t) => {
+  const input = MANAGED_ENV.replace("HERMES_PRIVATE_RESEARCH_ENABLED=false", "HERMES_PRIVATE_RESEARCH_ENABLED=true");
+  const f = fixture(t, input), metadata = managedMetadata(); let artifactReads = 0;
+  const result = await configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, {
+    createDatabase: () => metadata.database,
+    createRepository: () => ({ loadActiveArtifact: async () => { artifactReads++; return artifactFixture(); } }),
+  });
+  assert.equal(artifactReads, 1); assert.equal(result.artifactValidated, true);
+  assert.equal(fs.readFileSync(f.envFile, "utf8"), input.replace("MEMBERSHIP_MANAGED_AI_ENABLED=false", "MEMBERSHIP_MANAGED_AI_ENABLED=true"));
+  const failed = fixture(t, input);
+  await assert.rejects(configureResearchRuntime({ envFile: failed.envFile, backupFile: failed.backupFile, managedAi: "enable" }, {
+    createDatabase: () => metadata.database, createRepository: () => ({ loadActiveArtifact: async () => null }),
+  }), safeError("private_theory_validation_failed"));
+  assertUnchanged(failed, input);
+});
+test("combined private and managed enable writes only the three selected keys in one atomic replacement", async (t) => {
+  const f = fixture(t), metadata = managedMetadata();
+  await configureResearchRuntime({ ...f, managedAi: "enable" }, { createDatabase: () => metadata.database, createRepository: validRepository });
+  assert.equal(fs.readFileSync(f.envFile, "utf8"), BASE_ENV
+    .replace("ALLOWED_PROVIDER_HOSTS=api.openai.com", "ALLOWED_PROVIDER_HOSTS=api.openai.com,api.deepseek.com")
+    .replace("HERMES_PRIVATE_RESEARCH_ENABLED=false", "HERMES_PRIVATE_RESEARCH_ENABLED=true")
+    .replace("MEMBERSHIP_MANAGED_AI_ENABLED=false", "MEMBERSHIP_MANAGED_AI_ENABLED=true"));
+  assert.equal(fs.readFileSync(f.backupFile, "utf8"), BASE_ENV);
+  assert.deepEqual(fs.readdirSync(f.directory), ["gateway.env", "original.env"]);
+});
+test("managed disable changes only its flag without configuration, database, key or artifact access", async (t) => {
+  const input = "UNRELATED=unchanged\r\nHERMES_PRIVATE_RESEARCH_ENABLED=true\r\nMEMBERSHIP_MANAGED_AI_ENABLED='true'  \r\nAI_SECRET_MASTER_KEY=not-parsed\r\n";
+  const f = fixture(t, input);
+  const result = await configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "disable" }, {
+    createDatabase: () => { throw new Error("must not access database"); }, createRepository: () => { throw new Error("must not read artifact"); },
+  });
+  assert.equal(result.managedAiEnabled, false); assert.equal(result.managedAiValidated, false);
+  assert.equal(fs.readFileSync(f.envFile, "utf8"), input.replace("MEMBERSHIP_MANAGED_AI_ENABLED='true'", "MEMBERSHIP_MANAGED_AI_ENABLED='false'"));
+  assert.equal(fs.readFileSync(f.backupFile, "utf8"), input);
+});
+test("default or explicit preserve performs no configuration write, backup or database read", async (t) => {
+  for (const managedAi of [undefined, "preserve"] as const) {
+    const f = fixture(t);
+    await configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, ...(managedAi ? { managedAi } : {}) }, {
+      createDatabase: () => { throw new Error("must not access database"); }, createRepository: () => { throw new Error("must not access repository"); },
+    });
+    assertUnchanged(f);
+  }
+});
+test("missing route, model, provider, secret or unsupported model never enables managed AI", async (t) => {
+  for (const missing of ["route", "model", "provider", "secret"] as const) {
+    const f = fixture(t, MANAGED_ENV), metadata = managedMetadata({ missing });
+    await assert.rejects(configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, { createDatabase: () => metadata.database }), safeError("managed_ai_validation_failed"));
+    assertUnchanged(f, MANAGED_ENV);
+  }
+  for (const baseUrl of ["https://api.deepseek.com/not-the-api", "https://api.deepseek.com/v1?private=value", "https://api.deepseek.com/v1#private", "https://api.deepseek.com:444/v1"]) {
+    const f = fixture(t, MANAGED_ENV), metadata = managedMetadata({ baseUrl });
+    await assert.rejects(configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, { createDatabase: () => metadata.database }), safeError("managed_ai_validation_failed"));
+    assertUnchanged(f, MANAGED_ENV);
+  }
+  const f = fixture(t, MANAGED_ENV), metadata = managedMetadata({ modelName: "deepseek-v4-pro" });
+  await assert.rejects(configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, { createDatabase: () => metadata.database }), safeError("managed_ai_validation_failed"));
+  assertUnchanged(f, MANAGED_ENV);
+});
+test("managed-only enable does not silently add a missing DeepSeek host or accept unsafe Supabase origins", async (t) => {
+  const f = fixture(t), metadata = managedMetadata();
+  await assert.rejects(configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, { createDatabase: () => metadata.database }), safeError("managed_ai_validation_failed"));
+  assertUnchanged(f);
+  const input = MANAGED_ENV.replace("https://example.supabase.co", "https://example.supabase.co.evil.invalid"), unsafe = fixture(t, input);
+  await assert.rejects(configureResearchRuntime({ envFile: unsafe.envFile, backupFile: unsafe.backupFile, managedAi: "enable" }, { createDatabase: () => { throw new Error("must not send credentials"); } }), safeError("invalid_runtime_configuration"));
+  assertUnchanged(unsafe, input);
+});
+test("missing, zero, discounted, non-finite or mismatched costs fail closed before backup or write", async (t) => {
+  const base = { id: modelId, provider_id: providerId, name: "deepseek-flash", input_cost_per_million: 0.3, output_cost_per_million: 1.2 };
+  for (const costs of [[], [{ ...base, input_cost_per_million: 0 }], [{ ...base, input_cost_per_million: 0.15 }], [{ ...base, output_cost_per_million: 0.6 }],
+    [{ ...base, output_cost_per_million: "Infinity" }], [{ ...base, input_cost_per_million: "not-a-number" }], [{ ...base, id: providerId }], [{ ...base, name: "deepseek-v4-pro" }],
+    [{ ...base, output_cost_per_million: null }], [{ ...base, input_cost_per_million: 1_000_001 }], [base, base]]) {
+    const f = fixture(t, MANAGED_ENV), metadata = managedMetadata({ costs });
+    await assert.rejects(configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, { createDatabase: () => metadata.database }), safeError("managed_ai_cost_configuration_required"));
+    assertUnchanged(f, MANAGED_ENV);
+  }
+});
+test("metadata failure is sanitized and cannot expose provider URL, credentials or database body", async (t) => {
+  const f = fixture(t, MANAGED_ENV);
+  await assert.rejects(configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, {
+    createDatabase: () => ({ request: async () => { throw new Error("secret fixture and https://private.example.invalid/raw-body"); } }),
+  }), safeError("managed_ai_validation_failed"));
+  assertUnchanged(f, MANAGED_ENV);
+});
+test("managed atomic-write failure never changes the original and retains exact rollback bytes", async (t) => {
+  const f = fixture(t, MANAGED_ENV), metadata = managedMetadata();
+  t.mock.method(fs, "renameSync", () => { throw new Error("private disk detail"); });
+  await assert.rejects(configureResearchRuntime({ envFile: f.envFile, backupFile: f.backupFile, managedAi: "enable" }, { createDatabase: () => metadata.database }), safeError("runtime_write_failed"));
+  assert.equal(fs.readFileSync(f.envFile, "utf8"), MANAGED_ENV); assert.equal(fs.readFileSync(f.backupFile, "utf8"), MANAGED_ENV);
+});
+test("managed CLI mode is optional and exact; explicit preserve and combined operations retain old private syntax", () => {
+  const base = ["--env-file", "/safe/gateway.env", "--backup-file", "/safe/original.env"];
+  assert.deepEqual(parseRuntimeArguments([...base, "--managed-ai", "preserve"]), { envFile: "/safe/gateway.env", backupFile: "/safe/original.env", managedAi: "preserve" });
+  assert.deepEqual(parseRuntimeArguments([...base, "--managed-ai", "enable", "--enable-private", "false"]), { envFile: "/safe/gateway.env", backupFile: "/safe/original.env", enablePrivate: false, managedAi: "enable" });
+  for (const value of ["true", "ENABLE", "", "enable\n", "enable;secret"]) assert.throws(() => parseRuntimeArguments([...base, "--managed-ai", value]), safeError("invalid_arguments"));
 });

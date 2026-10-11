@@ -114,6 +114,69 @@ test("private research activation is opt-in, validated before restart and exactl
   assert.doesNotMatch(activation.run, /MEMBERSHIP_MANAGED_AI_ENABLED|AI_SECRET_MASTER_KEY|DEEPSEEK_API_KEY/);
 });
 
+test("managed AI activation is separately opt-in, shares the owned env and restores the original worker state", () => {
+  const inputs = (backendWorkflow.on ?? backendWorkflow.true).workflow_dispatch.inputs;
+  assert.equal(inputs.managed_ai.default, "preserve");
+  assert.deepEqual(inputs.managed_ai.options, ["preserve", "enable", "disable"]);
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  assert.equal(activation.env.MANAGED_AI, "${{ inputs.managed_ai }}");
+  assert.match(activation.run, /case "\$MANAGED_AI" in preserve\|enable\|disable/);
+  assert.match(activation.run, /MANAGED_AI='\$\{MANAGED_AI\}' bash -s/);
+  assert.match(activation.run, /if test "\$PRIVATE_RESEARCH" != preserve \|\| test "\$MANAGED_AI" != preserve/);
+  assert.match(activation.run, /runtime_arguments=\(--managed-ai "\$MANAGED_AI"\)/);
+  assert.match(activation.run, /--backup-file "\$\{backup_root\}\/gateway\.env" "\$\{runtime_arguments\[@\]\}"/);
+  assert.match(activation.run, /worker_was_active=0[\s\S]*is-active --quiet elliott-wave-ai-worker\.service/);
+  assert.match(activation.run, /if test "\$MANAGED_AI" = enable; then\n\s*sudo systemctl restart elliott-wave-ai-worker\.service/);
+  assert.match(activation.run, /if test "\$MANAGED_AI" = enable; then test "\$\(sudo systemctl is-active elliott-wave-ai-worker\.service\)" = active; fi/);
+  assert.match(activation.run, /if test "\$MANAGED_AI" = enable && test "\$worker_was_active" -eq 0; then\n\s*sudo systemctl stop elliott-wave-ai-worker\.service/);
+  assert.doesNotMatch(activation.run, /systemctl (?:enable|disable)(?: --now)? elliott-wave-ai-worker\.service/);
+  for (const name of ["elliott-wave-gateway.service", "elliott-wave-ai-worker.service"]) {
+    const unit = fs.readFileSync(new URL(`../deployment/systemd/${name}`, import.meta.url), "utf8");
+    assert.match(unit, /^EnvironmentFile=\/etc\/elliott-wave\/gateway\.env$/m);
+  }
+});
+
+test("real shell toggle selection invokes one operation only and preserves the private flag for managed-only changes", () => {
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const start = activation.run.indexOf('if test "$PRIVATE_RESEARCH" != preserve || test "$MANAGED_AI" != preserve; then');
+  const end = activation.run.indexOf('if test "$legacy_layout" -eq 1; then', start);
+  assert.ok(start > 0 && end > start);
+  const operation = activation.run.slice(start, end);
+  for (const privateResearch of ["preserve", "enable", "disable"]) for (const managedAi of ["preserve", "enable", "disable"]) {
+    const program = `set -eu
+PRIVATE_RESEARCH="$WAVEKB_TEST_PRIVATE"
+MANAGED_AI="$WAVEKB_TEST_MANAGED"
+release_dir=/fixture/release
+backup_root=/fixture/backup
+sudo() { printf '%s\\n' "$@"; }
+${operation}`;
+    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_PRIVATE: privateResearch, WAVEKB_TEST_MANAGED: managedAi }, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    if (privateResearch === "preserve" && managedAi === "preserve") { assert.equal(result.stdout, ""); continue; }
+    const args = result.stdout.trim().split("\n");
+    assert.equal(args.filter((arg) => arg.endsWith("configure-runtime.ts")).length, 1);
+    assert.equal(args[args.indexOf("--managed-ai") + 1], managedAi);
+    assert.equal(args.includes("--enable-private"), privateResearch !== "preserve");
+    if (privateResearch !== "preserve") assert.equal(args[args.indexOf("--enable-private") + 1], String(privateResearch === "enable"));
+  }
+});
+
+test("real rollback worker branch leaves an originally stopped worker stopped without changing autostart", () => {
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const operation = activation.run.match(/if test "\$MANAGED_AI" = enable && test "\$worker_was_active" -eq 0; then[\s\S]*?\n\s*fi/)?.[0];
+  assert.ok(operation);
+  for (const managedAi of ["preserve", "enable", "disable"]) for (const wasActive of [0, 1]) {
+    const program = `set -eu
+MANAGED_AI="$WAVEKB_TEST_MANAGED"
+worker_was_active="$WAVEKB_TEST_ACTIVE"
+sudo() { printf '%s\\n' "$@"; }
+${operation}`;
+    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_MANAGED: managedAi, WAVEKB_TEST_ACTIVE: String(wasActive) }, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n"), ["systemctl", managedAi === "enable" && !wasActive ? "stop" : "try-restart", "elliott-wave-ai-worker.service"]);
+  }
+});
+
 test("environment rollback never truncates the live file when copying its backup fails", () => {
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
   const rollback = activation.run.match(/if sudo test -f "\$\{backup_root\}\/gateway\.env"; then[\s\S]*?\n\s*fi/)?.[0];

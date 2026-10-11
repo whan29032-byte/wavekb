@@ -132,10 +132,43 @@ describe("mentor payment reliability", () => {
     expect(writes).toEqual([]);
   });
 
+  it.each(["claim", "order", "read-error", "uncertain"] as const)("keeps offer comparison available during %s without exposing a new payment route", async (reason) => {
+    if (reason === "claim") claims = [claim];
+    if (reason === "order") orders = [pendingOrder];
+    if (reason === "read-error") readError = true;
+    const markerKey = "wavekb:mentor-payment-attempt:student:mentor";
+    const marker = JSON.stringify({ ownerId: "student", mentorId: "mentor", startedAt: "2026-09-05", orderId: "unresolved-old-order" });
+    if (reason === "uncertain") localStorage.setItem(markerKey, marker);
+    const priorClaims = [...claims], priorOrders = [...orders];
+    const secondOffer = { ...offer, id: "offer-long", name: "90 天复盘", price_cents: 29900, duration_days: 90, weekly_questions: 5 };
+    render(<MentorCheckout actorId="student" mentorName="导师" offers={[offer, secondOffer, { ...offer, id: "withdrawn", name: "已下架方案", active: false }]} paymentMethods={[method]} returnPath="/mentors/mentor" />);
+
+    const comparison = await screen.findByRole("region", { name: "辅导方案比较" });
+    expect(within(comparison).getByText(/目录原价，不是新的付款报价/)).toBeDefined();
+    expect(within(comparison).getByText(/核对完成前不展示收款信息/)).toBeDefined();
+    const options = within(comparison).getAllByRole("radio") as HTMLInputElement[];
+    expect(options).toHaveLength(2);
+    expect(options[0].checked).toBe(true);
+    fireEvent.click(options[1]);
+    expect(options[1].checked).toBe(true);
+    expect(options[0].checked).toBe(false);
+    expect(within(comparison).queryByText("已下架方案")).toBeNull();
+    expect(screen.queryByText(method.account_value)).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制收款信息" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "我已付款，通知导师" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "服务端付款报价" })).toBeNull();
+    expect(writes).toEqual([]);
+    expect(claims).toEqual(priorClaims);
+    expect(orders).toEqual(priorOrders);
+    if (reason === "uncertain") expect(localStorage.getItem(markerKey)).toBe(marker);
+  });
+
   it("keeps pending declarations visible when the mentor withdraws all offers", async () => {
     claims = [claim];
     render(<MentorCheckout actorId="student" mentorName="导师" offers={[]} paymentMethods={[]} returnPath="/mentors/mentor" />);
     await screen.findByRole("region", { name: "付款待核对摘要" });
+    expect(screen.getByText(/这位导师暂未开放可购买方案；原付款记录仍保留/)).toBeDefined();
+    expect(screen.queryByRole("radio")).toBeNull();
     expect(writes).toEqual([]);
   });
 

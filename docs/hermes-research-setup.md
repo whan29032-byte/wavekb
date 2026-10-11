@@ -49,7 +49,8 @@
 1. 先部署兼容适配。生产后端工作流新增 `private_research: preserve|enable|disable`，默认 preserve 不改现有环境；enable/disable 通过服务端工具只追加精确允许主机 `api.deepseek.com` 和私有资料开关。enable 在写入前校验已激活资料；原始环境以 0600 字节备份，失败与代码/服务配置一起回滚。**不修改 master key 或 `MEMBERSHIP_MANAGED_AI_ENABLED`。** 未确认允许名单前，不要求用户在生产后台盲目保存 Key。
 2. 之后在现有 `/admin/ai` 加密密钥入口保存 **独立的网站服务端 Key**。提供商名称 `DeepSeek`，适配器 `OpenAI 兼容`，API 地址 `https://api.deepseek.com/v1`；`deepseek-flash` 是模型名，不能填在 API 地址栏。不要把 Key 放进聊天、代码、Git、SQL、前端环境变量或截图。后台“安全保存”只校验地址并加密保存，**不是实际模型调用成功证明**。网址、允许名单、重名和写入失败返回固定安全错误；保存后刷新失败与保存失败分开显示，结果未知先刷新核实，不自动重复创建。
 3. 为该 provider 配置 `ai_models` 与 `wave_analysis` 的 `ai_task_routes`。现有后台表单还不能创建模型和路由，不能假设只保存 Key 就自动完成。视觉模型使用当前已核对的 `deepseek-flash`（DeepSeek V4.1 Flash），初始服务端上下文上限 32,768、最终输出上限 4,096、超时 60,000ms；这是应用预算，不是模型的官方最大能力。成本与月预算仍须按部署时官方价格配置，不把数据库默认零成本当成免费；当前 worker 的 `cost_confirmed=false` 也不构成真实账单或月费用硬限额已生效的证据。
-4. 先保持 `MEMBERSHIP_MANAGED_AI_ENABLED=false`，完成鉴权、每日额度、单次格式修复、空内容／截断、429／超时、费用记账和不泄露引用的受控真实请求验收后再启用。不能借用户 Key 或替换提供商来绕过未配置状态。
+4. 保存 Key 和配置模型／路由仍不会自动开启托管分析。生产后端工作流提供独立的 `managed_ai: preserve|enable|disable`，默认 preserve；受控验收时显式 enable，先用现有 resolver 只读核对路由、精确 `deepseek-flash` 模型、官方地址及有效 secret 的记录 ID，再要求费用配置不低于当时核对的峰值输入 `$0.3/M`、输出 `$1.2/M`。managed-only 操作只改 `MEMBERSHIP_MANAGED_AI_ENABLED`，原配置以 0600 字节备份并原子替换；原私有资料已开启时再次复核快照。随后启动并检查共用该环境的 Gateway／Worker，失败恢复原环境和 Worker 运行状态，不改其自启动设置或任何会员权益。**这是配置门槛，不是真实模型成功证明，也不是月费用硬限额。**
+5. 通过真实已登录、已具备有效 VIP 的账号，执行有界的文字与截图任务；不临时授予会员、不绕过每日额度、不借 BYOK。确认鉴权、usage、结构校验、引用隐藏及页面结果；失败可通过上述独立 disable 停止托管调用。超时、429、空内容／截断及格式修复还需单独的合成和真实证据，不能用保存成功或两笔成功调用冒充所有故障模式均已实测。
 
 此前生产只读检查：启用的 provider、model、`wave_analysis` route 及已配置 secret 数量均为 **0**；没有读取密钥值。此结果不代表本轮实时状态，部署时必须重新核对，不能据此宣称云端 DeepSeek 已接通。
 

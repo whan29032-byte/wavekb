@@ -16,6 +16,15 @@ on:
           - preserve
           - enable
           - disable
+      managed_ai:
+        description: "Preserve configuration, or enable/disable membership DeepSeek after metadata and conservative cost validation (never changes keys or membership rights)"
+        required: true
+        type: choice
+        default: preserve
+        options:
+          - preserve
+          - enable
+          - disable
 
 permissions:
   contents: read
@@ -280,11 +289,13 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           PRIVATE_RESEARCH: ${{ inputs.private_research }}
+          MANAGED_AI: ${{ inputs.managed_ai }}
         run: |
           set -Eeuo pipefail
           case "$PRIVATE_RESEARCH" in preserve|enable|disable) ;; *) exit 1 ;; esac
+          case "$MANAGED_AI" in preserve|enable|disable) ;; *) exit 1 ;; esac
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' bash -s" <<'REMOTE'
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' MANAGED_AI='${MANAGED_AI}' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           release_root=/opt/elliott-wave-gateway
@@ -293,6 +304,8 @@ jobs:
           archive="$HOME/wavekb-gateway-${release_id}.tar.gz"
           current_link="${release_root}/current"
           units=(elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer)
+          worker_was_active=0
+          if sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then worker_was_active=1; fi
 
           test -d "$current_link"
           sudo test ! -e "$release_dir"
@@ -345,19 +358,27 @@ jobs:
             fi
             sudo systemctl daemon-reload
             sudo systemctl restart elliott-wave-gateway.service
-            sudo systemctl try-restart elliott-wave-ai-worker.service || true
+            if test "$MANAGED_AI" = enable && test "$worker_was_active" -eq 0; then
+              sudo systemctl stop elliott-wave-ai-worker.service || true
+            else
+              sudo systemctl try-restart elliott-wave-ai-worker.service || true
+            fi
             sudo systemctl try-restart elliott-wave-mentor-notifications.service || true
             sudo systemctl try-restart elliott-wave-youtube-sync.service || true
             exit "$status"
           }
           trap rollback ERR
 
-          if test "$PRIVATE_RESEARCH" != preserve; then
-            private_enabled=false
-            test "$PRIVATE_RESEARCH" != enable || private_enabled=true
+          if test "$PRIVATE_RESEARCH" != preserve || test "$MANAGED_AI" != preserve; then
+            runtime_arguments=(--managed-ai "$MANAGED_AI")
+            if test "$PRIVATE_RESEARCH" != preserve; then
+              private_enabled=false
+              test "$PRIVATE_RESEARCH" != enable || private_enabled=true
+              runtime_arguments+=(--enable-private "$private_enabled")
+            fi
             sudo /usr/bin/node -- "${release_dir}/src/research/configure-runtime.ts" \
               --env-file /etc/elliott-wave/gateway.env \
-              --backup-file "${backup_root}/gateway.env" --enable-private "$private_enabled"
+              --backup-file "${backup_root}/gateway.env" "${runtime_arguments[@]}"
           fi
 
           if test "$legacy_layout" -eq 1; then
@@ -372,7 +393,11 @@ jobs:
           sudo mv -Tf "$candidate_link" "$current_link"
           sudo systemctl daemon-reload
           sudo systemctl restart elliott-wave-gateway.service
-          sudo systemctl try-restart elliott-wave-ai-worker.service
+          if test "$MANAGED_AI" = enable; then
+            sudo systemctl restart elliott-wave-ai-worker.service
+          else
+            sudo systemctl try-restart elliott-wave-ai-worker.service
+          fi
           sudo systemctl enable --now elliott-wave-mentor-notifications.service
           sudo systemctl restart elliott-wave-mentor-notifications.service
           sudo systemctl enable --now elliott-wave-youtube-sync.service
@@ -390,6 +415,7 @@ jobs:
           done
           test "$accepted" -eq 1
           test "$(sudo systemctl is-active elliott-wave-gateway.service)" = active
+          if test "$MANAGED_AI" = enable; then test "$(sudo systemctl is-active elliott-wave-ai-worker.service)" = active; fi
           test "$(sudo systemctl is-active elliott-wave-trading-sync.timer)" = active
           test "$(sudo systemctl is-active elliott-wave-mentor-notifications.service)" = active
           test "$(sudo systemctl is-active elliott-wave-youtube-sync.service)" = active
