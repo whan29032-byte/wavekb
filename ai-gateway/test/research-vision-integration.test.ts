@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildKnowledgeIndex } from "../src/knowledge/index.ts";
 import { normalizeAiRunRequest } from "../src/knowledge/contracts.ts";
-import { KnowledgeRuntime } from "../src/knowledge/runtime.ts";
+import { KnowledgeRuntime, MODEL_OUTPUT_REPAIR_MAX_BYTES } from "../src/knowledge/runtime.ts";
 import { publicAiJob } from "../src/research/publication.ts";
 import type { ProviderRequest } from "../src/providers/types.ts";
 import type { VisionImageReaderPort } from "../src/research/vision-images.ts";
@@ -77,8 +77,7 @@ test("unsupported model, owner, analysis, or instrument mismatches fail before a
 test("image context reserves provider visual tokens rather than base64 byte length", async () => {
   const initial = fixture(); await initial.run(baseRequest);
   const sent = initial.requests[0]!;
-  const repair = "The preceding output was invalid. Return one corrected JSON object only; do not add facts or citation IDs.";
-  const contextTokens = Buffer.byteLength(sent.system) + Buffer.byteLength(String(sent.messages[0]!.content)) + Buffer.byteLength(repair) + 2048 + 4096 + 100;
+  const contextTokens = Buffer.byteLength(sent.system) + Buffer.byteLength(String(sent.messages[0]!.content)) + MODEL_OUTPUT_REPAIR_MAX_BYTES + 2048 + 4096 + 100;
   const text = fixture({ contextTokens }); await text.run(baseRequest);
   const vision = fixture({ contextTokens }); await assert.rejects(vision.run(), /input_context_too_large/);
   assert.equal(vision.reads.length, 0); assert.equal(vision.requests.length, 0);
@@ -88,7 +87,31 @@ test("single repair keeps the exact images and accounts for both calls without r
   const f = fixture({ outcomes: [{ incorrect: true }, candidate()] }); const result = await f.run();
   assert.equal(f.reads.length, 1); assert.equal(f.requests.length, 2);
   assert.deepEqual(f.requests[1]!.messages[0], f.requests[0]!.messages[0]);
+  assert.equal(f.requests[1]!.model, f.requests[0]!.model);
+  assert.match(String(f.requests[1]!.messages[1]!.content), /Validation category: schema_fields/);
+  assert.ok(Buffer.byteLength(String(f.requests[1]!.messages[1]!.content)) <= MODEL_OUTPUT_REPAIR_MAX_BYTES);
   assert.equal(result.provider?.usage.inputTokens, 2088); assert.equal(result.provider?.usage.outputTokens, 100);
+});
+
+test("image-only observations use existing candidate fields and never weaken the exact schema", async () => {
+  const extraField = { ...candidate(), image_observations: ["synthetic blue wave"] };
+  const invalid = fixture({ outcomes: [extraField, extraField] });
+  await assert.rejects(invalid.run(), (error: unknown) => {
+    assert.equal((error as { diagnostic?: unknown }).diagnostic, "schema_fields");
+    return true;
+  });
+  assert.equal(invalid.requests.length, 2);
+  assert.equal(invalid.reads.length, 1);
+  assert.match(invalid.requests[0]!.system, /Visible image observations.*current_pattern/u);
+  assert.match(invalid.requests[0]!.system, /no top-level scenarios field/u);
+  assert.doesNotMatch(String(invalid.requests[1]!.messages[1]!.content), /synthetic blue wave/u);
+
+  const valid = fixture({ outcomes: [candidate({ current_pattern: "Synthetic blue 0–5 wave outline; candidate only",
+    valid_scenarios: [{ key: "primary", pattern: "impulse", conditions: ["Visible blue wave labels 0–5"],
+      invalidations: ["Precise price and time evidence is missing"], confidence: 0.3 }] })] });
+  const result = await valid.run();
+  assert.equal(valid.requests.length, 1);
+  assert.equal((result.output as Record<string, unknown>).wave_chart, undefined);
 });
 
 test("read failure is not silently converted to a text-only model call, and public errors do not leak paths", async () => {
