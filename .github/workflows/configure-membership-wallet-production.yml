@@ -1,0 +1,148 @@
+name: Configure WaveKB membership wallet production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type CONFIGURE_WAVEKB_MEMBERSHIP_WALLET"
+        required: true
+        type: string
+      operation:
+        description: "Probe current worker and fixed chain nodes, or enable wallet verification"
+        required: true
+        type: choice
+        options: [probe, enable]
+        default: probe
+      expected_runtime_sha:
+        description: "Exact 40-character Gateway commit currently deployed; this operations-only commit need not replace the application"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-backend-production
+  cancel-in-progress: false
+
+jobs:
+  verify-configuration-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require main and bounded explicit inputs
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          OPERATION: ${{ inputs.operation }}
+          EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRMATION" = CONFIGURE_WAVEKB_MEMBERSHIP_WALLET
+          case "$OPERATION" in probe|enable) ;; *) exit 1 ;; esac
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify configuration and receipt contracts without production access
+        run: node --test tests/configure-wallet-runtime.test.mjs tests/wallet-configuration-receipt.test.mjs
+
+  configure-wallet:
+    needs: verify-configuration-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Require main and bounded explicit inputs
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          OPERATION: ${{ inputs.operation }}
+          EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRMATION" = CONFIGURE_WAVEKB_MEMBERSHIP_WALLET
+          case "$OPERATION" in probe|enable) ;; *) exit 1 ;; esac
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+      - uses: actions/checkout@v4
+      - name: Require the current reviewed main revision
+        run: |
+          set -Eeuo pipefail
+          current_main=$(git ls-remote origin refs/heads/main | cut -f1)
+          test "$current_main" = "$GITHUB_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          test -n "$DEPLOY_SSH_KEY"
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+      - name: Verify installed immutable Gateway and backup directory
+        env:
+          EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s -- "$EXPECTED_RUNTIME_SHA" <<'REMOTE'
+          set -Eeuo pipefail
+          expected_sha=$1
+          [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]]
+          /usr/bin/node --input-type=module - "$expected_sha" <<'NODE'
+          import fs from 'node:fs';
+          try {
+            const expected = process.argv[2];
+            if (fs.readFileSync('/opt/elliott-wave-gateway/current/DEPLOYMENT_VERSION', 'utf8').trim() !== expected) throw new Error();
+            const response = await fetch('http://127.0.0.1:8787/health', { redirect: 'error', signal: AbortSignal.timeout(5000), cache: 'no-store' });
+            const body = await response.json();
+            if (!response.ok || body.ok !== true || body.deployment !== expected) throw new Error();
+            console.log('wallet_configuration_revision_verified');
+          } catch { console.error('wallet_configuration_revision_mismatch'); process.exitCode = 1; }
+          NODE
+          sudo -n true
+          sudo -n test -d /var/backups/elliott-wave-gateway
+          REMOTE
+      - name: Run reviewed operations source and require a complete service receipt
+        env:
+          OPERATION: ${{ inputs.operation }}
+          EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          case "$OPERATION" in probe|enable) ;; *) exit 1 ;; esac
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          remote_command="sudo -n /usr/bin/node --input-type=module - --env-file /etc/elliott-wave/gateway.env --operation ${OPERATION} --expected-runtime-sha ${EXPECTED_RUNTIME_SHA}"
+          if test "$OPERATION" = enable; then
+            remote_command="${remote_command} --backup-file /var/backups/elliott-wave-gateway/wallet-config-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env"
+          fi
+          # Reviewed main source travels only through stdin; no persistent code
+          # replacement, credentials, arbitrary endpoints or shell input.
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "$remote_command" \
+            < scripts/configure-wallet-runtime.mjs | node scripts/project-wallet-configuration.mjs --operation "$OPERATION"
+      - name: Clean runner SSH material
+        if: always()
+        run: rm -f "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"
