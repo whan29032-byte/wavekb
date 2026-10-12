@@ -4,6 +4,16 @@ import { AiConnections } from "./ai-connections";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it("keeps the personal model form separate from the member-only Hermes service", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ connections: [] })));
+  vi.stubGlobal("fetch", fetcher); render(<AiConnections />);
+  await screen.findByText(/尚未连接模型/);
+  expect(screen.getByRole("heading", { name: "自带 Key 模型接口" })).toBeDefined();
+  expect(screen.getByText(/与会员专属 Hermes 分开/)).toBeDefined();
+  expect(screen.queryByRole("option", { name: /Hermes/ })).toBeNull();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
 it("selects and submits the current official DeepSeek Flash preset through the real form", async () => {
   const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ connections: [] })))
     .mockResolvedValueOnce(new Response(JSON.stringify({ connection: { id: "new-deepseek" } })))
