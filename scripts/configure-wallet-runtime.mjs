@@ -152,7 +152,7 @@ function productionServices() {
   return {
     revision: async expected => revision(expected),
     inspect: async () => {
-      try { return inspectWalletWorker(execFileSync("/usr/bin/systemctl", ["show", UNIT, "--property=LoadState,ActiveState,SubState,MainPID"], { encoding: "utf8", timeout: 10000, maxBuffer: 4096, stdio: ["ignore", "pipe", "ignore"] })); }
+      try { return inspectWalletWorker(execFileSync("/usr/bin/systemctl", ["show", UNIT, "--property=LoadState,ActiveState,SubState,MainPID"], { encoding: "utf8", timeout: 1000, maxBuffer: 4096, stdio: ["ignore", "pipe", "ignore"] })); }
       catch { return { running: false, pid: 0 }; }
     },
     restart: async () => { execFileSync("/usr/bin/systemctl", ["restart", UNIT], { timeout: 20000, stdio: "ignore" }); },
@@ -226,18 +226,30 @@ async function preflight(env, deps) {
       || BigInt(`0x${value.blockID.slice(0, 16)}`) !== BigInt(number) || !fresh(timestamp, deps.now(), WALLET_TRON_MAX_AGE_MS)) throw new Error();
   } catch { fail("tron_preflight_failed"); }
 }
-async function checkedWorker(services, env, sha, differentPid, stableWait) {
+async function checkedWorker(services, env, sha, differentPid) {
   const state = await services.inspect();
   if (!state?.running || !Number.isSafeInteger(state.pid) || state.pid < 1) fail("worker_inactive");
   if (state.pid === differentPid || !await services.revision(sha) || !await services.matches(state.pid, env, sha)) fail("worker_verification_failed");
   const after = await services.inspect();
   if (!after?.running || after.pid !== state.pid) fail("worker_verification_failed");
-  if (stableWait) {
-    await stableWait(1000);
-    const stable = await checkedWorker(services, env, sha);
-    if (stable.pid !== state.pid) fail("worker_verification_failed");
-  }
   return state;
+}
+async function startedWorker(services, env, sha, differentPid, wait) {
+  let lastError;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await wait(250);
+    let state;
+    try { state = await checkedWorker(services, env, sha, differentPid); }
+    catch (error) {
+      if (!(error instanceof WalletRuntimeError) || !["worker_inactive", "worker_verification_failed"].includes(error.code)) throw error;
+      lastError = error; continue;
+    }
+    await wait(1000);
+    const stable = await checkedWorker(services, env, sha, differentPid);
+    if (stable.pid !== state.pid) fail("worker_verification_failed");
+    return stable;
+  }
+  throw lastError ?? new WalletRuntimeError("worker_verification_failed");
 }
 function validateOptions(options) {
   if (!object(options) || Object.keys(options).some(name => !["envFile", "backupFile", "operation", "expectedRuntimeSha"].includes(name))
@@ -275,14 +287,14 @@ export async function configureWalletRuntime(options, dependencies = {}) {
     try {
       if (changed) atomicReplace(options.envFile, next, original, "environment_changed");
       try { await services.restart(); } catch { fail("worker_restart_failed"); }
-      await checkedWorker(services, candidate, options.expectedRuntimeSha, before.pid, deps.wait);
+      await startedWorker(services, candidate, options.expectedRuntimeSha, before.pid, deps.wait);
       if (!readOwned(options.envFile).equals(next)) fail("environment_changed");
     } catch (error) {
       const current = readOwned(options.envFile);
       if (!current.equals(next) && !current.equals(original)) fail("rollback_conflict");
       try {
         if (changed && current.equals(next)) atomicReplace(options.envFile, original, next, "rollback_conflict");
-        await services.restart(); await checkedWorker(services, parsed.env, options.expectedRuntimeSha, before.pid, deps.wait);
+        await services.restart(); await startedWorker(services, parsed.env, options.expectedRuntimeSha, before.pid, deps.wait);
       } catch (rollbackError) { if (rollbackError instanceof WalletRuntimeError && rollbackError.code === "rollback_conflict") throw rollbackError; fail("runtime_rollback_failed"); }
       if (error instanceof WalletRuntimeError) throw error;
       fail("runtime_write_failed");

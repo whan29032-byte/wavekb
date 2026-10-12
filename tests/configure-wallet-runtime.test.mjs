@@ -45,7 +45,7 @@ function fixture(t, text = initial) {
   };
   const options = { envFile, backupFile, operation: "enable", expectedRuntimeSha: sha };
   return { directory, envFile, backupFile, state, services, options, deps: { services, fetch: fixtureFetch, now: () => now,
-    wait: async milliseconds => { assert.equal(milliseconds, 1000); } } };
+    wait: async milliseconds => { assert.ok([250, 1000].includes(milliseconds)); } } };
 }
 function result(operation, enabled, changed) { return { ok: true, operation, enabled, workerRunning: true, ethereumReady: true, baseReady: true, tronReady: true, changed }; }
 async function rejected(code, callback) { await assert.rejects(callback, error => error.code === code && error.message === code); }
@@ -174,7 +174,7 @@ test("a restart no-op or bad new process environment is rejected and the restore
 test("a startup process that exits or changes PID within the stability window cannot succeed", async t => {
   for (const exit of [true, false]) {
     const f = fixture(t); let waits = 0;
-    f.deps.wait = async milliseconds => { assert.equal(milliseconds, 1000); waits++; if (waits === 1) { if (exit) f.state.running = false; else f.state.pid++; } };
+    f.deps.wait = async milliseconds => { assert.ok([250, 1000].includes(milliseconds)); if (milliseconds === 1000) { waits++; if (waits === 1) { if (exit) f.state.running = false; else f.state.pid++; } } };
     await rejected(exit ? "worker_inactive" : "worker_verification_failed", () => configureWalletRuntime(f.options, f.deps));
     assert.equal(fs.readFileSync(f.envFile, "utf8"), initial); assert.equal(f.state.restarts, 2); assert.equal(waits, 2);
   }
@@ -182,9 +182,39 @@ test("a startup process that exits or changes PID within the stability window ca
 test("rollback must also survive the same stability window before it can be called restored", async t => {
   const f = fixture(t), normal = f.services.restart; let waits = 0;
   f.services.restart = async () => { if (!f.state.restarts) { f.state.restarts++; throw new Error("synthetic-start-failure"); } await normal(); };
-  f.deps.wait = async milliseconds => { assert.equal(milliseconds, 1000); waits++; f.state.running = false; };
+  f.deps.wait = async milliseconds => { assert.ok([250, 1000].includes(milliseconds)); if (milliseconds === 1000) { waits++; f.state.running = false; } };
   await rejected("runtime_rollback_failed", () => configureWalletRuntime(f.options, f.deps));
   assert.equal(fs.readFileSync(f.envFile, "utf8"), initial); assert.equal(waits, 1);
+});
+test("startup readiness tolerates bounded inactive and not-yet-Node transitions before the same-PID stability proof", async t => {
+  const f = fixture(t), restart = f.services.restart; let polls = 0, stableWaits = 0;
+  f.services.restart = async () => { await restart(); f.state.running = false; f.state.matching = false; };
+  f.deps.wait = async milliseconds => {
+    if (milliseconds === 250) { polls++; if (polls === 2) f.state.running = true; if (polls === 3) f.state.matching = true; }
+    else { assert.equal(milliseconds, 1000); stableWaits++; assert.equal(polls, 3); }
+  };
+  assert.deepEqual(await configureWalletRuntime(f.options, f.deps), result("enable", true, true));
+  assert.equal(polls, 3); assert.equal(stableWaits, 1); assert.equal(f.state.restarts, 1);
+});
+test("a permanent startup mismatch gets exactly twenty attempts and rollback has the same bounded transition wait", async t => {
+  const f = fixture(t), restart = f.services.restart; let candidatePolls = 0, rollbackPolls = 0, stableWaits = 0;
+  f.services.restart = async () => { await restart(); f.state.matching = false; if (f.state.restarts === 2) f.state.running = false; };
+  f.deps.wait = async milliseconds => {
+    if (milliseconds === 250) {
+      if (f.state.restarts === 1) candidatePolls++;
+      else { rollbackPolls++; if (rollbackPolls === 2) f.state.running = true; if (rollbackPolls === 3) f.state.matching = true; }
+    } else { assert.equal(milliseconds, 1000); stableWaits++; }
+  };
+  await rejected("worker_verification_failed", () => configureWalletRuntime(f.options, f.deps));
+  assert.equal(candidatePolls, 20); assert.equal(rollbackPolls, 3); assert.equal(stableWaits, 1);
+  assert.equal(fs.readFileSync(f.envFile, "utf8"), initial); assert.equal(f.state.restarts, 2);
+});
+test("a permanently inactive startup and rollback both expire without a green receipt", async t => {
+  const f = fixture(t), restart = f.services.restart; const polls = [0, 0];
+  f.services.restart = async () => { await restart(); f.state.running = false; };
+  f.deps.wait = async milliseconds => { assert.equal(milliseconds, 250); polls[f.state.restarts - 1]++; };
+  await rejected("runtime_rollback_failed", () => configureWalletRuntime(f.options, f.deps));
+  assert.deepEqual(polls, [20, 20]); assert.equal(fs.readFileSync(f.envFile, "utf8"), initial);
 });
 test("later writer wins CAS and is never overwritten or restarted by rollback", async t => {
   const f = fixture(t); f.services.restart = async () => { f.state.restarts++; fs.writeFileSync(f.envFile, initial + "LATER_WRITER=keep\n"); throw new Error(); };
