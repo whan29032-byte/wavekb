@@ -232,14 +232,23 @@ test("probe rechecks live runtime and never reports a process that exited during
   f.deps.fetch = async (url, init) => { const response = await fixtureFetch(url, init); if (url.startsWith("https://api.trongrid.io/")) f.state.running = false; return response; };
   await rejected("worker_inactive", () => configureWalletRuntime(probe, f.deps)); assert.equal(f.state.restarts, 0); assert.deepEqual(fs.readdirSync(f.directory), ["gateway.env"]);
 });
-test("production service adapter proves actual process argv, cwd, revision and environment in direct and stdin success paths", t => {
-  for (const mode of ["import-entry", "stdin-source", "unexpected-wallet-env"]) {
+test("production adapter checks exactly six wallet keys, ignores unrelated stale config and still proves CLI/runtime identity", t => {
+  const walletKeys = ["MEMBERSHIP_WALLET_ENABLED", "MEMBERSHIP_WALLET_ETHEREUM_RPC_URL", "MEMBERSHIP_WALLET_BASE_RPC_URL",
+    "MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS", "MEMBERSHIP_WALLET_TRONGRID_API_KEY", "MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE"];
+  const configured = initial + readyEnv + "MEMBERSHIP_WALLET_TRONGRID_API_KEY=private-tron-key\nMEMBERSHIP_WALLET_VERIFY_BATCH_SIZE=2\n";
+  const cases = ["import-entry", "stdin-source", "unrelated-stale-config"].map(mode => ({ mode, text: initial, valid: true }));
+  for (const key of walletKeys) for (const mode of ["different", "missing", "extra"]) cases.push({ mode, key, text: mode === "extra" ? initial : configured, valid: false });
+  for (const { mode, key, text, valid } of cases) {
     const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wallet-process-proof-"))); fs.chmodSync(directory, 0o700);
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
     const envFile = path.join(directory, "gateway.env"), backupFile = path.join(directory, "original.env"), release = path.join(directory, "release");
-    fs.mkdirSync(release, { mode: 0o755 }); fs.writeFileSync(path.join(release, "DEPLOYMENT_VERSION"), sha + "\n", { mode: 0o644 }); fs.writeFileSync(envFile, initial, { mode: 0o600 });
+    fs.mkdirSync(release, { mode: 0o755 }); fs.writeFileSync(path.join(release, "DEPLOYMENT_VERSION"), sha + "\n", { mode: 0o644 }); fs.writeFileSync(envFile, text, { mode: 0o600 });
     const processEnv = path.join(directory, "process-environ"), cmdline = path.join(directory, "process-cmdline");
-    fs.writeFileSync(processEnv, Object.entries(parseFixtureEnv(initial)).map(([key, value]) => `${key}=${value}`).join("\0") + "\0" + (mode === "unexpected-wallet-env" ? "MEMBERSHIP_WALLET_ENABLED=true\0" : ""));
+    const actual = parseFixtureEnv(text);
+    if (mode === "unrelated-stale-config") { actual.YOUTUBE_SYNC_ENABLED = "false"; delete actual.AI_PRIVATE_KEY; actual.OLD_AI_SETTING = "old-private-value"; }
+    else if (mode === "missing") delete actual[key];
+    else if (mode === "different" || mode === "extra") actual[key] = "different-wallet-value";
+    fs.writeFileSync(processEnv, Object.entries(actual).map(([name, value]) => `${name}=${value}`).join("\0") + "\0");
     fs.writeFileSync(cmdline, `${process.execPath}\0src/worker-main.ts\0`);
     const args = ["--env-file", envFile, "--backup-file", backupFile, "--operation", "enable", "--expected-runtime-sha", sha];
     const preamble = `import fakeFs from 'node:fs';import fakeCp from 'node:child_process';import {syncBuiltinESMExports} from 'node:module';
@@ -252,11 +261,11 @@ globalThis.fetch=async(url,init)=>{const body=JSON.parse(init.body);if(url==='ht
     const child = mode === "stdin-source"
       ? spawnSync(process.execPath, ["--input-type=module", "-", ...args], { input: preamble + "\n" + source, encoding: "utf8", env: {} })
       : spawnSync(process.execPath, ["--input-type=module", "-e", preamble + `\nprocess.argv=[process.execPath,${JSON.stringify(script)},...${JSON.stringify(args)}];await import(${JSON.stringify(pathToFileURL(script).href)});`], { encoding: "utf8", env: {} });
-    if (mode === "unexpected-wallet-env") {
+    if (!valid) {
       assert.equal(child.status, 1); assert.equal(child.stdout, ""); assert.equal(child.stderr, '{"ok":false,"code":"worker_verification_failed"}\n'); assert.ok(!fs.existsSync(backupFile));
     } else {
       assert.equal(child.status, 0, child.stderr); assert.equal(child.stderr, ""); assert.deepEqual(JSON.parse(child.stdout), result("enable", true, true));
-      assert.equal(fs.readFileSync(envFile, "utf8"), initial + readyEnv); assert.equal(fs.readFileSync(backupFile, "utf8"), initial);
+      assert.equal(fs.readFileSync(envFile, "utf8"), text + readyEnv); assert.equal(fs.readFileSync(backupFile, "utf8"), text);
     }
     assert.doesNotMatch(child.stdout + child.stderr, /private-|SUPABASE|https|key-sentinel/);
   }

@@ -168,9 +168,9 @@ function productionServices() {
           const separator = pair.indexOf("="); if (separator < 1) return false;
           const name = pair.slice(0, separator); if (Object.hasOwn(running, name)) return false; running[name] = pair.slice(separator + 1);
         }
-        return Object.entries(env).every(([name, value]) => running[name] === value)
-          && [...Object.keys(fields), "MEMBERSHIP_WALLET_TRONGRID_API_KEY", "MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE"]
-            .every(name => Object.hasOwn(env, name) || !Object.hasOwn(running, name));
+        return [...Object.keys(fields), "MEMBERSHIP_WALLET_TRONGRID_API_KEY", "MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE"]
+          .every(name => Object.hasOwn(env, name) === Object.hasOwn(running, name)
+            && (!Object.hasOwn(env, name) || env[name] === running[name]));
       } catch { return false; }
     },
   };
