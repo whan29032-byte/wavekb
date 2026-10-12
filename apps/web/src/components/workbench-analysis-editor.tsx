@@ -366,7 +366,7 @@ export function WorkbenchAnalysisEditor({ actorId, initialAnalysis, initialStep 
             <ManagedAiModeSelector key={actorId} actorId={actorId} value={aiMode} onChange={(mode) => setAiModeSelection({ owner: actorId, mode })} disabled={pending || visionBusy} />
             <KnowledgeScopeSelector value={knowledgeScope} onChange={setKnowledgeScope} disabled={pending || visionBusy} />
             <Button type="button" className="w-fit" disabled={pending || visionBusy} onClick={() => void startAi()}>启动 AI 候选分析</Button>
-            <p className="text-xs leading-5 text-muted-foreground">{aiMode === "managed" ? "使用平台配置的会员模型，服务器原子核实有效 VIP 与每日额度。" : "使用 AI 控制中心选定的自带 Key，不扣会员每日额度。"}知识检索和硬规则闸门仍由服务器处理。</p>
+            <p className="text-xs leading-5 text-muted-foreground">{aiMode === "managed" ? "使用 Hermes 云端研究，服务器核实有效 VIP 与每日额度；书籍及补充理论按当前范围与检索结果采用。" : "使用 AI 控制中心选定的自带 Key，不扣会员每日额度，也不读取 Hermes 私有补充资料。"}知识检索和硬规则闸门仍由服务器处理。</p>
             {aiJob ? <div className="grid gap-2 text-sm">
               <p>任务状态：<strong>{aiJob.status}</strong></p>
               <Button type="button" variant="secondary" size="small" className="w-fit" disabled={pending} onClick={() => void refreshAi()}>刷新 AI 状态</Button>

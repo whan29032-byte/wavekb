@@ -326,8 +326,8 @@ describe("AI knowledge selection", () => {
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(quota)))
       .mockResolvedValueOnce(new Response(JSON.stringify({ job: { id: "old-owner-job", status: "queued" } })));
     vi.stubGlobal("fetch", fetcher); render(<WorkbenchAnalysisEditor actorId="local-test" initialAnalysis={saved} initialStep={4} />);
-    fireEvent.click(screen.getByRole("button", { name: "核实平台会员额度" })); await screen.findByText(/剩余 48 次/);
-    fireEvent.click(screen.getByRole("radio", { name: /平台 AI/ }));
+    fireEvent.click(screen.getByRole("button", { name: "核实 Hermes 会员额度" })); await screen.findByText(/剩余 48 次/);
+    fireEvent.click(screen.getByRole("radio", { name: /Hermes 云端研究/ }));
     supabase.from.mockClear(); supabase.auth.getUser.mockReset();
     if (phase === "after") {
       supabase.auth.getUser.mockResolvedValueOnce({ data: { user: { id: "local-test" } }, error: null })
