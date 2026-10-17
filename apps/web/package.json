@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
-    "@supabase/ssr": "^0.12.4",
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.112.3",
     "@wavekb/domain": "workspace:*",
     "@wavekb/knowledge": "workspace:*",
@@ -35,7 +35,7 @@
     "@storybook/addon-docs": "^10.5.8",
     "@storybook/nextjs-vite": "^10.5.8",
     "@tailwindcss/postcss": "^4.3.3",
-    "@testing-library/react": "^16.3.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

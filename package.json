@@ -28,6 +28,6 @@
     "knowledge:assets:check": "pnpm --filter @wavekb/web assets:check"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8"
+    "@electric-sql/pglite": "0.5.10"
   }
 }
