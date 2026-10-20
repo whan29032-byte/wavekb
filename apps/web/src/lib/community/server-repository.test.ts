@@ -7,6 +7,10 @@ vi.mock("@/lib/env", () => ({ publicSupabaseConfig: () => ({ configured: true })
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({
   rpc: async (name: string, args: Record<string, unknown>) => {
     const basic = { id: "author", public_uid: 12345, display_name: "作者", avatar_url: null };
+    if (name === "post_engagement") {
+      const ids = Array.isArray(args.p_post_ids) ? args.p_post_ids as string[] : [];
+      return { data: ids.map((id) => ({ post_id: id, view_count: 0, like_count: 0, liked_by_me: false })), error: null };
+    }
     if (!db.legacyIdentity) return { data: [{ ...basic, nameplate_style: "classic" }], error: null };
     if (name === "get_public_post_profiles") return { data: null, error: { code: "PGRST202" } };
     if (name === "get_public_profiles") return { data: [basic], error: null };

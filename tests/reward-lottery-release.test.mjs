@@ -7,7 +7,7 @@ const source = (path) => readFile(new URL(path, root), "utf8");
 
 test("the lottery schema, member UI, admin UI and deployment marker ship together", async () => {
   const migrations = (await readdir(new URL("supabase/migrations/", root))).filter((name) => name.endsWith(".sql")).sort();
-  assert.equal(migrations.at(-1), "20261011152711_youtube_policy_consent.sql");
+  assert.equal(migrations.at(-1), "202610190001_community_engagement.sql");
 
   const [migration, manualMigration, customDisplayMigration, workflow, memberPage, memberRepository, memberComponent, adminPage, adminRepository, e2e] = await Promise.all([
     source("supabase/migrations/202609090002_reward_lottery.sql"),
@@ -30,13 +30,15 @@ test("the lottery schema, member UI, admin UI and deployment marker ship togethe
   const mentorNotifications = await source("supabase/migrations/202610080003_mentor_payment_notifications.sql");
   assert.match(mentorNotifications, /select '202610080003'::text/);
   assert.doesNotMatch(mentorNotifications, /(?:drop|alter) (?:table|function) public\.reward_lottery/);
-  assert.match(workflow, /test "\$schema" = 20261011152711/);
+  assert.match(workflow, /test "\$schema" = 202610190001/);
   const privateResearch = await source("supabase/migrations/20261010223739_hermes_private_research.sql");
   assert.doesNotMatch(privateResearch, /(?:drop|alter) (?:table|function) public\.reward_lottery/);
   const vision = await source("supabase/migrations/20261011001354_wave_analysis_images.sql");
   assert.doesNotMatch(vision, /(?:drop|alter) (?:table|function) public\.reward_lottery/);
   const policyConsent = await source("supabase/migrations/20261011152711_youtube_policy_consent.sql");
   assert.match(policyConsent, /select '20261011152711'::text/);
+  const engagement = await source("supabase/migrations/202610190001_community_engagement.sql");
+  assert.match(engagement, /select '202610190001'::text/);
   assert.doesNotMatch(policyConsent, /(?:drop|alter) (?:table|function) public\.reward_lottery/);
   for (const table of ["reward_lottery_campaigns", "reward_lottery_prizes", "reward_lottery_draws", "reward_lottery_admin_audit"]) {
     assert.match(migration, new RegExp(`alter table public\\.${table} enable row level security`));

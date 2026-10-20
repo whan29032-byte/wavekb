@@ -88,7 +88,8 @@ it("shows an accessible bounded account placeholder until the initial session re
   mocks.session.mockReturnValue(new Promise((resolve) => { finishSession = resolve; }));
   render(<AccountNavigation />);
   expect(screen.getByRole("status").textContent).toContain("正在加载账号");
-  expect(screen.getByRole("status").className).toContain("w-28");
+  expect(screen.getByRole("status").getAttribute("aria-label")).toBe("正在加载账号");
+  expect(screen.getByRole("status").className).toContain("w-11");
   expect(screen.queryByRole("link", { name: "登录" })).toBeNull();
   await act(async () => { finishSession({ data: { session: null } }); });
   expect(screen.queryByRole("status")).toBeNull();

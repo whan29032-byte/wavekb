@@ -1,0 +1,97 @@
+/*
+  Design System Starter — 样例，不应作为完成验收的最终样式。
+  npm install @radix-ui/colors 后、仅在项目尚未接入等价色板时使用。
+  如项目采用 Radix Themes/shadcn/Tailwind，优先映射现有 Token，而不是并行新建主题。
+  所有文字-背景组合须做实测对比度；本样例只说明语义层次。
+*/
+@import "@radix-ui/colors/slate.css";
+@import "@radix-ui/colors/slate-dark.css";
+@import "@radix-ui/colors/blue.css";
+@import "@radix-ui/colors/blue-dark.css";
+@import "@radix-ui/colors/jade.css";
+@import "@radix-ui/colors/jade-dark.css";
+@import "@radix-ui/colors/amber.css";
+@import "@radix-ui/colors/amber-dark.css";
+@import "@radix-ui/colors/ruby.css";
+@import "@radix-ui/colors/ruby-dark.css";
+
+:root,
+.light {
+  color-scheme: light;
+  /* Core semantic layer: mapping can change without editing business components */
+  --ds-surface-page: var(--slate-1);
+  --ds-surface-subtle: var(--slate-2);
+  --ds-surface-control: var(--slate-3);
+  --ds-surface-control-hover: var(--slate-4);
+  --ds-surface-control-pressed: var(--slate-5);
+  --ds-border-subtle: var(--slate-6);
+  --ds-border-control: var(--slate-7);
+  --ds-border-emphasis: var(--slate-8);
+  --ds-text-secondary: var(--slate-11);
+  --ds-text-primary: var(--slate-12);
+  --ds-action-bg: var(--blue-9);
+  --ds-action-hover: var(--blue-10);
+  --ds-action-text: #fff; /* Verify contrast for chosen accent/light/dark */
+  --ds-focus-ring: var(--blue-8);
+  --ds-status-success: var(--jade-11);
+  --ds-status-warning: var(--amber-11);
+  --ds-status-danger: var(--ruby-11);
+  /* Typography and geometry */
+  --ds-font-body: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ds-font-size-sm: .875rem;
+  --ds-font-size-body: 1rem;
+  --ds-font-size-title: 1.5rem;
+  --ds-space-1: .25rem;
+  --ds-space-2: .5rem;
+  --ds-space-3: .75rem;
+  --ds-space-4: 1rem;
+  --ds-space-6: 1.5rem;
+  --ds-space-8: 2rem;
+  --ds-radius-sm: .375rem;
+  --ds-radius-md: .625rem;
+  --ds-radius-lg: 1rem;
+  --ds-motion-fast: 120ms;
+  --ds-motion-normal: 200ms;
+  --ds-motion-slow: 280ms;
+}
+
+.dark,
+.dark-theme {
+  color-scheme: dark;
+  /* Radix dark CSS maps palette variables under .dark/.dark-theme.
+     Semantic variables still use the same names. Override exceptions here. */
+}
+
+/* Component token example: components use semantic aliases only */
+.ds-button-primary {
+  --button-bg: var(--ds-action-bg);
+  --button-hover: var(--ds-action-hover);
+  --button-fg: var(--ds-action-text);
+  padding: var(--ds-space-2) var(--ds-space-4);
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-md);
+  background: var(--button-bg);
+  color: var(--button-fg);
+  font-family: var(--ds-font-body);
+  transition: background-color var(--ds-motion-fast) ease;
+}
+.ds-button-primary:hover:not(:disabled) { background: var(--button-hover); }
+.ds-button-primary:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.ds-button-primary:disabled { cursor: not-allowed; opacity: .6; }
+.ds-card {
+  padding: var(--ds-space-6);
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-subtle);
+  color: var(--ds-text-primary);
+}
+.ds-secondary-text { color: var(--ds-text-secondary); }
+.ds-number { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-button-primary { transition: none; }
+}

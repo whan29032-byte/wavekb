@@ -438,30 +438,74 @@ export async function addPostComment(client: SupabaseClient, input: {
   userId: string;
   body: string;
   parentId?: string | null;
+  files?: File[];
 }) {
   const body = input.body.trim();
   if (!body || body.length > 2000) throw new Error("评论需要 1 到 2000 个字符。");
+  const files = (input.files ?? []).slice(0, 4);
+  if ((input.files?.length ?? 0) > 4) throw new Error("每条评论最多上传 4 张图片。");
+  for (const file of files) {
+    if (!imageExtension(file.type)) throw new Error("评论图片只支持 JPG、PNG 或 WebP。");
+    if (file.size > 5 * 1024 * 1024) throw new Error("评论图片不能超过 5MB。");
+  }
+
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  const result = await client.from("post_comments").insert({
-    id,
-    post_id: input.postId,
-    author_id: input.userId,
-    parent_id: input.parentId ?? null,
-    body,
-    status: "visible",
-  });
-  if (result.error) throw result.error;
-  return {
-    id,
-    post_id: input.postId,
-    author_id: input.userId,
-    parent_id: input.parentId ?? null,
-    body,
-    status: "visible" as const,
-    created_at: createdAt,
-    updated_at: createdAt,
-  };
+  const uploadedPaths: string[] = [];
+  try {
+    const uploads = files.map((file, sortOrder) => {
+      const extension = imageExtension(file.type)!;
+      const path = `${input.userId}/comments/${id}/${crypto.randomUUID()}.${extension}`;
+      uploadedPaths.push(path);
+      return { path, file, sortOrder };
+    });
+    await mapWithConcurrency(uploads, 3, async ({ path, file }) => {
+      const upload = await client.storage.from("post-images").upload(path, file, { upsert: false, contentType: file.type });
+      if (upload.error) throw upload.error;
+    });
+
+    const result = await client.from("post_comments").insert({
+      id,
+      post_id: input.postId,
+      author_id: input.userId,
+      parent_id: input.parentId ?? null,
+      body,
+      status: "visible",
+    });
+    if (result.error) throw result.error;
+
+    let images: Array<{ id: string; storage_path: string; sort_order: number }> = [];
+    if (uploads.length) {
+      const inserted = await client.from("post_comment_images").insert(uploads.map(({ path, sortOrder }) => ({
+        comment_id: id,
+        owner_id: input.userId,
+        storage_path: path,
+        sort_order: sortOrder,
+      }))).select("id,storage_path,sort_order");
+      if (inserted.error) {
+        await client.from("post_comments").delete().eq("id", id).eq("author_id", input.userId);
+        throw inserted.error;
+      }
+      images = inserted.data ?? [];
+    }
+
+    return {
+      id,
+      post_id: input.postId,
+      author_id: input.userId,
+      parent_id: input.parentId ?? null,
+      body,
+      status: "visible" as const,
+      created_at: createdAt,
+      updated_at: createdAt,
+      images,
+    };
+  } catch (error) {
+    if (uploadedPaths.length) {
+      await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
+    }
+    throw error;
+  }
 }
 
 export async function deletePostComment(client: SupabaseClient, commentId: string, userId: string) {

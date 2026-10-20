@@ -28,8 +28,34 @@ async function postsPage(field: "board" | "author_id", value: string, size: numb
     .order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to + 1);
   if (result.error) throw result.error;
   const rows = (result.data ?? []) as unknown as PostRow[];
-  const items = await attachProfiles(client, rows.slice(0, size).map((row) => ({ ...row, chart_package: null, external_url: null, external_kind: null })));
+  const items = await attachEngagement(client, await attachProfiles(client, rows.slice(0, size).map((row) => ({ ...row, chart_package: null, external_url: null, external_kind: null }))));
   return { items, hasNext: rows.length > size, total: result.count ?? 0 };
+}
+
+function missingEngagementFunction(error: { code?: string; message?: string } | null) {
+  return error?.code === "PGRST202" || error?.code === "42883"
+    || /could not find the function|function .* does not exist/i.test(String(error?.message ?? ""));
+}
+
+async function attachEngagement(client: SupabaseClient, posts: CommunityPost[]): Promise<CommunityPost[]> {
+  if (!posts.length) return posts;
+  const result = await client.rpc("post_engagement", { p_post_ids: posts.map((post) => post.id) });
+  // Older databases can render real rows before the engagement migration is applied.
+  if (result.error) {
+    if (missingEngagementFunction(result.error)) return posts;
+    throw result.error;
+  }
+  const rows = (result.data ?? []) as Array<{ post_id: string; view_count: number | string; like_count: number | string; liked_by_me: boolean }>;
+  const byId = new Map(rows.map((row) => [row.post_id, row]));
+  return posts.map((post) => {
+    const counts = byId.get(post.id);
+    return {
+      ...post,
+      view_count: Number(counts?.view_count ?? 0),
+      like_count: Number(counts?.like_count ?? 0),
+      liked_by_me: Boolean(counts?.liked_by_me),
+    };
+  });
 }
 
 type TimelineRow = Omit<ResearchTimelineNode, "profiles">;
@@ -93,7 +119,8 @@ export async function getPost(id: string): Promise<CommunityPost | null> {
   const result = await client.from("posts").select(POST_SELECT).eq("id", id).maybeSingle();
   if (result.error) throw result.error;
   if (!result.data) return null;
-  const [post] = await attachProfiles(client, [result.data as unknown as PostRow]);
+  const posts = await attachProfiles(client, [result.data as unknown as PostRow]);
+  const [post] = await attachEngagement(client, posts);
   return post ?? null;
 }
 
@@ -104,21 +131,32 @@ export async function listPostComments(postId: string, page?: number): Promise<P
   const client = await createClient();
   const size = page === undefined ? 200 : 50;
   const { from, to } = pageRange(parsePage(page), size);
-  const result = await client.from("post_comments")
-    .select("id,post_id,author_id,parent_id,body,status,created_at,updated_at", { count: "exact" })
+  const baseSelect = "id,post_id,author_id,parent_id,body,status,created_at,updated_at";
+  const query = (select: string) => client.from("post_comments")
+    .select(select, { count: "exact" })
     .eq("post_id", postId)
     .eq("status", "visible")
     .order("created_at", { ascending: true })
     .order("id", { ascending: true })
     .range(from, to + 1);
+  let result = await query(`${baseSelect},post_comment_images(id,storage_path,sort_order)`);
+  // The image relation ships with the engagement migration. Keep comments
+  // readable while the backend is still on the previous schema.
+  if (result.error && (/PGRST200|42P01/.test(String(result.error.code ?? "")) || /post_comment_images/i.test(String(result.error.message ?? "")))) {
+    result = await query(baseSelect);
+  }
   if (result.error) throw result.error;
-  const fetched = (result.data ?? []) as Omit<PostComment, "profiles">[];
+  const fetched = (result.data ?? []) as unknown as Array<Omit<PostComment, "profiles"> & { post_comment_images?: Array<{ id: string; storage_path: string; sort_order: number }> }>;
   const rows = fetched.slice(0, size);
   const pagination = { hasNext: fetched.length > size, total: result.count ?? 0 };
   const authorIds = [...new Set(rows.map((comment) => comment.author_id))];
   if (!authorIds.length) return page === undefined ? [] : { ...pagination, items: [] };
   const profiles = await loadPublicIdentities(client, authorIds);
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-  const items = rows.map((comment) => ({ ...comment, profiles: profileById.get(comment.author_id) ?? null }));
+  const items = rows.map(({ post_comment_images, ...comment }) => ({
+    ...comment,
+    images: [...(post_comment_images ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    profiles: profileById.get(comment.author_id) ?? null,
+  }));
   return page === undefined ? items : { ...pagination, items };
 }

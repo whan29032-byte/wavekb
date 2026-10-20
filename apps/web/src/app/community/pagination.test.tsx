@@ -6,7 +6,10 @@ import PostPage from "./post/[id]/page";
 import MemberPage from "../member/[uid]/page";
 
 const data = vi.hoisted(() => ({ post: { id: "post", board: "idea_sharing", title: "分页文章", body: "正文", author_id: "author", status: "published", created_at: "2026-09-01", updated_at: "2026-09-01", post_images: [], external_references: [], timeline_nodes: [], chart_package: null, profiles: null, comments_enabled: true } }));
-vi.mock("@/lib/env", () => ({ publicSupabaseConfig: () => ({ configured: true }) }));
+vi.mock("@/lib/env", () => ({
+  publicSupabaseConfig: () => ({ configured: true, url: "https://offline.test", key: "offline" }),
+  requirePublicSupabaseConfig: () => ({ url: "https://offline.test", key: "offline" }),
+}));
 vi.mock("@/lib/auth/dal", () => ({ getCurrentUser: async () => null, getOptionalActiveMember: async () => null }));
 vi.mock("@/lib/community/server-repository", () => ({
   listPosts: async (_board: string, _size?: number, page?: number) => page ? { items: [{ ...data.post, title: `板块第 ${page} 页` }], hasNext: true, total: 100 } : [data.post],

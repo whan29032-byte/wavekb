@@ -1,0 +1,85 @@
+version: '1.0'
+project:
+  name: 'WaveKB'
+  repo_path: '.'
+  product_type: '知识库 / 研究社区 / 会员与导师服务'
+  primary_users: '中文波浪理论学习者、研究者与交易者，典型场景是长时间阅读、发布研究和复盘'
+  primary_tasks:
+    - '按书、主题、问题或原书章节检索并核对知识证据'
+    - '在社区发布观点、评论、点赞、上传图表并参与讨论'
+    - '管理积分、会员、导师订单和后台治理'
+  critical_flows:
+    - '登录、UID 激活与会话恢复'
+    - '发帖、评论、图片上传与删除'
+    - '会员、钱包、导师支付、权益与审计'
+    - '后台权限控制、数据库迁移与生产发布'
+  language: 'zh-CN'
+  platforms: ['web']
+
+execution:
+  mode: IMPLEMENT
+  output: code-and-spec
+  scope:
+    - '全站语义 Token 与基础样式'
+    - '共享 UI 组件'
+    - '头部、移动导航、页脚'
+    - '首页、知识库、社区、帖子、积分与后台关键页面'
+  change_strategy: incremental
+  require_approval_for:
+    - destructive_changes
+    - dependency_replacement
+    - business_logic_changes
+    - production_deployment
+
+brand:
+  character: '冷静、精确、可信，面向长期研究与阅读'
+  references: []
+  logo_path: ''
+  preserve_existing_brand: true
+  core_colors:
+    primary: '#3f6f9f'
+    secondary: '#167f79'
+    tertiary: '#a94770'
+  neutral_family: 'slate'
+  allow_custom_palette: true
+
+design:
+  themes: both
+  density: adaptive
+  radius_character: '克制：控件 8px、卡片 12px、面板 16px'
+  motion_character: restrained
+  typography_family: 'PingFang SC / Microsoft YaHei / Noto Sans CJK SC / Helvetica Neue / Arial'
+  accessibility_target: WCAG_2_2_AA
+  minimum_viewports: [320, 390, 768, 1280, 1440]
+  states:
+    - default
+    - hover
+    - pressed
+    - selected
+    - focus-visible
+    - disabled
+    - loading
+    - success
+    - error
+    - empty
+
+quality:
+  enforce_semantic_tokens: true
+  flag_raw_color_values: true
+  flag_random_spacing: true
+  require_visual_regression: true
+  require_real_contrast_measurement: true
+  require_manual_keyboard_review: true
+  do_not_fabricate_product_data: true
+
+notes:
+  confirmed_decisions:
+    - '保留现有冷蓝灰品牌、五套主题与自定义强调色'
+    - '浅色优先；深色跟随系统或用户选择，不做机械反相'
+    - '单一主操作色；成功、警告、危险、信息使用独立状态色'
+    - '阅读页优先保证正文行宽、行高与数字稳定性'
+    - '虚拟浏览/点赞只影响展示，不改变真实积分和账本'
+  unknowns: []
+  do_not_change:
+    - '认证、支付、会员、导师订单、RLS/RPC 与数据库迁移 marker'
+    - '知识库正文、来源、图片交付边界与真实业务数据'

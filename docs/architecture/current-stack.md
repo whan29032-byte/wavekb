@@ -37,7 +37,7 @@ Supabase   ── Auth、Postgres、RLS、Storage、Edge Functions
 
 所有候选先跑无部署权限的 Ubuntu `verify-release.yml`：生产依赖零漏洞审计、知识一致性、根/工作区测试、类型检查、lint 和构建。`deploy-static-production.yml` 的历史文件名目前仅承担额外验证，不执行静态发布。
 
-涉及数据库/Gateway 时，先以手动生产确认运行 Backend 的明确迁移链，验证数据库与公开 RPC marker、Gateway health SHA，再审批同一提交的 Next 发布。最新候选 marker 为 `202610100002`，先执行管理/支付安全加固 `202610100001`，随后会员基础 `202610100002`；未知 marker 关闭发布。这是本分支目标，不是线上已迁移证明。
+涉及数据库/Gateway 时，先以手动生产确认运行 Backend 的明确迁移链，验证数据库与公开 RPC marker、Gateway health SHA，再审批同一提交的 Next 发布。最新候选 marker 为 `202610190001`，包含社区浏览/点赞展示、点赞积分与评论图片；此前的会员、钱包、Hermes、波浪图片和 YouTube 政策迁移必须按工作流逐项应用。未知 marker 关闭发布。这是本分支目标，不是线上已迁移证明。
 
 Next preflight 按实际 live SHA 判定变化并动态比较候选最新 schema。它不读取数据库 URL，也不自动迁移。相关账号/会员/发帖/依赖变更需真实专用账号验收；缺凭据时停止需要写入验收的发布。手动只读审批不绕过 schema、Gateway、构建或只读浏览器验证。外部验收通过后才 finalize，失败按准确旧发布回滚代码与服务；数据库迁移不会自动回滚。生产数据库、用户上传和服务器密钥不进入发布包。
 

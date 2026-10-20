@@ -90,12 +90,12 @@ export function AccountNavigation() {
   }
 
   if (sessionLoading) {
-    return <span role="status" className="flex min-h-11 w-28 shrink-0 items-center justify-center text-xs text-muted-foreground">正在加载账号…</span>;
+    return <span role="status" aria-label="正在加载账号" className="flex min-h-11 w-11 shrink-0 items-center justify-center text-muted-foreground"><UserCircle aria-hidden size={18} weight="duotone" /><span className="sr-only">正在加载账号…</span></span>;
   }
 
   if (!user) {
     return (
-      <Link href="/login" className="flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-muted hover:text-foreground">
+      <Link href="/login" className="flex min-h-11 items-center gap-2 rounded-[var(--radius-control)] px-3 py-2 text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground">
         <UserCircle aria-hidden size={18} weight="duotone" />登录
       </Link>
     );
@@ -104,10 +104,10 @@ export function AccountNavigation() {
   return (
     <span className="relative flex items-center">
       <details className="group relative lg:hidden">
-        <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="账户菜单"><UserCircle aria-hidden size={20} /></summary>
-        <nav className="absolute right-0 top-12 z-40 grid w-48 gap-1 rounded-xl border bg-surface p-2 shadow-xl" aria-label="账户导航">
-          <Link href={personalCenterPath(user.id, profile)} className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-semibold hover:bg-muted"><UserCircle aria-hidden size={18} />个人中心 {profile?.public_uid ? <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /> : null}</Link>
-          <button type="button" className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-left text-sm font-semibold text-destructive hover:bg-muted disabled:opacity-55" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}</button>
+        <summary className="grid size-11 cursor-pointer list-none place-items-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground" aria-label="账户菜单"><UserCircle aria-hidden size={20} /></summary>
+        <nav className="absolute right-0 top-12 z-40 grid w-48 gap-1 rounded-[var(--radius-card)] border border-border bg-popover p-2 shadow-[var(--shadow-floating)]" aria-label="账户导航">
+          <Link href={personalCenterPath(user.id, profile)} className="flex min-h-11 items-center gap-3 rounded-[var(--radius-control)] px-3 text-sm font-semibold hover:bg-surface-subtle"><UserCircle aria-hidden size={18} />个人中心 {profile?.public_uid ? <Nameplate uid={profile.public_uid} style={profile.nameplate_style} compact /> : null}</Link>
+          <button type="button" className="flex min-h-11 items-center gap-3 rounded-[var(--radius-control)] px-3 text-left text-sm font-semibold text-destructive hover:bg-destructive-surface disabled:opacity-55" onClick={signOut} disabled={pending} aria-describedby={error ? "sign-out-error" : undefined}><SignOut aria-hidden size={18} />{pending ? "正在退出" : "退出登录"}</button>
         </nav>
       </details>
       <span className="hidden items-center gap-1 lg:flex">

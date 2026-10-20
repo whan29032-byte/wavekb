@@ -4,8 +4,11 @@ import Link from "next/link";
 import { ArrowLeft } from "@phosphor-icons/react/dist/ssr";
 import { notFound } from "next/navigation";
 import { BOARDS, plainTextExcerpt } from "@wavekb/domain";
+import { Badge } from "@wavekb/ui";
 import { PostOwnerActions } from "@/components/post-owner-actions";
 import { PostComments } from "@/components/post-comments";
+import { PostEngagement } from "@/components/post-engagement";
+import { PostViewTracker } from "@/components/post-view-tracker";
 import { Pagination } from "@/components/pagination";
 import { parsePage } from "@/lib/pagination";
 import { ResearchAuthor } from "@/components/research-author";
@@ -25,6 +28,7 @@ type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ pag
 const RESEARCH_GENRE = {
   case_submission: "案例研究",
   idea_sharing: "市场观点",
+  video_sharing: "视频分享",
   public_viewpoint: "公开观点",
   question_answers: "问题讨论",
   review_answers: "复盘讨论",
@@ -56,17 +60,29 @@ export default async function PostPage({ params, searchParams }: PageProps) {
   const actorProfile = user ? await getMyProfile(user.id).catch(() => null) : null;
   const images = [...post.post_images].sort((a, b) => a.sort_order - b.sort_order);
   const chart = post.chart_package?.provider === "tradingview" ? post.chart_package as TradingViewPackage : null;
+  const likeDisabledReason = user
+    ? user.id === post.author_id
+      ? "不能给自己的帖子点赞。"
+      : actorProfile?.public_uid == null
+        ? "完成 UID 激活后才能点赞。"
+        : ""
+    : "";
 
   return (
     <main className="mx-auto grid max-w-7xl gap-8 px-4 py-8 md:px-6 md:py-12">
+      <PostViewTracker postId={post.id} />
       <Link href={`/community/${post.board}`} className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground hover:text-primary">
         <ArrowLeft aria-hidden size={17} />返回{BOARDS[post.board].title}
       </Link>
       <article className="grid gap-12 md:gap-16">
         <header className="mx-auto grid w-full max-w-4xl gap-6 border-b pb-8 md:pb-10">
-          <p className="text-sm font-semibold tracking-[0.08em] text-primary">{BOARDS[post.board].title} · {RESEARCH_GENRE[post.board]}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="primary">{BOARDS[post.board].title}</Badge>
+            <Badge variant="neutral">{RESEARCH_GENRE[post.board]}</Badge>
+          </div>
           <h1 className="max-w-[20ch] text-[clamp(1.875rem,5vw,3rem)] font-semibold leading-[1.12] tracking-[-0.04em] text-balance">{post.title}</h1>
           <ResearchAuthor profile={post.profiles} createdAt={post.created_at} updatedAt={post.updated_at} />
+          <PostEngagement postId={post.id} initialViews={post.view_count ?? 0} initialLikes={post.like_count ?? 0} initialLiked={Boolean(post.liked_by_me)} actorId={user?.id} disabledReason={likeDisabledReason || undefined} />
         </header>
         <section className="mx-auto w-full max-w-4xl" aria-label="正文观点"><ResearchBody body={post.body} /></section>
         {chart?.symbol ? <section className="research-section" aria-labelledby="post-chart-title"><header className="research-section-heading"><p>实时参考</p><h2 id="post-chart-title">TradingView 图表</h2><span>{chart.symbol} · {chart.interval}</span></header><iframe title={`${chart.symbol} TradingView 图表`} src={tradingViewEmbedUrl(chart)} className="aspect-video min-h-[420px] w-full rounded-xl border bg-muted max-md:min-h-[300px]" loading="lazy" referrerPolicy="no-referrer" /></section> : null}

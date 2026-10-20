@@ -7,6 +7,10 @@ export const BOARDS = {
     title: "思路分享",
     description: "分享理论理解、判断思路与复盘总结。",
   },
+  video_sharing: {
+    title: "视频分享",
+    description: "同步和分享 YouTube 等视频内容，与行情分析板块分开。",
+  },
   public_viewpoint: {
     title: "公开观点",
     description: "发布可讨论、可追踪并可在个人主页沉淀的市场观点。",
@@ -178,6 +182,15 @@ export type CommunityPost = {
   external_references: ExternalReference[];
   timeline_nodes: ResearchTimelineNode[];
   profiles: PublicProfile | null;
+  view_count?: number;
+  like_count?: number;
+  liked_by_me?: boolean;
+};
+
+export type PostCommentImage = {
+  id: string;
+  storage_path: string;
+  sort_order: number;
 };
 
 export type PostComment = {
@@ -190,6 +203,7 @@ export type PostComment = {
   created_at: string;
   updated_at: string;
   profiles: PublicProfile | null;
+  images?: PostCommentImage[];
 };
 
 export type PrivateEntryKind = "review" | "journal" | "draft";

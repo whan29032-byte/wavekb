@@ -5,7 +5,7 @@ import { Button } from "@wavekb/ui";
 
 export function EmptyBoard({ board, configured }: { board: BoardSlug; configured: boolean }) {
   return (
-    <section className="grid justify-items-start gap-4 rounded-xl border border-dashed bg-surface p-8 md:p-12">
+    <section className="grid justify-items-start gap-4 rounded-[var(--radius-panel)] border border-dashed border-border bg-surface p-8 shadow-[var(--shadow-xs)] md:p-12">
       <NotePencil aria-hidden size={34} weight="duotone" className="text-primary" />
       <div className="grid gap-2">
         <h2 className="text-xl font-semibold">{configured ? "这个板块还没有内容" : "新应用尚未连接 Supabase"}</h2>

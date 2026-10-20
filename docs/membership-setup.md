@@ -7,7 +7,7 @@
 ## 发布顺序
 
 1. 同一候选提交通过单元测试、实际 PostgreSQL 合同测试、构建、浏览器和知识库验收。
-2. 经正常发布审批依次应用 `202610100001_admin_payment_hardening.sql`、`202610100002_membership_foundation.sql`、`202610100003_membership_commerce.sql`、`202610100004_membership_benefits.sql`、`202610100005_membership_wallet_payments.sql`，只应用当前已知 marker 之后的未部署部分。数据库公开 `wavekb_schema_version()` 必须为 `202610100005`。未知 marker 停止发布。
+2. 经正常发布审批依次应用 `202610100001_admin_payment_hardening.sql` 至 `202610100005_membership_wallet_payments.sql` 的会员/钱包迁移，并按统一发布流程继续应用 Hermes、波浪图片、YouTube 政策与社区互动迁移到 `202610190001`；只应用当前已知 marker 之后的未部署部分。数据库公开 `wavekb_schema_version()` 必须为 `202610190001`。未知 marker 停止发布。
 3. 发布同一提交的 Gateway 与 worker；`MEMBERSHIP_MANAGED_AI_ENABLED` 保持 `false`。
 4. 独立部署会员钱包 Checkout。若已有 Stripe 历史订单，还须保留旧函数部署与回调。现有 Backend 工作流不代替此步骤：
 

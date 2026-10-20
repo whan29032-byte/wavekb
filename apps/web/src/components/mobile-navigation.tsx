@@ -21,10 +21,22 @@ export function MobileNavigation() {
     return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
   }, [open]);
 
+  const items = [
+    { label: "知识库", href: "/knowledge", matches: (path: string) => path.startsWith("/knowledge") },
+    { label: "交易收益榜", href: "/leaderboard", matches: (path: string) => path.startsWith("/leaderboard") },
+    { label: "社区", href: "/community/idea_sharing", matches: (path: string) => path.startsWith("/community") },
+    { label: "导师", href: "/mentors", matches: (path: string) => path.startsWith("/mentors") || path.startsWith("/tutoring") },
+    { label: "积分商城", href: "/rewards", matches: (path: string) => path.startsWith("/rewards") },
+    { label: "机构研报", href: "/research", matches: (path: string) => path.startsWith("/research"), prefetch: false },
+  ] as const;
+
   return <div ref={root} className="lg:hidden">
-    <button ref={trigger} type="button" aria-label={open ? "收起主导航" : "展开主导航"} aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)} className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">{open ? <X aria-hidden size={20} /> : <List aria-hidden size={20} />}</button>
-    {open ? <nav id={id} aria-label="移动主导航" className="absolute inset-x-4 top-full mt-2 grid gap-1 rounded-xl border bg-surface p-2 shadow-xl">
-      {[["知识库", "/knowledge"], ["交易收益榜", "/leaderboard"], ["社区", "/community/idea_sharing"], ["导师", "/mentors"], ["积分商城", "/rewards"], ["机构研报", "/research"]].map(([label, href]) => <Link key={href} href={href} prefetch={href === "/research" ? false : undefined} aria-current={pathname?.startsWith(href) ? "page" : undefined} onClick={() => setOpen(false)} className="flex min-h-11 items-center rounded-lg px-3 text-sm font-semibold hover:bg-muted aria-[current=page]:bg-muted aria-[current=page]:text-primary">{label}</Link>)}
+    <button ref={trigger} type="button" aria-label={open ? "收起主导航" : "展开主导航"} aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)} className="grid size-11 cursor-pointer place-items-center rounded-[var(--radius-control)] text-muted-foreground transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">{open ? <X aria-hidden size={20} /> : <List aria-hidden size={20} />}</button>
+    {open ? <nav id={id} aria-label="移动主导航" className="absolute inset-x-4 top-full mt-2 grid gap-1 rounded-[var(--radius-card)] border bg-popover p-2 shadow-[var(--shadow-floating)]">
+      {items.map((item) => {
+        const active = pathname ? item.matches(pathname) : false;
+        return <Link key={item.href} href={item.href} prefetch={"prefetch" in item ? item.prefetch : undefined} aria-current={active ? "page" : undefined} onClick={() => setOpen(false)} className="flex min-h-11 items-center rounded-[var(--radius-control)] px-3 text-sm font-semibold transition-colors hover:bg-surface-subtle aria-[current=page]:bg-primary-selected aria-[current=page]:text-primary">{item.label}</Link>;
+      })}
     </nav> : null}
   </div>;
 }

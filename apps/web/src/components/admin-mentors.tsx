@@ -33,10 +33,75 @@ function validateService(name: string, price: number, days: number, weekly: numb
 }
 
 function MentorCreate({ count, pending, onSave }: { count: number; pending: boolean; onSave: (value: MentorCatalogInput) => Promise<boolean> }) {
-  const [uid, setUid] = useState(""); const [selected, setSelected] = useState<(AdminUser & { bio?: string }) | null>(null); const [lookup, setLookup] = useState(false); const [headline, setHeadline] = useState(""); const [specialties, setSpecialties] = useState(""); const [price, setPrice] = useState("299"); const [weekly, setWeekly] = useState("3"); const [days, setDays] = useState("30"); const [error, setError] = useState("");
-  async function findUser() { if (!/^\d{5,6}$/.test(uid.trim())) return setError("请输入 5 至 6 位数字 UID。"); setLookup(true); setError(""); try { const params = new URLSearchParams({ query: uid.trim(), status: "all", role: "all", page: "1", limit: "25" }); const response = await fetch(`/api/admin/users?${params}`, { cache: "no-store" }); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(String(payload.error || "administration_failed")); const user = (Array.isArray(payload.users) ? payload.users : []).find((item: AdminUser) => String(item.public_uid || "") === uid.trim()); if (!user) throw new Error("没有找到这个站内 UID。"); setSelected(user); } catch (lookupError) { setSelected(null); setError(friendlyError(lookupError)); } finally { setLookup(false); } }
-  async function submit(event: React.FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return setError("请先读取并确认站内用户。"); const cents = Math.round(Number(price) * 100); const validation = validateService("一对一波浪辅导", cents, Number(days), Number(weekly)); if (validation) return setError(validation); const saved = await onSave({ ownerId: selected.id, displayName: selected.display_name || `UID ${selected.public_uid}`, headline, bio: "", avatarUrl: selected.avatar_url, specialties: specialties.split(/[、，,]/).map((item) => item.trim()).filter(Boolean), active: true, sortOrder: (count + 1) * 10, offerName: "一对一波浪辅导", priceCents: cents, durationDays: Number(days), weeklyQuestions: Number(weekly), offerActive: true }); if (saved) { setUid(""); setSelected(null); setHeadline(""); setSpecialties(""); } }
-  return <form className="grid gap-4 rounded-xl border bg-surface p-4 md:p-5" onSubmit={submit}><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"><Field><Label>站内 UID</Label><Input value={uid} onChange={(event) => { setUid(event.target.value); setSelected(null); }} inputMode="numeric" maxLength={6} pattern="[0-9]{5,6}" placeholder="输入 5 至 6 位 UID" required /></Field><Button type="button" variant="secondary" className="self-end" disabled={lookup} onClick={findUser}><UserFocus aria-hidden size={17} />{lookup ? "正在读取" : "读取站内资料"}</Button></div>{selected ? <div className="rounded-lg bg-muted p-4"><strong>{selected.display_name || "未命名用户"}</strong><p className="mt-1 text-xs text-muted-foreground">UID {selected.public_uid} · {selected.email || "未绑定邮箱"}</p><p className="mt-2 text-sm text-muted-foreground">{selected.bio || "该用户尚未填写个人简介。"}</p></div> : <p className="text-xs text-muted-foreground">上架前必须匹配现有用户，导师账号才可回复学员并核对收款。</p>}<div className="grid gap-3 sm:grid-cols-2"><Field><Label>一句话介绍</Label><Input value={headline} onChange={(event) => setHeadline(event.target.value)} maxLength={120} /></Field><Field><Label>擅长方向</Label><Input value={specialties} onChange={(event) => setSpecialties(event.target.value)} placeholder="推动浪、调整浪、加密资产" /></Field></div><div className="grid gap-3 sm:grid-cols-3"><Field><Label>价格（USDT）</Label><Input type="number" min={0} step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} /></Field><Field><Label>每周提问</Label><Input type="number" min={1} max={100} step={1} value={weekly} onChange={(event) => setWeekly(event.target.value)} /></Field><Field><Label>有效天数</Label><Input type="number" min={1} max={366} step={1} value={days} onChange={(event) => setDays(event.target.value)} /></Field></div>{error ? <FieldMessage role="alert">{error}</FieldMessage> : null}<Button type="submit" className="w-fit" disabled={!selected || pending}><Plus aria-hidden size={17} />上架导师与首个方案</Button></form>;
+  const [uid, setUid] = useState("");
+  const [selected, setSelected] = useState<(AdminUser & { bio?: string }) | null>(null);
+  const [lookup, setLookup] = useState(false);
+  const [headline, setHeadline] = useState("");
+  const [specialties, setSpecialties] = useState("");
+  const [price, setPrice] = useState("299");
+  const [weekly, setWeekly] = useState("3");
+  const [days, setDays] = useState("30");
+  const [error, setError] = useState("");
+  async function lookupUser(value: string): Promise<(AdminUser & { bio?: string }) | null> {
+    const normalized = value.trim();
+    if (!/^\d{5,6}$/.test(normalized)) {
+      setSelected(null);
+      setError("请输入 5 至 6 位数字 UID。");
+      return null;
+    }
+    setLookup(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({ query: normalized, status: "all", role: "all", page: "1", limit: "25" });
+      const response = await fetch(`/api/admin/users?${params}`, { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(payload.error || "administration_failed"));
+      const user = (Array.isArray(payload.users) ? payload.users : []).find((item: AdminUser) => String(item.public_uid || "") === normalized);
+      if (!user) throw new Error("没有找到这个站内 UID。");
+      setSelected(user);
+      return user;
+    } catch (lookupError) {
+      setSelected(null);
+      setError(friendlyError(lookupError));
+      return null;
+    } finally {
+      setLookup(false);
+    }
+  }
+  async function findUser() { await lookupUser(uid); }
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const actor = selected ?? await lookupUser(uid);
+    if (!actor) return;
+    const cents = Math.round(Number(price) * 100);
+    const validation = validateService("一对一波浪辅导", cents, Number(days), Number(weekly));
+    if (validation) return setError(validation);
+    setError("");
+    const saved = await onSave({
+      ownerId: actor.id,
+      displayName: actor.display_name || `UID ${actor.public_uid}`,
+      headline,
+      bio: "",
+      avatarUrl: actor.avatar_url,
+      specialties: specialties.split(/[、，,]/).map((item) => item.trim()).filter(Boolean),
+      active: true,
+      sortOrder: (count + 1) * 10,
+      offerName: "一对一波浪辅导",
+      priceCents: cents,
+      durationDays: Number(days),
+      weeklyQuestions: Number(weekly),
+      offerActive: true,
+    });
+    if (saved) {
+      setUid("");
+      setSelected(null);
+      setHeadline("");
+      setSpecialties("");
+      return;
+    }
+    setError("上架未完成，请查看页面上方提示。");
+  }
+  return <form className="grid gap-4 rounded-xl border bg-surface p-4 md:p-5" onSubmit={submit}><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"><Field><Label>站内 UID</Label><Input value={uid} onChange={(event) => { setUid(event.target.value); setSelected(null); }} inputMode="numeric" maxLength={6} pattern="[0-9]{5,6}" placeholder="输入 5 至 6 位 UID" required /></Field><Button type="button" variant="secondary" className="self-end" disabled={lookup} onClick={findUser}><UserFocus aria-hidden size={17} />{lookup ? "正在读取" : "读取站内资料"}</Button></div>{selected ? <div className="rounded-lg bg-muted p-4"><strong>{selected.display_name || "未命名用户"}</strong><p className="mt-1 text-xs text-muted-foreground">UID {selected.public_uid} · {selected.email || "未绑定邮箱"}</p><p className="mt-2 text-sm text-muted-foreground">{selected.bio || "该用户尚未填写个人简介。"}</p></div> : <p className="text-xs text-muted-foreground">上架前必须匹配现有用户，导师账号才可回复学员并核对收款。</p>}<div className="grid gap-3 sm:grid-cols-2"><Field><Label>一句话介绍</Label><Input value={headline} onChange={(event) => setHeadline(event.target.value)} maxLength={120} /></Field><Field><Label>擅长方向</Label><Input value={specialties} onChange={(event) => setSpecialties(event.target.value)} placeholder="推动浪、调整浪、加密资产" /></Field></div><div className="grid gap-3 sm:grid-cols-3"><Field><Label>价格（USDT）</Label><Input type="number" min={0} step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} /></Field><Field><Label>每周提问</Label><Input type="number" min={1} max={100} step={1} value={weekly} onChange={(event) => setWeekly(event.target.value)} /></Field><Field><Label>有效天数</Label><Input type="number" min={1} max={366} step={1} value={days} onChange={(event) => setDays(event.target.value)} /></Field></div>{error ? <FieldMessage role="alert">{error}</FieldMessage> : null}<Button type="submit" className="w-fit" disabled={pending || lookup}><Plus aria-hidden size={17} />{lookup ? "正在读取" : pending ? "正在上架" : "上架导师与首个方案"}</Button></form>;
 }
 
 function OfferEditor({ offer, pending, onUpdate, onDelete }: { offer: AdminMentorOffer; pending: boolean; onUpdate: (value: Partial<MentorOfferInput>) => Promise<boolean>; onDelete: () => Promise<boolean> }) {
