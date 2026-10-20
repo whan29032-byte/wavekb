@@ -1,11 +1,14 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Gift, Plus, Receipt, SealCheck } from "@phosphor-icons/react";
 import { formatLotteryProbability } from "@wavekb/domain";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { adminRewardLotteryMutations, loadAdminRewardLottery } from "@/lib/admin/reward-lottery-client-repository";
+import { uploadRewardImage } from "@/lib/admin/reward-images";
 import type { AdminRewardLotteryCampaign, AdminRewardLotteryDraw, AdminRewardLotteryStore, RewardLotteryCampaignInput, RewardLotteryPrizeInput } from "@/lib/admin/reward-lottery-types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -32,6 +35,7 @@ function CampaignEditor({ campaign, pending, onSave }: { campaign?: AdminRewardL
   const [title, setTitle] = useState(campaign?.title ?? "");
   const [description, setDescription] = useState(campaign?.description ?? "");
   const [imageUrl, setImageUrl] = useState(campaign?.image_url ?? "");
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [cost, setCost] = useState(String(campaign?.entry_cost_points ?? 100));
   const [startsAt, setStartsAt] = useState(inputDate(campaign?.starts_at));
   const [endsAt, setEndsAt] = useState(inputDate(campaign?.ends_at));
@@ -45,19 +49,32 @@ function CampaignEditor({ campaign, pending, onSave }: { campaign?: AdminRewardL
     if (title.trim().length < 2 || title.trim().length > 80) return setError("活动名称应为 2 至 80 个字符。");
     if (!Number.isInteger(points) || points < 1 || points > 100000) return setError("每次消耗积分应为 1 至 100000 的整数。");
     if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) return setError("结束时间必须晚于开始时间。");
-    if (imageUrl.trim()) {
-      try { if (new URL(imageUrl.trim()).protocol !== "https:") return setError("活动图片必须使用 HTTPS 地址。"); }
+    let nextImageUrl = imageUrl.trim();
+    if (imageFile) {
+      try {
+        nextImageUrl = await uploadRewardImage(createClient(), imageFile, "lottery");
+        setImageUrl(nextImageUrl);
+      } catch (uploadError) {
+        return setError(uploadError instanceof Error ? uploadError.message : "活动图片上传失败，请重试。");
+      }
+    }
+    if (nextImageUrl) {
+      try { if (new URL(nextImageUrl).protocol !== "https:") return setError("活动图片必须使用 HTTPS 地址。"); }
       catch { return setError("活动图片 URL 格式不正确。"); }
     }
     setError("");
-    await onSave({ id: campaign?.id, title: title.trim(), description: description.trim(), imageUrl, entryCostPoints: points, startsAt: start.toISOString(), endsAt: end.toISOString() });
+    await onSave({ id: campaign?.id, title: title.trim(), description: description.trim(), imageUrl: nextImageUrl, entryCostPoints: points, startsAt: start.toISOString(), endsAt: end.toISOString() });
   }
 
   return <form className="grid gap-4" onSubmit={submit}>
     <div className="grid gap-3 md:grid-cols-2"><Field><Label htmlFor="lottery-campaign-title">活动名称</Label><Input id="lottery-campaign-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={80} required /></Field><Field><Label htmlFor="lottery-campaign-cost">每次消耗积分</Label><Input id="lottery-campaign-cost" type="number" min={1} max={100000} step={1} value={cost} onChange={(event) => setCost(event.target.value)} required /></Field></div>
     <Field><Label htmlFor="lottery-campaign-description">活动说明</Label><Textarea id="lottery-campaign-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={500} /></Field>
     <div className="grid gap-3 md:grid-cols-2"><Field><Label htmlFor="lottery-campaign-start">开始时间</Label><Input id="lottery-campaign-start" type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required /></Field><Field><Label htmlFor="lottery-campaign-end">结束时间</Label><Input id="lottery-campaign-end" type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required /></Field></div>
-    <Field><Label htmlFor="lottery-campaign-image">活动图片 URL</Label><Input id="lottery-campaign-image" type="url" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="可选，HTTPS 地址" /></Field>
+    <div className="grid gap-3 md:grid-cols-2">
+      <Field><Label htmlFor="lottery-campaign-image">活动图片 URL</Label><Input id="lottery-campaign-image" type="url" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="可选，HTTPS 地址" /></Field>
+      <Field><Label htmlFor="lottery-campaign-image-file">上传活动图片</Label><input id="lottery-campaign-image-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium" /><span className="text-xs text-muted-foreground">JPG / PNG / WebP，最大 5MB；上传后覆盖 URL。</span></Field>
+    </div>
+    {imageUrl ? <div className="overflow-hidden rounded-lg border bg-muted"><img src={imageUrl} alt="活动图片预览" className="h-36 w-full object-cover" loading="lazy" /></div> : null}
     {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
     <div className="flex justify-end border-t pt-4"><Button type="submit" disabled={pending}>{campaign ? "保存活动" : "创建活动"}</Button></div>
   </form>;
@@ -66,6 +83,8 @@ function CampaignEditor({ campaign, pending, onSave }: { campaign?: AdminRewardL
 function PrizeEditor({ campaignId, existingProbability, pending, onSave }: { campaignId: string; existingProbability: number; pending: boolean; onSave: (input: RewardLotteryPrizeInput) => Promise<boolean> }) {
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [probability, setProbability] = useState("1.00");
   const [stock, setStock] = useState("1");
   const [sortOrder, setSortOrder] = useState("100");
@@ -82,9 +101,22 @@ function PrizeEditor({ campaignId, existingProbability, pending, onSave }: { cam
     if (existingProbability + basisPoints > 10000) return setError("奖品概率合计不能超过 100.00%。");
     if (!Number.isInteger(inventory) || inventory < 0) return setError("奖品库存必须是大于或等于 0 的整数。");
     if (!Number.isInteger(order)) return setError("排序必须是整数。");
+    let nextImageUrl = imageUrl.trim();
+    if (imageFile) {
+      try {
+        nextImageUrl = await uploadRewardImage(createClient(), imageFile, "lottery");
+        setImageUrl(nextImageUrl);
+      } catch (uploadError) {
+        return setError(uploadError instanceof Error ? uploadError.message : "奖品图片上传失败，请重试。");
+      }
+    }
+    if (nextImageUrl) {
+      try { if (new URL(nextImageUrl).protocol !== "https:") return setError("奖品图片必须使用 HTTPS 地址。"); }
+      catch { return setError("奖品图片 URL 格式不正确。"); }
+    }
     setError("");
-    const saved = await onSave({ campaignId, name: name.trim(), summary: summary.trim(), imageUrl: null, probabilityBps: basisPoints, stockTotal: inventory, sortOrder: order });
-    if (saved) { setName(""); setSummary(""); setProbability("1.00"); setStock("1"); }
+    const saved = await onSave({ campaignId, name: name.trim(), summary: summary.trim(), imageUrl: nextImageUrl, probabilityBps: basisPoints, stockTotal: inventory, sortOrder: order });
+    if (saved) { setName(""); setSummary(""); setImageUrl(""); setImageFile(null); setProbability("1.00"); setStock("1"); }
   }
 
   return <form className="grid gap-4 rounded-xl border bg-surface p-4 md:p-5" noValidate onSubmit={submit}>
@@ -94,6 +126,11 @@ function PrizeEditor({ campaignId, existingProbability, pending, onSave }: { cam
       <Field><Label htmlFor="lottery-prize-stock">奖品库存</Label><Input id="lottery-prize-stock" type="number" min={0} step={1} value={stock} onChange={(event) => setStock(event.target.value)} required /></Field>
       <Field><Label htmlFor="lottery-prize-order">排序</Label><Input id="lottery-prize-order" type="number" step={1} value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} /></Field>
     </div>
+    <div className="grid gap-3 md:grid-cols-2">
+      <Field><Label htmlFor="lottery-prize-image">奖品图片 URL</Label><Input id="lottery-prize-image" type="url" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="可选，HTTPS 地址" /></Field>
+      <Field><Label htmlFor="lottery-prize-image-file">上传奖品图片</Label><input id="lottery-prize-image-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium" /><span className="text-xs text-muted-foreground">JPG / PNG / WebP，最大 5MB。</span></Field>
+    </div>
+    {imageUrl ? <div className="overflow-hidden rounded-lg border bg-muted"><img src={imageUrl} alt="奖品图片预览" className="h-32 w-full object-cover" loading="lazy" /></div> : null}
     <p className="text-xs text-muted-foreground">所有中奖奖品均进入后台待处理，由管理员确认发放并填写领取方式或兑换码。</p>
     {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
     <div className="flex items-center justify-between gap-4 border-t pt-4"><span className="text-xs text-muted-foreground">添加后奖品总概率不得超过 100.00%</span><Button type="submit" disabled={pending}><Plus aria-hidden size={17} />添加奖品</Button></div>

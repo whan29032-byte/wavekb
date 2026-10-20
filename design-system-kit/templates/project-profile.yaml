@@ -1,0 +1,69 @@
+# PROJECT PROFILE — 复制到项目根目录后再按需调整；留空项由 Codex 审计实际代码决定。
+# 本文件是配置示例，不是可直接运行的应用配置。
+version: '1.0'
+project:
+  name: ''                        # 项目名
+  repo_path: '.'
+  product_type: ''                # 例如 SaaS / 电商 / 内容媒体 / 编辑器 / 工作台
+  primary_users: ''               # 核心用户、使用时长和常见任务
+  primary_tasks: []              # 建议列出 3 个实际任务
+  critical_flows: []             # 不允许改业务逻辑的流程
+  language: 'zh-CN'
+  platforms: ['web']
+
+execution:
+  mode: AUTO                      # AUTO | AUDIT | SYSTEM | IMPLEMENT | REVIEW | MIGRATE
+  output: code-and-spec          # spec-only | code-and-spec | audit-only
+  scope: []                      # 空：根据当前请求确定
+  change_strategy: incremental   # incremental / greenfield
+  require_approval_for:
+    - destructive_changes
+    - dependency_replacement
+    - business_logic_changes
+    - production_deployment
+
+brand:
+  character: ''                   # 如“克制、精确、明快”；不填则先提出候选
+  references: []                  # 已获授权的截图、网站或设计稿；附参考理由
+  logo_path: ''
+  preserve_existing_brand: true
+  core_colors:
+    primary: ''                   # 如 '#2563EB'；留空优先沿用现有品牌
+    secondary: ''
+    tertiary: ''
+  neutral_family: ''              # gray/slate/mauve/sage/olive/sand/现有色板
+  allow_custom_palette: true
+
+design:
+  themes: follow-existing        # follow-existing | light | dark | both
+  density: adaptive              # comfortable | compact | adaptive
+  radius_character: ''           # 方正/柔和/克制；由品牌识别确定
+  motion_character: restrained
+  typography_family: ''          # 使用现有字体优先
+  accessibility_target: WCAG_2_2_AA
+  minimum_viewports: [320, 390, 768, 1280, 1440]
+  states:
+    - default
+    - hover
+    - pressed
+    - selected
+    - focus-visible
+    - disabled
+    - loading
+    - success
+    - error
+    - empty
+
+quality:
+  enforce_semantic_tokens: true
+  flag_raw_color_values: true
+  flag_random_spacing: true
+  require_visual_regression: true
+  require_real_contrast_measurement: true
+  require_manual_keyboard_review: true
+  do_not_fabricate_product_data: true
+
+notes:
+  confirmed_decisions: []
+  unknowns: []
+  do_not_change: []

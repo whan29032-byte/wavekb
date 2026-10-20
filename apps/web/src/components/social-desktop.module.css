@@ -29,8 +29,8 @@
 .friendRow strong,.requestRow strong,.conversationRow strong,.notificationRow strong,.searchResult strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.73rem; }
 .friendRow div>span,.requestRow small,.conversationRow small,.notificationRow small { overflow:hidden; color:var(--muted-foreground); font-size:.64rem; text-overflow:ellipsis; white-space:nowrap; }
 .friendAction { display:grid; width:2rem; height:2rem; place-items:center; border-radius:.4rem; color:var(--primary); }
-.presence { position:absolute; left:2rem; bottom:.55rem; z-index:2; width:.55rem; height:.55rem; border:2px solid var(--surface); border-radius:50%; background:#929dac; }
-.presence[data-online] { background:#24a866; }
+.presence { position:absolute; left:2rem; bottom:.55rem; z-index:2; width:.55rem; height:.55rem; border:2px solid var(--surface); border-radius:50%; background:var(--muted-foreground); }
+.presence[data-online] { background:var(--success); }
 .conversationRow { width:100%; grid-template-columns:auto minmax(0,1fr) auto auto; }
 .mentorRow { display:grid; min-height:50px; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:.45rem; border-bottom:1px solid color-mix(in srgb,var(--border) 62%,transparent); padding:.35rem .55rem; }
 .mentorRow:hover { background:var(--primary-selected); }

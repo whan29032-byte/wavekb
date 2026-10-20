@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Gift, Ticket } from "@phosphor-icons/react";
@@ -88,6 +90,7 @@ export function RewardLottery({ actorId, initialState }: RewardLotteryProps) {
           <span className={styles.eyebrow}><Ticket aria-hidden size={17} />限时活动</span>
           <h2 id="reward-lottery-title">{state.campaign.title}</h2>
           <p>{state.campaign.description}</p>
+          {state.campaign.image_url ? <img src={state.campaign.image_url} alt={state.campaign.title} className="mt-3 h-40 w-full max-w-md rounded-xl object-cover" loading="lazy" /> : null}
         </div>
         <dl className={styles.summary}>
           <div><dt>每次消耗</dt><dd>{state.campaign.entry_cost_points} 积分</dd></div>
@@ -133,7 +136,10 @@ export function RewardLottery({ actorId, initialState }: RewardLotteryProps) {
           <div className={styles.prizeList}>
             {state.prizes.map((prize) => (
               <article key={prize.id} className={styles.prizeRow}>
-                <div><strong>{prize.name}</strong><span>{prize.summary}</span></div>
+                <div className="flex min-w-0 items-center gap-3">
+                  {prize.image_url ? <img src={prize.image_url} alt={prize.name} className="h-12 w-12 shrink-0 rounded-md object-cover" loading="lazy" /> : null}
+                  <div><strong>{prize.name}</strong><span>{prize.summary}</span></div>
+                </div>
                 <div className={styles.prizeMeta}>
                   <strong>{formatLotteryProbability(prize.probability_bps)}</strong>
                   <span>{prize.stock_remaining > 0 ? `剩余 ${prize.stock_remaining}` : "已兑完"}</span>

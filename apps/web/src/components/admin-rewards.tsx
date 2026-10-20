@@ -1,10 +1,13 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle, Coins, Medal, Package, Plus, Prohibit, Receipt, UserCircle } from "@phosphor-icons/react";
 import { Button, Field, FieldMessage, Input, Label, Textarea } from "@wavekb/ui";
 import { adminRewardMutations, loadAdminRewardStore } from "@/lib/admin/rewards-client-repository";
+import { uploadRewardImage } from "@/lib/admin/reward-images";
 import type { AdminRewardProduct, AdminRewardRedemption, AdminRewardStore, AdminRewardWallet, RewardProductInput } from "@/lib/admin/rewards-types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -32,6 +35,8 @@ function ProductEditor({ product, pending, onSave }: { product?: AdminRewardProd
   const [summary, setSummary] = useState(product?.summary || "");
   const [description, setDescription] = useState(product?.description || "");
   const [imageUrl, setImageUrl] = useState(product?.image_url || "");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [features, setFeatures] = useState(Array.isArray(product?.metadata?.features) ? (product!.metadata.features as unknown[]).filter((item): item is string => typeof item === "string").join("\n") : "");
   const [category, setCategory] = useState<AdminRewardProduct["category"]>(product?.category || "identity");
   const [productType, setProductType] = useState<AdminRewardProduct["product_type"]>(product?.product_type || "nameplate");
   const [pricePoints, setPricePoints] = useState(String(product?.price_points ?? 100));
@@ -50,23 +55,35 @@ function ProductEditor({ product, pending, onSave }: { product?: AdminRewardProd
     const order = Number(sortOrder);
     if (name.trim().length < 2 || name.trim().length > 80) return setLocalError("商品名称应为 2 至 80 个字符。");
     if (!Number.isInteger(points) || points <= 0 || !Number.isInteger(inventory) || inventory < -1 || !Number.isInteger(order)) return setLocalError("请检查积分、库存和排序值；库存 -1 表示不限量。");
-    if (imageUrl.trim()) {
+    let nextImageUrl = imageUrl.trim();
+    if (imageFile) {
       try {
-        if (new URL(imageUrl.trim()).protocol !== "https:") return setLocalError("展示图必须使用 HTTPS 地址。");
+        nextImageUrl = await uploadRewardImage(createClient(), imageFile, "products");
+        setImageUrl(nextImageUrl);
+      } catch (uploadError) {
+        return setLocalError(uploadError instanceof Error ? uploadError.message : "图片上传失败，请重试。");
+      }
+    }
+    if (nextImageUrl) {
+      try {
+        if (new URL(nextImageUrl).protocol !== "https:") return setLocalError("展示图必须使用 HTTPS 地址。");
       } catch {
         return setLocalError("展示图 URL 格式不正确。");
       }
     }
-    const metadata: Record<string, unknown> = productType === "nameplate"
-      ? { nameplate_style: nameplateStyle, duration_days: Number(durationDays) }
-      : productType === "title" ? { display_title: displayTitle.trim() } : {};
+    const featureList = features.split(/\r?\n/).map((item) => item.trim()).filter(Boolean).slice(0, 10);
+    const metadata: Record<string, unknown> = {
+      ...(productType === "nameplate" ? { nameplate_style: nameplateStyle, duration_days: Number(durationDays) } : {}),
+      ...(productType === "title" ? { display_title: displayTitle.trim() } : {}),
+      ...(featureList.length ? { features: featureList } : {}),
+    };
     if (productType === "nameplate" && (!Number.isInteger(Number(durationDays)) || Number(durationDays) < 1 || Number(durationDays) > 3650)) return setLocalError("铭牌有效期应为 1 至 3650 天的整数。");
     if (productType === "title" && (!displayTitle.trim() || displayTitle.trim().length > 24)) return setLocalError("身份称号应为 1 至 24 个字符。");
     setLocalError("");
-    const saved = await onSave({ id: product?.id, name: name.trim(), summary, description, imageUrl, category, productType, pricePoints: points, stock: inventory, metadata, active, sortOrder: order });
+    const saved = await onSave({ id: product?.id, name: name.trim(), summary, description, imageUrl: nextImageUrl, category, productType, pricePoints: points, stock: inventory, metadata, active, sortOrder: order });
     if (!saved) return;
     if (!product) {
-      setName(""); setSummary(""); setDescription(""); setImageUrl(""); setPricePoints("100"); setStock("-1"); setSortOrder("100");
+      setName(""); setSummary(""); setDescription(""); setImageUrl(""); setImageFile(null); setFeatures(""); setPricePoints("100"); setStock("-1"); setSortOrder("100");
     }
   }
 
@@ -85,11 +102,14 @@ function ProductEditor({ product, pending, onSave }: { product?: AdminRewardProd
       </div>
       {productType === "nameplate" ? <div className="grid gap-3 sm:grid-cols-2"><Field><Label>铭牌样式</Label><select className={controlClass} value={nameplateStyle} onChange={(event) => setNameplateStyle(event.target.value)}>{nameplateStyles.map((style) => <option key={style} value={style}>{style}</option>)}</select></Field><Field><Label>兑换有效天数</Label><Input type="number" min={1} max={3650} step={1} value={durationDays} onChange={(event) => setDurationDays(event.target.value)} /></Field></div> : null}
       {productType === "title" ? <Field><Label>兑换后称号</Label><Input value={displayTitle} onChange={(event) => setDisplayTitle(event.target.value)} maxLength={24} required /></Field> : null}
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_auto] sm:items-end">
+      <Field><Label htmlFor={`reward-features-${product?.id || "new"}`}>商品卖点 / 功能（每行一条，最多 10 条）</Label><Textarea id={`reward-features-${product?.id || "new"}`} value={features} onChange={(event) => setFeatures(event.target.value)} maxLength={1000} className="min-h-20" placeholder={"例如：全站显示专属徽章\n兑换后立即生效"} /></Field>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_10rem_auto] sm:items-end">
         <Field><Label>展示图 URL</Label><Input type="url" value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} maxLength={2048} placeholder="可选，必须使用 HTTPS" /></Field>
+        <Field><Label>上传展示图</Label><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] ?? null)} className="block w-full rounded-lg border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium" /><span className="text-xs text-muted-foreground">JPG / PNG / WebP，最大 5MB；上传后覆盖 URL。</span></Field>
         <Field><Label>排序</Label><Input type="number" step={1} value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} /></Field>
         <label className="flex min-h-11 items-center gap-2 rounded-lg border bg-background px-3 text-sm font-medium"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />前台展示</label>
       </div>
+      {imageUrl ? <div className="overflow-hidden rounded-lg border bg-muted"><img src={imageUrl} alt="商品展示图预览" className="h-36 w-full object-cover" loading="lazy" /></div> : null}
       {localError ? <FieldMessage role="alert">{localError}</FieldMessage> : null}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4"><span className="text-xs text-muted-foreground">商品不做物理删除，下架请关闭“前台展示”。</span><Button type="submit" disabled={pending}>{product ? "保存商品" : <><Plus aria-hidden size={17} />新建商品</>}</Button></div>
     </form>

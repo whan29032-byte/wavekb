@@ -1,0 +1,58 @@
+# 使用示例：不是通用默认，只有 MOLIPLY 工程才采用本品牌参数。
+version: '1.0'
+project:
+  name: 'MOLIPLY 模力补给'
+  repo_path: '.'
+  product_type: '数字商品和软件订阅商城'
+  primary_users: '购买数字商品的中文用户及后台运营人员'
+  primary_tasks:
+    - '查找商品与查看交付方式'
+    - '确认订单和支付状态'
+    - '查询订单、商品交付及售后'
+  critical_flows:
+    - '既有订单及发货状态机'
+    - '既有支付确认及退款规则'
+    - '已有激活码核销业务状态'
+  language: 'zh-CN'
+  platforms: ['web', 'mobile']
+execution:
+  mode: AUTO
+  output: code-and-spec
+  scope: []
+  change_strategy: incremental
+brand:
+  character: '简洁、可信、精确；品牌页面可适当有科技感，交易和表单页面突出可读性'
+  references: []
+  logo_path: ''
+  preserve_existing_brand: true
+  core_colors:
+    primary: '#2563EB'
+    secondary: '#06B6D4'
+    tertiary: '#0B0F19'
+  neutral_family: 'slate'
+  allow_custom_palette: true
+design:
+  themes: both
+  density: adaptive
+  radius_character: '克制'
+  motion_character: restrained
+  typography_family: ''
+  accessibility_target: WCAG_2_2_AA
+  minimum_viewports: [320, 390, 768, 1280, 1440]
+quality:
+  enforce_semantic_tokens: true
+  flag_raw_color_values: true
+  flag_random_spacing: true
+  require_visual_regression: true
+  require_real_contrast_measurement: true
+  require_manual_keyboard_review: true
+  do_not_fabricate_product_data: true
+notes:
+  confirmed_decisions:
+    - 'MOLIPLY 英文和模力补给中文品牌名'
+    - '保留现有品牌色和既有业务流程'
+  unknowns:
+    - '当前仓库与已有主题系统的实际实现'
+  do_not_change:
+    - '支付接入逻辑'
+    - '账号与订单交付规则'
