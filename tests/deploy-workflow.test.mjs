@@ -238,7 +238,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   const publicSchemaCheck = backendSteps.findIndex((step) => /Verify the public schema marker/.test(step.name));
   assert.ok(hostPreflight >= 0 && hostPreflight < schemaGate && schemaGate < publicSchemaCheck && publicSchemaCheck < upload && upload < activation);
   assert.match(contractVerification.run, /trading-leaderboard-postgres\.test\.mjs/);
-  for (const filename of ["admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres", "membership-commerce-postgres", "membership-payment-functions", "membership-benefits-postgres", "membership-wallet-postgres", "membership-wallet-functions"]) {
+  for (const filename of ["admin-mentor-publish-postgres", "admin-payment-hardening-postgres", "mentor-payment-webhook", "mentor-checkout-function", "membership-foundation-postgres", "membership-commerce-postgres", "membership-payment-functions", "membership-benefits-postgres", "membership-wallet-postgres", "membership-wallet-functions"]) {
     assert.ok(contractVerification.run.includes(`tests/${filename}.test.mjs`), `${filename} must gate backend migration and upload`);
   }
   assert.match(backendSteps[schemaGate].run, /schema_before=.*wavekb_schema_version/);
@@ -265,13 +265,14 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   }
   assert.match(backendSteps[schemaGate].run, /test "\$private_schema_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /not has_schema_privilege\('authenticated','hermes_research_private','USAGE'\)/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610190001/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610220001/);
+  assert.match(backendSteps[schemaGate].run, /test "\$mentor_publish_rpc_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$image_rls_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$image_bucket_closed" = t/);
   assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610190001/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610220001/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -301,6 +302,7 @@ test("every known backend marker selects only its unapplied migration suffix and
     "20261011001354_wave_analysis_images.sql",
     "20261011152711_youtube_policy_consent.sql",
     "202610190001_community_engagement.sql",
+    "202610220001_atomic_admin_mentor_publish.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -318,7 +320,7 @@ ${selection}`;
     ["202609090002", 0], ["202609100001", 1], ["202610080001", 2], ["202610080002", 3],
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
     ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11], ["20261011001354", 12],
-    ["20261011152711", 13], ["202610190001", 14],
+    ["20261011152711", 13], ["202610190001", 14], ["202610220001", 15],
   ]) {
     const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
@@ -393,7 +395,7 @@ printf 'BASELINE_READY\\n'`;
   function run(marker, count = "1", exit = "0") {
     return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
   }
-  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001"];
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001"];
   for (const marker of markers) {
     const result = run(marker);
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
@@ -405,11 +407,11 @@ printf 'BASELINE_READY\\n'`;
     assert.doesNotMatch(result.stdout, /WRITE:|BASELINE_READY/);
   }
   for (const count of ["", "0", "2", "t"]) {
-    const result = run("202610190001", count);
+    const result = run("202610220001", count);
     assert.notEqual(result.status, 0, `invalid column count ${count}`);
     assert.doesNotMatch(result.stdout, /BASELINE_READY/);
   }
-  const failedMigration = run("202610190001", "1", "7");
+  const failedMigration = run("202610220001", "1", "7");
   assert.equal(failedMigration.status, 7);
   assert.doesNotMatch(failedMigration.stdout, /BASELINE_READY/);
 });

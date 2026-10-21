@@ -34,4 +34,4 @@ pnpm test:e2e
 
 `assets:sync` 复制知识资产并生成内容寻址的无损阅读 WebP。sharp 版本与 `knowledge/reading/image-delivery-integrity.json` 的编码器标记绑定；更新时必须证明全部原 PNG SHA、原生尺寸和像素一致，再更新派生清单。PDF、原 PNG 和知识正文不由该过程改写。
 
-会员基础只提供有期限的手动权益与审计记录，不配置价格、支付或自动续费，也不限制既有公开内容。涉及数据库/Gateway 的发布顺序见根 [DEPLOYMENT.md](../../DEPLOYMENT.md)；本分支目标 schema 为 `202610190001`，不代表线上已经执行。
+会员基础只提供有期限的手动权益与审计记录，不配置价格、支付或自动续费，也不限制既有公开内容。涉及数据库/Gateway 的发布顺序见根 [DEPLOYMENT.md](../../DEPLOYMENT.md)；本分支目标 schema 为 `202610220001`，不代表线上已经执行。
