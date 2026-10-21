@@ -88,7 +88,8 @@ test.describe("authenticated member shell acceptance", () => {
     const theme = await avatar.getAttribute("data-nameplate");
     expect(theme).not.toBeNull();
     expect(await nameplate.getAttribute("data-nameplate")).toBe(theme);
-    const headerNameplates = page.getByRole("navigation", { name: "主导航" }).locator('.identity-nameplate[aria-label="UID 33333"]');
+    // Account controls are a header sibling of the primary site navigation.
+    const headerNameplates = page.locator("header").locator('.identity-nameplate[aria-label="UID 33333"]');
     // A missing account identity is a failure, not a reason to skip comparison.
     await expect(headerNameplates.first()).toHaveAttribute("data-nameplate", theme!, { timeout: 15_000 });
     for (const badge of await headerNameplates.all()) await expect(badge).toHaveAttribute("data-nameplate", theme!);
