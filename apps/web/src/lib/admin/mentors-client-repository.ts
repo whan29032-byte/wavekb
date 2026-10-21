@@ -14,11 +14,9 @@ export function mentorOrderTransitions(status: AdminMentorOrder["status"]) { ret
 export function adminMentorMutations(client: SupabaseClient) {
   return {
     async saveCatalog(input: MentorCatalogInput) {
-      const result = await client.rpc("admin_upsert_mentor_catalog", { p_mentor_id: input.mentorId || null, p_offer_id: input.offerId || null, p_owner_id: input.ownerId || null, p_display_name: input.displayName.trim(), p_headline: input.headline.trim(), p_bio: input.bio.trim(), p_avatar_url: input.avatarUrl?.trim() || null, p_specialties: input.specialties, p_active: input.active, p_sort_order: input.sortOrder, p_offer_name: input.offerName.trim() || "一对一波浪辅导", p_price_cents: input.priceCents, p_currency: "USDT", p_duration_days: input.durationDays, p_weekly_questions: input.weeklyQuestions });
+      const result = await client.rpc("admin_upsert_mentor_catalog_v2", { p_mentor_id: input.mentorId || null, p_offer_id: input.offerId || null, p_owner_id: input.ownerId || null, p_display_name: input.displayName.trim(), p_headline: input.headline.trim(), p_bio: input.bio.trim(), p_avatar_url: input.avatarUrl?.trim() || null, p_specialties: input.specialties, p_active: input.active, p_sort_order: input.sortOrder, p_offer_name: input.offerName.trim() || "一对一波浪辅导", p_price_cents: input.priceCents, p_currency: "USDT", p_duration_days: input.durationDays, p_weekly_questions: input.weeklyQuestions, p_offer_active: input.offerActive });
       if (result.error) throw result.error;
-      const offerId = String((result.data as { offer_id?: string })?.offer_id || input.offerId || "");
-      if (offerId) { const restored = await client.from("mentor_offers").update({ active: input.offerActive }).eq("id", offerId).select("id").maybeSingle(); if (restored.error || !restored.data) throw restored.error || new Error("offer_update_failed"); }
-      return result.data as { mentor_id: string; offer_id: string };
+      return result.data as { mentor_id: string; offer_id: string; reused_mentor: boolean };
     },
     async createOffer(input: MentorOfferInput) { const result = await client.from("mentor_offers").insert(input).select("id").single(); if (result.error) throw result.error; return result.data.id as string; },
     async updateOffer(id: string, input: Partial<MentorOfferInput>) { const result = await client.from("mentor_offers").update(input).eq("id", id).select("id").maybeSingle(); if (result.error || !result.data) throw result.error || new Error("offer_update_failed"); },

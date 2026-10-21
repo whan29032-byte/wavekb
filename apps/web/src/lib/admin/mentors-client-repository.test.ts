@@ -4,6 +4,37 @@ import type { AdminMentorOrder } from "./mentors-types";
 import { adminMentorMutations, mentorOrderTransitions } from "./mentors-client-repository";
 
 describe("mentor order transitions", () => {
+  it("publishes a mentor and offer through one atomic RPC", async () => {
+    const payload = { mentor_id: "mentor-1", offer_id: "offer-1", reused_mentor: true };
+    const rpc = vi.fn().mockResolvedValue({ data: payload, error: null });
+    const from = vi.fn();
+    const client = { rpc, from } as unknown as SupabaseClient;
+
+    await expect(adminMentorMutations(client).saveCatalog({
+      ownerId: "11111111-1111-4111-8111-111111111111",
+      displayName: " 测试导师 ",
+      headline: " 波浪结构 ",
+      bio: " 证据优先 ",
+      avatarUrl: " ",
+      specialties: ["推动浪"],
+      active: true,
+      sortOrder: 20,
+      offerName: " 实盘复盘 ",
+      priceCents: 29900,
+      durationDays: 30,
+      weeklyQuestions: 3,
+      offerActive: false,
+    })).resolves.toEqual(payload);
+
+    expect(rpc).toHaveBeenCalledWith("admin_upsert_mentor_catalog_v2", expect.objectContaining({
+      p_display_name: "测试导师",
+      p_offer_name: "实盘复盘",
+      p_offer_active: false,
+      p_currency: "USDT",
+    }));
+    expect(from).not.toHaveBeenCalled();
+  });
+
   it("allows payment to activate rights and refund to revoke them", () => {
     expect(mentorOrderTransitions("pending")).toContain("paid");
     expect(mentorOrderTransitions("paid")).toContain("refunded");

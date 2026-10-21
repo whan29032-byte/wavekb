@@ -26,15 +26,16 @@ SSH 使用固定 ED25519 指纹；不得把真实部署凭据、数据库 URL �
 涉及 `supabase/`、Gateway 或其 systemd 单元的发布，先确保同一候选提交验证通过，再手动运行
 `deploy-backend-production.yml`，选择 `main` 并输入 `DEPLOY_WAVEKB_BACKEND`。
 
-本分支数据库目标 marker 是 `202610190001`。工作流逐项接受从 `202609090002` 到 `202610190001`
+本分支数据库目标 marker 是 `202610220001`。工作流逐项接受从 `202609090002` 到 `202610220001`
 的已知 marker，按当前 marker 仅执行尚未应用的迁移后缀；完整顺序以 `supabase/migrations/` 文件名
 为准。本轮新增的末端迁移为：
 
 1. `20261011152711_youtube_policy_consent.sql`
 2. `202610190001_community_engagement.sql`
+3. `202610220001_atomic_admin_mentor_publish.sql`
 
 未知 marker 停止，不自动初始化或遍历重跑全库。迁移使用 `ON_ERROR_STOP`；最终数据库查询与
-公开 `wavekb_schema_version()` RPC 必须都返回 `202610190001`，之后才允许上传 Gateway 发布包。
+公开 `wavekb_schema_version()` RPC 必须都返回 `202610220001`，之后才允许上传 Gateway 发布包。
 全新数据库另按所有迁移文件名顺序初始化，不把已有生产库当新项目。这里描述的是候选发布目标，
 不证明线上数据库已经应用这些迁移。
 

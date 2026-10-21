@@ -17,6 +17,9 @@ const orderLabels = { pending: "待核对", paid: "已支付 / 已发权益", ca
 function friendlyError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || "");
   if (/mentor_name_invalid/i.test(message)) return "导师显示名称应为 2 至 40 个字符。";
+  if (/mentor_owner_not_found/i.test(message)) return "没有找到要绑定的站内账号，请重新读取 UID。";
+  if (/mentor_owner_conflict/i.test(message)) return "这个站内账号已绑定其他导师，请刷新导师目录后重试。";
+  if (/mentor_offer_(name|price|duration|weekly_questions|currency)_invalid/i.test(message)) return "导师方案参数不正确，请检查名称、价格、有效天数和提问次数。";
   if (/order_transition_invalid/i.test(message)) return "不允许从当前状态切换到所选状态。";
   if (/order_changed_concurrently/i.test(message)) return "订单已被其他管理员修改，请刷新后重试。";
   if (/23503|foreign key|violates foreign key/i.test(message)) return "这条记录已关联订单或付款，不能删除；请改为下架或停用。";
@@ -79,7 +82,7 @@ function MentorCreate({ count, pending, onSave }: { count: number; pending: bool
     setError("");
     const saved = await onSave({
       ownerId: actor.id,
-      displayName: actor.display_name || `UID ${actor.public_uid}`,
+      displayName: actor.display_name.trim().length >= 2 && actor.display_name.trim().length <= 40 ? actor.display_name.trim() : `UID ${actor.public_uid}`,
       headline,
       bio: "",
       avatarUrl: actor.avatar_url,
