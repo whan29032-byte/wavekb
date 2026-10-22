@@ -62,6 +62,8 @@ beforeEach(() => {
       if (name === "submit_manual_mentor_payment") { claims = [claim]; return { data: { order_id: "order", claim_id: "claim" }, error: null }; }
       if (name === "submit_mentor_payment_claim") { claims = [claim]; return { data: "claim", error: null }; }
       if (name === "cancel_unsubmitted_mentor_order") { orders = orders.filter((order) => order.id !== params?.p_order_id); return { data: params?.p_order_id, error: null }; }
+      if (name === "request_mentor_service_completion") return { data: { entitlement_id: "entitlement", status: "completion_requested" }, error: null };
+      if (name === "respond_mentor_service_completion") return { data: { entitlement_id: "entitlement", status: params?.p_confirm ? "completed" : "disputed" }, error: null };
       return { data: 1, error: null };
     },
   };
@@ -491,6 +493,17 @@ describe("mentor payment reliability", () => {
     expect(screen.queryByRole("button", { name: "取消未付款原订单" })).toBeNull();
     expect(writes).toEqual([]);
   });
+
+  it("lets a buyer cancel an unbound legacy order only after confirming no transfer", async () => {
+    orders = [{ ...pendingOrder, payment_method_id: null, payment_provider: null, provider_order_id: null } as unknown as typeof pendingOrder];
+    checkout();
+    const button = await screen.findByRole("button", { name: "取消未付款旧订单" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "我确认此旧订单从未转账，需要取消" }));
+    fireEvent.click(button);
+    await screen.findByRole("button", { name: "我已付款，通知导师" });
+    expect(writes).toEqual(["cancel_unsubmitted_mentor_order"]);
+  });
 });
 
 describe("mentor conversation reliability", () => {
@@ -515,6 +528,26 @@ describe("mentor conversation reliability", () => {
 
   it("keeps the existing mentor reply permission after the student's right expires", () => {
     render(<MentorThread actorId="mentor-owner" thread={{ ...thread, status: "expired" }} initialMessages={[]} />);
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(false);
+    expect((screen.getByRole("textbox", { name: "回复学员" }) as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("lets the mentor request completion and moves the conversation into student review", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    authenticatedBuyer = "mentor-owner";
+    render(<MentorThread actorId="mentor-owner" thread={{ ...thread, status: "expired" }} initialMessages={[]} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "结束说明（可选）" }), { target: { value: "约定周期已完成" } });
+    fireEvent.click(screen.getByRole("button", { name: "申请结束服务" }));
+    await screen.findByText(/结束申请已发送/);
+    expect(writes).toContain("request_mentor_service_completion");
+  });
+
+  it("lets the student confirm or dispute a mentor completion request", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<MentorThread actorId="student" thread={{ ...thread, status: "completion_requested", completion_request_note: "约定周期已完成" }} initialMessages={[]} />);
+    expect(screen.getByText(/约定周期已完成/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "确认服务完成" }));
+    await screen.findByText(/会话已转为只读/);
+    expect(writes).toContain("respond_mentor_service_completion");
+    expect((screen.getByRole("textbox", { name: "发送问题" }) as HTMLTextAreaElement).disabled).toBe(true);
   });
 });

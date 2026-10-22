@@ -53,8 +53,8 @@ cp ai-gateway/.env.example ai-gateway/.env
 涉及数据库或 Gateway 的版本必须在同一提交上按 Backend-first 顺序发布：先等待非部署型 Ubuntu
 `Verify WaveKB release` 的生产依赖安全审计、测试、类型和构建门槛通过，再手动确认发布 Backend；数据库
 marker、Gateway 精确 health SHA 与相关接口验收通过后，才可确认并发布 Next。Next 工作流本身不执行迁移。
-本分支最新迁移目标为 `202610220001`：从管理/支付安全加固 `202610100001` 起，依次包含会员基础与钱包、
-Hermes 私有研报、波浪分析图片、YouTube 政策同意、社区互动展示，最后是导师原子上架修复 `202610220001`。这不表示线上
+本分支最新迁移目标为 `202610220002`：从管理/支付安全加固 `202610100001` 起，依次包含会员基础与钱包、
+Hermes 私有研报、波浪分析图片、YouTube 政策同意、社区互动展示、导师原子上架修复，以及导师订单与服务履约闭环 `202610220002`。这不表示线上
 数据库已经迁移；Backend 只接受工作流逐项列明的旧 marker，Next 必须与候选提交的最新 marker 完全一致，
 未知 marker 关闭发布。Gateway 归档只带代码、`package.json`、
 `knowledge/retrieval-index.json` 与 `DEPLOYMENT_VERSION`，不带 PDF 或密钥。

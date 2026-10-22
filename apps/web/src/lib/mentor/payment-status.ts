@@ -21,6 +21,7 @@ export type BuyerPendingMentorOrder = {
   id: string; buyer_id: string; mentor_id: string; offer_id: string;
   payment_method_id: string | null; status: "pending"; created_at: string;
   payment_provider?: string | null;
+  provider_order_id?: string | null;
   idempotency_key?: string;
 } & MentorOrderSummary;
 
@@ -28,7 +29,7 @@ export async function readBuyerPendingMentorOrders(client: SupabaseClient, actor
   const auth = await client.auth.getUser();
   if (auth.error || auth.data.user?.id !== actorId) throw new Error("authentication_required");
   let query = client.from("mentor_orders")
-    .select("id,buyer_id,mentor_id,offer_id,payment_method_id,payment_provider,status,created_at,idempotency_key,offer_name_snapshot,amount_cents,currency,duration_days_snapshot,weekly_questions_snapshot")
+    .select("id,buyer_id,mentor_id,offer_id,payment_method_id,payment_provider,provider_order_id,status,created_at,idempotency_key,offer_name_snapshot,amount_cents,currency,duration_days_snapshot,weekly_questions_snapshot")
     .eq("buyer_id", actorId).eq("status", "pending");
   if (mentorId) query = query.eq("mentor_id", mentorId);
   const result = await query.order("created_at", { ascending: false });

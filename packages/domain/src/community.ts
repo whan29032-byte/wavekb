@@ -339,11 +339,15 @@ export type MentorAccess = {
   mentor_name: string;
   mentor_avatar_url: string | null;
   thread_id: string;
-  status: "active" | "expired" | "revoked" | "refunded";
+  status: "active" | "expired" | "completion_requested" | "completed" | "disputed" | "revoked" | "refunded";
   weekly_question_limit: number;
   questions_used: number;
   starts_at: string;
   ends_at: string;
+  completion_requested_at?: string | null;
+  completion_request_note?: string;
+  completion_responded_at?: string | null;
+  completion_response_note?: string;
 };
 
 export type MentorPaymentMethod = {
@@ -372,6 +376,10 @@ export type MentorThread = {
   questions_used: number;
   starts_at: string;
   ends_at: string;
+  completion_requested_at?: string | null;
+  completion_request_note?: string;
+  completion_responded_at?: string | null;
+  completion_response_note?: string;
 };
 
 export type MentorMessage = {
@@ -785,6 +793,11 @@ export function formatMentorPrice(cents: number, currency = "USDT"): string {
 
 export function remainingMentorQuota(value: Pick<MentorAccess, "weekly_question_limit" | "questions_used">): number {
   return Math.max(0, Number(value.weekly_question_limit || 0) - Number(value.questions_used || 0));
+}
+
+export function mentorAccessCanAsk(value: Pick<MentorAccess, "status" | "ends_at">, now = Date.now()): boolean {
+  return ["active", "completion_requested", "disputed"].includes(value.status)
+    && new Date(value.ends_at).getTime() > now;
 }
 
 export function validateMentorQuestion(rawValue: string): { ok: boolean; value: string; message?: string } {

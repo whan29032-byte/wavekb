@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AdminMentorOrder } from "./mentors-types";
+import type { AdminMentorOrder, AdminMentorService } from "./mentors-types";
 import { adminMentorMutations, mentorOrderTransitions } from "./mentors-client-repository";
 
 describe("mentor order transitions", () => {
@@ -60,5 +60,13 @@ describe("mentor order transitions", () => {
     const error = { message: "order_changed_concurrently" };
     const client = { rpc: vi.fn().mockResolvedValue({ data: null, error }) } as unknown as SupabaseClient;
     await expect(adminMentorMutations(client).updateOrder({ id: "order-1", status: "pending" } as AdminMentorOrder, "paid")).rejects.toEqual(error);
+  });
+
+  it("resolves service disputes through an audited expected-state RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { entitlement_id: "service-1", status: "completed" }, error: null });
+    const client = { rpc } as unknown as SupabaseClient;
+    const service = { id: "service-1", stored_status: "disputed" } as AdminMentorService;
+    await adminMentorMutations(client).updateService(service, "completed", " 双方补充说明后确认 ");
+    expect(rpc).toHaveBeenCalledWith("admin_transition_mentor_service", { p_entitlement_id: "service-1", p_expected_status: "disputed", p_status: "completed", p_reason: "双方补充说明后确认" });
   });
 });

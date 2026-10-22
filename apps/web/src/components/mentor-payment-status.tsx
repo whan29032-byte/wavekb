@@ -72,7 +72,15 @@ function PendingOrderRecovery({ order, refresh, onResolved }: { order: BuyerPend
       setError("暂时无法核对处理结果。请刷新状态；重试仍使用原订单，不要再次转账。");
     } finally { await refresh(); lock.current = false; setPending(false); }
   }
-  if (order.payment_provider !== "manual" || !order.payment_method_id) return <p className="text-sm leading-6 text-muted-foreground">此订单不是可补交声明的手工付款订单。请回到原支付页面核对，或联系导师处理；不要再次转账。</p>;
+  const manual = order.payment_provider === "manual" && Boolean(order.payment_method_id);
+  const cancellableLegacy = !order.payment_provider && !order.payment_method_id && !order.provider_order_id;
+  if (!manual && !cancellableLegacy) return <p className="text-sm leading-6 text-muted-foreground">此订单不是可补交声明的手工付款订单，且已绑定支付渠道，不能在这里取消。请回到原支付页面核对，或联系导师处理；不要再次转账。</p>;
+  if (cancellableLegacy) return <div className="grid gap-3">
+    <p className="text-sm leading-6">这是旧版流程遗留且未绑定支付渠道的待处理订单。系统不会推断是否付款；只有确认从未转账时才能安全取消。</p>
+    <label className="flex min-h-11 items-center gap-2 py-2 text-sm"><input type="checkbox" checked={unpaid} disabled={pending} onChange={(event) => setUnpaid(event.target.checked)} className="accent-primary" />我确认此旧订单从未转账，需要取消</label>
+    <Button type="button" variant="ghost" className="min-h-11 w-fit" disabled={pending || !unpaid} onClick={() => void recover(true)}>取消未付款旧订单</Button>
+    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+  </div>;
   return <div className="grid gap-3">
     <p className="text-sm leading-6">原订单已保存，但还没有付款声明。已转账请选择补交声明；只有确认从未转账，才可以取消。</p>
     <div className="grid gap-1"><Label htmlFor={`mentor-recovery-note-${order.id}`}>转账编号或核对备注（可选）</Label><Input id={`mentor-recovery-note-${order.id}`} className="min-h-11" value={note} onChange={(event) => setNote(event.target.value)} maxLength={1000} disabled={pending} /></div>
