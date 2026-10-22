@@ -11,7 +11,7 @@ test("production gate requires a completed zero-vulnerability official-registry 
   assert.match(message, /zero vulnerability/);
   assert.deepEqual(command[0], "pnpm");
   assert.deepEqual(command[1], ["audit", "--prod", "--json", "--registry=https://registry.npmjs.org"]);
-  assert.equal(command[2].timeout, 60_000);
+  assert.equal(command[2].timeout, 180_000);
 });
 
 test("all production severities fail, including low and informational findings", () => {

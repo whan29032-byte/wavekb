@@ -27,8 +27,10 @@ export function verifyProductionAudit({ stdout, status, signal, error }) {
 }
 
 export function auditProductionDependencies(run = spawnSync) {
+  // npm audit can take longer than one minute on a cold GitHub-hosted runner.
+  // Keep the gate fail-closed, but allow the registry enough time to respond.
   const result = run("pnpm", ["audit", "--prod", "--json", "--registry=https://registry.npmjs.org"], {
-    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60_000, maxBuffer: 10 * 1024 * 1024,
+    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 180_000, maxBuffer: 10 * 1024 * 1024,
   });
   return verifyProductionAudit(result);
 }
