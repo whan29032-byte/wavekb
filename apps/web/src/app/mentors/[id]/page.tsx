@@ -25,7 +25,7 @@ export default async function MentorDetailPage({ params }: { params: Promise<{ i
     actor ? listMyMentorAccess() : Promise.resolve([]),
     actor ? listMentorPaymentMethods(id) : Promise.resolve([]),
   ]);
-  const access = accessList.find((item) => item.mentor_id === id && item.status === "active");
+  const access = accessList.find((item) => item.mentor_id === id && ["active", "completion_requested", "disputed"].includes(item.status));
 
   return (
     <main className="mx-auto grid max-w-6xl gap-8 px-4 py-10 md:px-6 md:py-14">

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { cancelUnsubmittedMentorOrder, getMyMentorOfferQuote, isDefiniteMentorCheckoutFailure, resumeManualMentorPayment, submitManualMentorPayment } from "./client-repository";
+import { cancelUnsubmittedMentorOrder, getMyMentorOfferQuote, isDefiniteMentorCheckoutFailure, requestMentorServiceCompletion, respondMentorServiceCompletion, resumeManualMentorPayment, submitManualMentorPayment } from "./client-repository";
 
 const input = { offerId: "offer-id", paymentMethodId: "method-id", buyerNote: "  转账编号 94217  ", requestId: "11111111-1111-4111-8111-111111111111", expectedQuote: { price_cents: 10000, currency: "USDT", duration_days: 30, weekly_questions: 3 } };
 
@@ -47,5 +47,19 @@ describe("atomic manual mentor payment", () => {
     const rpc = vi.fn(async () => ({ data: "original-order", error: null }));
     await cancelUnsubmittedMentorOrder({ rpc } as never, "original-order", true);
     expect(rpc).toHaveBeenCalledExactlyOnceWith("cancel_unsubmitted_mentor_order", { p_order_id: "original-order", p_confirm_unpaid: true });
+  });
+});
+
+describe("mentor service lifecycle", () => {
+  it("uses dedicated RPCs for mentor request and student response", async () => {
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: { entitlement_id: "entitlement", status: "completion_requested" }, error: null })
+      .mockResolvedValueOnce({ data: { entitlement_id: "entitlement", status: "disputed" }, error: null });
+    await requestMentorServiceCompletion({ rpc } as never, "thread", " 完成说明 ");
+    await respondMentorServiceCompletion({ rpc } as never, "thread", false, " 尚未完成 ");
+    expect(rpc.mock.calls).toEqual([
+      ["request_mentor_service_completion", { p_thread_id: "thread", p_note: "完成说明" }],
+      ["respond_mentor_service_completion", { p_thread_id: "thread", p_confirm: false, p_note: "尚未完成" }],
+    ]);
   });
 });

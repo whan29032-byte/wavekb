@@ -94,6 +94,18 @@ export async function sendMentorMessage(client: SupabaseClient, threadId: string
   return Number(result.data);
 }
 
+export async function requestMentorServiceCompletion(client: SupabaseClient, threadId: string, note: string) {
+  const result = await client.rpc("request_mentor_service_completion", { p_thread_id: threadId, p_note: String(note || "").trim().slice(0, 1000) });
+  if (result.error) throw result.error;
+  return result.data as { entitlement_id: string; status: "completion_requested" };
+}
+
+export async function respondMentorServiceCompletion(client: SupabaseClient, threadId: string, confirm: boolean, note: string) {
+  const result = await client.rpc("respond_mentor_service_completion", { p_thread_id: threadId, p_confirm: confirm, p_note: String(note || "").trim().slice(0, 1000) });
+  if (result.error) throw result.error;
+  return result.data as { entitlement_id: string; status: "completed" | "disputed" };
+}
+
 export async function reviewMentorPaymentClaim(client: SupabaseClient, claimId: string, confirm: boolean) {
   const result = await client.rpc("review_mentor_payment_claim", { p_claim_id: claimId, p_confirm: confirm });
   if (result.error) throw result.error;

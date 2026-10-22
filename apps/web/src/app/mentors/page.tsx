@@ -22,7 +22,7 @@ export default async function MentorsPage() {
     actor ? listMyMentorAccess() : Promise.resolve([]),
     actor ? getMyMentorSettings() : Promise.resolve(null),
   ]);
-  const activeAccess = accessList.filter((item) => item.status === "active");
+  const activeAccess = accessList.filter((item) => ["active", "completion_requested", "disputed"].includes(item.status));
 
   return (
     <main className="mx-auto grid max-w-6xl gap-12 px-4 py-8 md:px-6 md:py-12">

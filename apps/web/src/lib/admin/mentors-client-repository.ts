@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AdminMentorOrder, MentorCatalogInput, MentorOfferInput, MentorPaymentInput } from "@/lib/admin/mentors-types";
+import type { AdminMentorOrder, AdminMentorService, MentorCatalogInput, MentorOfferInput, MentorPaymentInput } from "@/lib/admin/mentors-types";
 
 const transitions: Record<AdminMentorOrder["status"], AdminMentorOrder["status"][]> = {
   pending: ["pending", "paid", "cancelled", "failed"],
@@ -31,6 +31,14 @@ export function adminMentorMutations(client: SupabaseClient) {
       });
       if (result.error) throw result.error;
       if (!result.data) throw new Error("order_changed_concurrently");
+      return result.data;
+    },
+    async updateService(service: AdminMentorService, nextStatus: "active" | "completed" | "disputed" | "revoked", reason: string) {
+      const result = await client.rpc("admin_transition_mentor_service", {
+        p_entitlement_id: service.id, p_expected_status: service.stored_status, p_status: nextStatus, p_reason: reason.trim(),
+      });
+      if (result.error) throw result.error;
+      if (!result.data) throw new Error("service_changed_concurrently");
       return result.data;
     },
   };
