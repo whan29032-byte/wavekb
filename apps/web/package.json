@@ -21,7 +21,7 @@
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
     "@supabase/ssr": "^0.12.4",
-    "@supabase/supabase-js": "^2.112.3",
+    "@supabase/supabase-js": "^2.117.3",
     "@wavekb/domain": "workspace:*",
     "@wavekb/knowledge": "workspace:*",
     "@wavekb/ui": "workspace:*",
