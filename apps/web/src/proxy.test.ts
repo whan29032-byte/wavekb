@@ -4,7 +4,7 @@ import { proxy } from "./proxy";
 
 const boundary = vi.hoisted(() => ({ session: vi.fn() }));
 vi.mock("@/lib/supabase/proxy", () => ({ updateSession: boundary.session }));
-beforeEach(() => boundary.session.mockReset().mockResolvedValue(NextResponse.next()));
+beforeEach(() => boundary.session.mockReset().mockResolvedValue({ response: NextResponse.next(), userId: "user-1" }));
 
 it("rejects an unknown public board before streaming commits a successful response", async () => {
   const response = await proxy(new NextRequest("https://wavekb.com/community/not-a-board"));
@@ -31,4 +31,17 @@ it.each(["/knowledge", "/community/idea_sharing", "/community/post/abc"])("does 
   const response = await proxy(new NextRequest(`https://wavekb.com${pathname}`));
 
   expect(response.headers.get("x-robots-tag")).toBeNull();
+});
+
+it("redirects anonymous visitors of the community to login", async () => {
+  boundary.session.mockResolvedValue({ response: NextResponse.next(), userId: null });
+  const response = await proxy(new NextRequest("https://wavekb.com/community/idea_sharing"));
+  expect(response.status).toBe(307);
+  expect(response.headers.get("location")).toBe("https://wavekb.com/login?next=%2Fcommunity%2Fidea_sharing");
+});
+
+it("leaves other public pages reachable without a session", async () => {
+  boundary.session.mockResolvedValue({ response: NextResponse.next(), userId: null });
+  const response = await proxy(new NextRequest("https://wavekb.com/knowledge"));
+  expect(response.headers.get("location")).toBeNull();
 });

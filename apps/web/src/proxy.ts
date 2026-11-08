@@ -19,7 +19,14 @@ export async function proxy(request: NextRequest) {
       });
     }
   }
-  const response = await updateSession(request);
+  const { response, userId } = await updateSession(request);
+
+  // 社区需要注册并登录后才能进入。
+  if (!userId && /^\/community(?:\/|$)/.test(request.nextUrl.pathname)) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
+    return NextResponse.redirect(loginUrl);
+  }
   if (/^\/(?:api|admin|account(?:\/|$)|account-restricted|activate-uid|friends(?:\/|$)|login(?:\/|$)|member(?:\/|$)|messages(?:\/|$)|mentor\/manage(?:\/|$)|payment(?:\/|$)|profile(?:\/|$)|recover(?:\/|$)|register(?:\/|$)|rewards(?:\/|$)|tutoring(?:\/|$)|workbench(?:\/|$))/.test(request.nextUrl.pathname)
     || /^\/community\/[^/]+\/new\/?$/.test(request.nextUrl.pathname)
     || /^\/community\/post\/[^/]+\/edit\/?$/.test(request.nextUrl.pathname)) {

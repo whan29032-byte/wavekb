@@ -2,9 +2,9 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { publicSupabaseConfig } from "@/lib/env";
 
-export async function updateSession(request: NextRequest) {
+export async function updateSession(request: NextRequest): Promise<{ response: NextResponse; userId: string | null }> {
   const config = publicSupabaseConfig();
-  if (!config.configured) return NextResponse.next({ request });
+  if (!config.configured) return { response: NextResponse.next({ request }), userId: null };
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(config.url, config.key, {
@@ -18,6 +18,7 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  await supabase.auth.getClaims();
-  return response;
+  const { data } = await supabase.auth.getClaims();
+  const userId = (data?.claims?.sub as string | undefined) ?? null;
+  return { response, userId };
 }
