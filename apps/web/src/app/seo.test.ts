@@ -30,16 +30,24 @@ it("publishes an installable WaveKB standalone manifest", async () => {
   ]));
 });
 
-it("allows public crawling while keeping private areas out of crawler traversal", async () => {
+it("allows public crawling while keeping private areas out of the index", async () => {
   const routeModule = await optionalModule<{ default: () => { rules: Array<{ allow?: string; disallow?: string[] }>; sitemap: string } }>("./robots");
   const robots = routeModule?.default();
 
   expect(robots?.sitemap).toBe("https://wavekb.com/sitemap.xml");
   expect(robots?.rules).toEqual(expect.arrayContaining([
     expect.objectContaining({ allow: "/" }),
-    expect.objectContaining({ disallow: expect.arrayContaining(["/api/", "/admin/", "/account/", "/messages/", "/workbench/"]) }),
+    expect.objectContaining({ disallow: expect.arrayContaining(["/api/"]) }),
   ]));
-  expect(robots?.rules[0]?.disallow).toEqual(expect.arrayContaining(["/community/*/new", "/community/post/*/edit"]));
+
+  // 私有页面必须可被爬取，否则 Google 读不到 noindex，已收录的副本无法清除；
+  // 它们由 next.config.ts 统一下发 X-Robots-Tag: noindex 排除在索引之外。
+  const config = await readFile(join(process.cwd(), "next.config.ts"), "utf8");
+  expect(config).toContain("X-Robots-Tag");
+  for (const path of ["/login", "/register", "/account", "/messages/:path*", "/workbench/:path*", "/admin/:path*", "/community/:slug/new"]) {
+    expect(config).toContain(`"${path}"`);
+    expect(robots?.rules[0]?.disallow ?? []).not.toContain(path);
+  }
 });
 
 it("lists every generated knowledge route and only canonical public URLs", async () => {
