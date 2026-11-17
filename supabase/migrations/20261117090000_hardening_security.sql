@@ -67,3 +67,8 @@ begin
   end if;
   execute 'grant select on public.public_membership_plans to anon, authenticated';
 end $$;
+
+-- 5) 迁移标记：与既有迁移一致，把库内版本号推进到本次迁移时间戳。
+create or replace function public.wavekb_schema_version()
+returns text language sql stable security definer set search_path = ''
+as $$ select '20261117090000'::text; $$;

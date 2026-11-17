@@ -46,7 +46,7 @@ async function bind(db,order,{session=`cs_${order.id.replaceAll('-','')}`,mode=o
   await actor(db,null,"service_role");
   return value(db,"register_membership_checkout_session($1,$2,$3,$4,$5::timestamptz,$6)",[order.buyer_id,order.id,session,url,expires,mode]);
 }
-async function pay(db,order,{event=`evt_${randomUUID().replaceAll('-','')}`,type="checkout.session.completed",status="paid",amount=order.amount_minor,currency=order.currency,buyer=order.buyer_id,mode=order.livemode,intent=`pi_${order.id.replaceAll('-','')}`,paidAt="2026-10-10T00:00:00.000Z"}={}) {
+async function pay(db,order,{event=`evt_${randomUUID().replaceAll('-','')}`,type="checkout.session.completed",status="paid",amount=order.amount_minor,currency=order.currency,buyer=order.buyer_id,mode=order.livemode,intent=`pi_${order.id.replaceAll('-','')}`,paidAt=new Date(Date.now()-60000).toISOString()}={}) {
   await actor(db,null,"service_role");
   return value(db,"apply_verified_membership_payment_event($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz)",[event,type,order.id,buyer,order.provider_session_id,intent,amount,currency,status,mode,paidAt]);
 }
@@ -199,7 +199,7 @@ test("verified async failure closes pending, seals intent, never grants/revives 
 }));
 test("one-time renewal periods are separate and a refund neither shifts nor revokes another period",()=>fixture(async(db)=>{
   const c=await setup(db),first=await bind(db,await prepare(db,c)); await pay(db,first);
-  const second=await bind(db,await prepare(db,c)); await pay(db,second,{paidAt:"2026-10-10T00:01:00.000Z"});
+  const second=await bind(db,await prepare(db,c)); await pay(db,second,{paidAt:new Date(Date.now()-60000+1000).toISOString()});
   const before=await mine(db); const g1=before.purchase_grants.find(g=>g.order_id===first.id),g2=before.purchase_grants.find(g=>g.order_id===second.id);
   assert.equal(g1.ends_at,g2.starts_at); assert.equal(g2.status,"scheduled");
   await refund(db,first); const after=await mine(db); assert.equal(after.purchase_grants.find(g=>g.id===g2.id).starts_at,g2.starts_at);

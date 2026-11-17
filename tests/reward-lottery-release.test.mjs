@@ -7,7 +7,7 @@ const source = (path) => readFile(new URL(path, root), "utf8");
 
 test("the lottery schema, member UI, admin UI and deployment marker ship together", async () => {
   const migrations = (await readdir(new URL("supabase/migrations/", root))).filter((name) => name.endsWith(".sql")).sort();
-  assert.equal(migrations.at(-1), "202610220002_mentor_service_lifecycle.sql");
+  assert.equal(migrations.at(-1), "20261117090000_hardening_security.sql");
 
   const [migration, manualMigration, customDisplayMigration, workflow, memberPage, memberRepository, memberComponent, adminPage, adminRepository, e2e] = await Promise.all([
     source("supabase/migrations/202609090002_reward_lottery.sql"),
