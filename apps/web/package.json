@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build",
-    "build:obfuscated": "next build && node scripts/obfuscate-chunks.mjs && node scripts/prepare-standalone.mjs"
+    "build:obfuscated": "next build && node scripts/obfuscate-chunks.mjs && node scripts/prepare-standalone.mjs",
+    "prebuild:obfuscated": "pnpm assets:sync && pnpm assets:check"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
