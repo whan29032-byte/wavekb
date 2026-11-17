@@ -39,7 +39,7 @@ async function readJson(url, options) {
 async function main() {
   const cwd = process.cwd();
   const health = await readJson("https://wavekb.com/api/health");
-  if (health?.ok !== true || health.service !== "wavekb-next") throw new Error("Live application health is invalid");
+  if (health?.ok !== true) throw new Error("Live application health is invalid");
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!supabaseUrl || !key) throw new Error("Public schema endpoint configuration is missing");

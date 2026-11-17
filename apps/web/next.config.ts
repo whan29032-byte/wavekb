@@ -27,6 +27,9 @@ const privatePagePaths = [
 const nextConfig: NextConfig = {
   output: "standalone",
   transpilePackages: ["@wavekb/domain", "@wavekb/knowledge", "@wavekb/ui"],
+  // 生产不生成浏览器 sourcemap：源映射会把未压缩的 TS/TSX 原文随构建产物一起
+  // 发布到公网，等于把业务逻辑和注释公开。排错走服务端日志与本地构建，不靠线上 map。
+  productionBrowserSourceMaps: false,
   poweredByHeader: false,
   deploymentId: process.env.DEPLOYMENT_VERSION,
   // Exact content-addressed files only: no permanent caching of mutable

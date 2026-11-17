@@ -70,7 +70,7 @@ jobs:
       - name: Build the standalone application
         env:
           DEPLOYMENT_VERSION: ${{ github.sha }}
-        run: pnpm --filter @wavekb/web build
+        run: pnpm --filter @wavekb/web build:obfuscated
 
       - name: Smoke the packaged worker with initialized temporary SQLite on the minimum runtime
         run: pnpm --package=node@22.18.0 dlx node scripts/smoke-tline-worker.mjs

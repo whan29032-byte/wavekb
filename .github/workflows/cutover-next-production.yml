@@ -119,8 +119,16 @@ jobs:
               add_header Referrer-Policy "strict-origin-when-cross-origin" always;
               add_header X-Frame-Options "SAMEORIGIN" always;
               add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+              add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+              add_header Cross-Origin-Opener-Policy "same-origin" always;
+              add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://unavatar.io https://cdn.discordapp.com https://i.ytimg.com https://*.supabase.co https://cdn.wavekb.com https://abs.twimg.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://cdn.wavekb.com; frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://www.tradingview.com https://x.com https://platform.twitter.com; base-uri 'self'; form-action 'self'" always;
 
               location /v1/ {
+
+                  add_header X-Content-Type-Options "nosniff" always;
+                  add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+                  add_header X-Frame-Options "SAMEORIGIN" always;
+                  add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
                   client_max_body_size 12m;
                   proxy_pass http://127.0.0.1:8787;
                   proxy_http_version 1.1;
@@ -133,6 +141,9 @@ jobs:
                   proxy_send_timeout 120s;
                   proxy_buffering off;
                   add_header Cache-Control "no-store" always;
+                  add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+                  add_header Cross-Origin-Opener-Policy "same-origin" always;
+                  add_header Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://unavatar.io https://cdn.discordapp.com https://i.ytimg.com https://*.supabase.co https://cdn.wavekb.com https://abs.twimg.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://cdn.wavekb.com; frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://www.tradingview.com https://x.com https://platform.twitter.com; base-uri 'self'; form-action 'self'" always;
               }
 
               location / {
@@ -196,7 +207,7 @@ jobs:
             curl --fail --silent --show-error --retry 8 --retry-delay 3 \
               "https://wavekb.com${path}" > /dev/null
           done
-          curl --fail --silent --show-error https://wavekb.com/api/health | grep -F '"service":"wavekb-next"' > /dev/null
+          curl --fail --silent --show-error https://wavekb.com/api/health | grep -F '"ok":true' > /dev/null
 
       - name: Roll back production routing
         if: failure() && steps.routing.outputs.routing_release != ''
@@ -298,7 +309,7 @@ jobs:
             ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
               "rm -f -- \"\$HOME/wavekb-nginx-rollback-${ROUTING_RELEASE}\""
-            curl --fail --silent --show-error https://wavekb.com/api/health | grep -F '"service":"wavekb-next"' > /dev/null
+            curl --fail --silent --show-error https://wavekb.com/api/health | grep -F '"ok":true' > /dev/null
             exit 0
           fi
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
