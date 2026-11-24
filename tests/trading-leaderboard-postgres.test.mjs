@@ -7,11 +7,16 @@ const migrationUrl = new URL(
   "../supabase/migrations/202609080003_public_trading_amounts.sql",
   import.meta.url,
 );
+const multiExchangeMigrationUrl = new URL(
+  "../supabase/migrations/202611240001_multi_exchange_trade_review.sql",
+  import.meta.url,
+);
 
 const ownerOne = "11111111-1111-4111-8111-111111111111";
 const connectionOne = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ownerTwo = "22222222-2222-4222-8222-222222222222";
 const connectionTwo = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const credentialTwo = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const ownerThree = "33333333-3333-4333-8333-333333333333";
 
 const expectedPublicKeys = [
@@ -50,12 +55,32 @@ async function createVersionTwoDatabase(database) {
     create table public.exchange_connections (
       id uuid primary key default gen_random_uuid(),
       owner_id uuid not null references public.profiles(id),
+      exchange text not null default 'binance' constraint exchange_connections_exchange_check check (exchange = 'binance'),
+      market text not null default 'usdm_futures' constraint exchange_connections_market_check check (market = 'usdm_futures'),
+      label text not null default '币安 U 本位合约',
       public_enabled boolean not null default true,
-      status text not null default 'active',
+      status text not null default 'active' constraint exchange_connections_status_check check (status in ('active', 'error', 'disabled')),
+      api_key_last_four text not null default '',
+      read_only_ack_at timestamptz not null default now(),
       started_at timestamptz not null,
       last_synced_at timestamptz,
       last_error_code text not null default '',
-      consecutive_failures integer not null default 0
+      consecutive_failures integer not null default 0,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+
+    create table public.exchange_connection_secrets (
+      id uuid primary key default gen_random_uuid(),
+      connection_id uuid not null references public.exchange_connections(id) on delete cascade,
+      owner_id uuid not null references public.profiles(id) on delete cascade,
+      ciphertext text not null,
+      iv text not null,
+      auth_tag text not null,
+      key_version integer not null default 1,
+      active boolean not null default true,
+      created_at timestamptz not null default now(),
+      rotated_at timestamptz
     );
 
     create table public.trading_equity_snapshots (
@@ -177,6 +202,7 @@ test("schema 003 backfills and incrementally maintains public equity and cumulat
   try {
     await createVersionTwoDatabase(database);
     await database.exec(await fs.readFile(migrationUrl, "utf8"));
+    await database.exec(await fs.readFile(multiExchangeMigrationUrl, "utf8"));
 
     const awaitingConsent = await database.query(
       "select * from public.list_trading_leaderboard('realtime', 50)",
@@ -223,12 +249,23 @@ test("schema 003 backfills and incrementally maintains public equity and cumulat
     await database.exec(`
       insert into public.profiles (id, public_uid, display_name)
       values ('${ownerTwo}', 44444, 'New trader');
-      insert into public.exchange_connections (
-        id, owner_id, public_enabled, status, started_at, last_synced_at,
-        public_amounts_consented_at
+      insert into public.exchange_credential_sets (
+        id, owner_id, provider, label, secret_mask, status
       ) values (
-        '${connectionTwo}', '${ownerTwo}', true, 'active',
-        now() - interval '4 hours', now() - interval '1 hour', now()
+        '${credentialTwo}', '${ownerTwo}', 'binance', 'New trader account', '••••EFGH', 'active'
+      );
+      insert into public.exchange_connections (
+        id, owner_id, exchange, market, label, public_enabled, status,
+        api_key_last_four, read_only_ack_at, started_at, last_synced_at,
+        public_amounts_consented_at, provider, credential_set_id,
+        account_label, account_identifier_mask, account_currency,
+        capabilities, equity_tracking_started_at, sync_status
+      ) values (
+        '${connectionTwo}', '${ownerTwo}', 'binance', 'usdm_futures', 'New trader account',
+        true, 'active', 'EFGH', now(), now() - interval '4 hours',
+        now() - interval '1 hour', now(), 'binance', '${credentialTwo}',
+        'New trader account', '••••EFGH', 'USDT', '{}'::jsonb,
+        now() - interval '4 hours', 'idle'
       );
       insert into public.trading_equity_snapshots (
         connection_id, owner_id, captured_at, equity_usdt,
@@ -279,7 +316,7 @@ test("schema 003 backfills and incrementally maintains public equity and cumulat
     assert.equal(Number(unchanged.rows[0].sample_count), 4);
 
     const version = await database.query("select public.wavekb_schema_version() as version");
-    assert.equal(version.rows[0].version, "202609080003");
+    assert.equal(version.rows[0].version, "202611240001");
   } finally {
     await database.close();
   }
@@ -290,6 +327,7 @@ test("schema 003 keeps private, stale, disabled and accounting-error accounts ou
   try {
     await createVersionTwoDatabase(database);
     await database.exec(await fs.readFile(migrationUrl, "utf8"));
+    await database.exec(await fs.readFile(multiExchangeMigrationUrl, "utf8"));
     await database.query(
       "select public.set_exchange_connection_public_amounts($1, $2, true, true)",
       [ownerOne, connectionOne],
