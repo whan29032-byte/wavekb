@@ -5,7 +5,7 @@ import { KnowledgeRuntime } from "../src/knowledge/runtime.ts";
 import { classifyProviderError } from "../src/jobs/router.ts";
 import { buildKnowledgeIndex, type KnowledgeChunk, type KnowledgeIndex } from "../src/knowledge/index.ts";
 import type { ProviderRequest, ProviderResult } from "../src/providers/types.ts";
-import { AiJobWorker, type ClaimedJob } from "../src/worker-main.ts";
+import { AiJobWorker, formatWorkerMetric, type ClaimedJob } from "../src/worker-main.ts";
 import { publicAiJob } from "../src/research/publication.ts";
 
 const config = loadConfig({
@@ -18,6 +18,17 @@ const config = loadConfig({
 
 const CONNECTION_ID = "44444444-4444-4444-8444-444444444444";
 const artifactKnowledgeVersion = buildKnowledgeIndex().knowledgeVersion;
+
+test("worker metrics include counters but never response bodies or credentials", () => {
+  const line = formatWorkerMetric("trading_sync", {
+    checked: 3, published: 2, failed: 1, duration_ms: 42,
+    response_body: "private-provider-response",
+    request_payload: { apiKey: "private-api-key" },
+    credential: "private-credential",
+  });
+  assert.deepEqual(JSON.parse(line), { event: "trading_sync", checked: 3, published: 2, failed: 1, duration_ms: 42 });
+  assert.equal(line.includes("private"), false);
+});
 
 const baseJob: ClaimedJob = {
   id: "job-1",

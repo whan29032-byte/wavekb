@@ -884,7 +884,21 @@ begin
       (item->>'id')::uuid, connection.owner_id, (item->>'revision')::integer,
       item->>'fill_digest', item
     ) on conflict (cycle_id, revision) do nothing;
+
+    update public.trading_trade_reviews
+    set needs_reconciliation = coalesce((item->>'needs_reconciliation')::boolean, false),
+        updated_at = now()
+    where cycle_id = (item->>'id')::uuid and owner_id = connection.owner_id;
   end loop;
+
+  update public.trading_trade_cycles current_cycle
+  set is_current = false, generation = next_generation, updated_at = now()
+  where current_cycle.connection_id = connection.id
+    and current_cycle.is_current
+    and not exists (
+      select 1 from jsonb_array_elements(p_cycles) candidate
+      where (candidate->>'id')::uuid = current_cycle.id
+    );
 
   for item in select value from jsonb_array_elements(p_lineage) loop
     insert into public.trading_trade_cycle_lineage (
@@ -923,6 +937,40 @@ begin
     'published', now(), now()
   );
   return next_generation;
+end;
+$$;
+
+create or replace function public.record_exchange_sync_failure_v3(
+  p_connection_id uuid,
+  p_owner_id uuid,
+  p_worker_id uuid,
+  p_error_code text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  connection public.exchange_connections;
+begin
+  if p_error_code !~ '^[a-z0-9_-]{3,80}$' then raise exception 'invalid_sync_error'; end if;
+  update public.exchange_connections
+  set status = 'error', sync_status = 'idle', last_error_code = p_error_code,
+      consecutive_failures = consecutive_failures + 1,
+      lease_owner = null, lease_until = null
+  where id = p_connection_id and owner_id = p_owner_id and lease_owner = p_worker_id
+  returning * into connection;
+  if connection.id is null then return false; end if;
+
+  insert into public.trading_sync_batches (
+    connection_id, owner_id, expected_generation, published_generation,
+    status, safe_error_code, started_at, finished_at
+  ) values (
+    connection.id, connection.owner_id, connection.sync_generation, null,
+    'failed', p_error_code, now(), now()
+  );
+  return true;
 end;
 $$;
 
@@ -1206,6 +1254,7 @@ revoke all on function public.rotate_exchange_credential_set(uuid, uuid, text, t
 revoke all on function public.upsert_exchange_connection_v3(uuid, text, uuid, text, text, text, text, jsonb, timestamptz, timestamptz) from public, anon, authenticated;
 revoke all on function public.claim_exchange_sync_connection(uuid, uuid, timestamptz, integer) from public, anon, authenticated;
 revoke all on function public.publish_exchange_sync_generation(uuid, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;
+revoke all on function public.record_exchange_sync_failure_v3(uuid, uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public.save_trading_trade_review(uuid, uuid, integer, text, text, text, text[], numeric, numeric) from public, anon, authenticated;
 revoke all on function public.disconnect_exchange_connection_v3(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.request_trading_data_deletion(uuid, uuid) from public, anon, authenticated;
@@ -1215,6 +1264,7 @@ grant execute on function public.rotate_exchange_credential_set(uuid, uuid, text
 grant execute on function public.upsert_exchange_connection_v3(uuid, text, uuid, text, text, text, text, jsonb, timestamptz, timestamptz) to service_role;
 grant execute on function public.claim_exchange_sync_connection(uuid, uuid, timestamptz, integer) to service_role;
 grant execute on function public.publish_exchange_sync_generation(uuid, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, timestamptz) to service_role;
+grant execute on function public.record_exchange_sync_failure_v3(uuid, uuid, uuid, text) to service_role;
 grant execute on function public.save_trading_trade_review(uuid, uuid, integer, text, text, text, text[], numeric, numeric) to service_role;
 grant execute on function public.disconnect_exchange_connection_v3(uuid, uuid) to service_role;
 grant execute on function public.request_trading_data_deletion(uuid, uuid) to service_role;

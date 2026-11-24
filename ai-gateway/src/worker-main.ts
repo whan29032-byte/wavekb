@@ -28,6 +28,15 @@ export type ClaimedJob = {
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+export function formatWorkerMetric(event: string, values: Record<string, unknown>): string {
+  const metric: Record<string, string | number | boolean> = { event: /^[a-z0-9_-]{1,48}$/i.test(event) ? event : "worker_metric" };
+  for (const [key, value] of Object.entries(values)) {
+    if (!/^[a-z][a-z0-9_]{0,47}$/i.test(key) || /(body|payload|request|response|secret|credential|token|key)/i.test(key)) continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") metric[key] = value;
+  }
+  return JSON.stringify(metric);
+}
+
 type WorkerKnowledgeRuntime = {
   run(input: {
     job: ClaimedJob;

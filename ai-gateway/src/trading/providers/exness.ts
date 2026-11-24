@@ -156,7 +156,34 @@ function parseHistoryPayload(page: ProviderHistoryPage) {
     accountCurrency: text(payload.account_currency, "account_currency").toUpperCase(),
     items: payload.items.map((item) => record(item, "history_item")),
     hasMore: payload.has_more,
+    coverageStartedAt: payload.coverage_started_at === undefined ? null : text(payload.coverage_started_at, "coverage_started_at"),
   };
+}
+
+type ExnessHistoryCursor = {
+  version: 1;
+  history_start: string;
+  window_from: string;
+  window_to: string;
+  provider_cursor: string | null;
+};
+
+function historyCursor(value: string | null, account: ProviderAccount, now: number): ExnessHistoryCursor {
+  const historyStart = new Date(now - account.capabilities.history_age_days * 24 * 60 * 60 * 1_000).toISOString();
+  const windowTo = new Date(now).toISOString();
+  const windowFrom = new Date(Math.max(Date.parse(historyStart), now - account.capabilities.history_range_days * 24 * 60 * 60 * 1_000)).toISOString();
+  if (!value) return { version: 1, history_start: historyStart, window_from: windowFrom, window_to: windowTo, provider_cursor: null };
+  try {
+    const parsed = JSON.parse(value) as Partial<ExnessHistoryCursor>;
+    if (parsed.version === 1 && typeof parsed.history_start === "string" && typeof parsed.window_from === "string" && typeof parsed.window_to === "string"
+      && (parsed.provider_cursor === null || typeof parsed.provider_cursor === "string")
+      && [parsed.history_start, parsed.window_from, parsed.window_to].every((item) => Number.isFinite(Date.parse(item)))) {
+      return parsed as ExnessHistoryCursor;
+    }
+  } catch {
+    // A pre-window cursor is resumed inside the current provider window.
+  }
+  return { version: 1, history_start: historyStart, window_from: windowFrom, window_to: windowTo, provider_cursor: value };
 }
 
 export class ExnessTradingProviderAdapter implements TradingProviderAdapter {
@@ -272,18 +299,27 @@ export class ExnessTradingProviderAdapter implements TradingProviderAdapter {
     if (cursor.kind !== "opaque") throw Object.assign(new Error("exness_invalid_history_cursor"), { statusCode: 400 });
     const accessPoint = await this.accessPoint(account.external_account_id, account.credentials);
     const parameters: Record<string, string> = { limit: "200" };
-    if (cursor.value) parameters.cursor = cursor.value;
-    else {
-      const rangeMs = account.capabilities.history_range_days * 24 * 60 * 60 * 1_000;
-      parameters.from = new Date(this.now() - rangeMs).toISOString();
-      parameters.to = new Date(this.now()).toISOString();
-    }
+    const state = historyCursor(cursor.value, account, this.now());
+    if (state.provider_cursor) parameters.cursor = state.provider_cursor;
+    else { parameters.from = state.window_from; parameters.to = state.window_to; }
     const payload = record(await this.get(accessPoint, `/v1/history/accounts/${account.external_account_id}/deals`, parameters, account.credentials), "deals_history");
     if (!Array.isArray(payload.items) || typeof payload.has_more !== "boolean") throw Object.assign(new Error("exness_invalid_deals_history"), { statusCode: 502 });
-    const nextCursor = payload.next_cursor === undefined ? null : text(payload.next_cursor, "next_cursor");
+    const providerCursor = payload.next_cursor === undefined ? null : text(payload.next_cursor, "next_cursor");
+    let next: ExnessHistoryCursor | null = null;
+    if (payload.has_more) {
+      if (!providerCursor) throw Object.assign(new Error("exness_next_cursor_missing"), { statusCode: 502 });
+      next = { ...state, provider_cursor: providerCursor };
+    } else if (Date.parse(state.window_from) > Date.parse(state.history_start)) {
+      const nextTo = Date.parse(state.window_from);
+      const nextFrom = Math.max(Date.parse(state.history_start), nextTo - account.capabilities.history_range_days * 24 * 60 * 60 * 1_000);
+      next = { ...state, window_from: new Date(nextFrom).toISOString(), window_to: new Date(nextTo).toISOString(), provider_cursor: null };
+    }
     return {
-      payload: { connection_id: account.connection_id, account_currency: account.account_currency, items: payload.items, has_more: payload.has_more },
-      cursor: { kind: "opaque", value: nextCursor }, fetched_at: new Date(this.now()).toISOString(),
+      payload: {
+        connection_id: account.connection_id, account_currency: account.account_currency,
+        items: payload.items, has_more: next !== null, coverage_started_at: state.window_from,
+      },
+      cursor: { kind: "opaque", value: next ? JSON.stringify(next) : null }, fetched_at: new Date(this.now()).toISOString(),
     };
   }
 
@@ -335,7 +371,7 @@ export class ExnessTradingProviderAdapter implements TradingProviderAdapter {
     const times = [...fills.map((fill) => fill.occurred_at), ...cashEvents.map((event) => event.occurred_at)].sort();
     return {
       fills, cash_events: cashEvents, next_cursor: page.cursor, exhausted: !payload.hasMore,
-      coverage_started_at: times[0] ?? page.fetched_at, coverage_ended_at: times.at(-1) ?? page.fetched_at,
+      coverage_started_at: times[0] ?? payload.coverageStartedAt ?? page.fetched_at, coverage_ended_at: times.at(-1) ?? page.fetched_at,
       warnings: cashEvents.some((event) => event.type === "unknown") ? ["exness_unknown_deal_type"] : [],
     };
   }

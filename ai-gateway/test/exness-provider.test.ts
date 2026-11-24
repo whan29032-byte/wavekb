@@ -52,6 +52,7 @@ test("signs exact EXN-DATA bytes, discovers official access points, and validate
   const validated = await adapter.validateCredentials({ provider: "exness", credentials: credentials(), read_only_ack: true });
   assert.equal(validated.length, 2);
   assert.deepEqual(validated.map((item) => item.external_account_id), ["101", "202"]);
+  assert.deepEqual(validated.map((item) => item.account_identifier_mask), ["••••101", "••••202"]);
   assert.ok(calls.length >= 6);
   for (const call of calls) {
     assert.equal(call.headers.get("EXN-API-KEY"), "exnsk-test-key");
@@ -84,9 +85,37 @@ test("uses live history limits, decimal snapshots, and opaque deal cursors", asy
   assert.equal(snapshot.equity, "1010.375");
   assert.equal(snapshot.unrealized_pnl, "10.25");
   const history = await adapter.fetchHistory(account(), { kind: "opaque", value: null });
-  assert.equal(history.cursor.value, "opaque-next");
-  const second = await adapter.fetchHistory(account(), { kind: "opaque", value: "opaque-next" });
+  const cursor = JSON.parse(history.cursor.value ?? "null") as Record<string, unknown>;
+  assert.equal(cursor.provider_cursor, "opaque-next");
+  assert.equal(cursor.window_from, "2026-11-10T12:00:00.000Z");
+  assert.equal(cursor.window_to, "2026-11-24T12:00:00.000Z");
+  const second = await adapter.fetchHistory(account(), history.cursor);
   assert.equal(second.cursor.kind, "opaque");
+});
+
+test("walks backward through provider-sized Exness history windows until the live age limit", async () => {
+  const windows: Array<[string | null, string | null]> = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com" });
+    if (url.pathname.endsWith("/deals")) {
+      windows.push([url.searchParams.get("from"), url.searchParams.get("to")]);
+      return json({ items: [], has_more: false });
+    }
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+  const narrowAccount = account({ capabilities: { ...account().capabilities, history_age_days: 30, history_range_days: 10 } });
+  let cursor: ProviderHistoryPage["cursor"] = { kind: "opaque", value: null };
+  do {
+    const page = await adapter.fetchHistory(narrowAccount, cursor);
+    cursor = page.cursor;
+  } while (cursor.value !== null);
+  assert.deepEqual(windows, [
+    ["2026-11-14T12:00:00.000Z", "2026-11-24T12:00:00.000Z"],
+    ["2026-11-04T12:00:00.000Z", "2026-11-14T12:00:00.000Z"],
+    ["2026-10-25T12:00:00.000Z", "2026-11-04T12:00:00.000Z"],
+  ]);
 });
 
 test("keeps same-symbol position IDs separate through partial close and classifies swap, balance, admin fee, and dividend", () => {
