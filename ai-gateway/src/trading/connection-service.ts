@@ -1,16 +1,17 @@
 import { createHmac } from "node:crypto";
-import { isTradingProvider, type TradingProduct, type TradingProvider } from "@wavekb/domain/trading-review";
+import type { TradingProduct, TradingProvider } from "@wavekb/domain/trading-review";
 import type { GatewayConfig } from "../config.ts";
 import { encryptSecret, type EncryptedSecret } from "../secrets/crypto.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
 import { BinanceTradingProviderAdapter } from "./providers/binance.ts";
 import { BitgetTradingProviderAdapter } from "./providers/bitget.ts";
 import { BybitTradingProviderAdapter } from "./providers/bybit.ts";
-import type {
-  ProviderAccount,
-  ProviderCapabilities,
-  TradingProviderAdapter,
-  ValidatedAccount,
+import {
+  isTradingProvider,
+  type ProviderAccount,
+  type ProviderCapabilities,
+  type TradingProviderAdapter,
+  type ValidatedAccount,
 } from "./providers/contracts.ts";
 import { ExnessTradingProviderAdapter } from "./providers/exness.ts";
 import { OkxTradingProviderAdapter } from "./providers/okx.ts";

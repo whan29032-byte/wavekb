@@ -1,5 +1,4 @@
-import { isTradingProvider, type TradingProvider } from "@wavekb/domain/trading-review";
-import type { TradingProviderAdapter } from "./contracts.ts";
+import { isTradingProvider, type TradingProvider, type TradingProviderAdapter } from "./contracts.ts";
 
 const requiredReadMethods = [
   "validateCredentials",

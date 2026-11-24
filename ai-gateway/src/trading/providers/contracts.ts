@@ -1,12 +1,17 @@
-import {
-  TRADING_PRODUCTS,
-  isTradingProvider,
-  type TradingProduct,
-  type TradingProvider,
-  type TradingValuationStatus,
+import type {
+  TradingProduct,
+  TradingProvider,
+  TradingValuationStatus,
 } from "@wavekb/domain/trading-review";
 
 export type { TradingProduct, TradingProvider } from "@wavekb/domain/trading-review";
+
+const TRADING_PROVIDERS: readonly TradingProvider[] = ["binance", "okx", "bybit", "bitget", "exness"];
+const TRADING_PRODUCTS: readonly TradingProduct[] = ["usdt_perpetual", "usdt_delivery", "cfd"];
+
+export function isTradingProvider(value: unknown): value is TradingProvider {
+  return typeof value === "string" && (TRADING_PROVIDERS as readonly string[]).includes(value);
+}
 
 export type ProviderCredentialInput = {
   provider: TradingProvider;
