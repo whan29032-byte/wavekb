@@ -34,6 +34,7 @@ function release(overrides = {}) {
     schemaVersion: "202611240002",
     releaseSha: sha,
     rollbackTarget: rollback,
+    sameCodeRollback: false,
     flags,
     providerOrigins: hosts,
     worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: 0 },
@@ -48,7 +49,14 @@ test("accepts a current reversible release and emits only safe operational field
   assert.equal(result.workbenchEnabled, true);
   assert.equal(result.schemaVersion, "202611240002");
   assert.equal(result.rollbackTarget, rollback);
+  assert.equal(result.sameCodeRollback, false);
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak|api_key|secret/i);
+});
+
+test("accepts an explicit same-code configuration rollback target", () => {
+  const result = validateTradingRelease(release({ rollbackTarget: sha, sameCodeRollback: true }));
+  assert.equal(result.rollbackTarget, sha);
+  assert.equal(result.sameCodeRollback, true);
 });
 
 test("allows one provider or the total workbench to be disabled for rollback", () => {
@@ -65,6 +73,7 @@ test("fails closed on schema drift, unsafe origins, stale workers and invalid ro
     release({ worker: { lastRunAt: "2026-11-24T10:00:00Z", checked: 5, failed: 0 } }),
     release({ worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: 1 } }),
     release({ rollbackTarget: sha }),
+    release({ sameCodeRollback: true }),
     release({ flags: { ...flags, TRADING_PROVIDER_OKX_ENABLED: "yes" } }),
   ];
   for (const value of invalid) assert.throws(() => validateTradingRelease(value));

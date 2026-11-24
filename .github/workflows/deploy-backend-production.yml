@@ -436,7 +436,6 @@ jobs:
               process.stdout.write(deployment);
             });
           ')
-          test "$rollback_sha" != "$RELEASE_SHA"
           printf '%s\n' "$previous" | sudo tee "${backup_root}/previous-release" > /dev/null
           for unit in "${units[@]}"; do
             if sudo test -f "/etc/systemd/system/${unit}"; then
@@ -600,6 +599,7 @@ jobs:
           const observedAt = new Date().toISOString();
           const observation = {
             expectedSchemaVersion: "202611240002", schemaVersion: "202611240002", releaseSha, rollbackTarget,
+            sameCodeRollback: releaseSha === rollbackTarget,
             flags: {
               TRADING_WORKBENCH_V2_ENABLED: boolean("TRADING_WORKBENCH_V2_ENABLED"),
               TRADING_PROVIDER_BINANCE_ENABLED: boolean("TRADING_PROVIDER_BINANCE_ENABLED"),

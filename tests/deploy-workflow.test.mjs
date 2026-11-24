@@ -163,6 +163,8 @@ test("multi-exchange trading cutover is explicit, fail-closed and covered by exa
   assert.match(activation.run, /mv -Tf "\$environment_rollback" \/etc\/elliott-wave\/gateway\.env/);
   assert.match(activation.run, /release-preflight\.mjs" --runtime-file/);
   assert.match(activation.run, /trading-runtime-observation\.json/);
+  assert.doesNotMatch(activation.run, /test "\$rollback_sha" != "\$RELEASE_SHA"/);
+  assert.match(activation.run, /sameCodeRollback: releaseSha === rollbackTarget/);
   assert.match(activation.run, /enabled-state[\s\S]*active-state/);
   assert.match(activation.run, /case "\$trading_enabled_state"[\s\S]*systemctl enable[\s\S]*systemctl disable/);
   assert.match(activation.run, /case "\$trading_active_state"[\s\S]*systemctl start[\s\S]*systemctl stop/);

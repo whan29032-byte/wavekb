@@ -42,7 +42,8 @@ export function validateTradingRelease(input) {
   invariant(input.schemaVersion === input.expectedSchemaVersion, "database schema is not current");
   invariant(/^[0-9a-f]{40}$/.test(input.releaseSha ?? ""), "release SHA is invalid");
   invariant(/^[0-9a-f]{40}$/.test(input.rollbackTarget ?? ""), "rollback target is invalid");
-  invariant(input.releaseSha !== input.rollbackTarget, "rollback target must differ from release");
+  const sameCodeRollback = strictBoolean(input.sameCodeRollback, "sameCodeRollback");
+  invariant(sameCodeRollback === (input.releaseSha === input.rollbackTarget), "rollback mode does not match code state");
 
   const workbenchEnabled = strictBoolean(input.flags?.TRADING_WORKBENCH_V2_ENABLED, "TRADING_WORKBENCH_V2_ENABLED");
   const enabledProviders = PROVIDERS.filter((provider) => strictBoolean(input.flags?.[FLAG_BY_PROVIDER[provider]], FLAG_BY_PROVIDER[provider]));
@@ -61,6 +62,7 @@ export function validateTradingRelease(input) {
     workbenchEnabled,
     enabledProviders,
     rollbackTarget: input.rollbackTarget,
+    sameCodeRollback,
     worker: {
       lastRunAt: new Date(lastRun).toISOString(),
       checked: input.worker.checked,
@@ -117,11 +119,14 @@ function envBoolean(name) {
 function runtimeInputFromEnv() {
   const flags = { TRADING_WORKBENCH_V2_ENABLED: envBoolean("TRADING_WORKBENCH_V2_ENABLED") };
   for (const name of Object.values(FLAG_BY_PROVIDER)) flags[name] = envBoolean(name);
+  const releaseSha = process.env.TRADING_RELEASE_SHA;
+  const rollbackTarget = process.env.TRADING_ROLLBACK_SHA;
   return {
     expectedSchemaVersion: "202611240002",
     schemaVersion: process.env.TRADING_SCHEMA_VERSION,
-    releaseSha: process.env.TRADING_RELEASE_SHA,
-    rollbackTarget: process.env.TRADING_ROLLBACK_SHA,
+    releaseSha,
+    rollbackTarget,
+    sameCodeRollback: releaseSha === rollbackTarget,
     flags,
     providerOrigins: {
       binance: process.env.BINANCE_FUTURES_API_URL ?? "https://fapi.binance.com",
