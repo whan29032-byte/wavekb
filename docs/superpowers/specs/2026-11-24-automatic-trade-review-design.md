@@ -1,5 +1,7 @@
 # WaveKB 自动交易复盘设计
 
+> **已被替代：** 本文是 Binance 单平台版本，不再作为实施依据。当前设计见 `docs/superpowers/specs/2026-11-24-multi-exchange-automatic-trade-review-design.md`。
+
 日期：2026-11-24
 状态：已确认，待实施
 

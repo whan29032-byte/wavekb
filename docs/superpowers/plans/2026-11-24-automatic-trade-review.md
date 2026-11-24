@@ -1,5 +1,7 @@
 # Automatic Trade Review Implementation Plan
 
+> **Superseded:** Do not execute this Binance-only plan. The approved product scope now covers Binance, OKX, Bybit, Bitget, and Exness through a unified adapter architecture. A replacement plan will be written after `docs/superpowers/specs/2026-11-24-multi-exchange-automatic-trade-review-design.md` is approved.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the 11-step default workbench flow with a private Binance USD-M automatic review dashboard and one-page per-trade review backed by real fills, fees, funding, equity snapshots, and WaveKB knowledge-grounded AI.
