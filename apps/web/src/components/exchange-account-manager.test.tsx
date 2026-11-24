@@ -102,4 +102,16 @@ describe("ExchangeAccountManager", () => {
     await waitFor(() => expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/exchange/connections/c1/reverify"));
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body)).credentials.privateKey).toBe("new-private");
   });
+
+  it("starts an owner-scoped manual synchronization from an active account", async () => {
+    const connection = { id: "c1", provider: "binance", account_label: "主账户", account_identifier_mask: "••••1001", account_currency: "USDT", products: ["usdt_perpetual"], read_only_status: "verified", capability_status: "ready", status: "active", public_enabled: false, last_synced_at: null, last_error_code: "" };
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => response({ connections: [connection] }))
+      .mockImplementationOnce(() => response({ sync: { status: "published", connection_id: "c1", generation: 3 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ExchangeAccountManager actorId="owner" />);
+    fireEvent.click(await screen.findByRole("button", { name: "立即同步" }));
+    await screen.findByText("交易记录已同步。");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/exchange/connections/c1/sync");
+  });
 });

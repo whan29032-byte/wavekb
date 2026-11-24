@@ -97,6 +97,7 @@ class Store implements TradingSyncStore {
   existingCash: CanonicalCashEvent[] = [];
   previousCycles: any[] = [];
   claimResult = true;
+  claimCalls = 0;
   publication: SyncPublication | null = null;
   publications = 0;
   failures: string[] = [];
@@ -105,7 +106,7 @@ class Store implements TradingSyncStore {
 
   async getConnection(id: string) { return id === this.connection.id ? this.connection : null; }
   async listDueConnections() { return this.dueConnections; }
-  async claim() { return this.claimResult; }
+  async claim() { this.claimCalls += 1; return this.claimResult; }
   async loadCredentialEnvelope() { return { ciphertext: "cipher", iv: "iv", auth_tag: "tag", key_version: 1, last_four: "" }; }
   async bindExternalAccountHash(_ownerId: string, _connectionId: string, hash: string) { this.connection.external_account_id_hash = hash; }
   async loadCursor() { return this.cursor; }
@@ -207,6 +208,17 @@ test("throttles repeated manual sync and skips providers disabled by a runtime f
   store.connection.last_synced_at = null;
   assert.deepEqual(await service(store, adapter, []).syncConnection(connectionId), { status: "skipped", reason: "provider_disabled", connection_id: connectionId });
   assert.equal(store.publications, 0);
+});
+
+test("rejects a manual sync for a connection owned by another user before claiming its lease", async () => {
+  const store = new Store();
+  const adapter = new Adapter([batch()]);
+  await assert.rejects(
+    () => service(store, adapter).syncConnection(connectionId, { manual: true, owner_id: "99999999-9999-4999-8999-999999999999" }),
+    /exchange_connection_not_found/,
+  );
+  assert.equal(store.claimCalls, 0);
+  assert.equal(adapter.validateCalls, 0);
 });
 
 test("publishes explicit valuation gaps instead of inventing USD values", async () => {

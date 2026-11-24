@@ -394,9 +394,9 @@ export class TradingSyncService {
     return this.store.publish(publication);
   }
 
-  async syncConnection(connectionId: string, options: { manual?: boolean } = {}): Promise<SyncResult> {
+  async syncConnection(connectionId: string, options: { manual?: boolean; owner_id?: string } = {}): Promise<SyncResult> {
     const connection = await this.store.getConnection(connectionId);
-    if (!connection) throw Object.assign(new Error("exchange_connection_not_found"), { statusCode: 404 });
+    if (!connection || (options.owner_id && connection.owner_id !== options.owner_id)) throw Object.assign(new Error("exchange_connection_not_found"), { statusCode: 404 });
     if (!this.enabledProviders.has(connection.provider)) return { status: "skipped", reason: "provider_disabled", connection_id: connection.id };
     const lastSync = Date.parse(connection.last_synced_at ?? "");
     if (options.manual && Number.isFinite(lastSync) && this.now() - lastSync < this.syncIntervalMs) {

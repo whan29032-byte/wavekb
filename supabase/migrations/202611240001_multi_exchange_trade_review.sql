@@ -1020,6 +1020,7 @@ begin
       tags = excluded.tags,
       planned_stop_price = excluded.planned_stop_price,
       planned_risk_amount = excluded.planned_risk_amount,
+      needs_reconciliation = false,
       updated_at = now()
   returning * into review;
   return review;

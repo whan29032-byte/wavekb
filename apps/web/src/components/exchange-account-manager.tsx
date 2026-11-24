@@ -181,7 +181,7 @@ export function ExchangeAccountManager({ actorId }: { actorId: string | null }) 
     formRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
   }
 
-  async function connectionAction(connection: Connection, action: "public" | "disconnect" | "data") {
+  async function connectionAction(connection: Connection, action: "public" | "disconnect" | "data" | "sync") {
     if (action === "disconnect" && !window.confirm(`确认断开“${connection.account_label}”？已同步的复盘数据会保留。`)) return;
     if (action === "data" && !window.confirm(`确认删除“${connection.account_label}”的交易数据？数据将隐藏并进入 30 天删除期。`)) return;
     setPending(true); setError(""); setNotice("");
@@ -198,8 +198,9 @@ export function ExchangeAccountManager({ actorId }: { actorId: string | null }) 
       const body = await payload(response);
       if (!response.ok) throw new Error(String(body.error || "request_failed"));
       if (action === "data") setConnections((items) => items.filter((item) => item.id !== connection.id));
+      else if (action === "sync" && body.sync?.status === "published") setConnections((items) => items.map((item) => item.id === connection.id ? { ...item, last_synced_at: new Date().toISOString(), last_error_code: "" } : item));
       else if (body.connection) setConnections((items) => items.map((item) => item.id === connection.id ? body.connection as Connection : item));
-      setNotice(action === "public" ? (nextPublic ? "该账户已加入收益榜。" : "该账户已退出收益榜。") : action === "disconnect" ? "账户连接已断开。" : "删除申请已提交。");
+      setNotice(action === "public" ? (nextPublic ? "该账户已加入收益榜。" : "该账户已退出收益榜。") : action === "disconnect" ? "账户连接已断开。" : action === "data" ? "删除申请已提交。" : body.sync?.status === "published" ? "交易记录已同步。" : body.sync?.reason === "manual_throttled" ? "刚刚同步过，请稍后再试。" : "同步任务正在由其他进程处理。");
       router.refresh();
     } catch (cause) { setError(messageFor(cause instanceof Error ? cause.message : "request_failed")); }
     finally { setPending(false); }
@@ -264,10 +265,10 @@ export function ExchangeAccountManager({ actorId }: { actorId: string | null }) 
             </header>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="secondary" disabled={pending || connection.status !== "active"} onClick={() => void connectionAction(connection, "public")}>{connection.public_enabled ? "退出收益榜" : "加入收益榜"}</Button>
+              <Button type="button" variant="ghost" disabled={pending || connection.status !== "active"} onClick={() => void connectionAction(connection, "sync")}><ArrowsClockwise aria-hidden size={16} />立即同步</Button>
               <Button type="button" variant="ghost" disabled={pending} onClick={() => beginReverify(connection)}>更新 API</Button>
               <Button type="button" variant="ghost" disabled={pending || connection.status === "disabled"} onClick={() => void connectionAction(connection, "disconnect")}><LinkBreak aria-hidden size={16} />断开连接</Button>
               <Button type="button" variant="ghost" disabled={pending} onClick={() => void connectionAction(connection, "data")}><Trash aria-hidden size={16} />删除数据</Button>
-              <Button type="button" variant="ghost" disabled title="自动同步启用后会在此显示手动同步"><ArrowsClockwise aria-hidden size={16} />自动同步</Button>
             </div>
           </article>
         ))}

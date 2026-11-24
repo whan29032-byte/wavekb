@@ -391,6 +391,13 @@ test("atomic publication uses leases, generation compare-and-swap and idempotent
     );
     const review = await database.query("select reason, plan_compliance from public.trading_trade_reviews");
     assert.deepEqual(review.rows, [{ reason: "Breakout", plan_compliance: "yes" }]);
+    await database.exec("update public.trading_trade_reviews set needs_reconciliation = true");
+    await database.query(
+      "select public.save_trading_trade_review($1, $2, 1, 'Reviewed again', 'partial', 'Keep evidence', array[]::text[], null, null)",
+      [ownerOne, cycleOne],
+    );
+    const reconciled = await database.query("select needs_reconciliation from public.trading_trade_reviews");
+    assert.deepEqual(reconciled.rows, [{ needs_reconciliation: false }]);
 
     await database.exec("set role anon");
     await assert.rejects(database.query("select * from public.trading_fills"), /permission denied/);

@@ -14,6 +14,12 @@ import {
   createExchangeConnectionService,
   type ExchangeConnectionService,
 } from "./trading/connection-service.ts";
+import {
+  createTradingWorkbenchService,
+  type TradingWorkbenchService,
+} from "./trading/workbench-service.ts";
+import type { TradingSyncService } from "./trading/sync-service.ts";
+import { createTradingSyncService } from "./trading-worker.ts";
 
 export type ServerDeps = {
   config: GatewayConfig;
@@ -24,6 +30,8 @@ export type ServerDeps = {
   authRateLimiter?: AuthRateLimiter;
   youtubeApi?: YouTubeRouteApi;
   exchangeConnections?: ExchangeConnectionService;
+  tradingWorkbench?: TradingWorkbenchService;
+  tradingSync?: Pick<TradingSyncService, "syncConnection">;
 };
 
 export type GatewayUser = { id: string; role: string };
@@ -205,6 +213,9 @@ function authFailure(error: unknown): RouteResult {
     "credential_accounts_mismatch",
     "public_amounts_consent_required",
     "sync_service_unavailable",
+    "trade_cycle_not_found",
+    "stale_trade_cycle_revision",
+    "invalid_trade_review",
     "binance_1021",
     "binance_1022",
     "binance_2014",
@@ -281,6 +292,9 @@ function routeFailure(error: unknown): RouteResult {
     "credential_accounts_mismatch",
     "public_amounts_consent_required",
     "sync_service_unavailable",
+    "trade_cycle_not_found",
+    "stale_trade_cycle_revision",
+    "invalid_trade_review",
     "binance_1021",
     "binance_1022",
     "binance_2014",
@@ -562,6 +576,21 @@ async function route(
       body: { connections: await api.listUserConnections(actor.id) },
     };
   }
+  if (method === "GET" && path === "/v1/user/trading-workbench") {
+    if (!deps.tradingWorkbench) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 200, body: { workbench: await deps.tradingWorkbench.getDashboard(actor.id, query) }, headers: { "cache-control": "no-store" } };
+  }
+  const tradingTradeMatch = path.match(/^\/v1\/user\/trading-trades\/([^/]+)(\/review)?$/);
+  if (tradingTradeMatch?.[1]) {
+    if (!deps.tradingWorkbench) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    const cycleId = decodeURIComponent(tradingTradeMatch[1]);
+    if (method === "GET" && !tradingTradeMatch[2]) {
+      return { statusCode: 200, body: { detail: await deps.tradingWorkbench.getTrade(actor.id, cycleId, query.timezone) }, headers: { "cache-control": "no-store" } };
+    }
+    if (method === "PUT" && tradingTradeMatch[2]) {
+      return { statusCode: 200, body: { review: await deps.tradingWorkbench.saveReview(actor.id, cycleId, (payload ?? {}) as Record<string, unknown>) } };
+    }
+  }
   if (method === "GET" && path === "/v1/user/membership-ai") {
     if (!api.membershipAiStatus) return { statusCode: 503, body: { error: "managed_ai_disabled" } };
     return { statusCode: 200, body: await api.membershipAiStatus(actor.id) };
@@ -657,7 +686,8 @@ async function route(
       return { statusCode: 202, body: { deletion: await deps.exchangeConnections.requestDeletion(actor.id, connectionId) } };
     }
     if (method === "POST" && action === "sync") {
-      throw Object.assign(new Error("sync_service_unavailable"), { statusCode: 503 });
+      if (!deps.tradingSync) throw Object.assign(new Error("sync_service_unavailable"), { statusCode: 503 });
+      return { statusCode: 200, body: { sync: await deps.tradingSync.syncConnection(connectionId, { manual: true, owner_id: actor.id }) } };
     }
   }
   if (method === "POST" && path === "/v1/user/ai-connections") {
@@ -756,7 +786,7 @@ export function buildServer(deps: ServerDeps): GatewayServer {
           response.setHeader("vary", "origin");
         }
         response.setHeader("access-control-allow-headers", "authorization, content-type");
-        response.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+        response.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
         if (request.method === "OPTIONS") {
           response.statusCode = 204;
           response.end();
@@ -832,6 +862,8 @@ if (isMain) {
     authApi: new AuthApi(config),
     userAdministrationApi: new UserAdministrationApi(config),
     exchangeConnections: createExchangeConnectionService(config),
+    tradingWorkbench: createTradingWorkbenchService(config),
+    tradingSync: createTradingSyncService(config),
     ...(youtubeApi ? { youtubeApi } : {}),
   });
   await server.listen({ port: config.PORT, host: "127.0.0.1" });
