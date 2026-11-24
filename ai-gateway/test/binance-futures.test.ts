@@ -47,3 +47,26 @@ test("does not expose Binance error messages or credentials", async () => {
     return true;
   });
 });
+
+test("reads only allowlisted trade and income history with a bounded time cursor", async () => {
+  const calls: URL[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.pathname.endsWith("userTrades")) return json([{ id: 7, time: 1_700_000_000_100 }]);
+    if (url.pathname.endsWith("income")) return json([{ tranId: 8, time: 1_700_000_000_200 }]);
+    throw new Error("unexpected endpoint");
+  };
+  const client = new BinanceFuturesClient("key", "secret", "https://fapi.binance.com", fetcher, () => 1_701_000_000_000);
+  const page = await client.historyPage(1_700_000_000_000);
+  assert.equal(page.trades.length, 1);
+  assert.equal(page.income.length, 1);
+  assert.equal(page.nextStartTime, 1_700_604_800_001);
+  assert.equal(page.exhausted, false);
+  assert.deepEqual(calls.map((url) => url.pathname).sort(), ["/fapi/v1/income", "/fapi/v1/userTrades"]);
+  for (const url of calls) {
+    assert.equal(url.searchParams.get("startTime"), "1700000000000");
+    assert.equal(url.searchParams.get("endTime"), "1700604800000");
+    assert.equal(url.searchParams.get("limit"), "1000");
+  }
+});
