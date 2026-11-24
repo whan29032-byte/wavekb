@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import JavaScriptObfuscator from "javascript-obfuscator";
 
 // 构建后对客户端 chunk 做一层混淆。只处理 ≥2048 字节的文件：
@@ -21,6 +23,24 @@ const options = {
   deadCodeInjection: false,
   sourceMap: false,
 };
+
+function relativeChunkName(file) {
+  return path.relative(CHUNKS_DIR, path.resolve(file)).split(path.sep).join("/");
+}
+
+export function identifiersPrefixForChunk(file) {
+  const digest = createHash("sha256").update(relativeChunkName(file)).digest("hex").slice(0, 12);
+  return `_wk_${digest}_`;
+}
+
+export function obfuscateChunkSource(source, file) {
+  const obfuscated = JavaScriptObfuscator.obfuscate(source, {
+    ...options,
+    identifiersPrefix: identifiersPrefixForChunk(file),
+    inputFileName: relativeChunkName(file),
+  }).getObfuscatedCode();
+  return `(function(){${obfuscated}\n}).call(globalThis);`;
+}
 
 function* walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -45,7 +65,7 @@ function main() {
       continue;
     }
     try {
-      const result = JavaScriptObfuscator.obfuscate(source, options).getObfuscatedCode();
+      const result = obfuscateChunkSource(source, file);
       fs.writeFileSync(file, result, "utf8");
       processed += 1;
     } catch (error) {
@@ -58,4 +78,5 @@ function main() {
   console.log(`[obfuscate-chunks] processed ${processed}, skipped ${skipped}, kept-original ${failed}`);
 }
 
-main();
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) main();
