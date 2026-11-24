@@ -17,6 +17,16 @@ export type NormalizedAiRunRequest = {
   vision_context?: { instrument: string; timeframe: string };
 };
 
+export type TradeReviewKnowledgeScope = "all" | { book_ids: PublishedBookId[] };
+
+export type NormalizedTradeReviewAiRequest = {
+  request_version: 1;
+  client_request_id: string;
+  task_type: "trade_review";
+  cycle_revision: number;
+  knowledge_scope: TradeReviewKnowledgeScope;
+};
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VERSIONED_KEYS = new Set([
   "request_version",
@@ -34,6 +44,14 @@ const LEGACY_KEYS = new Set([
 const VISION_KEYS = new Set([...VERSIONED_KEYS, "vision_image_ids", "vision_context"]);
 const ALL_SCOPE_KEYS = new Set(["mode"]);
 const SINGLE_SCOPE_KEYS = new Set(["mode", "book_id"]);
+const TRADE_REVIEW_KEYS = new Set([
+  "request_version",
+  "client_request_id",
+  "task_type",
+  "cycle_revision",
+  "knowledge_scope",
+]);
+const TRADE_REVIEW_BOOK_SCOPE_KEYS = new Set(["book_ids"]);
 
 function invalidRequest(message = "invalid ai run request"): never {
   throw Object.assign(new Error(message), { statusCode: 400 });
@@ -139,5 +157,52 @@ export function normalizeAiRunRequest(
       ? { mode: "all" }
       : normalizeScope(input.knowledge_scope, catalog),
     ...visionFields,
+  };
+}
+
+export function normalizeTradeReviewAiRequest(
+  input: Record<string, unknown>,
+  catalog: BookCatalog,
+): NormalizedTradeReviewAiRequest {
+  if (!isRecord(input)) invalidRequest("invalid trade review request");
+  exactKeys(input, TRADE_REVIEW_KEYS);
+  if (input.request_version !== 1 || input.task_type !== "trade_review") {
+    invalidRequest("trade review request version or task is invalid");
+  }
+  if (typeof input.client_request_id !== "string"
+    || input.client_request_id.length > 64
+    || !UUID_PATTERN.test(input.client_request_id)) {
+    invalidRequest("client_request_id is invalid");
+  }
+  if (!Number.isInteger(input.cycle_revision)
+    || Number(input.cycle_revision) < 1
+    || Number(input.cycle_revision) > 2_147_483_647) {
+    invalidRequest("cycle_revision is invalid");
+  }
+  let knowledgeScope: TradeReviewKnowledgeScope;
+  if (input.knowledge_scope === "all") {
+    knowledgeScope = "all";
+  } else {
+    const scope = input.knowledge_scope;
+    if (!isRecord(scope)) invalidRequest("knowledge_scope is invalid");
+    exactKeys(scope, TRADE_REVIEW_BOOK_SCOPE_KEYS);
+    if (!Array.isArray(scope.book_ids) || scope.book_ids.length < 1
+      || scope.book_ids.length > catalog.length
+      || scope.book_ids.some((bookId) => typeof bookId !== "string")
+      || new Set(scope.book_ids).size !== scope.book_ids.length) {
+      invalidRequest("knowledge_scope is invalid");
+    }
+    const published = new Set(catalog.map((book) => book.bookId));
+    if (scope.book_ids.some((bookId) => !published.has(bookId as PublishedBookId))) {
+      invalidRequest("knowledge_scope book is unpublished");
+    }
+    knowledgeScope = { book_ids: scope.book_ids as PublishedBookId[] };
+  }
+  return {
+    request_version: 1,
+    client_request_id: input.client_request_id.toLowerCase(),
+    task_type: "trade_review",
+    cycle_revision: Number(input.cycle_revision),
+    knowledge_scope: knowledgeScope,
   };
 }

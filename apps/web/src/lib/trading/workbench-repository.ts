@@ -45,6 +45,31 @@ export type SaveTradingReviewInput = {
   planned_risk_amount: string | null;
 };
 
+export type TradeReviewAiCitation = {
+  knowledge_id: string;
+  book_title: string;
+  title: string;
+  href: string;
+  pages: number[];
+  snippet: string;
+};
+
+export type TradeReviewAiOutput = {
+  fact_summary: string[];
+  discipline_observations: Array<{ observation: string; basis: "user_statement" | "model_inference" }>;
+  wave_structure_hypothesis: { status: "unknown"; summary: string; evidence_limit: string };
+  citations: TradeReviewAiCitation[];
+  next_checklist: string[];
+};
+
+export type TradeReviewAiJob = {
+  id: string;
+  status: "queued" | "waiting_retry" | "running" | "succeeded" | "failed" | "cancelled";
+  stale?: boolean;
+  output_payload?: TradeReviewAiOutput | null;
+  error_code?: string | null;
+};
+
 export class TradingRepositoryError extends Error {
   readonly code: string;
   readonly status: number;
@@ -78,4 +103,26 @@ export async function saveTradingReview(id: string, input: SaveTradingReviewInpu
   return json<TradingReviewView>(await fetch(`/api/trading/trades/${encodeURIComponent(id)}/review`, {
     method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
   }), "review");
+}
+
+export async function submitTradeReviewAi(
+  id: string,
+  cycleRevision: number,
+  knowledgeScope: "all" | { book_ids: string[] },
+) {
+  const clientRequestId = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(16).padStart(8, "0").slice(-8)}-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, "0").slice(0, 12)}`;
+  return json<TradeReviewAiJob>(await fetch(`/api/trading/trades/${encodeURIComponent(id)}/ai-review`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      request_version: 1,
+      client_request_id: clientRequestId,
+      task_type: "trade_review",
+      cycle_revision: cycleRevision,
+      knowledge_scope: knowledgeScope,
+    }),
+  }), "job");
+}
+
+export async function getTradeReviewAiJob(jobId: string) {
+  return json<TradeReviewAiJob>(await fetch(`/api/ai/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" }), "job");
 }

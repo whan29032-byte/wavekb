@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { GatewayConfig } from "../config.ts";
 import { normalizeDirectoryResource } from "../directory/external-directory.ts";
-import { normalizeAiRunRequest } from "../knowledge/contracts.ts";
+import { normalizeAiRunRequest, normalizeTradeReviewAiRequest } from "../knowledge/contracts.ts";
 import type { NormalizedAiRunRequest } from "../knowledge/contracts.ts";
 import { normalizeVisionImageIds } from "../research/vision-input.ts";
 import { buildKnowledgeIndex, type KnowledgeIndex } from "../knowledge/index.ts";
@@ -12,6 +12,7 @@ import { validateProviderUrl, validateUserProviderUrl } from "../security/provid
 import type { GatewayApi, GatewayUser } from "../server.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
 import { BinanceLeaderboardService } from "../trading/leaderboard-service.ts";
+import { publicTradeReviewJob, type TradeReviewContext } from "../trading/ai-review.ts";
 
 function assertSelectedVision(request: NormalizedAiRunRequest, analysis: Record<string, any>): void {
   if (request.request_version !== 3) return;
@@ -577,11 +578,132 @@ export class SupabaseGatewayApi implements GatewayApi {
     }
   }
 
+  async enqueueTradeReviewJob(
+    ownerId: string,
+    cycleId: string,
+    input: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!UUID_PATTERN.test(cycleId)) throw Object.assign(new Error("invalid_trade_cycle_id"), { statusCode: 400 });
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) {
+      throw Object.assign(new Error("invalid_trade_review_request"), { statusCode: 400 });
+    }
+    const mode = Object.hasOwn(input, "execution_mode") ? input.execution_mode : "byok";
+    if (mode !== "byok" && mode !== "managed") throw Object.assign(new Error("invalid_execution_mode"), { statusCode: 400 });
+    const request = { ...input };
+    delete request.execution_mode;
+    const normalized = normalizeTradeReviewAiRequest(request, this.knowledgeIndex.books);
+    const normalizedCycleId = cycleId.toLowerCase();
+    const cycles = await this.database.request(
+      `/rest/v1/trading_trade_cycles?id=eq.${encodeURIComponent(normalizedCycleId)}&owner_id=eq.${encodeURIComponent(ownerId)}&is_current=eq.true&select=id,owner_id,connection_id,provider,revision,product,symbol,direction,opened_at,closed_at,entry_price,exit_price,quantity,realized_pnl,fees,funding_or_swap,dividends,net_pnl,account_currency,usd_net_pnl,valuation_status,completeness,is_current&limit=1`,
+    );
+    if (!cycles.length) throw Object.assign(new Error("trade_not_found"), { statusCode: 404 });
+    const cycle = cycles[0] as Record<string, unknown>;
+    if (Number(cycle.revision) !== normalized.cycle_revision) {
+      throw Object.assign(new Error("stale_trade_cycle_revision"), { statusCode: 409 });
+    }
+    const reviews = await this.database.request(
+      `/rest/v1/trading_trade_reviews?cycle_id=eq.${encodeURIComponent(normalizedCycleId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=reason,plan_compliance,next_improvement,tags,planned_stop_price,planned_risk_amount&limit=1`,
+    );
+    const review = reviews[0] as Record<string, unknown> | undefined;
+    const tradeContext: TradeReviewContext = {
+      trade: {
+        provider: cycle.provider, product: cycle.product, symbol: cycle.symbol, direction: cycle.direction,
+        opened_at: cycle.opened_at, closed_at: cycle.closed_at, entry_price: cycle.entry_price,
+        exit_price: cycle.exit_price, quantity: cycle.quantity, realized_pnl: cycle.realized_pnl,
+        fees: cycle.fees, funding_or_swap: cycle.funding_or_swap, dividends: cycle.dividends,
+        net_pnl: cycle.net_pnl, account_currency: cycle.account_currency, usd_net_pnl: cycle.usd_net_pnl,
+        valuation_status: cycle.valuation_status, completeness: cycle.completeness,
+      },
+      review: review ? {
+        reason: review.reason, plan_compliance: review.plan_compliance,
+        next_improvement: review.next_improvement,
+        tags: Array.isArray(review.tags) ? review.tags : [],
+        planned_stop_price: review.planned_stop_price,
+        planned_risk_amount: review.planned_risk_amount,
+      } : null,
+    };
+    const idempotencyKey = `${ownerId}:trade:${normalizedCycleId}:${normalized.cycle_revision}:${normalized.client_request_id}`;
+    const existing = await this.database.request(
+      `/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*&limit=1`,
+    );
+    if (existing.length) {
+      const job = existing[0];
+      if (job.task_type !== "trade_review" || job.trade_cycle_id !== normalizedCycleId
+        || Number(job.trade_cycle_revision) !== normalized.cycle_revision
+        || job.execution_source !== mode
+        || !isDeepStrictEqual(job.accepted_request ?? job.input_payload, normalized)) {
+        throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
+      }
+      return publicTradeReviewJob(job, this.knowledgeIndex, { stale: false });
+    }
+
+    let connection: Record<string, unknown> | null = null;
+    let managedModelId: string | null = null;
+    if (mode === "managed") {
+      if (!this.config.MEMBERSHIP_MANAGED_AI_ENABLED) throw Object.assign(new Error("managed_ai_disabled"), { statusCode: 503 });
+      const model = await this.managedConnections.inspect("trade_review");
+      managedModelId = model.id;
+      connection = { source: "managed", model_id: model.id, model_name: model.name };
+    } else {
+      const connections = await this.database.request(
+        `/rest/v1/user_ai_connections?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&is_default=eq.true&select=id,label,adapter,base_url,model_name,max_output_tokens,context_tokens,temperature,timeout_ms&limit=1`,
+      );
+      if (!connections.length) throw Object.assign(new Error("ai_connection_required"), { statusCode: 409 });
+      connection = connections[0];
+    }
+    const body = {
+      owner_id: ownerId,
+      analysis_id: null,
+      trade_cycle_id: normalizedCycleId,
+      trade_cycle_revision: normalized.cycle_revision,
+      trade_context: tradeContext,
+      execution_source: mode,
+      user_connection_id: mode === "byok" ? connection!.id : null,
+      managed_model_id: managedModelId,
+      connection_snapshot: mode === "managed" ? connection : {
+        id: connection!.id, label: connection!.label, adapter: connection!.adapter,
+        base_url: connection!.base_url, model_name: connection!.model_name,
+        max_output_tokens: connection!.max_output_tokens, context_tokens: connection!.context_tokens,
+        temperature: connection!.temperature, timeout_ms: connection!.timeout_ms,
+      },
+      task_type: "trade_review",
+      idempotency_key: idempotencyKey,
+      input_payload: normalized,
+      knowledge_version: this.knowledgeIndex.knowledgeVersion,
+    };
+    try {
+      const rows = await this.database.request("/rest/v1/ai_jobs", {
+        method: "POST", headers: { prefer: "return=representation" }, body,
+      });
+      return publicTradeReviewJob(rows[0], this.knowledgeIndex, { stale: false });
+    } catch (error) {
+      const duplicate = Number((error as { status?: number }).status) === 409 || (error as { code?: string }).code === "23505";
+      if (!duplicate) throw error;
+      const recovered = await this.database.request(
+        `/rest/v1/ai_jobs?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=*&limit=1`,
+      );
+      if (!recovered.length || recovered[0].task_type !== "trade_review"
+        || recovered[0].execution_source !== mode
+        || !isDeepStrictEqual(recovered[0].accepted_request ?? recovered[0].input_payload, normalized)) {
+        throw Object.assign(new Error("ai_request_conflict"), { statusCode: 409 });
+      }
+      return publicTradeReviewJob(recovered[0], this.knowledgeIndex, { stale: false });
+    }
+  }
+
   async getJob(ownerId: string, jobId: string): Promise<unknown> {
     const rows = await this.database.request(
-      `/rest/v1/ai_jobs?id=eq.${encodeURIComponent(jobId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,status,execution_source,output_payload,error_code,error_message,actual_model_id,user_connection_id,connection_snapshot,knowledge_version,created_at,finished_at&limit=1`,
+      `/rest/v1/ai_jobs?id=eq.${encodeURIComponent(jobId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,analysis_id,trade_cycle_id,trade_cycle_revision,task_type,status,execution_source,output_payload,error_code,error_message,actual_model_id,user_connection_id,connection_snapshot,knowledge_version,created_at,finished_at&limit=1`,
     );
     if (!rows.length) throw Object.assign(new Error("job not found"), { statusCode: 404 });
+    if (rows[0].task_type === "trade_review") {
+      const cycles = await this.database.request(
+        `/rest/v1/trading_trade_cycles?id=eq.${encodeURIComponent(rows[0].trade_cycle_id)}&owner_id=eq.${encodeURIComponent(ownerId)}&is_current=eq.true&select=revision&limit=1`,
+      );
+      const stale = !cycles.length || Number(cycles[0].revision) !== Number(rows[0].trade_cycle_revision);
+      return publicTradeReviewJob(rows[0], this.knowledgeIndex, { stale });
+    }
     return publicAiJob(rows[0], this.knowledgeIndex);
   }
 

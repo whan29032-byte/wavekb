@@ -65,6 +65,7 @@ export type GatewayApi = {
     input: Record<string, unknown>,
   ): Promise<unknown>;
   enqueueJob(ownerId: string, analysisId: string, input: Record<string, unknown>): Promise<unknown>;
+  enqueueTradeReviewJob?(ownerId: string, cycleId: string, input: Record<string, unknown>): Promise<unknown>;
   getJob(ownerId: string, jobId: string): Promise<unknown>;
   listTradingLeaderboard?(): Promise<unknown[]>;
   getExchangeConnection?(ownerId: string): Promise<unknown>;
@@ -216,6 +217,12 @@ function authFailure(error: unknown): RouteResult {
     "trade_cycle_not_found",
     "stale_trade_cycle_revision",
     "invalid_trade_review",
+    "invalid_trade_cycle_id",
+    "invalid_trade_review_request",
+    "trade_not_found",
+    "invalid_execution_mode",
+    "ai_request_conflict",
+    "managed_ai_disabled",
     "binance_1021",
     "binance_1022",
     "binance_2014",
@@ -579,6 +586,14 @@ async function route(
   if (method === "GET" && path === "/v1/user/trading-workbench") {
     if (!deps.tradingWorkbench) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return { statusCode: 200, body: { workbench: await deps.tradingWorkbench.getDashboard(actor.id, query) }, headers: { "cache-control": "no-store" } };
+  }
+  const tradingAiReviewMatch = path.match(/^\/v1\/user\/trading-trades\/([^/]+)\/ai-review$/);
+  if (method === "POST" && tradingAiReviewMatch?.[1]) {
+    if (!api.enqueueTradeReviewJob) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return {
+      statusCode: 202,
+      body: { job: await api.enqueueTradeReviewJob(actor.id, decodeURIComponent(tradingAiReviewMatch[1]), (payload ?? {}) as Record<string, unknown>) },
+    };
   }
   const tradingTradeMatch = path.match(/^\/v1\/user\/trading-trades\/([^/]+)(\/review)?$/);
   if (tradingTradeMatch?.[1]) {

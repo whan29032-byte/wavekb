@@ -10,6 +10,12 @@ import { MembershipWalletWorker } from "./membership-wallet-worker.ts";
 import { assertPublishedAnalysisOutput } from "./research/publication.ts";
 import { ResearchPrivateRepository } from "./research/private-repository.ts";
 import { VisionImageReader } from "./research/vision-images.ts";
+import {
+  assertPublishedTradeReviewOutput,
+  TradeReviewAiRuntime,
+  type TradeReviewAiJob,
+  type TradeReviewRuntimeResult,
+} from "./trading/ai-review.ts";
 
 type WorkerDatabase = Pick<SupabaseRest, "request">;
 type WorkerConnectionResolver = Pick<UserConnectionResolver, "resolve">;
@@ -18,6 +24,9 @@ export type ClaimedJob = {
   id: string;
   owner_id: string;
   analysis_id: string | null;
+  trade_cycle_id?: string | null;
+  trade_cycle_revision?: number | null;
+  trade_context?: Record<string, unknown> | null;
   user_connection_id?: string | null;
   execution_source?: "byok" | "managed";
   managed_model_id?: string | null;
@@ -45,6 +54,13 @@ type WorkerKnowledgeRuntime = {
   }): Promise<KnowledgeRuntimeResult>;
 };
 
+type WorkerTradeReviewRuntime = {
+  run(input: {
+    job: TradeReviewAiJob;
+    connection: Awaited<ReturnType<UserConnectionResolver["resolve"]>>;
+  }): Promise<TradeReviewRuntimeResult>;
+};
+
 export class AiJobWorker {
   private readonly config: GatewayConfig;
   private readonly workerId: string;
@@ -52,6 +68,7 @@ export class AiJobWorker {
   private readonly connections: WorkerConnectionResolver;
   private readonly managedConnections: Pick<ManagedConnectionResolver, "resolve">;
   private readonly knowledgeRuntime: WorkerKnowledgeRuntime;
+  private readonly tradeReviewRuntime: WorkerTradeReviewRuntime;
   private readonly now: () => number;
   private stopping = false;
 
@@ -64,6 +81,7 @@ export class AiJobWorker {
       managedConnections?: Pick<ManagedConnectionResolver, "resolve">;
       now?: () => number;
       knowledgeRuntime?: WorkerKnowledgeRuntime;
+      tradeReviewRuntime?: WorkerTradeReviewRuntime;
     } = {},
   ) {
     this.config = config;
@@ -78,6 +96,7 @@ export class AiJobWorker {
       privateResearchEnabled: config.HERMES_PRIVATE_RESEARCH_ENABLED === true,
       ...(config.HERMES_PRIVATE_RESEARCH_ENABLED === true ? { privateRepository: new ResearchPrivateRepository(this.database) } : {}),
     });
+    this.tradeReviewRuntime = dependencies.tradeReviewRuntime ?? new TradeReviewAiRuntime({ database: this.database });
   }
 
   stop() { this.stopping = true; }
@@ -114,7 +133,14 @@ export class AiJobWorker {
     const started = this.now();
     try {
       const managed = job.execution_source === "managed";
-      if (!job.analysis_id || (managed ? !job.managed_model_id || job.user_connection_id : !job.user_connection_id)) throw new Error("job connection or analysis is missing");
+      const tradeReview = job.task_type === "trade_review";
+      const validSubject = tradeReview
+        ? !job.analysis_id && Boolean(job.trade_cycle_id) && Number.isInteger(job.trade_cycle_revision) && job.trade_cycle_revision! > 0
+          && Boolean(job.trade_context) && typeof job.trade_context === "object" && !Array.isArray(job.trade_context)
+        : Boolean(job.analysis_id);
+      if (!validSubject || (managed ? !job.managed_model_id || job.user_connection_id : !job.user_connection_id)) {
+        throw new Error("job connection or subject is missing");
+      }
       if (managed) {
         if (!this.config.MEMBERSHIP_MANAGED_AI_ENABLED) throw new Error("managed_ai_disabled");
         const authorized = await this.database.request("/rest/v1/rpc/authorize_membership_ai_job", {
@@ -126,19 +152,33 @@ export class AiJobWorker {
         `/rest/v1/profiles?id=eq.${encodeURIComponent(job.owner_id)}&account_status=eq.active&select=id&limit=1`,
       );
       if (!profiles.length) throw new Error("account restricted");
-      const analyses = await this.database.request(
-        `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(job.analysis_id)}&owner_id=eq.${encodeURIComponent(job.owner_id)}&select=*&limit=1`,
-      );
-      if (!analyses.length) throw new Error("analysis not found");
       const connection = managed
         ? await this.managedConnections.resolve(job.owner_id, job.task_type, job.managed_model_id!)
         : await this.connections.resolve(job.owner_id, job.user_connection_id!);
-      const result = await this.knowledgeRuntime.run({
-        job,
-        analysis: analyses[0],
-        connection,
-      });
-      try { assertPublishedAnalysisOutput(result.output); }
+      let result: KnowledgeRuntimeResult | TradeReviewRuntimeResult;
+      if (tradeReview) {
+        result = await this.tradeReviewRuntime.run({
+          job: {
+            ...job,
+            analysis_id: null,
+            trade_cycle_id: job.trade_cycle_id!,
+            trade_cycle_revision: job.trade_cycle_revision!,
+            trade_context: job.trade_context as TradeReviewAiJob["trade_context"],
+            task_type: "trade_review",
+          },
+          connection,
+        });
+      } else {
+        const analyses = await this.database.request(
+          `/rest/v1/workbench_analyses?id=eq.${encodeURIComponent(job.analysis_id!)}&owner_id=eq.${encodeURIComponent(job.owner_id)}&select=*&limit=1`,
+        );
+        if (!analyses.length) throw new Error("analysis not found");
+        result = await this.knowledgeRuntime.run({ job, analysis: analyses[0], connection });
+      }
+      try {
+        if (tradeReview) assertPublishedTradeReviewOutput(result.output);
+        else assertPublishedAnalysisOutput(result.output);
+      }
       catch (error) {
         const diagnostic = modelOutputDiagnostic(error);
         throw Object.assign(new Error("invalid_model_output"), {
@@ -183,7 +223,7 @@ export class AiJobWorker {
       const classification = classifyProviderError(error);
       const retry = classification === "retryable" && attemptNumber < 3;
       const runtimeCode = (error as { code?: unknown })?.code;
-      const provider = (error as { provider?: KnowledgeRuntimeResult["provider"] })?.provider;
+      const provider = (error as { provider?: KnowledgeRuntimeResult["provider"] | TradeReviewRuntimeResult["provider"] })?.provider;
       const errorCode = runtimeCode === "knowledge_unavailable" || runtimeCode === "invalid_model_output" || runtimeCode === "input_context_too_large" || runtimeCode === "invalid_chart_input"
         || runtimeCode === "vision_model_required" || runtimeCode === "invalid_image_input" || runtimeCode === "image_unavailable"
         ? runtimeCode

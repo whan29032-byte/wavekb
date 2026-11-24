@@ -7,6 +7,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/202611240001_multi_exchange_trade_review.sql",
   import.meta.url,
 );
+const tradeReviewAiMigrationUrl = new URL(
+  "../supabase/migrations/202611240002_trade_review_ai.sql",
+  import.meta.url,
+);
 
 const ownerOne = "11111111-1111-4111-8111-111111111111";
 const ownerTwo = "22222222-2222-4222-8222-222222222222";
@@ -442,6 +446,88 @@ test("deletion hides immediately, hard-deletes within 30 days and expires minima
     await database.query("select public.purge_due_trading_data(now())");
     const auditCount = await database.query("select count(*)::integer as count from public.trading_deletion_audit");
     assert.equal(auditCount.rows[0].count, 0);
+  } finally {
+    await database.close();
+  }
+});
+
+test("trade review AI jobs bind one owner-scoped immutable cycle revision without overloading analysis_id", async () => {
+  const database = await migratedDatabase();
+  try {
+    await database.exec(`
+      create table public.workbench_analyses (
+        id uuid primary key,
+        owner_id uuid not null references public.profiles(id)
+      );
+      create table public.ai_models (id uuid primary key);
+      create table public.user_ai_connections (
+        id uuid primary key,
+        owner_id uuid not null references public.profiles(id),
+        enabled boolean not null default true
+      );
+      create table public.ai_jobs (
+        id uuid primary key default gen_random_uuid(),
+        owner_id uuid not null references public.profiles(id),
+        analysis_id uuid references public.workbench_analyses(id),
+        task_type text not null,
+        idempotency_key text not null unique,
+        status text not null default 'queued',
+        input_payload jsonb not null default '{}'::jsonb,
+        output_payload jsonb,
+        knowledge_version text not null default 'test',
+        user_connection_id uuid references public.user_ai_connections(id),
+        connection_snapshot jsonb not null default '{}'::jsonb,
+        execution_source text not null default 'byok',
+        managed_model_id uuid references public.ai_models(id),
+        accepted_request jsonb,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        finished_at timestamptz
+      );
+      insert into public.user_ai_connections (id, owner_id)
+      values ('99999999-9999-4999-8999-999999999999', '${ownerOne}');
+      insert into public.trading_trade_cycles (
+        id, connection_id, owner_id, provider, stable_key, revision, fill_digest,
+        product, symbol, direction, opened_at, closed_at, entry_price, exit_price,
+        quantity, realized_pnl, fees, funding_or_swap, dividends, net_pnl,
+        account_currency, usd_net_pnl, valuation_status, completeness, generation
+      ) values (
+        '${cycleOne}', '${connectionOne}', '${ownerOne}', 'binance', 'ai-cycle', 2, 'digest-2',
+        'usdt_perpetual', 'BTCUSDT', 'long', now() - interval '2 hours', now() - interval '1 hour',
+        100, 110, 1, 10, -1, 0, 0, 9, 'USDT', 9, 'direct', 'complete', 1
+      );
+      insert into public.trading_trade_cycle_revisions (cycle_id, owner_id, revision, fill_digest, facts)
+      values ('${cycleOne}', '${ownerOne}', 2, 'digest-2', '{"symbol":"BTCUSDT"}'::jsonb);
+    `);
+    await database.exec(await fs.readFile(tradeReviewAiMigrationUrl, "utf8"));
+
+    const inserted = await database.query(`
+      insert into public.ai_jobs (
+        owner_id, analysis_id, task_type, idempotency_key, input_payload,
+        user_connection_id, execution_source, trade_cycle_id,
+        trade_cycle_revision, trade_context
+      ) values (
+        $1, null, 'trade_review', 'trade-review-1',
+        '{"request_version":1,"task_type":"trade_review"}'::jsonb,
+        '99999999-9999-4999-8999-999999999999', 'byok', $2, 2,
+        '{"trade":{"symbol":"BTCUSDT"},"review":{"reason":"breakout"}}'::jsonb
+      ) returning analysis_id, trade_cycle_id, trade_cycle_revision, accepted_request
+    `, [ownerOne, cycleOne]);
+    assert.equal(inserted.rows[0].analysis_id, null);
+    assert.equal(inserted.rows[0].trade_cycle_id, cycleOne);
+    assert.equal(inserted.rows[0].trade_cycle_revision, 2);
+    assert.equal(inserted.rows[0].accepted_request.task_type, "trade_review");
+
+    await assert.rejects(database.query(`
+      insert into public.ai_jobs (
+        owner_id, task_type, idempotency_key, input_payload, user_connection_id,
+        execution_source, trade_cycle_id, trade_cycle_revision, trade_context
+      ) values ($1, 'trade_review', 'foreign-owner', '{}'::jsonb,
+        '99999999-9999-4999-8999-999999999999', 'byok', $2, 2, '{}'::jsonb)
+    `, [ownerTwo, cycleOne]), /ai_job_input_invalid|foreign key/);
+    await assert.rejects(database.exec(`
+      update public.ai_jobs set trade_cycle_revision = 3 where idempotency_key = 'trade-review-1'
+    `), /ai_job_identity_immutable/);
   } finally {
     await database.close();
   }
