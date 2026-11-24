@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./community": "./src/community.ts"
+    "./community": "./src/community.ts",
+    "./trading-review": "./src/trading-review.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

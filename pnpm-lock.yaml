@@ -19,6 +19,10 @@ importers:
         version: 0.5.8
 
   ai-gateway:
+    dependencies:
+      '@wavekb/domain':
+        specifier: workspace:*
+        version: link:../packages/domain
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

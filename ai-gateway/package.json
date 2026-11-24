@@ -17,6 +17,9 @@
     "mentor:notify": "node src/mentor-notification-worker.ts",
     "youtube:sync": "node src/youtube-sync-worker.ts"
   },
+  "dependencies": {
+    "@wavekb/domain": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"
