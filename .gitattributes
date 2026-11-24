@@ -1,2 +1,6 @@
 # Preserve PDF bytes, including cross-reference offsets and checksums.
 assets/books/*.pdf binary
+
+# This generated artifact is compared byte-for-byte in tests. Keep its
+# canonical LF output on Windows instead of applying core.autocrlf.
+ai-gateway/knowledge/retrieval-index.json text eol=lf
