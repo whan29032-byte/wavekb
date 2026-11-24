@@ -8,19 +8,29 @@ const ALLOWED = new Map<string, Set<string>>([
   ["connection/sync", new Set(["POST"])],
   ["connection/public", new Set(["POST"])],
   ["connection/disconnect", new Set(["POST"])],
+  ["connections", new Set(["GET"])],
+  ["connections/validate", new Set(["POST"])],
+  ["connections/connect", new Set(["POST"])],
 ]);
+
+function allowed(path: string, method: "GET" | "POST" | "DELETE") {
+  if (ALLOWED.get(path)?.has(method)) return true;
+  const match = path.match(/^connections\/([^/]+)\/(sync|reverify|public|disconnect|data)$/);
+  if (!match) return false;
+  return match[2] === "data" ? method === "DELETE" : method === "POST";
+}
 
 function json(body: object, status = 200) {
   return NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
 }
 
-async function proxy(request: NextRequest, segments: string[], method: "GET" | "POST") {
+async function proxy(request: NextRequest, segments: string[], method: "GET" | "POST" | "DELETE") {
   let path = "";
   try { path = segments.map((item) => decodeURIComponent(item)).join("/"); }
   catch { return json({ error: "not_found" }, 404); }
-  if (!ALLOWED.get(path)?.has(method)) return json({ error: "not_found" }, 404);
+  if (!allowed(path, method)) return json({ error: "not_found" }, 404);
   if (!publicSupabaseConfig().configured) return json({ error: "authentication_required" }, 401);
-  if (method === "POST" && !gatewayRequestOrigin(request.headers, request.nextUrl.origin)) return json({ error: "request_origin_invalid" }, 403);
+  if (method !== "GET" && !gatewayRequestOrigin(request.headers, request.nextUrl.origin)) return json({ error: "request_origin_invalid" }, 403);
 
   const client = await createClient();
   const [userResult, sessionResult] = await Promise.all([client.auth.getUser(), client.auth.getSession()]);
@@ -28,9 +38,9 @@ async function proxy(request: NextRequest, segments: string[], method: "GET" | "
   if (!userResult.data.user || !accessToken) return json({ error: "authentication_required" }, 401);
 
   const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (method === "POST" && (!Number.isFinite(declaredLength) || declaredLength > 16 * 1024)) return json({ error: "payload_too_large" }, 413);
+  if (method !== "GET" && (!Number.isFinite(declaredLength) || declaredLength > 32 * 1024)) return json({ error: "payload_too_large" }, 413);
   const body = method === "POST" ? await request.text() : undefined;
-  if (body && new TextEncoder().encode(body).byteLength > 16 * 1024) return json({ error: "payload_too_large" }, 413);
+  if (body && new TextEncoder().encode(body).byteLength > 32 * 1024) return json({ error: "payload_too_large" }, 413);
 
   const origin = (process.env.AUTH_GATEWAY_INTERNAL_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
   let upstream: Response;
@@ -56,4 +66,8 @@ export async function GET(request: NextRequest, context: PathContext) {
 
 export async function POST(request: NextRequest, context: PathContext) {
   return proxy(request, (await context.params).path || [], "POST");
+}
+
+export async function DELETE(request: NextRequest, context: PathContext) {
+  return proxy(request, (await context.params).path || [], "DELETE");
 }

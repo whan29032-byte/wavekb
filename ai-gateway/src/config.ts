@@ -19,6 +19,7 @@ export type GatewayConfig = {
   AUTH_UID_ACTION_LIMIT_PER_HOUR: number;
   AUTH_FEATURE_ENABLED: boolean;
   BINANCE_FUTURES_API_URL: string;
+  TRADING_ACCOUNT_HMAC_KEY: Buffer;
   TRADING_SYNC_MINUTES: number;
 };
 
@@ -61,6 +62,12 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
   if (masterKey.length !== 32) {
     throw new Error("AI_SECRET_MASTER_KEY must decode to 32-byte key");
   }
+  const tradingAccountHmacKey = env.TRADING_ACCOUNT_HMAC_KEY
+    ? Buffer.from(env.TRADING_ACCOUNT_HMAC_KEY, "base64")
+    : masterKey;
+  if (tradingAccountHmacKey.length !== 32) {
+    throw new Error("TRADING_ACCOUNT_HMAC_KEY must decode to 32-byte key");
+  }
   const binanceFuturesApiUrl = env.BINANCE_FUTURES_API_URL ?? "https://fapi.binance.com";
   try {
     const parsed = new URL(binanceFuturesApiUrl);
@@ -98,6 +105,7 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
     ),
     AUTH_FEATURE_ENABLED: boolean(env.AUTH_FEATURE_ENABLED, false),
     BINANCE_FUTURES_API_URL: binanceFuturesApiUrl.replace(/\/$/, ""),
+    TRADING_ACCOUNT_HMAC_KEY: tradingAccountHmacKey,
     TRADING_SYNC_MINUTES: integer(env.TRADING_SYNC_MINUTES, 15, 5, 1440),
   };
 }

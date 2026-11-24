@@ -10,6 +10,10 @@ import { youtubeRoute, type YouTubeRouteApi } from "./youtube/routes.ts";
 import { loadYouTubeSyncConfig } from "./youtube/config.ts";
 import { GoogleYouTubeProvider } from "./youtube/provider.ts";
 import { YouTubeService } from "./youtube/service.ts";
+import {
+  createExchangeConnectionService,
+  type ExchangeConnectionService,
+} from "./trading/connection-service.ts";
 
 export type ServerDeps = {
   config: GatewayConfig;
@@ -19,6 +23,7 @@ export type ServerDeps = {
   userAdministrationApi?: AdminUsersApi;
   authRateLimiter?: AuthRateLimiter;
   youtubeApi?: YouTubeRouteApi;
+  exchangeConnections?: ExchangeConnectionService;
 };
 
 export type GatewayUser = { id: string; role: string };
@@ -191,6 +196,15 @@ function authFailure(error: unknown): RouteResult {
     "exchange_secret_missing",
     "exchange_secret_invalid",
     "exchange_sync_failed",
+    "invalid_exchange_credentials",
+    "invalid_trading_provider",
+    "trading_provider_disabled",
+    "exchange_accounts_invalid",
+    "exchange_account_selection_invalid",
+    "account_unavailable",
+    "credential_accounts_mismatch",
+    "public_amounts_consent_required",
+    "sync_service_unavailable",
     "binance_1021",
     "binance_1022",
     "binance_2014",
@@ -258,6 +272,15 @@ function routeFailure(error: unknown): RouteResult {
     "exchange_secret_invalid",
     "exchange_sync_failed",
     "exchange_sync_gap_too_large",
+    "invalid_exchange_credentials",
+    "invalid_trading_provider",
+    "trading_provider_disabled",
+    "exchange_accounts_invalid",
+    "exchange_account_selection_invalid",
+    "account_unavailable",
+    "credential_accounts_mismatch",
+    "public_amounts_consent_required",
+    "sync_service_unavailable",
     "binance_1021",
     "binance_1022",
     "binance_2014",
@@ -587,6 +610,56 @@ async function route(
     if (!api.disconnectExchangeConnection) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return { statusCode: 200, body: { connection: await api.disconnectExchangeConnection(actor.id) } };
   }
+  if (method === "GET" && path === "/v1/user/exchange-connections") {
+    if (!deps.exchangeConnections) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return { statusCode: 200, body: { connections: await deps.exchangeConnections.list(actor.id) } };
+  }
+  if (method === "POST" && path === "/v1/user/exchange-connections/validate") {
+    if (!deps.exchangeConnections) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return {
+      statusCode: 200,
+      body: { validation: await deps.exchangeConnections.validate(actor.id, (payload ?? {}) as Record<string, unknown>) },
+    };
+  }
+  if (method === "POST" && path === "/v1/user/exchange-connections/connect") {
+    if (!deps.exchangeConnections) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    return {
+      statusCode: 201,
+      body: await deps.exchangeConnections.connect(actor.id, (payload ?? {}) as Record<string, unknown>),
+    };
+  }
+  const exchangeConnectionAction = path.match(/^\/v1\/user\/exchange-connections\/([^/]+)\/(sync|reverify|public|disconnect|data)$/);
+  if (exchangeConnectionAction?.[1] && exchangeConnectionAction[2]) {
+    if (!deps.exchangeConnections) return { statusCode: 503, body: { error: "gateway_not_configured" } };
+    const connectionId = decodeURIComponent(exchangeConnectionAction[1]);
+    const action = exchangeConnectionAction[2];
+    const input = (payload ?? {}) as Record<string, unknown>;
+    if (method === "POST" && action === "reverify") {
+      return { statusCode: 200, body: await deps.exchangeConnections.rotateCredentials(actor.id, connectionId, input) };
+    }
+    if (method === "POST" && action === "public") {
+      return {
+        statusCode: 200,
+        body: {
+          connection: await deps.exchangeConnections.setPublic(
+            actor.id,
+            connectionId,
+            input.public_enabled === true,
+            input.public_amounts_consent === true,
+          ),
+        },
+      };
+    }
+    if (method === "POST" && action === "disconnect") {
+      return { statusCode: 200, body: { connection: await deps.exchangeConnections.disconnect(actor.id, connectionId) } };
+    }
+    if (method === "DELETE" && action === "data") {
+      return { statusCode: 202, body: { deletion: await deps.exchangeConnections.requestDeletion(actor.id, connectionId) } };
+    }
+    if (method === "POST" && action === "sync") {
+      throw Object.assign(new Error("sync_service_unavailable"), { statusCode: 503 });
+    }
+  }
   if (method === "POST" && path === "/v1/user/ai-connections") {
     return {
       statusCode: 201,
@@ -683,7 +756,7 @@ export function buildServer(deps: ServerDeps): GatewayServer {
           response.setHeader("vary", "origin");
         }
         response.setHeader("access-control-allow-headers", "authorization, content-type");
-        response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+        response.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
         if (request.method === "OPTIONS") {
           response.statusCode = 204;
           response.end();
@@ -758,6 +831,7 @@ if (isMain) {
     api: new SupabaseGatewayApi(config),
     authApi: new AuthApi(config),
     userAdministrationApi: new UserAdministrationApi(config),
+    exchangeConnections: createExchangeConnectionService(config),
     ...(youtubeApi ? { youtubeApi } : {}),
   });
   await server.listen({ port: config.PORT, host: "127.0.0.1" });

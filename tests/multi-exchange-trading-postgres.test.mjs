@@ -180,18 +180,31 @@ test("legacy Binance data migrates in place and credentials remain shared until 
       )
     `, [connectionTwo, ownerOne, credentialSetId]);
 
+    await database.query(
+      "select public.rotate_exchange_credential_set($1, $2, $3, $4, $5, $6, $7)",
+      [ownerOne, credentialSetId, "••••WXYZ", "cipher-rotated", "iv-rotated", "tag-rotated", 2],
+    );
+    const rotated = await database.query(`
+      select ciphertext, active, key_version
+      from public.exchange_credential_secrets
+      where credential_set_id = $1 order by created_at, key_version
+    `, [credentialSetId]);
+    assert.equal(rotated.rows.filter((row) => row.active).length, 1);
+    assert.equal(rotated.rows.at(-1).ciphertext, "cipher-rotated");
+    assert.equal(rotated.rows.at(-1).key_version, 2);
+
     await database.query("select public.disconnect_exchange_connection_v3($1, $2)", [ownerOne, connectionOne]);
     let secret = await database.query(
       "select active from public.exchange_credential_secrets where credential_set_id = $1",
       [credentialSetId],
     );
-    assert.equal(secret.rows[0].active, true);
+    assert.equal(secret.rows.some((row) => row.active), true);
     await database.query("select public.disconnect_exchange_connection_v3($1, $2)", [ownerOne, connectionTwo]);
     secret = await database.query(
       "select active from public.exchange_credential_secrets where credential_set_id = $1",
       [credentialSetId],
     );
-    assert.equal(secret.rows[0].active, false);
+    assert.equal(secret.rows.some((row) => row.active), false);
 
     await database.exec(`
       insert into public.exchange_credential_sets (id, owner_id, provider, label, status)

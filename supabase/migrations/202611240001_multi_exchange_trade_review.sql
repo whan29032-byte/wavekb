@@ -450,6 +450,49 @@ begin
 end;
 $$;
 
+create or replace function public.rotate_exchange_credential_set(
+  p_owner_id uuid,
+  p_credential_set_id uuid,
+  p_secret_mask text,
+  p_ciphertext text,
+  p_iv text,
+  p_auth_tag text,
+  p_key_version integer
+)
+returns public.exchange_credential_sets
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  credentials public.exchange_credential_sets;
+begin
+  select * into credentials
+  from public.exchange_credential_sets
+  where id = p_credential_set_id and owner_id = p_owner_id
+  for update;
+  if credentials.id is null then raise exception 'exchange_connection_not_found'; end if;
+  if char_length(coalesce(p_secret_mask, '')) > 32 then raise exception 'invalid_exchange_credentials'; end if;
+
+  update public.exchange_credential_secrets
+  set active = false, rotated_at = now()
+  where credential_set_id = credentials.id and owner_id = credentials.owner_id and active;
+
+  insert into public.exchange_credential_secrets (
+    credential_set_id, owner_id, ciphertext, iv, auth_tag, key_version, active
+  ) values (
+    credentials.id, credentials.owner_id, p_ciphertext, p_iv, p_auth_tag,
+    p_key_version, true
+  );
+
+  update public.exchange_credential_sets
+  set secret_mask = p_secret_mask, status = 'active', updated_at = now()
+  where id = credentials.id
+  returning * into credentials;
+  return credentials;
+end;
+$$;
+
 -- Keep the currently deployed Gateway compatible during the rolling release.
 -- The legacy v2 boundary now writes both the legacy snapshot/secret tables and
 -- the new credential-set model without changing its public signature.
@@ -1159,6 +1202,7 @@ as $$
 $$;
 
 revoke all on function public.upsert_exchange_credential_set(uuid, text, text, text, text, text, text, integer) from public, anon, authenticated;
+revoke all on function public.rotate_exchange_credential_set(uuid, uuid, text, text, text, text, integer) from public, anon, authenticated;
 revoke all on function public.upsert_exchange_connection_v3(uuid, text, uuid, text, text, text, text, jsonb, timestamptz, timestamptz) from public, anon, authenticated;
 revoke all on function public.claim_exchange_sync_connection(uuid, uuid, timestamptz, integer) from public, anon, authenticated;
 revoke all on function public.publish_exchange_sync_generation(uuid, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, timestamptz) from public, anon, authenticated;
@@ -1167,6 +1211,7 @@ revoke all on function public.disconnect_exchange_connection_v3(uuid, uuid) from
 revoke all on function public.request_trading_data_deletion(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.purge_due_trading_data(timestamptz) from public, anon, authenticated;
 grant execute on function public.upsert_exchange_credential_set(uuid, text, text, text, text, text, text, integer) to service_role;
+grant execute on function public.rotate_exchange_credential_set(uuid, uuid, text, text, text, text, integer) to service_role;
 grant execute on function public.upsert_exchange_connection_v3(uuid, text, uuid, text, text, text, text, jsonb, timestamptz, timestamptz) to service_role;
 grant execute on function public.claim_exchange_sync_connection(uuid, uuid, timestamptz, integer) to service_role;
 grant execute on function public.publish_exchange_sync_generation(uuid, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, timestamptz) to service_role;
