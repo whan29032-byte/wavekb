@@ -38,9 +38,9 @@ async function proxy(request: NextRequest, segments: string[], method: "GET" | "
   if (!userResult.data.user || !accessToken) return json({ error: "authentication_required" }, 401);
 
   const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (method !== "GET" && (!Number.isFinite(declaredLength) || declaredLength > 32 * 1024)) return json({ error: "payload_too_large" }, 413);
+  if (method !== "GET" && (!Number.isFinite(declaredLength) || declaredLength > 16 * 1024)) return json({ error: "payload_too_large" }, 413);
   const body = method === "POST" ? await request.text() : undefined;
-  if (body && new TextEncoder().encode(body).byteLength > 32 * 1024) return json({ error: "payload_too_large" }, 413);
+  if (body && new TextEncoder().encode(body).byteLength > 16 * 1024) return json({ error: "payload_too_large" }, 413);
 
   const origin = (process.env.AUTH_GATEWAY_INTERNAL_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
   let upstream: Response;

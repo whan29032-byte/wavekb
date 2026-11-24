@@ -19,6 +19,11 @@ test("the backend archive starts outside checkout with all four books and no PDF
   fs.mkdirSync(gateway, { recursive: true });
   fs.cpSync(path.join(repoRoot, "ai-gateway", "package.json"), path.join(gateway, "package.json"));
   fs.cpSync(path.join(repoRoot, "ai-gateway", "src"), path.join(gateway, "src"), { recursive: true });
+  fs.mkdirSync(path.join(directory, "scripts"));
+  fs.cpSync(
+    path.join(repoRoot, "scripts", "trading-release-preflight.mjs"),
+    path.join(directory, "scripts", "trading-release-preflight.mjs"),
+  );
   fs.mkdirSync(path.join(gateway, "knowledge"));
   fs.cpSync(
     path.join(repoRoot, "ai-gateway", "knowledge", "retrieval-index.json"),
@@ -37,7 +42,7 @@ test("the backend archive starts outside checkout with all four books and no PDF
   const listed = spawnSync("tar", ["-tzf", "wavekb-gateway.tar.gz"], { cwd: directory, encoding: "utf8" });
   assert.equal(listed.status, 0, listed.stderr);
   const entries = listed.stdout.split(/\r?\n/);
-  for (const expected of ["package.json", "src/", "knowledge/retrieval-index.json", "DEPLOYMENT_VERSION"]) {
+  for (const expected of ["package.json", "src/", "knowledge/retrieval-index.json", "DEPLOYMENT_VERSION", "release-preflight.mjs"]) {
     assert.ok(entries.some((entry) => entry === expected || entry.startsWith(expected)), `${expected} must be packaged`);
   }
   assert.ok(!entries.some((entry) => /\.pdf$/i.test(entry)), "source PDFs must not be packaged");

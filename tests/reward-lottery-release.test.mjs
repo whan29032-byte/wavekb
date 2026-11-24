@@ -7,7 +7,8 @@ const source = (path) => readFile(new URL(path, root), "utf8");
 
 test("the lottery schema, member UI, admin UI and deployment marker ship together", async () => {
   const migrations = (await readdir(new URL("supabase/migrations/", root))).filter((name) => name.endsWith(".sql")).sort();
-  assert.equal(migrations.at(-1), "20261117090000_hardening_security.sql");
+  assert.ok(migrations.includes("20261117090000_hardening_security.sql"));
+  assert.equal(migrations.at(-1), "202611240002_trade_review_ai.sql");
 
   const [migration, manualMigration, customDisplayMigration, workflow, memberPage, memberRepository, memberComponent, adminPage, adminRepository, e2e] = await Promise.all([
     source("supabase/migrations/202609090002_reward_lottery.sql"),
@@ -30,7 +31,7 @@ test("the lottery schema, member UI, admin UI and deployment marker ship togethe
   const mentorNotifications = await source("supabase/migrations/202610080003_mentor_payment_notifications.sql");
   assert.match(mentorNotifications, /select '202610080003'::text/);
   assert.doesNotMatch(mentorNotifications, /(?:drop|alter) (?:table|function) public\.reward_lottery/);
-  assert.match(workflow, /test "\$schema" = 202610220002/);
+  assert.match(workflow, /test "\$schema" = 202611240002/);
   const privateResearch = await source("supabase/migrations/20261010223739_hermes_private_research.sql");
   assert.doesNotMatch(privateResearch, /(?:drop|alter) (?:table|function) public\.reward_lottery/);
   const vision = await source("supabase/migrations/20261011001354_wave_analysis_images.sql");
