@@ -9,6 +9,7 @@ import type {
 } from "../src/trading/providers/contracts.ts";
 import {
   ExchangeConnectionService,
+  createExchangeConnectionService,
   type ConnectionRecord,
   type TradingConnectionStore,
 } from "../src/trading/connection-service.ts";
@@ -132,6 +133,28 @@ test("requires a read-only acknowledgement and returns only masked discovered ac
   });
   assert.equal(JSON.stringify(result).includes("secret-api"), false);
   assert.equal(JSON.stringify(result).includes("binance-1001"), false);
+});
+
+test("factory rejects disabled providers before credential validation", async () => {
+  const config = loadConfig({
+    SUPABASE_URL: "https://example.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "server-role-key-longer-than-twenty",
+    SUPABASE_PUBLISHABLE_KEY: "publishable-key-longer-than-twenty",
+    AI_SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString("base64"),
+    AUTH_SITE_URL: "https://wavekb.example/",
+    TRADING_ACCOUNT_HMAC_KEY: Buffer.alloc(32, 8).toString("base64"),
+    TRADING_PROVIDER_OKX_ENABLED: "true",
+  });
+  const disabledByMaster = createExchangeConnectionService(config);
+  await assert.rejects(
+    () => disabledByMaster.validate(owner, { provider: "okx", credentials: { apiKey: "not-sent", secretKey: "not-sent", passphrase: "not-sent" }, read_only_ack: true }),
+    /trading_provider_disabled/,
+  );
+  const enabled = createExchangeConnectionService({ ...config, TRADING_WORKBENCH_V2_ENABLED: true });
+  await assert.rejects(
+    () => enabled.validate(owner, { provider: "binance", credentials: { apiKey: "not-sent", secretKey: "not-sent" }, read_only_ack: true }),
+    /trading_provider_disabled/,
+  );
 });
 
 test("connects selected Exness accounts with one encrypted credential envelope", async () => {

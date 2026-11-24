@@ -139,10 +139,92 @@ test("managed AI activation is separately opt-in, shares the owned env and resto
   }
 });
 
+test("multi-exchange trading cutover is explicit, fail-closed and covered by exact environment rollback", () => {
+  const inputs = (backendWorkflow.on ?? backendWorkflow.true).workflow_dispatch.inputs;
+  for (const input of ["trading_cutover", "trading_provider_binance", "trading_provider_okx", "trading_provider_bybit", "trading_provider_bitget", "trading_provider_exness"]) {
+    assert.equal(inputs[input].default, "preserve");
+    assert.deepEqual(inputs[input].options, ["preserve", "enable", "disable"]);
+  }
+  const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  assert.match(contracts.run, /multi-exchange-trading-postgres\.test\.mjs/);
+  assert.match(contracts.run, /trading-release-preflight\.test\.mjs/);
+  assert.match(contracts.run, /trading-release-preflight\.mjs --static/);
+  assert.equal(activation.env.TRADING_CUTOVER, "${{ inputs.trading_cutover }}");
+  assert.match(activation.run, /for trading_action in "\$TRADING_CUTOVER" "\$TRADING_BINANCE" "\$TRADING_OKX" "\$TRADING_BYBIT" "\$TRADING_BITGET" "\$TRADING_EXNESS"/);
+  for (const [provider, input] of [["BINANCE", "binance"], ["OKX", "okx"], ["BYBIT", "bybit"], ["BITGET", "bitget"], ["EXNESS", "exness"]]) {
+    assert.equal(activation.env[`TRADING_${provider}`], `\${{ inputs.trading_provider_${input} }}`);
+  }
+  assert.match(activation.run, /TRADING_WORKBENCH_V2_ENABLED/);
+  for (const provider of ["BINANCE", "OKX", "BYBIT", "BITGET", "EXNESS"]) {
+    assert.match(activation.run, new RegExp(`TRADING_PROVIDER_${provider}_ENABLED`));
+  }
+  assert.match(activation.run, /install -m 0600 \/etc\/elliott-wave\/gateway\.env "\$\{backup_root\}\/gateway\.env"/);
+  assert.match(activation.run, /mv -Tf "\$environment_rollback" \/etc\/elliott-wave\/gateway\.env/);
+  assert.match(activation.run, /release-preflight\.mjs" --runtime-file/);
+  assert.match(activation.run, /trading-runtime-observation\.json/);
+  assert.match(activation.run, /enabled-state[\s\S]*active-state/);
+  assert.match(activation.run, /case "\$trading_enabled_state"[\s\S]*systemctl enable[\s\S]*systemctl disable/);
+  assert.match(activation.run, /case "\$trading_active_state"[\s\S]*systemctl start[\s\S]*systemctl stop/);
+  assert.doesNotMatch(activation.run, /api[_-]?key|secret[_-]?key|private[_-]?key/i);
+});
+
+test("web release follows the Gateway-owned cutover and requires authenticated trading acceptance", () => {
+  const contracts = steps.find((step) => /Verify the release candidate/.test(step.name));
+  const local = steps.find((step) => /Verify local critical browser journeys/.test(step.name));
+  const packageStep = steps.find((step) => /Package the accepted standalone application/.test(step.name));
+  const production = steps.find((step) => /required authenticated trading workbench acceptance/.test(step.name));
+  assert.match(contracts.run, /trading-release-preflight\.mjs --static/);
+  assert.equal(workflow.env.TRADING_WORKBENCH_V2_ENABLED, undefined);
+  assert.match(local.run, /e2e\/trading-workbench\.spec\.ts/);
+  assert.doesNotMatch(packageStep.run, /TRADING_WORKBENCH_V2_DEFAULT|TRADING_WORKBENCH_V2_ENABLED/);
+  assert.match(production.run, /e2e\/trading-workbench\.spec\.ts/);
+  assert.equal(production.if, undefined);
+  assert.equal(production.env.TRADING_LIVE_ACCEPTANCE, "1");
+  assert.equal(production.env.E2E_POSTING_IDENTIFIER, "${{ secrets.E2E_POSTING_IDENTIFIER }}");
+});
+
+test("trading rollback restores enabled and active state instead of unconditionally starting units", () => {
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const start = activation.run.indexOf('for trading_unit in elliott-wave-trading-sync.service elliott-wave-trading-sync.timer; do', activation.run.indexOf("sudo systemctl daemon-reload"));
+  const end = activation.run.indexOf("  done", start) + "  done".length;
+  assert.ok(start > 0 && end > start);
+  const operation = activation.run.slice(start, end);
+  for (const [enabled, active, expected] of [
+    ["enabled", "active", ["enable", "start"]],
+    ["disabled", "inactive", ["disable", "stop"]],
+    ["static", "inactive", ["is-enabled", "stop"]],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-trading-state-"));
+    try {
+      for (const unit of ["elliott-wave-trading-sync.service", "elliott-wave-trading-sync.timer"]) {
+        fs.writeFileSync(path.join(directory, `${unit}.enabled-state`), `${enabled}\n`);
+        fs.writeFileSync(path.join(directory, `${unit}.active-state`), `${active}\n`);
+      }
+      const program = `set -eu
+backup_root="$WAVEKB_STATE_ROOT"
+sudo() {
+  if test "$1" = cat; then command cat "$2"; return; fi
+  if test "$1" = systemctl && test "$2" = is-enabled; then printf '%s\\n' static; printf '%s\\n' "$2" >> "$WAVEKB_STATE_LOG"; return; fi
+  if test "$1" = systemctl; then printf '%s\\n' "$2" >> "$WAVEKB_STATE_LOG"; return; fi
+  return 1
+}
+${operation}`;
+      const log = path.join(directory, "calls.log");
+      const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_STATE_ROOT: directory, WAVEKB_STATE_LOG: log }, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+      const calls = fs.readFileSync(log, "utf8").trim().split(/\r?\n/);
+      assert.deepEqual(calls, [...expected, ...expected]);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("real shell toggle selection invokes one operation only and preserves the private flag for managed-only changes", () => {
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
   const start = activation.run.indexOf('if test "$PRIVATE_RESEARCH" != preserve || test "$MANAGED_AI" != preserve; then');
-  const end = activation.run.indexOf('if test "$legacy_layout" -eq 1; then', start);
+  const end = activation.run.indexOf('if test "$TRADING_CUTOVER" != preserve || test "$TRADING_BINANCE" != preserve', start);
   assert.ok(start > 0 && end > start);
   const operation = activation.run.slice(start, end);
   for (const privateResearch of ["preserve", "enable", "disable"]) for (const managedAi of ["preserve", "enable", "disable"]) {
@@ -191,15 +273,18 @@ test("environment rollback never truncates the live file when copying its backup
       fs.writeFileSync(path.join(backup, "gateway.env"), "ORIGINAL=safe\n", { mode: 0o600 });
       const live = path.join(directory, "gateway.env");
       fs.writeFileSync(live, "CANDIDATE=safe\n", { mode: 0o600 });
+      const shellBackup = backup.replaceAll("\\", "/");
+      const shellDirectory = directory.replaceAll("\\", "/");
       // GNU mv -T is exercised unchanged on the production Linux CI runner.
       // macOS's BSD mv omits -T; both fixture targets are verified regular files.
       const platformMove = process.platform === "darwin" ? 'mv() { test "$1" = -Tf; command mv -f "$2" "$3"; }' : "";
-      const program = `set -eu\nbackup_root="${backup}"\nrelease_id=fixture\nsudo() { "$@"; }\n${platformMove}\n${failCopy ? 'install() { head -c 1 "$3" > "$4"; return 9; }' : ""}\n${rollback.replaceAll("/etc/elliott-wave", directory)}`;
+      const program = `set -eu\nbackup_root="${shellBackup}"\nrelease_id=fixture\nsudo() { "$@"; }\n${platformMove}\n${failCopy ? 'install() { head -c 1 "$3" > "$4"; return 9; }' : ""}\n${rollback.replaceAll("/etc/elliott-wave", shellDirectory)}`;
       const result = spawnSync("bash", ["-c", program], { encoding: "utf8" });
       assert.equal(result.status, failCopy ? 9 : 0, result.stderr);
       assert.equal(fs.readFileSync(live, "utf8"), failCopy ? "CANDIDATE=safe\n" : "ORIGINAL=safe\n");
       assert.equal(fs.readFileSync(path.join(backup, "gateway.env"), "utf8"), "ORIGINAL=safe\n");
-      assert.equal(fs.statSync(live).mode & 0o777, 0o600);
+      if (process.platform !== "win32") assert.equal(fs.statSync(live).mode & 0o777, 0o600);
+      else assert.equal(fs.statSync(live).isFile(), true, "Windows cannot represent the Linux 0600 mode exactly");
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   }
 });
@@ -265,7 +350,10 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   }
   assert.match(backendSteps[schemaGate].run, /test "\$private_schema_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /not has_schema_privilege\('authenticated','hermes_research_private','USAGE'\)/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202610220002/);
+  assert.match(backendSteps[schemaGate].run, /202611240001_multi_exchange_trade_review\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202611240002_trade_review_ai\.sql/);
+  assert.match(backendSteps[schemaGate].run, /test "\$trading_review_rls_tables" = 13/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611240002/);
   assert.match(backendSteps[schemaGate].run, /test "\$mentor_publish_rpc_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$mentor_service_rpc_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$image_rls_closed" = t/);
@@ -273,7 +361,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202610220002/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611240002/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -305,6 +393,8 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202610190001_community_engagement.sql",
     "202610220001_atomic_admin_mentor_publish.sql",
     "202610220002_mentor_service_lifecycle.sql",
+    "202611240001_multi_exchange_trade_review.sql",
+    "202611240002_trade_review_ai.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -323,14 +413,15 @@ ${selection}`;
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
     ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11], ["20261011001354", 12],
     ["20261011152711", 13], ["202610190001", 14], ["202610220001", 15], ["202610220002", 16],
+    ["202611240001", 17], ["202611240002", 18],
   ]) {
-    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
+    const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
     const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
     assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
   }
   for (const marker of ["", "202609090001", "202610100006", "invalid"]) {
-    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
+    const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.notEqual(result.status, 0, marker);
     assert.doesNotMatch(result.stdout, /supabase\/migrations\//);
   }
@@ -397,7 +488,7 @@ printf 'BASELINE_READY\\n'`;
   function run(marker, count = "1", exit = "0") {
     return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
   }
-  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002"];
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002"];
   for (const marker of markers) {
     const result = run(marker);
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
@@ -681,7 +772,7 @@ test("the real workflow package excludes browser-generated cache while preservin
   fs.writeFileSync(path.join(standalone, ".next/static/app.js"), "static");
   fs.writeFileSync(path.join(standalone, "research.sqlite"), "private database must not ship");
   fs.writeFileSync(path.join(standalone, "research.sqlite-wal"), "private WAL must not ship");
-  const packaging = steps.find((step) => /^tar -C apps\/web\/\.next\/standalone/.test(step.run ?? ""));
+  const packaging = steps.find((step) => /tar -C apps\/web\/\.next\/standalone/.test(step.run ?? ""));
   const result = spawnSync("bash", ["-c", packaging.run], { cwd: directory, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   const archive = spawnSync("tar", ["-tzf", "wavekb-next-preview.tar.gz"], { cwd: directory, encoding: "utf8" });

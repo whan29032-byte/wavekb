@@ -29,7 +29,7 @@ function response(value = body) { return Promise.resolve(new Response(JSON.strin
 
 describe("TradingWorkbenchDashboard", () => {
   it("shows exactly six headline metrics, coverage warnings, all filters and no 11-step creation CTA", async () => {
-    const fetcher = vi.fn((_url: string) => response()); vi.stubGlobal("fetch", fetcher);
+    const fetcher = vi.fn((url: string) => { void url; return response(); }); vi.stubGlobal("fetch", fetcher);
     render(<TradingWorkbenchDashboard actorId="owner" />);
     expect(await screen.findAllByTestId(/^headline-/)).toHaveLength(6);
     expect(screen.getByText("部分账户缺少美元估值")).toBeTruthy();
@@ -43,7 +43,7 @@ describe("TradingWorkbenchDashboard", () => {
   });
 
   it("requeries the backend for range, provider and account filters", async () => {
-    const fetcher = vi.fn((_url: string) => response()); vi.stubGlobal("fetch", fetcher);
+    const fetcher = vi.fn((url: string) => { void url; return response(); }); vi.stubGlobal("fetch", fetcher);
     render(<TradingWorkbenchDashboard actorId="owner" />); await screen.findByText("BTCUSDT");
     fireEvent.change(screen.getByLabelText("统计范围"), { target: { value: "7d" } });
     fireEvent.change(screen.getByLabelText("交易平台"), { target: { value: "exness" } });

@@ -78,8 +78,19 @@ function credentialPayload(provider: Provider, form: HTMLFormElement): Record<st
   return base;
 }
 
-async function payload(response: Response) {
-  return response.json().catch(() => ({})) as Promise<Record<string, any>>;
+type ExchangeApiPayload = {
+  error?: unknown;
+  connections?: unknown;
+  connection?: unknown;
+  validation?: { accounts?: unknown };
+  sync?: { status?: unknown; reason?: unknown };
+};
+
+async function payload(response: Response): Promise<ExchangeApiPayload> {
+  const value: unknown = await response.json().catch(() => ({}));
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as ExchangeApiPayload
+    : {};
 }
 
 export function ExchangeAccountManager({ actorId }: { actorId: string | null }) {

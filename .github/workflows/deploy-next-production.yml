@@ -66,6 +66,7 @@ jobs:
           pnpm --dir ai-gateway typecheck
           pnpm --dir ai-gateway test
           node --test tests/ai-gateway-packaging.test.mjs
+          node scripts/trading-release-preflight.mjs --static
 
       - name: Build the standalone application
         env:
@@ -122,6 +123,7 @@ jobs:
             e2e/natural-law-illustrations.spec.ts e2e/knowledge-image-delivery.spec.ts \
             --workers=2 --retries=0
           pnpm --filter @wavekb/web exec playwright test e2e/reading-image-worker.spec.ts --workers=2 --retries=0
+          pnpm --filter @wavekb/web exec playwright test e2e/trading-workbench.spec.ts --workers=1 --retries=0
           pnpm --filter @wavekb/web exec playwright test --config=playwright.ui.config.ts
 
       - name: Preserve failed local browser evidence without deployment credentials
@@ -158,8 +160,19 @@ jobs:
           test -n "$E2E_POSTING_IDENTIFIER"
           test -n "$E2E_POSTING_PASSWORD"
 
+      - name: Require authenticated trading acceptance credentials before any remote write
+        env:
+          E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
+          E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$E2E_POSTING_IDENTIFIER"
+          test -n "$E2E_POSTING_PASSWORD"
+
       - name: Package the accepted standalone application
-        run: tar -C apps/web/.next/standalone --exclude='./apps/web/.next/cache' --exclude='*.sqlite*' --exclude='*.db-wal' --exclude='*.db-shm' -czf wavekb-next-preview.tar.gz .
+        run: |
+          set -Eeuo pipefail
+          tar -C apps/web/.next/standalone --exclude='./apps/web/.next/cache' --exclude='*.sqlite*' --exclude='*.db-wal' --exclude='*.db-shm' -czf wavekb-next-preview.tar.gz .
 
       - name: Configure pinned SSH access
         env:
@@ -263,6 +276,14 @@ jobs:
           PLAYWRIGHT_BASE_URL: https://wavekb.com
           TLINE_LIVE_ACCEPTANCE: "1"
         run: pnpm --filter @wavekb/web exec playwright test e2e/tline.acceptance.spec.ts --workers=1
+
+      - name: Run required authenticated trading workbench acceptance
+        env:
+          E2E_POSTING_IDENTIFIER: ${{ secrets.E2E_POSTING_IDENTIFIER }}
+          E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
+          PLAYWRIGHT_BASE_URL: https://wavekb.com
+          TRADING_LIVE_ACCEPTANCE: "1"
+        run: pnpm --filter @wavekb/web exec playwright test e2e/trading-workbench.spec.ts --project=desktop-chromium --workers=1 --retries=0
 
       # Conditional on relevant changes since LIVE base; this mutates dedicated
       # disposable records and is not a read-only smoke test.

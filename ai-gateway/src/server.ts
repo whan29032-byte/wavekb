@@ -151,6 +151,9 @@ function healthPayload(deps: ServerDeps): object {
     ok: true,
     service: "elliott-wave-ai-gateway",
     deployment,
+    features: {
+      trading_workbench_v2: deps.config.TRADING_WORKBENCH_V2_ENABLED,
+    },
     time: (deps.now ?? (() => new Date()))().toISOString(),
   };
 }

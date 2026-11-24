@@ -179,6 +179,12 @@ test("a transient post-start timer inspection failure does not roll back a healt
   assert.ok(f.events.includes("start:timer"));
 });
 
+test("the web startup delegates trading cutover to Gateway health", () => {
+  const startup = api.buildReleaseStartup(sha);
+  assert.doesNotMatch(startup, /TRADING_WORKBENCH_V2_ENABLED|TRADING_WORKBENCH_V2_DEFAULT/);
+  assert.match(startup, /export DEPLOYMENT_VERSION=/);
+});
+
 for (const enabled of ["disabled", "static"]) {
   test(`rollback preserves previously ${enabled}, inactive sync units without starting them`, async (t) => {
     const f = persistentFixture(t, true);

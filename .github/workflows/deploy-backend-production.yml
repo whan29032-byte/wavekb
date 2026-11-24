@@ -25,6 +25,45 @@ on:
           - preserve
           - enable
           - disable
+      trading_cutover:
+        description: "Preserve, enable, or disable only the automatic-workbench master flag"
+        required: true
+        type: choice
+        default: preserve
+        options:
+          - preserve
+          - enable
+          - disable
+      trading_provider_binance:
+        description: "Stage the Binance read-only sync flag independently"
+        required: true
+        type: choice
+        default: preserve
+        options: [preserve, enable, disable]
+      trading_provider_okx:
+        description: "Stage the OKX read-only sync flag independently"
+        required: true
+        type: choice
+        default: preserve
+        options: [preserve, enable, disable]
+      trading_provider_bybit:
+        description: "Stage the Bybit read-only sync flag independently"
+        required: true
+        type: choice
+        default: preserve
+        options: [preserve, enable, disable]
+      trading_provider_bitget:
+        description: "Stage the Bitget read-only sync flag independently"
+        required: true
+        type: choice
+        default: preserve
+        options: [preserve, enable, disable]
+      trading_provider_exness:
+        description: "Stage the Exness read-only sync flag independently"
+        required: true
+        type: choice
+        default: preserve
+        options: [preserve, enable, disable]
 
 permissions:
   contents: read
@@ -73,13 +112,15 @@ jobs:
           node scripts/validate-knowledge.mjs
           pnpm --dir ai-gateway typecheck
           pnpm --dir ai-gateway test
-          node --test tests/ai-gateway-packaging.test.mjs tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/hermes-theory-artifact.test.mjs tests/hermes-private-research-postgres.test.mjs tests/wave-analysis-images-postgres.test.mjs tests/trading-leaderboard.test.mjs tests/trading-leaderboard-postgres.test.mjs tests/reward-lottery-postgres.test.mjs tests/mentor-checkout-postgres.test.mjs tests/mentor-notification-postgres.test.mjs tests/admin-mentor-publish-postgres.test.mjs tests/mentor-service-lifecycle-postgres.test.mjs tests/youtube-sync-postgres.test.mjs tests/youtube-policy-consent-postgres.test.mjs tests/admin-payment-hardening-postgres.test.mjs tests/mentor-payment-webhook.test.mjs tests/mentor-checkout-function.test.mjs tests/membership-foundation-postgres.test.mjs tests/membership-commerce-postgres.test.mjs tests/membership-payment-functions.test.mjs tests/membership-benefits-postgres.test.mjs tests/membership-wallet-postgres.test.mjs tests/membership-wallet-functions.test.mjs
+          node --test tests/ai-gateway-packaging.test.mjs tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/hermes-theory-artifact.test.mjs tests/hermes-private-research-postgres.test.mjs tests/wave-analysis-images-postgres.test.mjs tests/trading-leaderboard.test.mjs tests/trading-leaderboard-postgres.test.mjs tests/multi-exchange-trading-postgres.test.mjs tests/trading-release-preflight.test.mjs tests/reward-lottery-postgres.test.mjs tests/mentor-checkout-postgres.test.mjs tests/mentor-notification-postgres.test.mjs tests/admin-mentor-publish-postgres.test.mjs tests/mentor-service-lifecycle-postgres.test.mjs tests/youtube-sync-postgres.test.mjs tests/youtube-policy-consent-postgres.test.mjs tests/admin-payment-hardening-postgres.test.mjs tests/mentor-payment-webhook.test.mjs tests/mentor-checkout-function.test.mjs tests/membership-foundation-postgres.test.mjs tests/membership-commerce-postgres.test.mjs tests/membership-payment-functions.test.mjs tests/membership-benefits-postgres.test.mjs tests/membership-wallet-postgres.test.mjs tests/membership-wallet-functions.test.mjs
+          node scripts/trading-release-preflight.mjs --static
 
       - name: Package immutable gateway release
         run: |
           set -Eeuo pipefail
           printf '%s\n' "$GITHUB_SHA" > ai-gateway/DEPLOYMENT_VERSION
-          tar -C ai-gateway -czf wavekb-gateway.tar.gz package.json src knowledge/retrieval-index.json DEPLOYMENT_VERSION
+          cp scripts/trading-release-preflight.mjs ai-gateway/release-preflight.mjs
+          tar -C ai-gateway -czf wavekb-gateway.tar.gz package.json src knowledge/retrieval-index.json DEPLOYMENT_VERSION release-preflight.mjs
 
       - name: Configure pinned SSH access
         env:
@@ -138,7 +179,7 @@ jobs:
           # Validate the marker before any DDL, then repair this marker-neutral
           # baseline even when the latest version has already been recorded.
           case "$schema_before" in
-            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002) ;;
+            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002|202611240001|202611240002) ;;
             *)
               echo "Unexpected production schema marker; refusing migration."
               exit 1
@@ -234,6 +275,12 @@ jobs:
               echo "Atomic mentor publishing already applied; adding service lifecycle."
               ;;
             202610220002)
+              echo "Mentor lifecycle applied; adding multi-exchange trade review."
+              ;;
+            202611240001)
+              echo "Multi-exchange trade review applied; adding knowledge-grounded trade review AI."
+              ;;
+            202611240002)
               echo "Production migrations already applied; continuing idempotently."
               ;;
             *)
@@ -241,35 +288,43 @@ jobs:
               exit 1
               ;;
           esac
-          if test "$schema_before" != 202610100005 && test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002; then
+          if test "$schema_before" != 202610100005 && test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100005_membership_wallet_payments.sql
           fi
-          if test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002; then
+          if test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261010223739_hermes_private_research.sql
           fi
-          if test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002; then
+          if test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011001354_wave_analysis_images.sql
           fi
-          if test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002; then
+          if test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011152711_youtube_policy_consent.sql
           fi
-          if test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002; then
+          if test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610190001_community_engagement.sql
           fi
-          if test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002; then
+          if test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220001_atomic_admin_mentor_publish.sql
           fi
-          if test "$schema_before" != 202610220002; then
+          if test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220002_mentor_service_lifecycle.sql
           fi
+          if test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240001_multi_exchange_trade_review.sql
+          fi
+          if test "$schema_before" != 202611240002; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240002_trade_review_ai.sql
+          fi
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema_after" = 202610220002
+          test "$schema_after" = 202611240002
           mentor_publish_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE') and not has_function_privilege('anon','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE');" | tr -d '[:space:]')
           test "$mentor_publish_rpc_closed" = t
           mentor_service_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.request_mentor_service_completion(uuid,text)','EXECUTE') and has_function_privilege('authenticated','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and has_function_privilege('authenticated','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE') and not has_function_privilege('anon','public.request_mentor_service_completion(uuid,text)','EXECUTE') and not has_function_privilege('anon','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and not has_function_privilege('anon','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE');" | tr -d '[:space:]')
           test "$mentor_service_rpc_closed" = t
           rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('exchange_connections','exchange_connection_secrets','trading_equity_snapshots','trading_return_summaries') and c.relrowsecurity;" | tr -d '[:space:]')
           test "$rls_tables" = 4
+          trading_review_rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('exchange_credential_sets','exchange_credential_secrets','trading_account_snapshots','trading_fills','trading_cash_events','trading_trade_cycles','trading_trade_cycle_revisions','trading_trade_cycle_lineage','trading_trade_reviews','trading_sync_cursors','trading_sync_batches','trading_delete_queue','trading_deletion_audit') and c.relrowsecurity;" | tr -d '[:space:]')
+          test "$trading_review_rls_tables" = 13
           lottery_rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('reward_lottery_campaigns','reward_lottery_prizes','reward_lottery_draws','reward_lottery_admin_audit') and c.relrowsecurity;" | tr -d '[:space:]')
           test "$lottery_rls_tables" = 4
           youtube_rls_tables=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('youtube_connections','youtube_connection_secrets','youtube_oauth_states','youtube_post_sources','youtube_revocation_jobs') and c.relrowsecurity;" | tr -d '[:space:]')
@@ -301,10 +356,10 @@ jobs:
               -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
               -H 'content-type: application/json' \
               -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]') || true
-            test "$schema" = 202610220002 && break
+            test "$schema" = 202611240002 && break
             sleep 2
           done
-          test "$schema" = 202610220002
+          test "$schema" = 202611240002
 
       - name: Upload gateway archive and systemd units
         env:
@@ -335,12 +390,21 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
           PRIVATE_RESEARCH: ${{ inputs.private_research }}
           MANAGED_AI: ${{ inputs.managed_ai }}
+          TRADING_CUTOVER: ${{ inputs.trading_cutover }}
+          TRADING_BINANCE: ${{ inputs.trading_provider_binance }}
+          TRADING_OKX: ${{ inputs.trading_provider_okx }}
+          TRADING_BYBIT: ${{ inputs.trading_provider_bybit }}
+          TRADING_BITGET: ${{ inputs.trading_provider_bitget }}
+          TRADING_EXNESS: ${{ inputs.trading_provider_exness }}
         run: |
           set -Eeuo pipefail
           case "$PRIVATE_RESEARCH" in preserve|enable|disable) ;; *) exit 1 ;; esac
           case "$MANAGED_AI" in preserve|enable|disable) ;; *) exit 1 ;; esac
+          for trading_action in "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS"; do
+            case "$trading_action" in preserve|enable|disable) ;; *) exit 1 ;; esac
+          done
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' MANAGED_AI='${MANAGED_AI}' bash -s" <<'REMOTE'
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' TRADING_CUTOVER='${TRADING_CUTOVER}' TRADING_BINANCE='${TRADING_BINANCE}' TRADING_OKX='${TRADING_OKX}' TRADING_BYBIT='${TRADING_BYBIT}' TRADING_BITGET='${TRADING_BITGET}' TRADING_EXNESS='${TRADING_EXNESS}' MANAGED_AI='${MANAGED_AI}' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           release_root=/opt/elliott-wave-gateway
@@ -365,6 +429,14 @@ jobs:
             sudo test ! -e "$previous"
             legacy_layout=1
           fi
+          rollback_sha=$(curl --fail --silent --show-error http://127.0.0.1:8787/health | /usr/bin/node -e '
+            let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => {
+              const deployment = JSON.parse(input).deployment;
+              if (!/^[0-9a-f]{40}$/.test(deployment)) process.exit(1);
+              process.stdout.write(deployment);
+            });
+          ')
+          test "$rollback_sha" != "$RELEASE_SHA"
           printf '%s\n' "$previous" | sudo tee "${backup_root}/previous-release" > /dev/null
           for unit in "${units[@]}"; do
             if sudo test -f "/etc/systemd/system/${unit}"; then
@@ -372,6 +444,19 @@ jobs:
             else
               sudo touch "${backup_root}/${unit}.missing"
             fi
+          done
+          for trading_unit in elliott-wave-trading-sync.service elliott-wave-trading-sync.timer; do
+            if sudo test -f "${backup_root}/${trading_unit}.missing"; then
+              printf '%s\n' missing | sudo tee "${backup_root}/${trading_unit}.enabled-state" > /dev/null
+              printf '%s\n' inactive | sudo tee "${backup_root}/${trading_unit}.active-state" > /dev/null
+              continue
+            fi
+            trading_enabled_state=$(sudo systemctl is-enabled "$trading_unit" 2>/dev/null || true)
+            case "$trading_enabled_state" in enabled|disabled|static) ;; *) exit 1 ;; esac
+            trading_active_state=inactive
+            if sudo systemctl is-active --quiet "$trading_unit"; then trading_active_state=active; fi
+            printf '%s\n' "$trading_enabled_state" | sudo tee "${backup_root}/${trading_unit}.enabled-state" > /dev/null
+            printf '%s\n' "$trading_active_state" | sudo tee "${backup_root}/${trading_unit}.active-state" > /dev/null
           done
           sudo install -d -m 0755 "$release_dir"
           sudo tar -xzf "$archive" -C "$release_dir"
@@ -403,6 +488,22 @@ jobs:
             fi
             sudo systemctl daemon-reload
             sudo systemctl restart elliott-wave-gateway.service
+            for trading_unit in elliott-wave-trading-sync.service elliott-wave-trading-sync.timer; do
+              trading_enabled_state=$(sudo cat "${backup_root}/${trading_unit}.enabled-state")
+              trading_active_state=$(sudo cat "${backup_root}/${trading_unit}.active-state")
+              case "$trading_enabled_state" in
+                enabled) sudo systemctl enable "$trading_unit" ;;
+                disabled) sudo systemctl disable "$trading_unit" ;;
+                static) test "$(sudo systemctl is-enabled "$trading_unit")" = static ;;
+                missing) continue ;;
+                *) exit 1 ;;
+              esac
+              case "$trading_active_state" in
+                active) sudo systemctl start "$trading_unit" ;;
+                inactive) sudo systemctl stop "$trading_unit" ;;
+                *) exit 1 ;;
+              esac
+            done
             if test "$MANAGED_AI" = enable && test "$worker_was_active" -eq 0; then
               sudo systemctl stop elliott-wave-ai-worker.service || true
             else
@@ -424,6 +525,26 @@ jobs:
             sudo /usr/bin/node -- "${release_dir}/src/research/configure-runtime.ts" \
               --env-file /etc/elliott-wave/gateway.env \
               --backup-file "${backup_root}/gateway.env" "${runtime_arguments[@]}"
+          fi
+
+          if test "$TRADING_CUTOVER" != preserve || test "$TRADING_BINANCE" != preserve || test "$TRADING_OKX" != preserve || test "$TRADING_BYBIT" != preserve || test "$TRADING_BITGET" != preserve || test "$TRADING_EXNESS" != preserve; then
+            if ! sudo test -f "${backup_root}/gateway.env"; then
+              sudo install -m 0600 /etc/elliott-wave/gateway.env "${backup_root}/gateway.env"
+            fi
+            sudo /usr/bin/node --input-type=module - /etc/elliott-wave/gateway.env \
+              "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS" <<'NODE'
+          import fs from "node:fs";
+          const [file, ...actions] = process.argv.slice(2);
+          const names = ["TRADING_WORKBENCH_V2_ENABLED", "TRADING_PROVIDER_BINANCE_ENABLED", "TRADING_PROVIDER_OKX_ENABLED", "TRADING_PROVIDER_BYBIT_ENABLED", "TRADING_PROVIDER_BITGET_ENABLED", "TRADING_PROVIDER_EXNESS_ENABLED"];
+          if (!file || actions.length !== names.length || actions.some((action) => !["preserve", "enable", "disable"].includes(action))) process.exit(2);
+          const original = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
+          const changes = new Map(names.flatMap((name, index) => actions[index] === "preserve" ? [] : [[name, actions[index] === "enable" ? "true" : "false"]]));
+          const kept = original.filter((line) => ![...changes.keys()].some((name) => line.startsWith(`${name}=`)));
+          const temporary = `${file}.trading-new`;
+          const updated = [...kept, ...[...changes].map(([name, enabled]) => `${name}=${enabled}`)];
+          fs.writeFileSync(temporary, `${updated.join("\n")}\n`, { flag: "wx", mode: 0o600 });
+          fs.renameSync(temporary, file);
+          NODE
           fi
 
           if test "$legacy_layout" -eq 1; then
@@ -448,7 +569,59 @@ jobs:
           sudo systemctl enable --now elliott-wave-youtube-sync.service
           sudo systemctl restart elliott-wave-youtube-sync.service
           sudo systemctl enable --now elliott-wave-trading-sync.timer
+          trading_worker_started_at=$(date --iso-8601=seconds)
           sudo systemctl start elliott-wave-trading-sync.service
+
+          trading_metric=$(sudo journalctl -u elliott-wave-trading-sync.service --since "$trading_worker_started_at" --no-pager -o cat | /usr/bin/node -e '
+            let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => {
+              const metrics = input.split(/\r?\n/).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } });
+              const metric = metrics.reverse().find((item) => item && item.event === "trading_sync");
+              if (!metric || !Number.isInteger(metric.checked) || !Number.isInteger(metric.failed)) process.exit(1);
+              process.stdout.write(JSON.stringify({ checked: metric.checked, failed: metric.failed }));
+            });
+          ')
+          runtime_observation="${backup_root}/trading-runtime-observation.json"
+          sudo /usr/bin/node --input-type=module - /etc/elliott-wave/gateway.env "$RELEASE_SHA" "$rollback_sha" "$trading_metric" "$runtime_observation" <<'NODE'
+          import fs from "node:fs";
+          const [envFile, releaseSha, rollbackTarget, metricJson, output] = process.argv.slice(2);
+          const allowlisted = new Map();
+          for (const line of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+            const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
+            if (!match) continue;
+            const raw = match[2];
+            allowlisted.set(match[1], raw.length >= 2 && raw[0] === raw.at(-1) && ['"', "'"].includes(raw[0]) ? raw.slice(1, -1) : raw);
+          }
+          const boolean = (name) => {
+            const value = allowlisted.get(name) ?? "false";
+            if (!['true', 'false'].includes(value)) throw new Error(`${name} is invalid`);
+            return value === 'true';
+          };
+          const metric = JSON.parse(metricJson);
+          const observedAt = new Date().toISOString();
+          const observation = {
+            expectedSchemaVersion: "202611240002", schemaVersion: "202611240002", releaseSha, rollbackTarget,
+            flags: {
+              TRADING_WORKBENCH_V2_ENABLED: boolean("TRADING_WORKBENCH_V2_ENABLED"),
+              TRADING_PROVIDER_BINANCE_ENABLED: boolean("TRADING_PROVIDER_BINANCE_ENABLED"),
+              TRADING_PROVIDER_OKX_ENABLED: boolean("TRADING_PROVIDER_OKX_ENABLED"),
+              TRADING_PROVIDER_BYBIT_ENABLED: boolean("TRADING_PROVIDER_BYBIT_ENABLED"),
+              TRADING_PROVIDER_BITGET_ENABLED: boolean("TRADING_PROVIDER_BITGET_ENABLED"),
+              TRADING_PROVIDER_EXNESS_ENABLED: boolean("TRADING_PROVIDER_EXNESS_ENABLED"),
+            },
+            providerOrigins: {
+              binance: allowlisted.get("BINANCE_FUTURES_API_URL") ?? "https://fapi.binance.com",
+              okx: allowlisted.get("OKX_API_URL") ?? "https://www.okx.com",
+              bybit: allowlisted.get("BYBIT_API_URL") ?? "https://api.bybit.com",
+              bitget: allowlisted.get("BITGET_API_URL") ?? "https://api.bitget.com",
+              exness: allowlisted.get("EXNESS_API_URL") ?? "https://my.exness.com",
+            },
+            worker: { lastRunAt: observedAt, checked: metric.checked, failed: metric.failed },
+            now: Date.parse(observedAt),
+          };
+          fs.writeFileSync(output, JSON.stringify(observation), { flag: "wx", mode: 0o600 });
+          NODE
+          sudo /usr/bin/node "${release_dir}/release-preflight.mjs" --runtime-file "$runtime_observation"
+          sudo rm -f "$runtime_observation"
 
           accepted=0
           for attempt in 1 2 3 4 5 6 7 8; do

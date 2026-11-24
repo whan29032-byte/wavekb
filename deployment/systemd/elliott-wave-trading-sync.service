@@ -1,5 +1,5 @@
 [Unit]
-Description=WaveKB Binance leaderboard snapshot sync
+Description=WaveKB read-only multi-exchange sync and retention maintenance
 After=network-online.target elliott-wave-gateway.service
 Wants=network-online.target
 
@@ -9,6 +9,7 @@ DynamicUser=yes
 WorkingDirectory=/opt/elliott-wave-gateway/current
 EnvironmentFile=/etc/elliott-wave/gateway.env
 ExecStart=/usr/bin/node src/trading-worker.ts
+TimeoutStartSec=14min
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes

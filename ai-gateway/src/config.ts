@@ -21,6 +21,12 @@ export type GatewayConfig = {
   BINANCE_FUTURES_API_URL: string;
   TRADING_ACCOUNT_HMAC_KEY: Buffer;
   TRADING_SYNC_MINUTES: number;
+  TRADING_WORKBENCH_V2_ENABLED: boolean;
+  TRADING_PROVIDER_BINANCE_ENABLED: boolean;
+  TRADING_PROVIDER_OKX_ENABLED: boolean;
+  TRADING_PROVIDER_BYBIT_ENABLED: boolean;
+  TRADING_PROVIDER_BITGET_ENABLED: boolean;
+  TRADING_PROVIDER_EXNESS_ENABLED: boolean;
 };
 
 const integer = (value: string | undefined, fallback: number, minimum: number, maximum: number): number => {
@@ -107,5 +113,11 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
     BINANCE_FUTURES_API_URL: binanceFuturesApiUrl.replace(/\/$/, ""),
     TRADING_ACCOUNT_HMAC_KEY: tradingAccountHmacKey,
     TRADING_SYNC_MINUTES: integer(env.TRADING_SYNC_MINUTES, 15, 5, 1440),
+    TRADING_WORKBENCH_V2_ENABLED: boolean(env.TRADING_WORKBENCH_V2_ENABLED, false),
+    TRADING_PROVIDER_BINANCE_ENABLED: boolean(env.TRADING_PROVIDER_BINANCE_ENABLED, false),
+    TRADING_PROVIDER_OKX_ENABLED: boolean(env.TRADING_PROVIDER_OKX_ENABLED, false),
+    TRADING_PROVIDER_BYBIT_ENABLED: boolean(env.TRADING_PROVIDER_BYBIT_ENABLED, false),
+    TRADING_PROVIDER_BITGET_ENABLED: boolean(env.TRADING_PROVIDER_BITGET_ENABLED, false),
+    TRADING_PROVIDER_EXNESS_ENABLED: boolean(env.TRADING_PROVIDER_EXNESS_ENABLED, false),
   };
 }

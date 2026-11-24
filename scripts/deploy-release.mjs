@@ -141,6 +141,11 @@ async function checkSync(options, state) {
   requireValue(validSuccess(status?.lastSuccess), "Research catalogue is not ready");
 }
 
+export function buildReleaseStartup(sha, tlineDatabasePath = "") {
+  requireValue(shaPattern.test(sha), "Invalid release SHA");
+  return `#!/bin/sh\nexport DEPLOYMENT_VERSION='${sha}'\n${tlineDatabasePath ? `export TLINE_RESEARCH_DB_PATH='${tlineDatabasePath}'\n` : ""}exec /usr/bin/node apps/web/server.js\n`;
+}
+
 function markDiagnosticStage(state, metadata, stage) {
   state.diagnosticStage = stage;
   saveMetadata(metadata, state);
@@ -202,7 +207,10 @@ export async function activate(options) {
     await options.ownCache(cacheDir, options.deployUser);
     fs.symlinkSync(cacheDir, cacheLink);
     fs.writeFileSync(path.join(p.releaseDir, "DEPLOYMENT_VERSION"), options.sha + "\n", { flag: "wx", mode: 0o644 });
-    fs.writeFileSync(path.join(p.releaseDir, "start-release.sh"), `#!/bin/sh\nexport DEPLOYMENT_VERSION='${options.sha}'\n${options.tline ? `export TLINE_RESEARCH_DB_PATH='${p.applicationRoot}/data/tline/research.sqlite'\n` : ""}exec /usr/bin/node apps/web/server.js\n`, { flag: "wx", mode: 0o755 });
+    fs.writeFileSync(path.join(p.releaseDir, "start-release.sh"), buildReleaseStartup(
+      options.sha,
+      options.tline ? `${p.applicationRoot}/data/tline/research.sqlite` : "",
+    ), { flag: "wx", mode: 0o755 });
     fs.chmodSync(path.join(p.releaseDir, "DEPLOYMENT_VERSION"), 0o644);
     fs.chmodSync(path.join(p.releaseDir, "start-release.sh"), 0o755);
     // systemd reads this as root. Never put credentials in the immutable code

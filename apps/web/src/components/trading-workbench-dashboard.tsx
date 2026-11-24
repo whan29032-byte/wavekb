@@ -16,20 +16,24 @@ export function TradingWorkbenchDashboard({ actorId }: { actorId: string }) {
   const [provider, setProvider] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [data, setData] = useState<TradingWorkbenchView | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [settledRequest, setSettledRequest] = useState("");
+  const [failure, setFailure] = useState<{ request: string; message: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const tradeLinks = useRef<Array<HTMLAnchorElement | null>>([]);
   const timezone = browserTimezone();
+  const requestKey = `${range}|${provider}|${connectionId}|${timezone}|${refreshKey}`;
 
   useEffect(() => {
-    let active = true; setLoading(true); setError("");
+    let active = true;
     void getTradingWorkbench({ range, provider: provider || undefined, connectionId: connectionId || undefined, timezone })
-      .then((value) => { if (active) setData(value); })
-      .catch(() => { if (active) setError("交易数据暂时无法读取，请稍后重试。"); })
-      .finally(() => { if (active) setLoading(false); });
+      .then((value) => { if (active) { setData(value); setFailure(null); } })
+      .catch(() => { if (active) setFailure({ request: requestKey, message: "交易数据暂时无法读取，请稍后重试。" }); })
+      .finally(() => { if (active) setSettledRequest(requestKey); });
     return () => { active = false; };
-  }, [range, provider, connectionId, timezone, refreshKey]);
+  }, [range, provider, connectionId, timezone, requestKey]);
+
+  const loading = settledRequest !== requestKey;
+  const error = failure?.request === requestKey ? failure.message : "";
 
   const availableAccounts = (data?.connections ?? []).filter((item) => !provider || item.provider === provider);
   function moveTradeFocus(index: number, key: string) {

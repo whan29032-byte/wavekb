@@ -15,6 +15,7 @@ import type {
 import { ExnessTradingProviderAdapter } from "./providers/exness.ts";
 import { OkxTradingProviderAdapter } from "./providers/okx.ts";
 import { createTradingProviderRegistry } from "./providers/registry.ts";
+import { enabledConnectionProviders } from "./provider-flags.ts";
 
 type ConnectionStatus = "pending_verification" | "active" | "error" | "disabled" | "deleting";
 
@@ -449,7 +450,7 @@ export function createExchangeConnectionService(config: GatewayConfig) {
     new BybitTradingProviderAdapter(),
     new BitgetTradingProviderAdapter(),
     new ExnessTradingProviderAdapter(),
-  ], ["binance", "okx", "bybit", "bitget", "exness"]);
+  ], enabledConnectionProviders(config));
   return new ExchangeConnectionService({
     store: new SupabaseTradingConnectionStore(config),
     adapters,
