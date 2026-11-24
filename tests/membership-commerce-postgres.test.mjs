@@ -139,7 +139,8 @@ test("unpaid completion never grants; duplicate and distinct paid events apply o
   const c=await setup(db),order=await bind(db,await prepare(db,c));
   assert.equal((await pay(db,order,{status:"unpaid",intent:null,paidAt:null})).applied,false); assert.equal((await effective(db)).has_vip,false);
   for(const args of [{amount:1},{currency:"CNY"},{buyer:ids.other},{mode:false}]) await assert.rejects(pay(db,order,args),/payment_amount_mismatch|order_payment_route_invalid|payment_mode_mismatch/);
-  const event="evt_once"; const results=await Promise.all(Array.from({length:6},()=>pay(db,order,{event})));
+  const event="evt_once",paidAt=new Date(Date.now()-60000).toISOString();
+  const results=await Promise.all(Array.from({length:6},()=>pay(db,order,{event,paidAt})));
   assert.equal(results.filter(x=>x.applied).length,1); assert.equal(results.filter(x=>x.duplicate).length,5);
   assert.equal((await pay(db,order,{event:"evt_distinct",type:"checkout.session.async_payment_succeeded"})).applied,false);
   const e=await effective(db); assert.equal(e.has_vip,true); assert.equal(e.ai_daily_limit,50); assert.equal(e.mentor_discount_bps,1000);
