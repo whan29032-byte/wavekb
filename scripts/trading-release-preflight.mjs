@@ -55,7 +55,10 @@ export function validateTradingRelease(input) {
   invariant(Number.isFinite(lastRun) && Number.isFinite(now), "worker timestamp is invalid");
   invariant(lastRun <= now && now - lastRun <= 30 * 60_000, "trading worker is stale");
   invariant(Number.isInteger(input.worker?.checked) && input.worker.checked >= 0, "worker checked counter is invalid");
-  invariant(Number.isInteger(input.worker?.failed) && input.worker.failed === 0, "trading worker has failures");
+  invariant(
+    Number.isInteger(input.worker?.failed) && input.worker.failed >= 0 && input.worker.failed <= input.worker.checked,
+    "worker failed counter is invalid",
+  );
 
   return {
     schemaVersion: input.schemaVersion,

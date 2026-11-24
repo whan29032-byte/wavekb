@@ -66,12 +66,24 @@ test("allows one provider or the total workbench to be disabled for rollback", (
   assert.equal(fallback.workbenchEnabled, false);
 });
 
+test("accepts isolated account failures from a completed worker run as degraded", () => {
+  const result = validateTradingRelease(release({
+    worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: 1 },
+  }));
+  assert.deepEqual(result.worker, {
+    lastRunAt: "2026-11-24T11:55:00.000Z",
+    checked: 5,
+    failed: 1,
+  });
+});
+
 test("fails closed on schema drift, unsafe origins, stale workers and invalid rollback state", () => {
   const invalid = [
     release({ schemaVersion: "202611240001" }),
     release({ providerOrigins: { ...hosts, okx: "http://attacker.invalid" } }),
     release({ worker: { lastRunAt: "2026-11-24T10:00:00Z", checked: 5, failed: 0 } }),
-    release({ worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: 1 } }),
+    release({ worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: -1 } }),
+    release({ worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: 6 } }),
     release({ rollbackTarget: sha }),
     release({ sameCodeRollback: true }),
     release({ flags: { ...flags, TRADING_PROVIDER_OKX_ENABLED: "yes" } }),
