@@ -356,9 +356,9 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /not has_schema_privilege\('authenticated','hermes_research_private','USAGE'\)/);
   assert.match(backendSteps[schemaGate].run, /202611240001_multi_exchange_trade_review\.sql/);
   assert.match(backendSteps[schemaGate].run, /202611240002_trade_review_ai\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202611250001_discord_account_link\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202611250002_discord_community_game\.sql/);
   assert.match(backendSteps[schemaGate].run, /test "\$trading_review_rls_tables" = 13/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611250001/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611250002/);
   assert.match(backendSteps[schemaGate].run, /test "\$discord_link_rls" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$discord_link_rpc_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$mentor_publish_rpc_closed" = t/);
@@ -368,7 +368,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611250001/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611250002/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -403,6 +403,7 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202611240001_multi_exchange_trade_review.sql",
     "202611240002_trade_review_ai.sql",
     "202611250001_discord_account_link.sql",
+    "202611250002_discord_community_game.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -421,7 +422,7 @@ ${selection}`;
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
     ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11], ["20261011001354", 12],
     ["20261011152711", 13], ["202610190001", 14], ["202610220001", 15], ["202610220002", 16],
-    ["202611240001", 17], ["202611240002", 18], ["202611250001", 19],
+    ["202611240001", 17], ["202611240002", 18], ["202611250001", 19], ["202611250002", 20],
   ]) {
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
@@ -496,7 +497,7 @@ printf 'BASELINE_READY\\n'`;
   function run(marker, count = "1", exit = "0") {
     return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
   }
-  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001"];
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001", "202611250002"];
   for (const marker of markers) {
     const result = run(marker);
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);

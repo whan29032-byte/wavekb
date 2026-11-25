@@ -179,7 +179,7 @@ jobs:
           # Validate the marker before any DDL, then repair this marker-neutral
           # baseline even when the latest version has already been recorded.
           case "$schema_before" in
-            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002|202611240001|202611240002|202611250001) ;;
+            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002|202611240001|202611240002|202611250001|202611250002) ;;
             *)
               echo "Unexpected production schema marker; refusing migration."
               exit 1
@@ -284,6 +284,9 @@ jobs:
               echo "Trade review AI applied; adding Discord account linking."
               ;;
             202611250001)
+              echo "Discord account linking applied; adding Discord community game."
+              ;;
+            202611250002)
               echo "Production migrations already applied; continuing idempotently."
               ;;
             *)
@@ -291,42 +294,47 @@ jobs:
               exit 1
               ;;
           esac
-          if test "$schema_before" != 202610100005 && test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001; then
+          if test "$schema_before" != 202610100005 && test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100005_membership_wallet_payments.sql
           fi
-          if test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+          if test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261010223739_hermes_private_research.sql
           fi
-          if test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+          if test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011001354_wave_analysis_images.sql
           fi
-          if test "$schema_before" != 20261011152711 && test "$schema_before" != 202611250001 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+          if test "$schema_before" != 20261011152711 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011152711_youtube_policy_consent.sql
           fi
-          if test "$schema_before" != 202610190001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+          if test "$schema_before" != 202610190001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610190001_community_engagement.sql
           fi
-          if test "$schema_before" != 202610220001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+          if test "$schema_before" != 202610220001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220001_atomic_admin_mentor_publish.sql
           fi
-          if test "$schema_before" != 202610220002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+          if test "$schema_before" != 202610220002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220002_mentor_service_lifecycle.sql
           fi
-          if test "$schema_before" != 202611240001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611240002; then
+          if test "$schema_before" != 202611240001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202611240002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240001_multi_exchange_trade_review.sql
           fi
-          if test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001; then
+          if test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240002_trade_review_ai.sql
           fi
-          if test "$schema_before" != 202611250001; then
+          if test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250001_discord_account_link.sql
           fi
+          if test "$schema_before" != 202611250002; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250002_discord_community_game.sql
+          fi
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema_after" = 202611250001
+          test "$schema_after" = 202611250002
           discord_link_rls=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select c.relrowsecurity and not has_table_privilege('anon','public.discord_link_tokens','SELECT') and not has_table_privilege('authenticated','public.discord_link_tokens','SELECT') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='discord_link_tokens';" | tr -d '[:space:]')
           test "$discord_link_rls" = t
           discord_link_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('service_role','public.issue_discord_link_token(text,text,text)','EXECUTE') and not has_function_privilege('anon','public.issue_discord_link_token(text,text,text)','EXECUTE') and not has_function_privilege('authenticated','public.issue_discord_link_token(text,text,text)','EXECUTE') and has_function_privilege('authenticated','public.redeem_discord_link_token(text)','EXECUTE') and not has_function_privilege('anon','public.redeem_discord_link_token(text)','EXECUTE');" | tr -d '[:space:]')
           test "$discord_link_rpc_closed" = t
+          discord_game_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('service_role','public.discord_game_action(text,text,text,jsonb)','EXECUTE') and not has_function_privilege('anon','public.discord_game_action(text,text,text,jsonb)','EXECUTE') and not has_function_privilege('authenticated','public.discord_game_action(text,text,text,jsonb)','EXECUTE');" | tr -d '[:space:]')
+          test "$discord_game_rpc_closed" = t
           mentor_publish_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE') and not has_function_privilege('anon','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE');" | tr -d '[:space:]')
           test "$mentor_publish_rpc_closed" = t
           mentor_service_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.request_mentor_service_completion(uuid,text)','EXECUTE') and has_function_privilege('authenticated','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and has_function_privilege('authenticated','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE') and not has_function_privilege('anon','public.request_mentor_service_completion(uuid,text)','EXECUTE') and not has_function_privilege('anon','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and not has_function_privilege('anon','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE');" | tr -d '[:space:]')
@@ -366,10 +374,10 @@ jobs:
               -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
               -H 'content-type: application/json' \
               -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]') || true
-            test "$schema" = 202611250001 && break
+            test "$schema" = 202611250002 && break
             sleep 2
           done
-          test "$schema" = 202611250001
+          test "$schema" = 202611250002
 
       - name: Upload gateway archive and systemd units
         env:
@@ -608,7 +616,7 @@ jobs:
           const metric = JSON.parse(metricJson);
           const observedAt = new Date().toISOString();
           const observation = {
-            expectedSchemaVersion: "202611250001", schemaVersion: "202611250001", releaseSha, rollbackTarget,
+            expectedSchemaVersion: "202611250002", schemaVersion: "202611250002", releaseSha, rollbackTarget,
             sameCodeRollback: releaseSha === rollbackTarget,
             flags: {
               TRADING_WORKBENCH_V2_ENABLED: boolean("TRADING_WORKBENCH_V2_ENABLED"),
