@@ -155,11 +155,108 @@ describe("ExchangeAccountManager", () => {
     const connection = { id: "c1", provider: "binance", account_label: "主账户", account_identifier_mask: "••••1001", account_currency: "USDT", products: ["usdt_perpetual"], read_only_status: "verified", capability_status: "ready", status: "active", public_enabled: false, last_synced_at: null, last_error_code: "" };
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => response({ connections: [connection] }))
-      .mockImplementationOnce(() => response({ sync: { status: "published", connection_id: "c1", generation: 3 } }));
+      .mockImplementationOnce(() => response({ sync: { status: "published", connection_id: "c1", generation: 3 } }))
+      .mockImplementationOnce(() => response({ connections: [{ ...connection, last_synced_at: "2026-11-25T10:30:00.000Z" }] }));
     vi.stubGlobal("fetch", fetchMock);
     render(<ExchangeAccountManager actorId="owner" />);
     fireEvent.click(await screen.findByRole("button", { name: "立即同步" }));
     await screen.findByText("交易记录已同步。");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/exchange/connections/c1/sync");
+  });
+
+  it("renders persisted synchronization health and keeps an unhealthy account retryable", async () => {
+    const connection = {
+      id: "c1",
+      provider: "binance",
+      account_label: "主账户",
+      account_identifier_mask: "••••1001",
+      account_currency: "USDT",
+      products: ["usdt_perpetual"],
+      read_only_status: "verified",
+      capability_status: "ready",
+      status: "active",
+      public_enabled: false,
+      last_synced_at: "2026-11-24T10:30:00.000Z",
+      last_error_code: "binance_rate_limited",
+    };
+    vi.stubGlobal("fetch", vi.fn(() => response({ connections: [connection] })));
+
+    render(<ExchangeAccountManager actorId="owner" />);
+
+    const card = await screen.findByTestId("exchange-connection-c1");
+    expect(within(card).getByText("同步异常")).toBeTruthy();
+    expect(within(card).getByText("当前保留上次完整数据")).toBeTruthy();
+    expect(within(card).getByText(/最后成功同步：/)).toBeTruthy();
+    expect(within(card).getByText("Binance 请求过于频繁，请稍后再同步。")).toBeTruthy();
+    expect((within(card).getByRole("button", { name: "立即同步" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((within(card).getByRole("button", { name: "加入收益榜" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("reloads persisted state after a failed manual sync and preserves its actionable error", async () => {
+    const activeConnection = {
+      id: "c1",
+      provider: "binance",
+      account_label: "主账户",
+      account_identifier_mask: "••••1001",
+      account_currency: "USDT",
+      products: ["usdt_perpetual"],
+      read_only_status: "verified",
+      capability_status: "ready",
+      status: "active",
+      public_enabled: false,
+      last_synced_at: "2026-11-24T10:30:00.000Z",
+      last_error_code: "",
+    };
+    const failedConnection = {
+      ...activeConnection,
+      status: "error",
+      last_error_code: "binance_rate_limited",
+    };
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => response({ connections: [activeConnection] }))
+      .mockImplementationOnce(() => response({ error: "binance_rate_limited" }, false))
+      .mockImplementationOnce(() => response({ connections: [failedConnection] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ExchangeAccountManager actorId="owner" />);
+    fireEvent.click(await screen.findByRole("button", { name: "立即同步" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/exchange/connections");
+    const card = screen.getByTestId("exchange-connection-c1");
+    expect(within(card).getByText("同步异常")).toBeTruthy();
+    expect(within(card).getByText("Binance 请求过于频繁，请稍后再同步。")).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toContain("Binance 请求过于频繁，请稍后再同步。");
+    expect(mocks.refresh).toHaveBeenCalled();
+  });
+
+  it("keeps the sync failure visible when refreshing persisted state also fails", async () => {
+    const connection = {
+      id: "c1",
+      provider: "binance",
+      account_label: "主账户",
+      account_identifier_mask: "••••1001",
+      account_currency: "USDT",
+      products: ["usdt_perpetual"],
+      read_only_status: "verified",
+      capability_status: "ready",
+      status: "active",
+      public_enabled: false,
+      last_synced_at: null,
+      last_error_code: "",
+    };
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => response({ connections: [connection] }))
+      .mockImplementationOnce(() => response({ error: "binance_rate_limited" }, false))
+      .mockRejectedValueOnce(new Error("private refresh failure"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ExchangeAccountManager actorId="owner" />);
+    fireEvent.click(await screen.findByRole("button", { name: "立即同步" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Binance 请求过于频繁，请稍后再同步。");
+    expect(alert.textContent).not.toContain("private refresh failure");
   });
 });

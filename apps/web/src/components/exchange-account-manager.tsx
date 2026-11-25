@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ArrowsClockwise, CheckCircle, LinkBreak, LockKey, Trash } from "@phosphor-icons/react";
+import { ArrowsClockwise, CheckCircle, LinkBreak, LockKey, Trash, WarningCircle } from "@phosphor-icons/react";
 import { Button, Field, FieldMessage, Input, Label } from "@wavekb/ui";
+import { exchangeErrorMessage } from "@/lib/trading/exchange-errors";
 
 type Provider = "binance" | "okx" | "bybit" | "bitget" | "exness";
 
@@ -65,7 +66,7 @@ function messageFor(code: string) {
     exness_access_point_not_allowed: "Exness 返回了不受信任的 Access Point，请稍后重试或联系 Exness 支持。",
     exness_read_only_scope_required: "只允许绑定 Trading Read-only API Key。",
     exness_account_trading_disabled: "该 Exness 交易账户目前不可用，请检查账户状态。",
-  } as Record<string, string>)[code] ?? "操作没有完成，请检查 API 权限与填写内容后重试。";
+  } as Record<string, string>)[code] ?? exchangeErrorMessage(code);
 }
 
 function credentialPayload(provider: Provider, form: HTMLFormElement): Record<string, string> {
@@ -106,6 +107,20 @@ async function payload(response: Response): Promise<ExchangeApiPayload> {
     : {};
 }
 
+async function fetchConnections(): Promise<Connection[]> {
+  const response = await fetch("/api/exchange/connections", { cache: "no-store" });
+  const body = await payload(response);
+  if (!response.ok) throw new Error(String(body.error || "request_failed"));
+  return Array.isArray(body.connections) ? body.connections as Connection[] : [];
+}
+
+function lastSuccessfulSync(value: string | null): string {
+  if (!value) return "尚未成功同步";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "尚未成功同步";
+  return `最后成功同步：${date.toLocaleString("zh-CN")}`;
+}
+
 export function ExchangeAccountManager({ actorId }: { actorId: string | null }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -124,12 +139,8 @@ export function ExchangeAccountManager({ actorId }: { actorId: string | null }) 
   useEffect(() => {
     if (!actorId) return;
     let active = true;
-    void fetch("/api/exchange/connections", { cache: "no-store" })
-      .then(async (response) => {
-        const body = await payload(response);
-        if (!response.ok) throw new Error(String(body.error || "request_failed"));
-        if (active) setConnections(Array.isArray(body.connections) ? body.connections : []);
-      })
+    void fetchConnections()
+      .then((items) => { if (active) setConnections(items); })
       .catch((cause) => { if (active) setError(messageFor(cause instanceof Error ? cause.message : "request_failed")); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -222,11 +233,18 @@ export function ExchangeAccountManager({ actorId }: { actorId: string | null }) 
       const body = await payload(response);
       if (!response.ok) throw new Error(String(body.error || "request_failed"));
       if (action === "data") setConnections((items) => items.filter((item) => item.id !== connection.id));
-      else if (action === "sync" && body.sync?.status === "published") setConnections((items) => items.map((item) => item.id === connection.id ? { ...item, last_synced_at: new Date().toISOString(), last_error_code: "" } : item));
+      else if (action === "sync") setConnections(await fetchConnections());
       else if (body.connection) setConnections((items) => items.map((item) => item.id === connection.id ? body.connection as Connection : item));
       setNotice(action === "public" ? (nextPublic ? "该账户已加入收益榜。" : "该账户已退出收益榜。") : action === "disconnect" ? "账户连接已断开。" : action === "data" ? "删除申请已提交。" : body.sync?.status === "published" ? "交易记录已同步。" : body.sync?.reason === "manual_throttled" ? "刚刚同步过，请稍后再试。" : "同步任务正在由其他进程处理。");
       router.refresh();
-    } catch (cause) { setError(messageFor(cause instanceof Error ? cause.message : "request_failed")); }
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : "request_failed";
+      if (action === "sync") {
+        try { setConnections(await fetchConnections()); } catch { /* Preserve the original sync failure. */ }
+        router.refresh();
+      }
+      setError(messageFor(code));
+    }
     finally { setPending(false); }
   }
 
@@ -290,21 +308,36 @@ export function ExchangeAccountManager({ actorId }: { actorId: string | null }) 
 
       <section className="grid gap-3" aria-labelledby="connected-title">
         <h3 id="connected-title" className="font-semibold">已连接账户</h3>
-        {!connections.length ? <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">还没有连接交易账户</p> : connections.map((connection) => (
+        {!connections.length ? <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">还没有连接交易账户</p> : connections.map((connection) => {
+          const syncUnhealthy = connection.status !== "disabled"
+            && connection.status !== "deleting"
+            && (connection.status === "error" || Boolean(connection.last_error_code));
+          return (
           <article key={connection.id} data-testid={`exchange-connection-${connection.id}`} className="grid gap-4 rounded-xl border p-5">
             <header className="flex flex-wrap items-start justify-between gap-3">
               <div><h4 className="flex items-center gap-2 font-semibold"><CheckCircle aria-hidden size={18} />{connection.account_label}</h4><p className="mt-1 text-xs text-muted-foreground">{providerLabels[connection.provider]} · {connection.account_identifier_mask} · {connection.account_currency}</p></div>
-              <span className="text-xs text-muted-foreground">{connection.status === "active" ? "连接正常" : connection.status === "disabled" ? "已断开" : "需要检查"}</span>
+              <span className={syncUnhealthy ? "flex items-center gap-1 text-xs font-medium text-warning" : "text-xs text-muted-foreground"}>
+                {syncUnhealthy ? <WarningCircle aria-hidden size={16} /> : null}
+                {connection.status === "disabled" ? "已断开" : syncUnhealthy ? "同步异常" : connection.status === "active" ? "连接正常" : "需要检查"}
+              </span>
             </header>
+            {syncUnhealthy ? <div className="grid gap-1 border-l-2 border-warning pl-3 text-sm leading-6">
+              <p className="font-medium text-warning">{messageFor(connection.last_error_code)}</p>
+              <p className="text-muted-foreground">当前保留上次完整数据</p>
+              {connection.last_synced_at
+                ? <time className="text-xs text-muted-foreground" dateTime={connection.last_synced_at}>{lastSuccessfulSync(connection.last_synced_at)}</time>
+                : <p className="text-xs text-muted-foreground">{lastSuccessfulSync(null)}</p>}
+            </div> : null}
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" disabled={pending || connection.status !== "active"} onClick={() => void connectionAction(connection, "public")}>{connection.public_enabled ? "退出收益榜" : "加入收益榜"}</Button>
-              <Button type="button" variant="ghost" disabled={pending || connection.status !== "active"} onClick={() => void connectionAction(connection, "sync")}><ArrowsClockwise aria-hidden size={16} />立即同步</Button>
+              <Button type="button" variant="secondary" disabled={pending || connection.status !== "active" || syncUnhealthy} onClick={() => void connectionAction(connection, "public")}>{connection.public_enabled ? "退出收益榜" : "加入收益榜"}</Button>
+              <Button type="button" variant="ghost" disabled={pending || (connection.status !== "active" && connection.status !== "error")} onClick={() => void connectionAction(connection, "sync")}><ArrowsClockwise aria-hidden size={16} />立即同步</Button>
               <Button type="button" variant="ghost" disabled={pending} onClick={() => beginReverify(connection)}>更新 API</Button>
               <Button type="button" variant="ghost" disabled={pending || connection.status === "disabled"} onClick={() => void connectionAction(connection, "disconnect")}><LinkBreak aria-hidden size={16} />断开连接</Button>
               <Button type="button" variant="ghost" disabled={pending} onClick={() => void connectionAction(connection, "data")}><Trash aria-hidden size={16} />删除数据</Button>
             </div>
           </article>
-        ))}
+          );
+        })}
       </section>
       {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
       {error ? <FieldMessage role="alert">{error}</FieldMessage> : null}
