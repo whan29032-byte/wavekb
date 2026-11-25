@@ -9,6 +9,11 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const now = Date.parse("2026-11-24T12:00:00.000Z");
 const { privateKey, publicKey } = generateKeyPairSync("ed25519");
 const privatePem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+const privateJwk = privateKey.export({ format: "jwk" });
+const privateHex = Buffer.concat([
+  Buffer.from(privateJwk.d ?? "", "base64url"),
+  Buffer.from(privateJwk.x ?? "", "base64url"),
+]).toString("hex");
 
 function credentials(overrides: Record<string, string> = {}): Record<string, string> {
   return {
@@ -49,7 +54,11 @@ test("signs exact EXN-DATA bytes, discovers official access points, and validate
     throw new Error(`unexpected path ${url.pathname}`);
   };
   const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
-  const validated = await adapter.validateCredentials({ provider: "exness", credentials: credentials(), read_only_ack: true });
+  const validated = await adapter.validateCredentials({
+    provider: "exness",
+    credentials: credentials({ private_key: `\n  ${privateHex}  \n` }),
+    read_only_ack: true,
+  });
   assert.equal(validated.length, 2);
   assert.deepEqual(validated.map((item) => item.external_account_id), ["101", "202"]);
   assert.deepEqual(validated.map((item) => item.account_identifier_mask), ["••••101", "••••202"]);
@@ -65,6 +74,45 @@ test("signs exact EXN-DATA bytes, discovers official access points, and validate
     assert.equal(signed.path, `${call.url.pathname}${call.url.search}`);
     assert.equal(signed.body_hash, "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU");
     assert.equal(verify(null, data, publicKey, Buffer.from(call.headers.get("EXN-SIGN") ?? "", "base64url")), true);
+  }
+});
+
+test("rejects a generated Exness private key whose public half does not match its seed before fetch", async () => {
+  let fetches = 0;
+  const adapter = new ExnessTradingProviderAdapter(async () => {
+    fetches += 1;
+    return json({});
+  }, () => now);
+  const mismatched = `${privateHex.slice(0, 64)}${"0".repeat(64)}`;
+  await assert.rejects(
+    () => adapter.validateCredentials({
+      provider: "exness",
+      credentials: credentials({ private_key: mismatched, account_ids: JSON.stringify(["101"]) }),
+      read_only_ack: true,
+    }),
+    /exness_invalid_private_key/,
+  );
+  assert.equal(fetches, 0);
+});
+
+test("maps official Exness authentication failures to fixed actionable errors", async () => {
+  const cases = [
+    [1000, "exness_invalid_api_key", 401],
+    [1001, "exness_invalid_signature", 401],
+    [1002, "exness_permission_denied", 403],
+  ] as const;
+  for (const [code, expected, status] of cases) {
+    const adapter = new ExnessTradingProviderAdapter(async () => json({ code, error_message: "private upstream detail" }, status), () => now);
+    await assert.rejects(
+      () => adapter.validateCredentials({
+        provider: "exness",
+        credentials: credentials({ account_ids: JSON.stringify(["101"]) }),
+        read_only_ack: true,
+      }),
+      (error: unknown) => error instanceof Error
+        && error.message === expected
+        && !error.message.includes("private upstream detail"),
+    );
   }
 });
 

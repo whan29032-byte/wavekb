@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, sign, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign, type KeyObject } from "node:crypto";
 import type {
   CanonicalCashEvent,
   CanonicalFill,
@@ -81,12 +81,23 @@ function allowedPath(path: string): boolean {
 }
 
 function privateKey(value: string): KeyObject {
+  const input = value.trim();
   try {
-    if (value.includes("BEGIN PRIVATE KEY")) return createPrivateKey(value);
-    if (/^[a-fA-F0-9]{128}$/.test(value)) {
-      const seed = Buffer.from(value.slice(0, 64), "hex");
+    if (input.startsWith("-----BEGIN PRIVATE KEY-----")) {
+      const key = createPrivateKey(input);
+      if (key.asymmetricKeyType !== "ed25519") throw new Error("unexpected_key_type");
+      return key;
+    }
+    if (/^[a-fA-F0-9]{128}$/.test(input)) {
+      const raw = Buffer.from(input, "hex");
+      const seed = raw.subarray(0, 32);
       const prefix = Buffer.from("302e020100300506032b657004220420", "hex");
-      return createPrivateKey({ key: Buffer.concat([prefix, seed]), format: "der", type: "pkcs8" });
+      const key = createPrivateKey({ key: Buffer.concat([prefix, seed]), format: "der", type: "pkcs8" });
+      const publicJwk = createPublicKey(key).export({ format: "jwk" });
+      if (!Buffer.from(publicJwk.x ?? "", "base64url").equals(raw.subarray(32))) {
+        throw new Error("public_half_mismatch");
+      }
+      return key;
     }
   } catch {
     // Converted below to a credential-safe public error.
@@ -116,9 +127,17 @@ function accountIds(value: Readonly<Record<string, string>>): string[] {
 
 function safeError(payload: unknown, status: number) {
   const root = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
-  const code = Number(root.code);
+  const code = Number(root.code ?? root.error_code);
   const rateLimited = status === 429 || code === 1 || code === 3015;
-  const message = rateLimited ? "exness_rate_limited" : code === 1001 ? "exness_invalid_signature" : code === 1002 ? "exness_permission_denied" : "exness_unavailable";
+  const message = rateLimited
+    ? "exness_rate_limited"
+    : code === 1000
+      ? "exness_invalid_api_key"
+      : code === 1001
+        ? "exness_invalid_signature"
+        : code === 1002
+          ? "exness_permission_denied"
+          : "exness_unavailable";
   return Object.assign(new Error(message), { statusCode: rateLimited ? 429 : status >= 500 ? 503 : 400 });
 }
 

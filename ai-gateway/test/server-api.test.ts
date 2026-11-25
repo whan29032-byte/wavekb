@@ -292,6 +292,36 @@ test("trading leaderboard is public while exchange credentials remain owner-scop
   assert.equal((publicConnection.json() as any).connection.public_amounts_consented, true);
 });
 
+test("exchange validation preserves fixed Exness errors without exposing upstream details", async () => {
+  const cases = [
+    ["exness_invalid_api_key", 400],
+    ["exness_invalid_signature", 400],
+    ["exness_permission_denied", 400],
+    ["exness_rate_limited", 429],
+    ["exness_unavailable", 503],
+    ["exness_invalid_private_key", 400],
+    ["exness_credentials_required", 400],
+    ["exness_discovery_not_allowed", 400],
+  ] as const;
+  for (const [code, statusCode] of cases) {
+    const exchangeConnections = {
+      async validate() {
+        throw Object.assign(new Error(code), { statusCode, cause: new Error("private upstream detail") });
+      },
+    } as any;
+    const server = buildServer({ config, api, exchangeConnections });
+    const response = await server.inject({
+      method: "POST",
+      url: "/v1/user/exchange-connections/validate",
+      headers: { authorization: "Bearer user-token" },
+      payload: { provider: "exness", credentials: {}, read_only_ack: true },
+    });
+    assert.equal(response.statusCode, statusCode);
+    assert.deepEqual(response.json(), { error: code });
+    assert.equal(response.body.includes("private upstream detail"), false);
+  }
+});
+
 test("only admins can inspect or disable exchange connections", async () => {
   const server = buildServer({ config, api });
   assert.equal((await server.inject({ url: "/v1/admin/trading-connections", headers: { authorization: "Bearer user-token" } })).statusCode, 403);
