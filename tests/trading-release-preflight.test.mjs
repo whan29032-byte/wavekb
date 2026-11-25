@@ -30,8 +30,8 @@ const hosts = {
 
 function release(overrides = {}) {
   return {
-    expectedSchemaVersion: "202611240002",
-    schemaVersion: "202611240002",
+    expectedSchemaVersion: "202611250001",
+    schemaVersion: "202611250001",
     releaseSha: sha,
     rollbackTarget: rollback,
     sameCodeRollback: false,
@@ -47,7 +47,7 @@ test("accepts a current reversible release and emits only safe operational field
   const result = validateTradingRelease(release({ secrets: { api_key: "must-not-leak" } }));
   assert.deepEqual(result.enabledProviders, ["binance", "okx", "bybit", "bitget", "exness"]);
   assert.equal(result.workbenchEnabled, true);
-  assert.equal(result.schemaVersion, "202611240002");
+  assert.equal(result.schemaVersion, "202611250001");
   assert.equal(result.rollbackTarget, rollback);
   assert.equal(result.sameCodeRollback, false);
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak|api_key|secret/i);

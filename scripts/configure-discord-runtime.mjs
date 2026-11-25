@@ -83,7 +83,6 @@ async function atomicReplace(target, content) {
     await writeFile(temporary, content, { flag: "wx", mode: 0o600 });
     await chmod(temporary, 0o600);
     await rename(temporary, target);
-    await chmod(target, 0o600);
   } finally {
     await rm(temporary, { force: true });
   }
