@@ -13,13 +13,14 @@ import { POST } from "./route";
 const token = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const tokenHash = "dc4bf80c77473d130fa0de86ba4018fe98bb214005e6a5891d12ba91446f9e81";
 
-function request(rawToken = token, origin = "https://wavekb.com") {
+function request(rawToken = token, origin = "https://wavekb.com", accept?: string) {
   return new Request("https://wavekb.com/api/integrations/discord/redeem", {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
       origin,
       "sec-fetch-site": origin === "https://wavekb.com" ? "same-origin" : "cross-site",
+      ...(accept ? { accept } : {}),
     },
     body: new URLSearchParams({ token: rawToken }),
   });
@@ -37,6 +38,18 @@ beforeEach(() => {
 });
 
 describe("POST /api/integrations/discord/redeem", () => {
+  it("returns a relative JSON destination to same-origin fetch clients", async () => {
+    const response = await POST(request(token, "https://wavekb.com", "application/json"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      redirectTo: "/account/discord-link?status=linked",
+    });
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
   it("rejects a cross-origin form before accessing the authenticated client", async () => {
     const response = await POST(request(token, "https://attacker.example"));
     expect(response.status).toBe(403);

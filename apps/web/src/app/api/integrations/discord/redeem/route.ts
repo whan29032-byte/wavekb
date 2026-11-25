@@ -22,6 +22,13 @@ function json(body: object, status: number) {
   });
 }
 
+function resultResponse(request: Request, pathname: string) {
+  if (request.headers.get("accept")?.includes("application/json")) {
+    return json({ redirectTo: pathname }, 200);
+  }
+  return redirect(request, pathname);
+}
+
 function errorStatus(message: string) {
   const mappings = [
     ["discord_link_token_expired", "expired"],
@@ -43,20 +50,20 @@ export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
   const token = form?.get("token");
   if (!isDiscordLinkToken(token)) {
-    return redirect(request, "/account/discord-link?status=invalid");
+    return resultResponse(request, "/account/discord-link?status=invalid");
   }
 
   const client = await createClient();
   const auth = await client.auth.getUser();
   if (auth.error || !auth.data.user) {
-    return redirect(request, `/login?next=${encodeURIComponent("/account/discord-link")}`);
+    return resultResponse(request, `/login?next=${encodeURIComponent("/account/discord-link")}`);
   }
 
   const result = await client.rpc("redeem_discord_link_token", {
     p_token_hash: hashDiscordLinkToken(token),
   });
   if (result.error) {
-    return redirect(request, `/account/discord-link?status=${errorStatus(result.error.message)}`);
+    return resultResponse(request, `/account/discord-link?status=${errorStatus(result.error.message)}`);
   }
-  return redirect(request, "/account/discord-link?status=linked");
+  return resultResponse(request, "/account/discord-link?status=linked");
 }

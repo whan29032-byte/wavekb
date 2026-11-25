@@ -1,11 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, type FormEvent } from "react";
 import { AuthCard } from "@/components/auth-card";
 
 const storageKey = "wavekb.discord-link-token.v1";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+const redemptionDestinations = new Set([
+  "/account/discord-link?status=linked",
+  "/account/discord-link?status=invalid",
+  "/account/discord-link?status=expired",
+  "/account/discord-link?status=used",
+  "/account/discord-link?status=revoked",
+  "/account/discord-link?status=conflict",
+  "/account/discord-link?status=restricted",
+  "/account/discord-link?status=error",
+  "/login?next=%2Faccount%2Fdiscord-link",
+]);
 
 function validToken(value: string | null): value is string {
   return typeof value === "string" && tokenPattern.test(value);
@@ -54,7 +66,10 @@ export function DiscordLinkTokenCleaner() {
 }
 
 export function DiscordLinkClient({ publicUid }: { publicUid: number | null }) {
+  const router = useRouter();
   const [token, setToken] = useState<string | null | undefined>(undefined);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     const hadFragment = window.location.hash.length > 0;
@@ -85,6 +100,39 @@ export function DiscordLinkClient({ publicUid }: { publicUid: number | null }) {
     const update = window.setTimeout(() => setToken(resolvedToken), 0);
     return () => window.clearTimeout(update);
   }, []);
+
+  async function redeem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const response = await fetch("/api/integrations/discord/redeem", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+        },
+        body: new URLSearchParams({ token }),
+        credentials: "same-origin",
+        redirect: "error",
+      });
+      if (!response.ok || response.redirected) throw new Error("discord_link_redeem_failed");
+      const payload: unknown = await response.json();
+      const redirectTo = typeof payload === "object" && payload !== null && "redirectTo" in payload
+        ? (payload as { redirectTo?: unknown }).redirectTo
+        : null;
+      if (typeof redirectTo !== "string" || !redemptionDestinations.has(redirectTo)) {
+        throw new Error("discord_link_redirect_invalid");
+      }
+      const destination = new URL(redirectTo, window.location.origin);
+      if (destination.origin !== window.location.origin) throw new Error("discord_link_redirect_invalid");
+      router.replace(`${destination.pathname}${destination.search}`);
+    } catch {
+      setSubmitError("绑定请求没有完成，请稍后重新点击确认。");
+      setSubmitting(false);
+    }
+  }
 
   if (token === undefined) {
     return (
@@ -127,12 +175,13 @@ export function DiscordLinkClient({ publicUid }: { publicUid: number | null }) {
         <p className="text-sm leading-6 text-muted-foreground">
           机器人不会读取邮箱、密码或私密内容；原有 Discord 经验和阵营等级也不会被网站覆盖。
         </p>
-        <form action="/api/integrations/discord/redeem" method="post">
+        <form onSubmit={redeem}>
           <input name="token" type="hidden" value={token} />
-          <button className="w-full rounded-lg bg-primary px-4 py-3 font-semibold text-primary-foreground hover:bg-primary-hover" type="submit">
+          <button className="w-full rounded-lg bg-primary px-4 py-3 font-semibold text-primary-foreground hover:bg-primary-hover disabled:cursor-wait disabled:opacity-70" disabled={submitting} type="submit">
             确认绑定 Discord
           </button>
         </form>
+        {submitError ? <p className="text-sm text-destructive" role="alert">{submitError}</p> : null}
       </div>
     </AuthCard>
   );
