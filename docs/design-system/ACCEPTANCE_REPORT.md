@@ -118,3 +118,43 @@
 ## 下一步唯一优先项
 
 **按 Backend-first 部署 `202610190001_community_engagement.sql`，确认 `wavekb_schema_version()` 返回 `202610190001` 后再发布 Next。** 之后用专用管理员/会员账号补积分商城与后台的真实登录态视觉验收。
+
+---
+
+## 2026-11-25 Binance 同步诊断验收
+
+- 范围：交易工作台账户卡片、手动同步失败恢复、Binance 安全错误码投影。
+- 不涉及：数据库迁移、凭证格式、同步账务算法、收益榜计算规则或运行时依赖。
+
+### 自动化证据
+
+| 检查 | 结果 | 命令/证据 |
+|---|---|---|
+| 全工作区类型检查 | PASS | `pnpm typecheck` |
+| 全工作区 lint | PASS | `pnpm lint` |
+| 生产构建 | PASS | `pnpm build`；255 个静态页面生成完成，独立服务器与静态资源准备完成 |
+| Gateway 路由回归 | 10 PASS | `pnpm --dir ai-gateway exec node --test test/server-api.test.ts` |
+| Gateway 新增错误码用例 | PASS | 代表性限流、交易权限、历史数据格式错误保留固定码，原始 cause 不进入响应 |
+| Web 定向回归 | 24 PASS | `pnpm --dir apps/web exec vitest run src/lib/trading/exchange-errors.test.ts src/components/exchange-account-manager.test.tsx` |
+| Web 全量单测 | 1665 PASS / 1 FAIL | 唯一失败为 Windows CRLF 下既有 service-worker offline shell 字节比较；与本次组件和错误翻译无关 |
+| Gateway 全量单测 | 524 PASS / 59 FAIL | 53 项 Windows `unsafe_env_file`、6 项 `E_PLATFORM_UNSUPPORTED`；定向 Gateway 路由套件通过 |
+| 根测试矩阵 | BLOCKED（Windows） | 84 项既有平台/部署脚本失败，另有 `braces` 补丁测试期望哈希与当前已跟踪 lockfile 哈希不一致；本次未修改 lockfile 或部署测试 |
+
+### 账户卡片状态
+
+| 场景 | 结果 |
+|---|---|
+| `active` 且存在 `last_error_code` | PASS；显示“同步异常”，不再显示“连接正常” |
+| `error` 连接 | PASS；“立即同步”仍可用，“加入收益榜”不可用 |
+| 有最后成功时间 | PASS；显示本地化“最后成功同步”时间 |
+| 从未成功同步 | PASS（代码/单测）；显示“尚未成功同步” |
+| 同步失败 | PASS；重新读取持久化连接状态并显示安全、可操作的 Binance 说明 |
+| 同步失败且状态刷新也失败 | PASS；保留原始同步错误，不显示刷新过程中的私有错误 |
+| 未知错误 | PASS；回退为通用说明，不回显未知输入或上游正文 |
+
+### 视觉与可访问性
+
+- 使用既有 `warning` 语义 Token、按钮、字段消息、边框、间距和圆角，没有新增颜色或依赖。
+- 异常状态同时使用警告图标和“同步异常”文字，不依赖颜色单独表达。
+- 错误说明、旧数据保留说明和最后成功时间始终可见，无需悬停；窄屏允许自然换行。
+- 真实登录态生产浏览器检查：BLOCKED。当前本地浏览器会话未登录，未使用或查看用户 API 凭证；部署完成后需由账户所有者在真实失败连接上复核一次。
