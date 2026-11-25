@@ -116,6 +116,12 @@ function persistentFixture(t, prior = false) {
         assert.ok(environmentFiles.every((file) => fs.existsSync(file)));
         if (prior) assert.ok(fs.existsSync(path.join(f.options.backupRoot, `${sha}-${options.runId}-${options.runAttempt}`, "research.sqlite")), "backup precedes warmup");
         if (fault === "sync") throw new Error("warmup failed");
+        if (fault === "network") {
+          const db = new ResearchStore(file);
+          try { db.failure("2026-09-05T00:02:00Z", "network_error", null); }
+          finally { db.close(); }
+          throw new Error("upstream unavailable");
+        }
         if (fault === "locked" || fault === "deferred") return { status: fault, lastSuccess: "2026-09-05T00:00:01Z" };
       }
       const db = new ResearchStore(file, { readOnly: command === "status" });
@@ -170,6 +176,29 @@ for (const phase of ["sync", "locked", "deferred", "enable:timer", "start:timer"
     assert.ok(f.events.indexOf("stop:service") < f.events.indexOf("backup"));
   });
 }
+
+test("a transient upstream outage reuses only an existing validated catalogue snapshot", { skip: process.platform === "win32" }, async (t) => {
+  const f = persistentFixture(t, true); f.fault("network");
+  const result = await api.activate(f.options);
+  assert.equal(fs.realpathSync(path.join(f.options.applicationRoot, "current")), result.releaseDir);
+  const state = JSON.parse(fs.readFileSync(path.join(f.options.backupRoot, result.releaseId, "rollback.json")));
+  assert.equal(state.tline.preheatComplete, true);
+  assert.equal(state.tline.warmupDegraded, true);
+  assert.equal(state.tline.lastSuccess, "2026-09-05T00:00:01.000Z");
+  const db = new ResearchStore(f.database, { readOnly: true });
+  assert.ok(db.detail("old")); assert.equal(db.status().errorCode, "network_error"); db.close();
+});
+
+test("warmup fallback rejects missing, unverified and credential-failure snapshots", () => {
+  const lastSuccess = "2026-09-05T00:00:01.000Z";
+  const previous = { lastAttempt: "2026-09-05T00:00:00.000Z" };
+  const transient = { lastSuccess, lastAttempt: "2026-09-05T00:02:00.000Z", errorCode: "network_error" };
+  assert.deepEqual(api.acceptResearchWarmup(null, transient, true, previous), { lastSuccess, warmupDegraded: true });
+  assert.throws(() => api.acceptResearchWarmup(null, { ...transient, errorCode: "unauthorized" }, true, previous), /warmup/);
+  assert.throws(() => api.acceptResearchWarmup(null, { ...transient, lastSuccess: null }, true, previous), /warmup/);
+  assert.throws(() => api.acceptResearchWarmup(null, transient, false, previous), /warmup/);
+  assert.throws(() => api.acceptResearchWarmup(null, { ...transient, lastAttempt: previous.lastAttempt }, true, previous), /warmup/);
+});
 
 test("a transient post-start timer inspection failure does not roll back a healthy web release", async (t) => {
   const f = persistentFixture(t); f.fault("check:timer");

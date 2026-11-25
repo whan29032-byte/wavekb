@@ -42,6 +42,18 @@ async function requireHealth(options, version) {
 
 function syncFiles(options) { return { service: options.syncUnitFile, timer: options.timerUnitFile }; }
 function validSuccess(value) { return typeof value === "string" && Number.isFinite(Date.parse(value)); }
+const transientWarmupErrors = new Set(["network_error", "rate_limited", "deadline_exceeded"]);
+export function acceptResearchWarmup(result, status, backupComplete, previousStatus = null) {
+  const synced = result?.status === "synced" && validSuccess(result.lastSuccess);
+  const currentAttempt = validSuccess(status?.lastAttempt)
+    && status.lastAttempt !== previousStatus?.lastAttempt;
+  const existingSnapshot = backupComplete === true && validSuccess(status?.lastSuccess)
+    && transientWarmupErrors.has(status?.errorCode)
+    && (currentAttempt || result?.status === "deferred");
+  requireValue(synced || existingSnapshot, "Research warmup did not complete a sync");
+  if (synced) requireValue(status?.lastSuccess === result.lastSuccess, "Research warmup watermark is missing");
+  return { lastSuccess: status.lastSuccess, warmupDegraded: existingSnapshot };
+}
 async function captureSync(options, backup) {
   const units = {};
   for (const [name, file] of Object.entries(syncFiles(options))) {
@@ -118,12 +130,17 @@ async function prepareSync(options, p, state, environmentFiles) {
     fs.unlinkSync(staging);
     state.tline.backupComplete = true; saveMetadata(p.metadata, state);
   }
-  const result = await options.worker({ ...request, command: "sync" });
-  requireValue(result?.status === "synced" && validSuccess(result.lastSuccess), "Research warmup did not complete a sync");
+  const previousStatus = state.tline.backupComplete
+    ? await options.worker({ ...request, command: "status" })
+    : null;
+  let result = null;
+  try { result = await options.worker({ ...request, command: "sync" }); }
+  catch { /* Status below decides whether a verified existing snapshot is safe. */ }
   const status = await options.worker({ ...request, command: "status" });
-  requireValue(validSuccess(status?.lastSuccess) && status.lastSuccess === result.lastSuccess, "Research warmup watermark is missing");
+  const accepted = acceptResearchWarmup(result, status, state.tline.backupComplete, previousStatus);
+  if (accepted.warmupDegraded) state.tline.warmupDegraded = true;
   state.tline.preheatComplete = true;
-  state.tline.lastSuccess = status.lastSuccess;
+  state.tline.lastSuccess = accepted.lastSuccess;
   saveMetadata(p.metadata, state);
 }
 function installSync(options, p, state, environmentFiles) {
