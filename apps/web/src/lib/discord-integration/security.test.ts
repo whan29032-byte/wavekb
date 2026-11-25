@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   authorizeDiscordBot,
   createDiscordLinkToken,
+  hashDiscordLinkToken,
+  isDiscordLinkToken,
   isDiscordSnowflake,
   requireDiscordIntegrationConfig,
 } from "./security";
@@ -28,6 +30,16 @@ describe("Discord integration security", () => {
     expect(token.rawToken).toBe("BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc");
     expect(token.tokenHash).toMatch(/^[0-9a-f]{64}$/);
     expect(token.tokenHash).not.toContain(token.rawToken);
+  });
+
+  it("accepts only a 32-byte base64url link token and hashes it deterministically", () => {
+    const rawToken = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+    expect(isDiscordLinkToken(rawToken)).toBe(true);
+    expect(isDiscordLinkToken(`${rawToken}=`)).toBe(false);
+    expect(isDiscordLinkToken("short-token")).toBe(false);
+    expect(hashDiscordLinkToken(rawToken)).toBe(
+      "dc4bf80c77473d130fa0de86ba4018fe98bb214005e6a5891d12ba91446f9e81",
+    );
   });
 
   it("requires all server-only integration settings and normalizes the public origin", () => {
