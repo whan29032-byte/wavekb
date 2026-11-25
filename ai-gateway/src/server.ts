@@ -19,6 +19,7 @@ import {
   type TradingWorkbenchService,
 } from "./trading/workbench-service.ts";
 import type { TradingSyncService } from "./trading/sync-service.ts";
+import { isPublicTradingProviderError } from "./trading/provider-error-codes.ts";
 import { createTradingSyncService } from "./trading-worker.ts";
 
 export type ServerDeps = {
@@ -246,7 +247,11 @@ function authFailure(error: unknown): RouteResult {
   ]);
   return authResult(
     Number(candidate?.statusCode || 503),
-    { error: allowed.has(code) ? code : "service_unavailable" },
+    {
+      error: allowed.has(code) || isPublicTradingProviderError(code)
+        ? code
+        : "service_unavailable",
+    },
   );
 }
 
@@ -335,7 +340,9 @@ function routeFailure(error: unknown): RouteResult {
   return {
     statusCode: Number(candidate?.statusCode || 500),
     body: {
-      error: allowed.has(code) ? code : "request_failed",
+      error: allowed.has(code) || isPublicTradingProviderError(code)
+        ? code
+        : "request_failed",
     },
   };
 }

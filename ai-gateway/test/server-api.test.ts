@@ -322,6 +322,38 @@ test("exchange validation preserves fixed Exness errors without exposing upstrea
   }
 });
 
+test("manual sync preserves fixed Binance errors without exposing raw causes", async () => {
+  const cases = [
+    ["binance_rate_limited", 429],
+    ["binance_trading_permission_not_allowed", 400],
+    ["binance_invalid_history_payload", 400],
+  ] as const;
+  for (const [code, statusCode] of cases) {
+    const tradingSync = {
+      async syncConnection() {
+        throw Object.assign(new Error(code), {
+          statusCode,
+          cause: new Error("private upstream detail"),
+        });
+      },
+    } as any;
+    const server = buildServer({
+      config,
+      api,
+      exchangeConnections: {} as any,
+      tradingSync,
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: "/v1/user/exchange-connections/11111111-1111-4111-8111-111111111111/sync",
+      headers: { authorization: "Bearer user-token" },
+    });
+    assert.equal(response.statusCode, statusCode);
+    assert.deepEqual(response.json(), { error: code });
+    assert.equal(response.body.includes("private upstream detail"), false);
+  }
+});
+
 test("only admins can inspect or disable exchange connections", async () => {
   const server = buildServer({ config, api });
   assert.equal((await server.inject({ url: "/v1/admin/trading-connections", headers: { authorization: "Bearer user-token" } })).statusCode, 403);
