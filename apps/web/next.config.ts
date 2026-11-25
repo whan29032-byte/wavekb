@@ -24,6 +24,14 @@ const privatePagePaths = [
   "/community/post/:slug/edit",
 ];
 
+const sensitivePageHeaders = [{
+  source: "/account/discord-link",
+  headers: [
+    { key: "Cache-Control", value: "private, no-store" },
+    { key: "Referrer-Policy", value: "no-referrer" },
+  ],
+}];
+
 const nextConfig: NextConfig = {
   output: "standalone",
   transpilePackages: ["@wavekb/domain", "@wavekb/knowledge", "@wavekb/ui"],
@@ -45,7 +53,7 @@ const nextConfig: NextConfig = {
       source,
       headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
     })),
-  ),
+  ).concat(sensitivePageHeaders),
 };
 
 export default nextConfig;

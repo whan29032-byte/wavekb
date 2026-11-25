@@ -10,6 +10,7 @@ function redirect(request: Request, pathname: string) {
     headers: {
       location: new URL(pathname, request.url).toString(),
       "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
     },
   });
 }
@@ -17,7 +18,7 @@ function redirect(request: Request, pathname: string) {
 function json(body: object, status: number) {
   return Response.json(body, {
     status,
-    headers: { "cache-control": "no-store" },
+    headers: { "cache-control": "no-store", "referrer-policy": "no-referrer" },
   });
 }
 
@@ -48,8 +49,7 @@ export async function POST(request: Request) {
   const client = await createClient();
   const auth = await client.auth.getUser();
   if (auth.error || !auth.data.user) {
-    const next = `/account/discord-link?token=${encodeURIComponent(token)}`;
-    return redirect(request, `/login?next=${encodeURIComponent(next)}`);
+    return redirect(request, `/login?next=${encodeURIComponent("/account/discord-link")}`);
   }
 
   const result = await client.rpc("redeem_discord_link_token", {

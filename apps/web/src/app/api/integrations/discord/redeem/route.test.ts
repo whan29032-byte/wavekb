@@ -56,13 +56,15 @@ describe("POST /api/integrations/discord/redeem", () => {
     expect(boundary.rpc).not.toHaveBeenCalled();
   });
 
-  it("redirects an expired login session back through login with the binding token", async () => {
+  it("redirects an expired login session without putting the binding token in a URL", async () => {
     boundary.getUser.mockResolvedValue({ data: { user: null }, error: null });
     const response = await POST(request());
     expect(response.status).toBe(303);
     const location = response.headers.get("location") ?? "";
     expect(location).toContain("/login?next=");
-    expect(decodeURIComponent(location)).toContain(`/account/discord-link?token=${token}`);
+    expect(decodeURIComponent(location)).toContain("/account/discord-link");
+    expect(location).not.toContain(token);
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(boundary.rpc).not.toHaveBeenCalled();
   });
 
@@ -75,6 +77,7 @@ describe("POST /api/integrations/discord/redeem", () => {
     expect(response.headers.get("location")).toBe("https://wavekb.com/account/discord-link?status=linked");
     expect(response.headers.get("location")).not.toContain(token);
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
   });
 
   it("rejects a malformed token without calling the database RPC", async () => {

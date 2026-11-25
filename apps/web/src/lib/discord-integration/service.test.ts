@@ -44,7 +44,7 @@ describe("createDiscordLink", () => {
     );
 
     expect(result).toEqual({
-      linkUrl: "https://wavekb.com/account/discord-link?token=raw-link-token",
+      linkUrl: "https://wavekb.com/account/discord-link#token=raw-link-token",
       expiresAt: "2026-11-25T08:10:00.000Z",
     });
     expect(database.calls).toEqual([

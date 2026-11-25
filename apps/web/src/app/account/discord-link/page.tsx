@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AuthCard } from "@/components/auth-card";
-import { requireActiveMember } from "@/lib/auth/dal";
-import { isDiscordLinkToken } from "@/lib/discord-integration/security";
+import { getCurrentUser, requireActiveMember } from "@/lib/auth/dal";
+import { DiscordLinkClient, DiscordLinkTokenCleaner } from "./discord-link-client";
 
-export const metadata: Metadata = { title: "绑定 Discord" };
+export const metadata: Metadata = {
+  title: "绑定 Discord",
+  referrer: "no-referrer",
+};
 
 type SearchValue = string | string[] | undefined;
 
@@ -48,56 +51,25 @@ const statusCopy: Record<string, { title: string; description: string }> = {
 };
 
 export default async function DiscordLinkPage({ searchParams }: {
-  searchParams: Promise<{ token?: SearchValue; status?: SearchValue }>;
+  searchParams: Promise<{ status?: SearchValue }>;
 }) {
   const query = await searchParams;
-  const token = first(query.token);
   const status = first(query.status);
-  const returnPath = status
-    ? `/account/discord-link?status=${encodeURIComponent(status)}`
-    : token
-      ? `/account/discord-link?token=${encodeURIComponent(token)}`
-      : "/account/discord-link";
-  const actor = await requireActiveMember(returnPath);
-
   const state = status ? statusCopy[status] : null;
   if (state) {
     return (
-      <AuthCard title={state.title} description={state.description}>
-        <Link className="rounded-lg bg-primary px-4 py-3 text-center font-semibold text-primary-foreground hover:bg-primary-hover" href="/member/profile">
-          返回个人中心
-        </Link>
-      </AuthCard>
+      <>
+        <DiscordLinkTokenCleaner />
+        <AuthCard title={state.title} description={state.description}>
+          <Link className="rounded-lg bg-primary px-4 py-3 text-center font-semibold text-primary-foreground hover:bg-primary-hover" href="/member/profile">
+            返回个人中心
+          </Link>
+        </AuthCard>
+      </>
     );
   }
 
-  if (!isDiscordLinkToken(token)) {
-    return (
-      <AuthCard title={statusCopy.invalid.title} description={statusCopy.invalid.description}>
-        <p className="rounded-lg bg-muted px-4 py-3 text-sm text-muted-foreground">没有任何账号数据被修改。</p>
-      </AuthCard>
-    );
-  }
-
-  return (
-    <AuthCard
-      title="绑定 WaveKB 与 Discord"
-      description="确认后，悠悠的宝宝可以读取你的公开资料、称号、铭牌和积分，用于 Discord 内展示与普通身份组同步。"
-    >
-      <div className="grid gap-4">
-        <p className="rounded-lg bg-muted px-4 py-3 text-sm">
-          当前登录账号：<strong>UID {actor.publicUid}</strong>
-        </p>
-        <p className="text-sm leading-6 text-muted-foreground">
-          机器人不会读取邮箱、密码或私密内容；原有 Discord 经验和阵营等级也不会被网站覆盖。
-        </p>
-        <form action="/api/integrations/discord/redeem" method="post">
-          <input name="token" type="hidden" value={token} />
-          <button className="w-full rounded-lg bg-primary px-4 py-3 font-semibold text-primary-foreground hover:bg-primary-hover" type="submit">
-            确认绑定 Discord
-          </button>
-        </form>
-      </div>
-    </AuthCard>
-  );
+  const user = await getCurrentUser();
+  const actor = user ? await requireActiveMember("/account/discord-link") : null;
+  return <DiscordLinkClient publicUid={actor?.publicUid ?? null} />;
 }

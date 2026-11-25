@@ -34,7 +34,7 @@ describe("POST /api/integrations/discord/link", () => {
   it("returns a no-store link response for an authorized bot", async () => {
     mocks.authorized = true;
     mocks.createLink.mockResolvedValue({
-      linkUrl: "https://wavekb.com/account/discord-link?token=raw",
+      linkUrl: "https://wavekb.com/account/discord-link#token=raw",
       expiresAt: "2026-11-25T08:10:00.000Z",
     });
     const response = await POST(new Request("https://wavekb.com/api/integrations/discord/link", {
@@ -44,7 +44,7 @@ describe("POST /api/integrations/discord/link", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
-      linkUrl: "https://wavekb.com/account/discord-link?token=raw",
+      linkUrl: "https://wavekb.com/account/discord-link#token=raw",
       expiresAt: "2026-11-25T08:10:00.000Z",
     });
     expect(mocks.createLink).toHaveBeenCalledWith({

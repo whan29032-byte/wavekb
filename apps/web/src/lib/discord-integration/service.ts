@@ -152,7 +152,7 @@ export async function createDiscordLink(
     dependencies.config.publicOrigin,
     input.requestOrigin,
   ));
-  link.searchParams.set("token", token.rawToken);
+  link.hash = new URLSearchParams({ token: token.rawToken }).toString();
   return { linkUrl: link.toString(), expiresAt: issued.expiresAt };
 }
 

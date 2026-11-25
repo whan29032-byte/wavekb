@@ -48,6 +48,7 @@ it("allows public crawling while keeping private areas out of the index", async 
     expect(config).toContain(`"${path}"`);
     expect(robots?.rules[0]?.disallow ?? []).not.toContain(path);
   }
+  expect(config).toMatch(/source:\s*"\/account\/discord-link"[\s\S]*?Referrer-Policy[\s\S]*?no-referrer/);
 });
 
 it("lists every generated knowledge route and only canonical public URLs", async () => {
