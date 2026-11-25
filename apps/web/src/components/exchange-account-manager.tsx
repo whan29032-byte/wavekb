@@ -52,6 +52,19 @@ function messageFor(code: string) {
     trading_provider_disabled: "该交易平台目前未开放连接。",
     exchange_gateway_unavailable: "交易账户服务暂时不可用，请稍后重试。",
     authentication_required: "请先登录。",
+    exness_invalid_api_key: "Exness API Key 无效或已过期，请重新生成后再试。",
+    exness_invalid_signature: "Exness 签名验证失败，请确认 API Key 与私钥来自同一组凭据。",
+    exness_permission_denied: "这组 API Key 没有访问该交易账户的只读权限。",
+    exness_rate_limited: "Exness 请求过于频繁，请稍后再试。",
+    exness_unavailable: "无法连接 Exness Gateway，请检查 Gateway Host 后重试。",
+    exness_invalid_private_key: "Exness 私钥格式或内容不正确，请粘贴完整的 128 位私钥或 PKCS#8 PEM。",
+    exness_credentials_required: "请完整填写 Exness API Key、私钥和 Gateway Host。",
+    exness_account_ids_required: "请填写 Exness 交易账户 ID。",
+    exness_invalid_account_ids: "Exness 交易账户 ID 只能填写数字，不要包含 #。",
+    exness_discovery_not_allowed: "请填写 Exness API 管理页 DNS Widget 中显示的 HTTPS Gateway Host。",
+    exness_access_point_not_allowed: "Exness 返回了不受信任的 Access Point，请稍后重试或联系 Exness 支持。",
+    exness_read_only_scope_required: "只允许绑定 Trading Read-only API Key。",
+    exness_account_trading_disabled: "该 Exness 交易账户目前不可用，请检查账户状态。",
   } as Record<string, string>)[code] ?? "操作没有完成，请检查 API 权限与填写内容后重试。";
 }
 
@@ -69,9 +82,9 @@ function credentialPayload(provider: Provider, form: HTMLFormElement): Record<st
       .split(/[\n,]+/).map((item) => item.trim()).filter(Boolean).join(",");
     return {
       apiKey: base.apiKey,
-      privateKey: String(values.get("privateKey") || ""),
+      privateKey: String(values.get("privateKey") || "").trim(),
       accountIds,
-      discoveryBaseUrl: "https://gateway.exness.com",
+      discoveryBaseUrl: String(values.get("discoveryBaseUrl") || "").trim(),
       trading_scope: "read_only",
     };
   }
@@ -246,7 +259,16 @@ export function ExchangeAccountManager({ actorId }: { actorId: string | null }) 
           {provider !== "exness" ? <Field><Label htmlFor="exchange-secret-key">Secret Key</Label><Input id="exchange-secret-key" name="secretKey" type="password" autoComplete="new-password" required /></Field> : null}
           {(provider === "okx" || provider === "bitget") ? <Field><Label htmlFor="exchange-passphrase">API Passphrase</Label><Input id="exchange-passphrase" name="passphrase" type="password" autoComplete="new-password" required /></Field> : null}
           {provider === "exness" ? <>
-            <Field className="md:col-span-2"><Label htmlFor="exchange-private-key">私钥（PEM）</Label><textarea id="exchange-private-key" name="privateKey" required rows={5} className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" /></Field>
+            <Field className="md:col-span-2">
+              <Label htmlFor="exchange-discovery-base-url">Gateway Host（DNS Widget）</Label>
+              <Input id="exchange-discovery-base-url" name="discoveryBaseUrl" type="url" inputMode="url" autoComplete="off" placeholder="https://gateway.example" required />
+              <FieldMessage>复制 Exness API 管理页 DNS Widget 当前显示的 HTTPS Gateway Host，不要使用示例地址。</FieldMessage>
+            </Field>
+            <Field className="md:col-span-2">
+              <Label htmlFor="exchange-private-key">私钥（128 位十六进制或 PKCS#8 PEM）</Label>
+              <textarea id="exchange-private-key" name="privateKey" required rows={5} className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs" />
+              <FieldMessage>粘贴创建这组 API Key 时保存的私钥；不要填写 API Key 标识或公钥。</FieldMessage>
+            </Field>
             <Field className="md:col-span-2"><Label htmlFor="exchange-account-ids">交易账户 ID（每行一个）</Label><textarea id="exchange-account-ids" name="accountIds" required rows={3} className="w-full rounded-md border bg-background px-3 py-2 text-sm" /></Field>
           </> : null}
         </div>

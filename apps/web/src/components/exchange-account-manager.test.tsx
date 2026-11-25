@@ -24,9 +24,11 @@ describe("ExchangeAccountManager", () => {
     expect(screen.getByLabelText("API Passphrase")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("交易平台"), { target: { value: "bybit" } });
     expect(screen.queryByLabelText("API Passphrase")).toBeNull();
+    expect(screen.queryByLabelText(/Gateway Host/)).toBeNull();
     fireEvent.change(screen.getByLabelText("交易平台"), { target: { value: "exness" } });
-    expect(screen.getByLabelText("私钥（PEM）")).toBeTruthy();
+    expect(screen.getByLabelText(/私钥/)).toBeTruthy();
     expect(screen.getByLabelText("交易账户 ID（每行一个）")).toBeTruthy();
+    expect(screen.getByLabelText(/Gateway Host/)).toBeTruthy();
     expect(document.body.textContent).not.toContain("saved-secret-value");
   });
 
@@ -46,8 +48,9 @@ describe("ExchangeAccountManager", () => {
     await screen.findByText("还没有连接交易账户");
     fireEvent.change(screen.getByLabelText("交易平台"), { target: { value: "exness" } });
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "exness-key" } });
-    fireEvent.change(screen.getByLabelText("私钥（PEM）"), { target: { value: "private-key" } });
+    fireEvent.change(screen.getByLabelText(/私钥/), { target: { value: "private-key" } });
     fireEvent.change(screen.getByLabelText("交易账户 ID（每行一个）"), { target: { value: "exness-2001\nexness-2002" } });
+    fireEvent.change(screen.getByLabelText(/Gateway Host/), { target: { value: "https://gateway-region.exness.com" } });
     fireEvent.click(screen.getByLabelText(/确认已关闭交易和提现权限/));
     fireEvent.click(screen.getByRole("button", { name: "验证只读权限" }));
     await screen.findByText("选择要连接的账户");
@@ -55,10 +58,54 @@ describe("ExchangeAccountManager", () => {
     fireEvent.click(screen.getByLabelText(/副账户/));
     fireEvent.click(screen.getByRole("button", { name: "连接 2 个账户" }));
     await screen.findByText("已连接 2 个账户");
+    const validateBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(validateBody.credentials.discoveryBaseUrl).toBe("https://gateway-region.exness.com");
     const connectBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
     expect(connectBody.selected_account_refs).toEqual(["ref-a", "ref-b"]);
     expect(connectBody.credentials.trading_scope).toBe("read_only");
     expect(screen.queryByDisplayValue("private-key")).toBeNull();
+  });
+
+  it("does not add an Exness Gateway Host to other provider credentials", async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => response({ connections: [] }))
+      .mockImplementationOnce(() => response({ validation: { provider: "binance", accounts: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ExchangeAccountManager actorId="owner" />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(document.querySelector("#exchange-api-key")!, { target: { value: "binance-key" } });
+    fireEvent.change(document.querySelector("#exchange-secret-key")!, { target: { value: "binance-secret" } });
+    fireEvent.click(document.querySelector('input[type="checkbox"]')!);
+    fireEvent.submit(document.querySelector("form")!);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(body.credentials.discoveryBaseUrl).toBeUndefined();
+  });
+
+  it.each([
+    ["exness_invalid_api_key", "Exness API Key 无效或已过期，请重新生成后再试。"],
+    ["exness_invalid_signature", "Exness 签名验证失败，请确认 API Key 与私钥来自同一组凭据。"],
+    ["exness_permission_denied", "这组 API Key 没有访问该交易账户的只读权限。"],
+    ["exness_rate_limited", "Exness 请求过于频繁，请稍后再试。"],
+    ["exness_unavailable", "无法连接 Exness Gateway，请检查 Gateway Host 后重试。"],
+    ["exness_invalid_private_key", "Exness 私钥格式或内容不正确，请粘贴完整的 128 位私钥或 PKCS#8 PEM。"],
+    ["exness_invalid_account_ids", "Exness 交易账户 ID 只能填写数字，不要包含 #。"],
+    ["exness_discovery_not_allowed", "请填写 Exness API 管理页 DNS Widget 中显示的 HTTPS Gateway Host。"],
+  ])("shows an actionable message for %s", async (code, expected) => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => response({ connections: [] }))
+      .mockImplementationOnce(() => response({ error: code }, false));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ExchangeAccountManager actorId="owner" />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(document.querySelector("#exchange-provider")!, { target: { value: "exness" } });
+    fireEvent.change(document.querySelector("#exchange-api-key")!, { target: { value: "exness-key" } });
+    fireEvent.change(document.querySelector("#exchange-private-key")!, { target: { value: "private-key" } });
+    fireEvent.change(document.querySelector("#exchange-account-ids")!, { target: { value: "18000046959" } });
+    fireEvent.change(screen.getByLabelText(/Gateway Host/), { target: { value: "https://gateway-region.exness.com" } });
+    fireEvent.click(document.querySelector('input[type="checkbox"]')!);
+    fireEvent.submit(document.querySelector("form")!);
+    expect(await screen.findByText(expected)).toBeTruthy();
   });
 
   it("changes ranking visibility and disconnects one account without affecting another", async () => {
@@ -94,8 +141,9 @@ describe("ExchangeAccountManager", () => {
     render(<ExchangeAccountManager actorId="owner" />);
     fireEvent.click(await screen.findByRole("button", { name: "更新 API" }));
     fireEvent.change(screen.getByLabelText("API Key"), { target: { value: "new-key" } });
-    fireEvent.change(screen.getByLabelText("私钥（PEM）"), { target: { value: "new-private" } });
+    fireEvent.change(screen.getByLabelText(/私钥/), { target: { value: "new-private" } });
     fireEvent.change(screen.getByLabelText("交易账户 ID（每行一个）"), { target: { value: "2001" } });
+    fireEvent.change(screen.getByLabelText(/Gateway Host/), { target: { value: "https://gateway-region.exness.com" } });
     fireEvent.click(screen.getByLabelText(/确认已关闭交易和提现权限/));
     fireEvent.click(screen.getByRole("button", { name: "验证只读权限" }));
     fireEvent.click(await screen.findByRole("button", { name: "更新这组凭证" }));
