@@ -184,7 +184,7 @@ test("a transient upstream outage reuses only an existing validated catalogue sn
   const state = JSON.parse(fs.readFileSync(path.join(f.options.backupRoot, result.releaseId, "rollback.json")));
   assert.equal(state.tline.preheatComplete, true);
   assert.equal(state.tline.warmupDegraded, true);
-  assert.equal(state.tline.lastSuccess, "2026-09-05T00:00:01.000Z");
+  assert.equal(Date.parse(state.tline.lastSuccess), Date.parse("2026-09-05T00:00:01Z"));
   const db = new ResearchStore(f.database, { readOnly: true });
   assert.ok(db.detail("old")); assert.equal(db.status().errorCode, "network_error"); db.close();
 });
