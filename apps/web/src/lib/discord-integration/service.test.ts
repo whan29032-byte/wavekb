@@ -1,14 +1,15 @@
-import { describe, expect, it } from "vitest";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { describe, expect, it, vi } from "vitest";
 import {
   DiscordIntegrationError,
   createDiscordLink,
+  createSupabaseDiscordStore,
   getDiscordMember,
   type DiscordIntegrationStore,
 } from "./service";
 
-const now = new Date("2026-11-25T08:00:00.000Z");
 const config = {
-  apiSecret: "secret",
+  apiSecret: "bot-secret-value-that-is-at-least-32-bytes",
   guildId: "1545731927733047306",
   serviceRoleKey: "service-role",
   publicOrigin: "https://wavekb.com",
@@ -17,8 +18,10 @@ const config = {
 function store(overrides: Partial<DiscordIntegrationStore> = {}) {
   const calls: Array<{ operation: string; value: unknown }> = [];
   const value: DiscordIntegrationStore = {
-    async revokePendingLinks(input) { calls.push({ operation: "revoke", value: input }); },
-    async insertLink(input) { calls.push({ operation: "insert", value: input }); },
+    async issueLink(input) {
+      calls.push({ operation: "issue", value: input });
+      return { expiresAt: "2026-11-25T08:10:00.000Z" };
+    },
     async findMemberByDiscordId(discordUserId) {
       calls.push({ operation: "find", value: discordUserId });
       return null;
@@ -29,14 +32,13 @@ function store(overrides: Partial<DiscordIntegrationStore> = {}) {
 }
 
 describe("createDiscordLink", () => {
-  it("revokes older links and stores only the new token hash for ten minutes", async () => {
+  it("uses one atomic store operation and returns its database-computed expiry", async () => {
     const database = store();
     const result = await createDiscordLink(
       { discordUserId: "111111111111111111", guildId: config.guildId, requestOrigin: "https://ignored.test" },
       {
         config,
         store: database.value,
-        now: () => now,
         createToken: () => ({ rawToken: "raw-link-token", tokenHash: "a".repeat(64) }),
       },
     );
@@ -47,35 +49,50 @@ describe("createDiscordLink", () => {
     });
     expect(database.calls).toEqual([
       {
-        operation: "revoke",
-        value: {
-          discordUserId: "111111111111111111",
-          guildId: config.guildId,
-          revokedAt: "2026-11-25T08:00:00.000Z",
-        },
-      },
-      {
-        operation: "insert",
+        operation: "issue",
         value: {
           tokenHash: "a".repeat(64),
           discordUserId: "111111111111111111",
           guildId: config.guildId,
-          expiresAt: "2026-11-25T08:10:00.000Z",
         },
       },
     ]);
     expect(JSON.stringify(database.calls)).not.toContain("raw-link-token");
   });
 
+  it("maps issuance to one restricted database RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: "2026-11-25T08:10:00.000Z",
+      error: null,
+    });
+    const client = {
+      rpc,
+      from: vi.fn(() => { throw new Error("table writes must not be used for issuance"); }),
+    } as unknown as SupabaseClient;
+    const database = createSupabaseDiscordStore(client);
+
+    await expect(database.issueLink({
+      tokenHash: "b".repeat(64),
+      discordUserId: "111111111111111111",
+      guildId: config.guildId,
+    })).resolves.toEqual({ expiresAt: "2026-11-25T08:10:00.000Z" });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("issue_discord_link_token", {
+      p_token_hash: "b".repeat(64),
+      p_discord_user_id: "111111111111111111",
+      p_guild_id: config.guildId,
+    });
+  });
+
   it("rejects invalid identities and a server outside the configured guild", async () => {
     const database = store();
     await expect(createDiscordLink(
       { discordUserId: "bad", guildId: config.guildId, requestOrigin: "https://wavekb.com" },
-      { config, store: database.value, now: () => now },
+      { config, store: database.value },
     )).rejects.toMatchObject({ code: "invalid_discord_user", status: 400 });
     await expect(createDiscordLink(
       { discordUserId: "111111111111111111", guildId: "999999999999999999", requestOrigin: "https://wavekb.com" },
-      { config, store: database.value, now: () => now },
+      { config, store: database.value },
     )).rejects.toMatchObject({ code: "guild_not_allowed", status: 403 });
     expect(database.calls).toEqual([]);
   });
@@ -101,7 +118,6 @@ describe("getDiscordMember", () => {
     const result = await getDiscordMember("111111111111111111", {
       config,
       store: database.value,
-      now: () => now,
     });
     expect(result).toEqual({
       uid: 583104,
@@ -120,7 +136,6 @@ describe("getDiscordMember", () => {
     await expect(getDiscordMember("111111111111111111", {
       config,
       store: missing.value,
-      now: () => now,
     })).rejects.toEqual(new DiscordIntegrationError("not_linked", 404));
 
     const banned = store({
@@ -141,7 +156,6 @@ describe("getDiscordMember", () => {
     await expect(getDiscordMember("111111111111111111", {
       config,
       store: banned.value,
-      now: () => now,
     })).rejects.toEqual(new DiscordIntegrationError("account_restricted", 403));
   });
 
@@ -164,7 +178,6 @@ describe("getDiscordMember", () => {
     const result = await getDiscordMember("111111111111111111", {
       config,
       store: database.value,
-      now: () => now,
     });
     expect(result.points).toEqual({ balance: 0, lifetimeEarned: 0 });
   });

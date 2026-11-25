@@ -35,6 +35,64 @@ alter table public.discord_link_tokens enable row level security;
 revoke all on table public.discord_link_tokens from public, anon, authenticated;
 grant select, insert, update, delete on table public.discord_link_tokens to service_role;
 
+create or replace function public.issue_discord_link_token(
+  p_token_hash text,
+  p_discord_user_id text,
+  p_guild_id text
+)
+returns timestamptz
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  issued_at timestamptz;
+  token_expires_at timestamptz;
+begin
+  if p_token_hash is null or p_token_hash !~ '^[0-9a-f]{64}$' then
+    raise exception 'discord_link_token_invalid';
+  end if;
+  if p_discord_user_id is null or p_discord_user_id !~ '^[0-9]{17,20}$' then
+    raise exception 'discord_user_invalid';
+  end if;
+  if p_guild_id is null or p_guild_id !~ '^[0-9]{17,20}$' then
+    raise exception 'discord_guild_invalid';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_guild_id || ':' || p_discord_user_id, 0)
+  );
+  issued_at := pg_catalog.clock_timestamp();
+
+  update public.discord_link_tokens
+  set revoked_at = issued_at
+  where discord_user_id = p_discord_user_id
+    and guild_id = p_guild_id
+    and revoked_at is null
+    and redeemed_at is null;
+
+  token_expires_at := issued_at + interval '10 minutes';
+  insert into public.discord_link_tokens (
+    token_hash,
+    discord_user_id,
+    guild_id,
+    expires_at
+  ) values (
+    p_token_hash,
+    p_discord_user_id,
+    p_guild_id,
+    token_expires_at
+  );
+
+  return token_expires_at;
+end;
+$$;
+
+revoke all on function public.issue_discord_link_token(text, text, text)
+from public, anon, authenticated;
+grant execute on function public.issue_discord_link_token(text, text, text)
+to service_role;
+
 create or replace function public.redeem_discord_link_token(p_token_hash text)
 returns jsonb
 language plpgsql

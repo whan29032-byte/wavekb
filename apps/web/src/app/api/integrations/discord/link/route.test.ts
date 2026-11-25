@@ -64,4 +64,23 @@ describe("POST /api/integrations/discord/link", () => {
     expect(await response.json()).toEqual({ error: "invalid_request" });
     expect(mocks.createLink).not.toHaveBeenCalled();
   });
+
+  it("returns a stable no-store error when atomic issuance is unavailable", async () => {
+    mocks.authorized = true;
+    mocks.createLink.mockRejectedValue({
+      code: "integration_unavailable",
+      status: 503,
+      detail: "database detail must not escape",
+    });
+    const response = await POST(new Request("https://wavekb.com/api/integrations/discord/link", {
+      method: "POST",
+      body: JSON.stringify({
+        discordUserId: "111111111111111111",
+        guildId: "1545731927733047306",
+      }),
+    }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ error: "integration_unavailable" });
+  });
 });

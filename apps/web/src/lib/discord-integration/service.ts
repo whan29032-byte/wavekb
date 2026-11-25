@@ -8,8 +8,6 @@ import {
   type DiscordIntegrationConfig,
 } from "./security";
 
-const LINK_LIFETIME_MS = 10 * 60 * 1000;
-
 export class DiscordIntegrationError extends Error {
   constructor(public readonly code: string, public readonly status: number) {
     super(code);
@@ -30,24 +28,17 @@ export type DiscordMemberRecord = {
 };
 
 export type DiscordIntegrationStore = {
-  revokePendingLinks(input: {
-    discordUserId: string;
-    guildId: string;
-    revokedAt: string;
-  }): Promise<void>;
-  insertLink(input: {
+  issueLink(input: {
     tokenHash: string;
     discordUserId: string;
     guildId: string;
-    expiresAt: string;
-  }): Promise<void>;
+  }): Promise<{ expiresAt: string }>;
   findMemberByDiscordId(discordUserId: string): Promise<DiscordMemberRecord | null>;
 };
 
 type Dependencies = {
   config: DiscordIntegrationConfig;
   store: DiscordIntegrationStore;
-  now: () => Date;
   createToken: () => { rawToken: string; tokenHash: string };
 };
 
@@ -57,25 +48,17 @@ function databaseError(error: { message?: string } | null) {
 
 export function createSupabaseDiscordStore(client: SupabaseClient): DiscordIntegrationStore {
   return {
-    async revokePendingLinks({ discordUserId, guildId, revokedAt }) {
-      const result = await client
-        .from("discord_link_tokens")
-        .update({ revoked_at: revokedAt })
-        .eq("discord_user_id", discordUserId)
-        .eq("guild_id", guildId)
-        .is("revoked_at", null)
-        .is("redeemed_at", null);
-      databaseError(result.error);
-    },
-
-    async insertLink({ tokenHash, discordUserId, guildId, expiresAt }) {
-      const result = await client.from("discord_link_tokens").insert({
-        token_hash: tokenHash,
-        discord_user_id: discordUserId,
-        guild_id: guildId,
-        expires_at: expiresAt,
+    async issueLink({ tokenHash, discordUserId, guildId }) {
+      const result = await client.rpc("issue_discord_link_token", {
+        p_token_hash: tokenHash,
+        p_discord_user_id: discordUserId,
+        p_guild_id: guildId,
       });
       databaseError(result.error);
+      if (typeof result.data !== "string" || !Number.isFinite(Date.parse(result.data))) {
+        throw new DiscordIntegrationError("integration_unavailable", 503);
+      }
+      return { expiresAt: new Date(result.data).toISOString() };
     },
 
     async findMemberByDiscordId(discordUserId) {
@@ -113,7 +96,6 @@ function defaultDependencies(): Dependencies {
   return {
     config,
     store: createSupabaseDiscordStore(createServiceClient(config.serviceRoleKey)),
-    now: () => new Date(),
     createToken: createDiscordLinkToken,
   };
 }
@@ -127,7 +109,6 @@ function resolvedDependencies(overrides?: Partial<Dependencies>): Dependencies {
   return {
     config: overrides.config,
     store: overrides.store,
-    now: overrides.now ?? (() => new Date()),
     createToken: overrides.createToken ?? createDiscordLinkToken,
   };
 }
@@ -161,26 +142,18 @@ export async function createDiscordLink(
     throw new DiscordIntegrationError("guild_not_allowed", 403);
   }
 
-  const issuedAt = dependencies.now();
-  const expiresAt = new Date(issuedAt.getTime() + LINK_LIFETIME_MS);
   const token = dependencies.createToken();
-  await dependencies.store.revokePendingLinks({
-    discordUserId: input.discordUserId,
-    guildId: input.guildId,
-    revokedAt: issuedAt.toISOString(),
-  });
-  await dependencies.store.insertLink({
+  const issued = await dependencies.store.issueLink({
     tokenHash: token.tokenHash,
     discordUserId: input.discordUserId,
     guildId: input.guildId,
-    expiresAt: expiresAt.toISOString(),
   });
   const link = new URL("/account/discord-link", integrationOrigin(
     dependencies.config.publicOrigin,
     input.requestOrigin,
   ));
   link.searchParams.set("token", token.rawToken);
-  return { linkUrl: link.toString(), expiresAt: expiresAt.toISOString() };
+  return { linkUrl: link.toString(), expiresAt: issued.expiresAt };
 }
 
 export async function getDiscordMember(

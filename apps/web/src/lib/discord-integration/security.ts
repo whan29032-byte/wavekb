@@ -36,6 +36,9 @@ export function requireDiscordIntegrationConfig(
   const guildId = environment.DISCORD_BOT_GUILD_ID?.trim() ?? "";
   const serviceRoleKey = environment.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
   if (!apiSecret) throw new Error("DISCORD_BOT_API_SECRET is required");
+  if (Buffer.byteLength(apiSecret, "utf8") < 32) {
+    throw new Error("DISCORD_BOT_API_SECRET must contain at least 32 UTF-8 bytes");
+  }
   if (!isDiscordSnowflake(guildId)) throw new Error("DISCORD_BOT_GUILD_ID must be a Discord snowflake");
   if (!serviceRoleKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required");
   return {

@@ -57,6 +57,18 @@ async function insertToken(database, {
   );
 }
 
+async function issueToken(database, {
+  hash,
+  discordUserId,
+  guildId = "1545731927733047306",
+}) {
+  const result = await database.query(
+    `select public.issue_discord_link_token($1, $2, $3) as expires_at`,
+    [hash, discordUserId, guildId],
+  );
+  return result.rows[0].expires_at;
+}
+
 test("migration enforces private hashed single-use Discord link storage", async () => {
   const database = await createDatabase();
   try {
@@ -179,6 +191,101 @@ test("redeem function rejects anonymous, expired, occupied and banned bindings",
       database.query("select public.redeem_discord_link_token($1)", ["d".repeat(64)]),
       /authentication_required/,
     );
+  } finally {
+    await database.close();
+  }
+});
+
+test("issue function is executable only by service_role and computes expiry in the database", async () => {
+  const database = await createDatabase();
+  try {
+    for (const role of ["anon", "authenticated"]) {
+      await database.exec(`set role ${role}`);
+      await assert.rejects(
+        issueToken(database, {
+          hash: role === "anon" ? "e".repeat(64) : "f".repeat(64),
+          discordUserId: role === "anon" ? "555555555555555555" : "666666666666666666",
+        }),
+        /permission denied/i,
+      );
+      await database.exec("reset role");
+    }
+
+    const before = Date.now();
+    await database.exec("set role service_role");
+    const expiresAt = await issueToken(database, {
+      hash: "7".repeat(64),
+      discordUserId: "777777777777777777",
+    });
+    await database.exec("reset role");
+    const lifetime = new Date(expiresAt).getTime() - before;
+    assert.ok(lifetime >= 9 * 60 * 1000 + 50 * 1000, `lifetime was ${lifetime}ms`);
+    assert.ok(lifetime <= 10 * 60 * 1000 + 10 * 1000, `lifetime was ${lifetime}ms`);
+  } finally {
+    await database.close();
+  }
+});
+
+test("concurrent issuance leaves only the latest token valid for one Discord identity", async () => {
+  const database = await createDatabase();
+  const hashes = ["8".repeat(64), "9".repeat(64)];
+  const discordUserId = "888888888888888888";
+  const completionOrder = [];
+  try {
+    await Promise.all(hashes.map(async (hash) => {
+      await issueToken(database, { hash, discordUserId });
+      completionOrder.push(hash);
+    }));
+
+    const issued = await database.query(`
+      select token_hash, revoked_at is null as active
+      from public.discord_link_tokens
+      where discord_user_id = $1
+      order by token_hash
+    `, [discordUserId]);
+    assert.equal(issued.rows.length, 2);
+    assert.equal(issued.rows.filter((row) => row.active).length, 1);
+    const activeHash = issued.rows.find((row) => row.active).token_hash;
+    const revokedHash = issued.rows.find((row) => !row.active).token_hash;
+    assert.equal(activeHash, completionOrder.at(-1));
+
+    await asUser(database, userOne);
+    await assert.rejects(
+      database.query("select public.redeem_discord_link_token($1)", [revokedHash]),
+      /discord_link_token_revoked/,
+    );
+    const redeemed = await database.query(
+      "select public.redeem_discord_link_token($1) as result",
+      [activeHash],
+    );
+    assert.equal(redeemed.rows[0].result.discord_user_id, discordUserId);
+  } finally {
+    await database.close();
+  }
+});
+
+test("failed insertion rolls back revocation of the previously active token", async () => {
+  const database = await createDatabase();
+  const originalHash = "a1".repeat(32);
+  const duplicateHash = "b2".repeat(32);
+  const discordUserId = "999999999999999999";
+  try {
+    await issueToken(database, { hash: originalHash, discordUserId });
+    await issueToken(database, {
+      hash: duplicateHash,
+      discordUserId: "101010101010101010",
+    });
+
+    await assert.rejects(
+      issueToken(database, { hash: duplicateHash, discordUserId }),
+      /duplicate key|unique constraint/i,
+    );
+    const original = await database.query(`
+      select revoked_at, redeemed_at
+      from public.discord_link_tokens
+      where token_hash = $1
+    `, [originalHash]);
+    assert.deepEqual(original.rows[0], { revoked_at: null, redeemed_at: null });
   } finally {
     await database.close();
   }

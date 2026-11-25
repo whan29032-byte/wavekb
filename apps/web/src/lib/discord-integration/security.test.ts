@@ -43,27 +43,44 @@ describe("Discord integration security", () => {
   });
 
   it("requires all server-only integration settings and normalizes the public origin", () => {
+    const apiSecret = "bot-secret-value-that-is-at-least-32-bytes";
     const config = requireDiscordIntegrationConfig({
-      DISCORD_BOT_API_SECRET: " bot-secret ",
+      DISCORD_BOT_API_SECRET: ` ${apiSecret} `,
       DISCORD_BOT_GUILD_ID: "1545731927733047306",
       SUPABASE_SERVICE_ROLE_KEY: " service-role ",
       DISCORD_LINK_PUBLIC_ORIGIN: "https://wavekb.com/",
     });
     expect(config).toEqual({
-      apiSecret: "bot-secret",
+      apiSecret,
       guildId: "1545731927733047306",
       serviceRoleKey: "service-role",
       publicOrigin: "https://wavekb.com",
     });
     expect(() => requireDiscordIntegrationConfig({
-      DISCORD_BOT_API_SECRET: "secret",
+      DISCORD_BOT_API_SECRET: apiSecret,
       DISCORD_BOT_GUILD_ID: "not-a-snowflake",
       SUPABASE_SERVICE_ROLE_KEY: "service-role",
     })).toThrow(/DISCORD_BOT_GUILD_ID/);
     expect(() => requireDiscordIntegrationConfig({
-      DISCORD_BOT_API_SECRET: "secret",
+      DISCORD_BOT_API_SECRET: apiSecret,
       DISCORD_BOT_GUILD_ID: "1545731927733047306",
       SUPABASE_SERVICE_ROLE_KEY: "",
     })).toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+  });
+
+  it("rejects short ASCII and multibyte bot secrets by UTF-8 bytes without echoing them", () => {
+    for (const secret of ["short-secret", "密".repeat(10)]) {
+      try {
+        requireDiscordIntegrationConfig({
+          DISCORD_BOT_API_SECRET: secret,
+          DISCORD_BOT_GUILD_ID: "1545731927733047306",
+          SUPABASE_SERVICE_ROLE_KEY: "service-role",
+        });
+        throw new Error("expected short secret rejection");
+      } catch (error) {
+        expect(String(error)).toMatch(/DISCORD_BOT_API_SECRET|32/);
+        expect(String(error)).not.toContain(secret);
+      }
+    }
   });
 });

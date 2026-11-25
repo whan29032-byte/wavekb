@@ -25,12 +25,12 @@ DISCORD_BOT_GUILD_ID=1545731927733047306
 DISCORD_LINK_PUBLIC_ORIGIN=https://wavekb.com
 ```
 
-- `SUPABASE_SERVICE_ROLE_KEY` 与 `DISCORD_BOT_API_SECRET` 都是服务器密钥，不得提交到 Git、写入日志或发送到客户端。
+- `SUPABASE_SERVICE_ROLE_KEY` 与 `DISCORD_BOT_API_SECRET` 都是服务器密钥，不得提交到 Git、写入日志或发送到客户端。共享密钥必须至少包含 32 个 UTF-8 字节，可用 `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"` 生成，并与机器人端的 `WEBSITE_BOT_API_SECRET` 保持一致。
 - `DISCORD_BOT_GUILD_ID` 限制只有指定 Discord 服务器可以签发绑定链接。
 - `DISCORD_LINK_PUBLIC_ORIGIN` 是机器人返回给用户的公开网站来源；本地开发可以改成对应的 HTTP 来源。
-- 发布网站代码之前，必须先应用 `supabase/migrations/202611250001_discord_account_link.sql`。数据库迁移缺失时，机器人接口会安全失败，不会降级为不受保护的绑定。
+- 发布网站代码之前，必须先应用 `supabase/migrations/202611250001_discord_account_link.sql`。迁移中的 service-role-only RPC 会按 Discord 用户与服务器加事务锁，在同一事务内撤销旧令牌、签发数据库计算的 10 分钟令牌；迁移缺失时接口会安全失败，不会降级为分步写入。
 
-机器人只会收到公开 UID、昵称、头像、称号、铭牌和积分汇总；接口不会返回邮箱、密码、会话或 Supabase 用户 UUID。绑定令牌 10 分钟有效、只能使用一次，数据库只保存令牌的 SHA-256 哈希。
+机器人只会收到公开 UID、昵称、头像、称号、铭牌和积分汇总；接口不会返回邮箱、密码、会话或 Supabase 用户 UUID。绑定令牌 10 分钟有效、只能使用一次，数据库只保存令牌的 SHA-256 哈希。轮换共享密钥时必须同步更新网站 `DISCORD_BOT_API_SECRET` 与机器人 `WEBSITE_BOT_API_SECRET`，然后重启两项服务；疑似泄露时立即轮换，不要记录旧值或新值。
 
 ## 检查
 
