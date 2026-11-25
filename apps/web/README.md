@@ -12,7 +12,25 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-打开 `http://localhost:3000`。Supabase 使用现有项目的 URL 和 publishable key，禁止填写 service-role key。
+打开 `http://localhost:3000`。普通浏览器会话使用现有项目的 URL 和 publishable key；service-role key 只能放在服务器运行环境中，绝不能加 `NEXT_PUBLIC_` 前缀或传给浏览器。
+
+## Discord 账号绑定
+
+“悠悠的宝宝”通过一次性链接把 Discord 用户绑定到当前登录的 WaveKB 账号。网站运行环境需要以下服务器变量：
+
+```env
+SUPABASE_SERVICE_ROLE_KEY=
+DISCORD_BOT_API_SECRET=
+DISCORD_BOT_GUILD_ID=1545731927733047306
+DISCORD_LINK_PUBLIC_ORIGIN=https://wavekb.com
+```
+
+- `SUPABASE_SERVICE_ROLE_KEY` 与 `DISCORD_BOT_API_SECRET` 都是服务器密钥，不得提交到 Git、写入日志或发送到客户端。
+- `DISCORD_BOT_GUILD_ID` 限制只有指定 Discord 服务器可以签发绑定链接。
+- `DISCORD_LINK_PUBLIC_ORIGIN` 是机器人返回给用户的公开网站来源；本地开发可以改成对应的 HTTP 来源。
+- 发布网站代码之前，必须先应用 `supabase/migrations/202611250001_discord_account_link.sql`。数据库迁移缺失时，机器人接口会安全失败，不会降级为不受保护的绑定。
+
+机器人只会收到公开 UID、昵称、头像、称号、铭牌和积分汇总；接口不会返回邮箱、密码、会话或 Supabase 用户 UUID。绑定令牌 10 分钟有效、只能使用一次，数据库只保存令牌的 SHA-256 哈希。
 
 ## 检查
 
