@@ -1,0 +1,134 @@
+name: Configure WaveKB Discord production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type CONFIGURE_WAVEKB_DISCORD after this exact website revision is deployed"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-next-production
+  cancel-in-progress: false
+
+jobs:
+  configure-discord:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Require main and explicit configuration confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRMATION" = CONFIGURE_WAVEKB_DISCORD
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+
+      - name: Check out the reviewed commit
+        uses: actions/checkout@v4
+
+      - name: Require the current main revision
+        run: |
+          set -Eeuo pipefail
+          current_main=$(git ls-remote origin refs/heads/main | cut -f1)
+          test "$current_main" = "$GITHUB_SHA"
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+
+      - name: Verify configuration and rollback contracts
+        run: |
+          set -Eeuo pipefail
+          pnpm install --frozen-lockfile
+          node --test tests/discord-runtime-configuration.test.mjs
+
+      - name: Validate bounded secret without output
+        env:
+          DISCORD_BOT_API_SECRET: ${{ secrets.DISCORD_BOT_API_SECRET }}
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module -e '
+            const secret = process.env.DISCORD_BOT_API_SECRET ?? "";
+            if (Buffer.byteLength(secret, "utf8") < 32 || !/^[A-Za-z0-9_-]{43,128}$/.test(secret)) process.exit(1);
+          '
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          test -n "$DEPLOY_SSH_KEY"
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Upload reviewed configuration transaction
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          remote_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            scripts/configure-discord-runtime.mjs \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-discord-config-${remote_id}.mjs"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            scripts/configure-discord-production.sh \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-discord-transaction-${remote_id}.sh"
+
+      - name: Apply stdin-only secret, restart, verify, or rollback
+        env:
+          DISCORD_BOT_API_SECRET: ${{ secrets.DISCORD_BOT_API_SECRET }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          remote_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_command="bash ./wavekb-discord-transaction-${remote_id}.sh ./wavekb-discord-config-${remote_id}.mjs /var/backups/wavekb-next-production/discord-config-${remote_id}.env ${GITHUB_SHA}"
+          node --input-type=module -e '
+            const secret = process.env.DISCORD_BOT_API_SECRET ?? "";
+            if (Buffer.byteLength(secret, "utf8") < 32 || !/^[A-Za-z0-9_-]{43,128}$/.test(secret)) process.exit(1);
+            process.stdout.write(JSON.stringify({ apiSecret: secret }));
+          ' | ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "$remote_command"
+
+      - name: Clean remote and runner transaction material
+        if: always()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          remote_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && -f "$HOME/.ssh/deploy_key" ]]; then
+            ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "rm -f -- ./wavekb-discord-config-${remote_id}.mjs ./wavekb-discord-transaction-${remote_id}.sh" || true
+          fi
+          rm -f "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts"

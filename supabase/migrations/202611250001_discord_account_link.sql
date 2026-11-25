@@ -181,3 +181,18 @@ revoke all on function public.redeem_discord_link_token(text)
 from public, anon;
 grant execute on function public.redeem_discord_link_token(text)
 to authenticated;
+
+create or replace function public.wavekb_schema_version()
+returns text
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select '202611250001'::text;
+$$;
+
+revoke all on function public.wavekb_schema_version()
+from public, anon, authenticated, service_role;
+grant execute on function public.wavekb_schema_version()
+to anon, authenticated, service_role;

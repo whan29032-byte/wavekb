@@ -90,6 +90,9 @@ test("migration enforces private hashed single-use Discord link storage", async 
     `);
     assert.equal(table.rows[0].relrowsecurity, true);
 
+    const marker = await database.query("select public.wavekb_schema_version() as version");
+    assert.equal(marker.rows[0].version, "202611250001");
+
     await assert.rejects(
       database.query(`insert into public.discord_link_tokens
         (token_hash, discord_user_id, guild_id, expires_at)
