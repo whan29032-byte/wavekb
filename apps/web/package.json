@@ -28,6 +28,7 @@
     "@wavekb/knowledge": "workspace:*",
     "@wavekb/ui": "workspace:*",
     "next": "16.4.6",
+    "openalgo-charts": "2.7.5",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
