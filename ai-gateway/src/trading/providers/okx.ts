@@ -1,7 +1,8 @@
 import { createHmac } from "node:crypto";
-import { unavailableCandleBatch, unavailableCandleCapabilities } from "./contracts.ts";
+import { assertCanonicalCandleBatch } from "./contracts.ts";
 import type {
   CandleRequest,
+  CanonicalCandle,
   CanonicalCandleBatch,
   CanonicalCashEvent,
   CanonicalFill,
@@ -23,6 +24,17 @@ const ALLOWED_PATHS = new Set([
   "/api/v5/trade/fills-history",
   "/api/v5/account/bills-archive",
 ]);
+const ALLOWED_CANDLE_PATHS = new Set(["/api/v5/market/history-candles", "/api/v5/market/history-mark-price-candles"]);
+const OKX_CANDLE_MAXIMUM_PAGE_SIZE = 100;
+const OKX_CANDLE_MAXIMUM_RANGE_SECONDS = 90 * 24 * 60 * 60;
+const OKX_CANDLE_BARS: Readonly<Partial<Record<CandleRequest["timeframe"], string>>> = {
+  "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1H", "2h": "2H", "4h": "4H",
+  "6h": "6Hutc", "12h": "12Hutc", "1d": "1Dutc", "1w": "1Wutc", "1M": "1Mutc",
+};
+const timeframeMilliseconds: Readonly<Partial<Record<CandleRequest["timeframe"], number>>> = {
+  "1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000,
+  "2h": 7_200_000, "4h": 14_400_000, "6h": 21_600_000, "12h": 43_200_000, "1d": 86_400_000, "1w": 604_800_000,
+};
 
 function record(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw Object.assign(new Error(`okx_invalid_${field}`), { statusCode: 502 });
@@ -64,8 +76,57 @@ function capabilities(positionMode: "net_mode" | "long_short_mode" = "long_short
     has_position_id: false, has_realized_pnl: true, has_fee_asset: true, has_funding_or_swap: true,
     has_external_cash_flow: true, has_usd_valuation: true, account_currency: "USDT", settlement_assets: ["USDT"],
     valuation_pairs: ["USDT/USD"],
-    candles: unavailableCandleCapabilities(),
+    candles: {
+      availability: "available", timeframes: Object.keys(OKX_CANDLE_BARS) as CandleRequest["timeframe"][],
+      maximum_page_size: OKX_CANDLE_MAXIMUM_PAGE_SIZE, maximum_range_seconds: OKX_CANDLE_MAXIMUM_RANGE_SECONDS,
+      price_modes: ["trade", "mark"], unavailable_reason: null,
+    },
   };
+}
+
+function candleFailure(code: string, statusCode: number): Error {
+  return Object.assign(new Error(code), { statusCode });
+}
+
+function validCandleRequestIdentity(request: CandleRequest): boolean {
+  const exactUtc = (value: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+    && new Date(value).toISOString() === value;
+  return /^[A-Z0-9][A-Z0-9-]{0,99}$/.test(request.native_symbol)
+    && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(request.normalized_symbol)
+    && exactUtc(request.from)
+    && exactUtc(request.to);
+}
+
+function candleEnd(openTime: number, timeframe: CandleRequest["timeframe"]): number {
+  if (timeframe !== "1M") {
+    const milliseconds = timeframeMilliseconds[timeframe];
+    if (!milliseconds) throw candleFailure("okx_invalid_candle_request", 400);
+    return openTime + milliseconds;
+  }
+  const date = new Date(openTime);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+}
+
+function finiteTimestamp(value: unknown, field: string): number {
+  const result = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(result) || result < 0) throw candleFailure(`okx_invalid_${field}`, 502);
+  return result;
+}
+
+function canonicalUnsignedDecimal(value: unknown, field: string, allowZero: boolean): string {
+  if (typeof value !== "string" && typeof value !== "number") throw candleFailure(`okx_invalid_${field}`, 502);
+  const raw = String(value);
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) throw candleFailure(`okx_invalid_${field}`, 502);
+  const [whole = "0", fraction = ""] = raw.split(".");
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  const result = normalizedFraction ? `${whole}.${normalizedFraction}` : whole;
+  if (!allowZero && result === "0") throw candleFailure(`okx_invalid_${field}`, 502);
+  return result;
+}
+
+function candleRow(value: unknown): unknown[] {
+  if (!Array.isArray(value) || value.length < 6) throw candleFailure("okx_invalid_candles", 502);
+  return value;
 }
 
 type OkxResponse = { code: string; data: Array<Record<string, unknown>> };
@@ -130,6 +191,25 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
     if (!response.ok || code !== "0") throw safeError(code, response.status);
     if (!Array.isArray(root.data)) throw Object.assign(new Error("okx_invalid_response"), { statusCode: 502 });
     return { code, data: root.data.map((item) => record(item, "response_item")) };
+  }
+
+  private async publicCandles(path: string, parameters: Record<string, string>): Promise<unknown[]> {
+    if (!ALLOWED_CANDLE_PATHS.has(path)) throw candleFailure("okx_path_not_allowed", 500);
+    const query = new URLSearchParams(parameters);
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.baseUrl}${path}?${query}`, {
+        method: "GET", redirect: "error", signal: AbortSignal.timeout(12_000), headers: { accept: "application/json" },
+      });
+    } catch {
+      throw candleFailure("okx_unavailable", 503);
+    }
+    const payload: unknown = await response.json().catch(() => null);
+    const root = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+    const code = typeof root.code === "string" ? root.code : "";
+    if (!response.ok || code !== "0") throw safeError(code, response.status);
+    if (!Array.isArray(root.data)) throw candleFailure("okx_invalid_candles", 502);
+    return root.data;
   }
 
   async validateCredentials(input: ProviderCredentialInput): Promise<ValidatedAccount[]> {
@@ -207,8 +287,78 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
     };
   }
 
-  async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
-    return unavailableCandleBatch(this.provider, request);
+  async fetchCandles(account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
+    resolveCredentials(account.credentials);
+    const bar = OKX_CANDLE_BARS[request.timeframe];
+    if (!validCandleRequestIdentity(request) || (request.product !== "usdt_perpetual" && request.product !== "usdt_delivery") || !bar
+      || (request.price_mode !== "trade" && request.price_mode !== "mark")
+      || !Number.isInteger(request.limit) || request.limit < 1 || request.limit > 3_000) throw candleFailure("okx_invalid_candle_request", 400);
+    const seriesBasis: "trade" | "mark" = request.price_mode;
+    const from = Date.parse(request.from);
+    const to = Date.parse(request.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || to - from > OKX_CANDLE_MAXIMUM_RANGE_SECONDS * 1_000) {
+      throw candleFailure("okx_invalid_candle_request", 400);
+    }
+    const fetchedAtMs = this.now();
+    const fetchedAt = new Date(fetchedAtMs).toISOString();
+    const rows = new Map<number, unknown[]>();
+    let cursor = to;
+    let providerLimitReached = false;
+    while (cursor > from && rows.size < request.limit) {
+      const page = await this.publicCandles(
+        request.price_mode === "mark" ? "/api/v5/market/history-mark-price-candles" : "/api/v5/market/history-candles",
+        { instId: request.native_symbol, bar, after: String(cursor), limit: String(Math.min(OKX_CANDLE_MAXIMUM_PAGE_SIZE, request.limit - rows.size)) },
+      );
+      if (page.length === 0) break;
+      let earliest = Number.POSITIVE_INFINITY;
+      for (const value of page) {
+        const row = candleRow(value);
+        const openTime = finiteTimestamp(row[0], "candle_time");
+        earliest = Math.min(earliest, openTime);
+        const closeTime = candleEnd(openTime, request.timeframe);
+        if (openTime >= from && closeTime <= to && rows.size < request.limit) rows.set(openTime, row);
+      }
+      if (!Number.isFinite(earliest) || earliest >= cursor) throw candleFailure("okx_invalid_candle_order", 502);
+      cursor = earliest;
+    }
+    if (rows.size >= request.limit && cursor > from) providerLimitReached = true;
+    const candles: CanonicalCandle[] = [...rows.entries()].sort(([left], [right]) => left - right).map(([openTime, row]) => {
+      const closeTime = candleEnd(openTime, request.timeframe);
+      const confirm = row.at(-1);
+      if (confirm !== "0" && confirm !== "1" && confirm !== 0 && confirm !== 1) throw candleFailure("okx_invalid_candle_confirm", 502);
+      return {
+        provider: this.provider, product: request.product, native_symbol: request.native_symbol,
+        normalized_symbol: request.normalized_symbol, timeframe: request.timeframe, series_basis: seriesBasis,
+        open_time: new Date(openTime).toISOString(), close_time: new Date(closeTime).toISOString(),
+        open: canonicalUnsignedDecimal(row[1], "candle_open", false), high: canonicalUnsignedDecimal(row[2], "candle_high", false),
+        low: canonicalUnsignedDecimal(row[3], "candle_low", false), close: canonicalUnsignedDecimal(row[4], "candle_close", false),
+        volume: request.price_mode === "mark" ? null : canonicalUnsignedDecimal(row[5], "candle_volume", true), source: "public_api",
+        source_timestamp: new Date(Math.min(closeTime - 1, fetchedAtMs)).toISOString(), fetched_at: fetchedAt,
+        status: (confirm === "1" || confirm === 1) && closeTime <= fetchedAtMs ? "final" : "partial", gap_before: false, gap_after: false,
+      };
+    });
+    const gaps: CanonicalCandleBatch["coverage"]["gaps"] = [];
+    let expectedOpen = from;
+    for (let index = 0; index < candles.length; index += 1) {
+      const candle = candles[index]!;
+      const openTime = Date.parse(candle.open_time);
+      if (openTime > expectedOpen) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: candle.open_time });
+      candle.gap_before = openTime > expectedOpen;
+      const next = candles[index + 1];
+      candle.gap_after = next ? Date.parse(next.open_time) > Date.parse(candle.close_time) : to > Date.parse(candle.close_time);
+      expectedOpen = Date.parse(candle.close_time);
+    }
+    if (candles.length > 0 && expectedOpen < to) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: request.to });
+    const warnings: CanonicalCandleBatch["warnings"] = [];
+    if (gaps.length > 0) warnings.push("historical_gap");
+    if (providerLimitReached) warnings.push("provider_limit_reached");
+    if (candles.length === 0) warnings.push("empty_range");
+    return assertCanonicalCandleBatch({
+      provider: this.provider, request, candles,
+      coverage: { status: candles.length === 0 ? "empty" : gaps.length > 0 ? "gapped" : "complete", range_start: request.from,
+        range_end: request.to, source: "public_api", fetched_at: fetchedAt, gaps, unavailable_reason: null },
+      warnings,
+    });
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

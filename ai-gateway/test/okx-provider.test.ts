@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 import { OkxTradingProviderAdapter } from "../src/trading/providers/okx.ts";
-import type { ProviderAccount, ProviderHistoryPage } from "../src/trading/providers/contracts.ts";
+import type { CandleRequest, ProviderAccount, ProviderHistoryPage } from "../src/trading/providers/contracts.ts";
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 const now = Date.parse("2026-11-24T12:00:00.000Z");
@@ -19,6 +19,25 @@ function account(): ProviderAccount {
       candles: { availability: "unavailable", timeframes: [], maximum_page_size: null, maximum_range_seconds: null, price_modes: [], unavailable_reason: "implementation_pending" },
     },
   };
+}
+
+const minute = 60_000;
+const candleStart = Date.UTC(2026, 10, 24, 8, 0, 0);
+
+function candleRequest(overrides: Partial<CandleRequest> = {}): CandleRequest {
+  return {
+    product: "usdt_perpetual", native_symbol: "BTC-USDT-SWAP", normalized_symbol: "BTCUSDT",
+    timeframe: "1m", price_mode: "trade", from: new Date(candleStart).toISOString(),
+    to: new Date(candleStart + 5 * minute).toISOString(), limit: 5, ...overrides,
+  };
+}
+
+function okxCandle(openTime: number, close = "101", confirm = "1"): unknown[] {
+  return [String(openTime), "100", "110", "99", close, "12.5", "1250", "1250", confirm];
+}
+
+function okxMarkCandle(openTime: number, close = "101", confirm = "1"): unknown[] {
+  return [String(openTime), "100", "110", "99", close, confirm];
 }
 
 test("signs only official GET paths with OKX headers and preserves opaque pagination", async () => {
@@ -106,4 +125,87 @@ test("projects OKX rate limits safely and rejects unknown fill enums", async () 
     fetched_at: "2026-11-24T12:00:00Z", cursor: { kind: "opaque", value: null },
     payload: { connection_id: account().connection_id, fills: [{ instType: "SWAP", instId: "BTC-USDT-SWAP", tradeId: "x", ordId: "x", side: "buy", posSide: "mystery", fillPx: "1", fillSz: "1", fillPnl: "0", fee: "0", feeCcy: "USDT", fillTime: "1763985600000" }], bills: [], exhausted: true },
   }), /unknown_position_mode/);
+});
+
+test("advertises audited OKX historical trade and mark candle capabilities", async () => {
+  const discovered = await new OkxTradingProviderAdapter().discoverCapabilities(account());
+  assert.deepEqual(discovered.candles, {
+    availability: "available",
+    timeframes: ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"],
+    maximum_page_size: 100,
+    maximum_range_seconds: 90 * 24 * 60 * 60,
+    price_modes: ["trade", "mark"],
+    unavailable_reason: null,
+  });
+});
+
+test("rejects unsafe OKX candle symbols before any upstream request", async () => {
+  let calls = 0;
+  const adapter = new OkxTradingProviderAdapter("https://www.okx.com", async () => { calls += 1; return json({ code: "0", data: [] }); });
+  await assert.rejects(() => adapter.fetchCandles(account(), candleRequest({ native_symbol: "BTC-USDT-SWAP&secret=x" })), /okx_invalid_candle_request/);
+  assert.equal(calls, 0);
+});
+
+test("loads descending OKX history pages through the gateway and returns deduplicated ascending candles with gaps", async () => {
+  const calls: Array<{ url: URL; headers: Headers }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    calls.push({ url, headers: new Headers(init?.headers) });
+    return calls.length === 1
+      ? json({ code: "0", data: [okxCandle(candleStart + 4 * minute, "105", "0"), okxCandle(candleStart + 3 * minute, "104")] })
+      : json({ code: "0", data: [okxCandle(candleStart + 3 * minute, "104"), okxCandle(candleStart + minute, "102"), okxCandle(candleStart)] });
+  };
+  const adapter = new OkxTradingProviderAdapter("https://www.okx.com", fetcher, () => candleStart + 4 * minute + 30_000);
+  const batch = await adapter.fetchCandles(account(), candleRequest());
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]?.url.pathname, "/api/v5/market/history-candles");
+  assert.deepEqual(Object.fromEntries(calls[0]!.url.searchParams), {
+    instId: "BTC-USDT-SWAP", bar: "1m", after: String(candleStart + 5 * minute), limit: "5",
+  });
+  assert.equal(calls[1]?.url.searchParams.get("after"), String(candleStart + 3 * minute));
+  assert.equal(calls.every(({ headers }) => headers.get("OK-ACCESS-KEY") === null && headers.get("OK-ACCESS-SIGN") === null), true);
+  assert.deepEqual(batch.candles.map((candle) => [candle.open_time, candle.status, candle.gap_before, candle.gap_after]), [
+    [new Date(candleStart).toISOString(), "final", false, false],
+    [new Date(candleStart + minute).toISOString(), "final", false, true],
+    [new Date(candleStart + 3 * minute).toISOString(), "final", true, false],
+    [new Date(candleStart + 4 * minute).toISOString(), "partial", false, false],
+  ]);
+  assert.deepEqual(batch.coverage.gaps, [{ series_basis: "trade", from: new Date(candleStart + 2 * minute).toISOString(), to: new Date(candleStart + 3 * minute).toISOString() }]);
+  assert.deepEqual(batch.warnings, ["historical_gap"]);
+});
+
+test("maps OKX UTC bars and mark-price endpoint while bounding every upstream page", async () => {
+  const urls: URL[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    urls.push(url);
+    return json({ code: "0", data: urls.length === 1 ? [okxMarkCandle(candleStart)] : [] });
+  };
+  const adapter = new OkxTradingProviderAdapter("https://www.okx.com", fetcher, () => candleStart + minute);
+  const batch = await adapter.fetchCandles(account(), candleRequest({ timeframe: "1d", price_mode: "mark", to: new Date(candleStart + 2 * 24 * 60 * minute).toISOString(), limit: 3_000 }));
+  assert.equal(urls[0]?.pathname, "/api/v5/market/history-mark-price-candles");
+  assert.equal(urls[0]?.searchParams.get("bar"), "1Dutc");
+  assert.equal(urls[0]?.searchParams.get("limit"), "100");
+  assert.equal(batch.candles.length <= 3_000, true);
+  assert.equal(batch.candles[0]?.series_basis, "mark");
+  assert.equal(batch.candles[0]?.volume, null);
+});
+
+test("redacts OKX candle auth, rate-limit, HTTP, and malformed upstream responses", async () => {
+  const cases = [
+    { status: 401, payload: { code: "50113", msg: "ok-secret ok-pass" }, message: "okx_invalid_signature", statusCode: 400 },
+    { status: 429, payload: { code: "50011", msg: "ok-secret ok-pass" }, message: "okx_rate_limited", statusCode: 429 },
+    { status: 503, payload: { code: "50000", msg: "ok-secret ok-pass" }, message: "okx_unavailable", statusCode: 503 },
+    { status: 200, payload: { code: "0", data: { raw: "ok-secret ok-pass" } }, message: "okx_invalid_candles", statusCode: 502 },
+  ];
+  for (const fixture of cases) {
+    const adapter = new OkxTradingProviderAdapter("https://www.okx.com", async () => json(fixture.payload, fixture.status));
+    await assert.rejects(() => adapter.fetchCandles(account(), candleRequest()), (error: unknown) => {
+      const safe = error as Error & { statusCode?: number };
+      assert.equal(safe.message, fixture.message);
+      assert.equal(safe.statusCode, fixture.statusCode);
+      assert.equal(/ok-secret|ok-pass/.test(safe.message), false);
+      return true;
+    });
+  }
 });

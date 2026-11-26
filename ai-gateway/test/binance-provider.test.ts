@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BinanceTradingProviderAdapter } from "../src/trading/providers/binance.ts";
-import type { ProviderAccount, ProviderHistoryPage } from "../src/trading/providers/contracts.ts";
+import type { CandleRequest, ProviderAccount, ProviderHistoryPage } from "../src/trading/providers/contracts.ts";
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 
@@ -16,6 +16,27 @@ function account(credentials: Record<string, string> = { api_key: "key", secret_
       candles: { availability: "unavailable", timeframes: [], maximum_page_size: null, maximum_range_seconds: null, price_modes: [], unavailable_reason: "implementation_pending" },
     },
   };
+}
+
+const minute = 60_000;
+const candleStart = Date.UTC(2026, 10, 24, 8, 0, 0);
+
+function candleRequest(overrides: Partial<CandleRequest> = {}): CandleRequest {
+  return {
+    product: "usdt_perpetual",
+    native_symbol: "BTCUSDT",
+    normalized_symbol: "BTCUSDT",
+    timeframe: "1m",
+    price_mode: "trade",
+    from: new Date(candleStart).toISOString(),
+    to: new Date(candleStart + 5 * minute).toISOString(),
+    limit: 5,
+    ...overrides,
+  };
+}
+
+function binanceKline(openTime: number, close = "101"): unknown[] {
+  return [openTime, "100", "110", "99", close, "12.5", openTime + minute - 1, "0", 7, "0", "0", "0"];
 }
 
 test("validates a migrated credential envelope alias and fails closed on trading or non-USDT permissions", async () => {
@@ -94,4 +115,111 @@ test("fetches canonical snapshots and history without exposing the secret", asyn
   const history = await adapter.fetchHistory(account(), { kind: "time", value: "1699990000000" });
   assert.equal(history.cursor.kind, "time");
   assert.equal(urls.some((url) => url.toString().includes("secret")), false);
+});
+
+test("advertises the audited USD-M candle contract", async () => {
+  const adapter = new BinanceTradingProviderAdapter();
+  const discovered = await adapter.discoverCapabilities(account());
+  assert.deepEqual(discovered.candles, {
+    availability: "available",
+    timeframes: ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M"],
+    maximum_page_size: 1_500,
+    maximum_range_seconds: 200 * 24 * 60 * 60,
+    price_modes: ["trade", "mark"],
+    unavailable_reason: null,
+  });
+});
+
+test("rejects unsafe Binance candle symbols before any upstream request", async () => {
+  let calls = 0;
+  const adapter = new BinanceTradingProviderAdapter("https://fapi.binance.com", async () => { calls += 1; return json([]); });
+  await assert.rejects(() => adapter.fetchCandles(account(), candleRequest({ native_symbol: "BTCUSDT&signature=leak" })), /binance_invalid_candle_request/);
+  assert.equal(calls, 0);
+});
+
+test("loads public USD-M trade candles through the gateway with exact pagination, deduplication, partial state, and gap evidence", async () => {
+  const calls: Array<{ url: URL; init: RequestInit | undefined }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    calls.push({ url, init });
+    if (calls.length === 1) return json([
+      binanceKline(candleStart),
+      binanceKline(candleStart + minute, "102"),
+    ]);
+    return json([
+      binanceKline(candleStart + minute, "102"),
+      binanceKline(candleStart + 3 * minute, "104"),
+      binanceKline(candleStart + 4 * minute, "105"),
+    ]);
+  };
+  const now = candleStart + 4 * minute + 30_000;
+  const adapter = new BinanceTradingProviderAdapter("https://fapi.binance.com", fetcher, () => now);
+  const batch = await adapter.fetchCandles(account({ api_key: "private-key", secret_key: "private-secret" }), candleRequest());
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]?.url.pathname, "/fapi/v1/klines");
+  assert.deepEqual(Object.fromEntries(calls[0]!.url.searchParams), {
+    symbol: "BTCUSDT", interval: "1m", startTime: String(candleStart), endTime: String(candleStart + 5 * minute - 1), limit: "5",
+  });
+  assert.equal(calls[1]?.url.searchParams.get("startTime"), String(candleStart + 2 * minute));
+  assert.equal(JSON.stringify(calls).includes("private-key"), false);
+  assert.equal(JSON.stringify(calls).includes("private-secret"), false);
+  assert.equal(calls.every(({ init }) => init?.signal instanceof AbortSignal), true);
+  assert.deepEqual(batch.candles.map((candle) => [candle.open_time, candle.close, candle.status, candle.gap_before, candle.gap_after]), [
+    [new Date(candleStart).toISOString(), "101", "final", false, false],
+    [new Date(candleStart + minute).toISOString(), "102", "final", false, true],
+    [new Date(candleStart + 3 * minute).toISOString(), "104", "final", true, false],
+    [new Date(candleStart + 4 * minute).toISOString(), "105", "partial", false, false],
+  ]);
+  assert.deepEqual(batch.coverage.gaps, [{
+    series_basis: "trade",
+    from: new Date(candleStart + 2 * minute).toISOString(),
+    to: new Date(candleStart + 3 * minute).toISOString(),
+  }]);
+  assert.equal(batch.coverage.status, "gapped");
+  assert.deepEqual(batch.warnings, ["historical_gap"]);
+});
+
+test("maps Binance mark-price candles, enforces the 1500-row page limit, and never returns more than 3000 rows", async () => {
+  const urls: URL[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    urls.push(url);
+    return json(urls.length === 1 ? [binanceKline(candleStart)] : []);
+  };
+  const adapter = new BinanceTradingProviderAdapter("https://fapi.binance.com", fetcher, () => candleStart + minute);
+  const batch = await adapter.fetchCandles(account(), candleRequest({
+    price_mode: "mark",
+    to: new Date(candleStart + 3_000 * minute).toISOString(),
+    limit: 3_000,
+  }));
+  assert.equal(urls[0]?.pathname, "/fapi/v1/markPriceKlines");
+  assert.equal(urls[0]?.searchParams.get("limit"), "1500");
+  assert.equal(batch.candles.length <= 3_000, true);
+  assert.equal(batch.candles[0]?.series_basis, "mark");
+  assert.equal(batch.candles[0]?.volume, null);
+});
+
+test("maps Binance HTTP, auth, rate-limit, and malformed payload failures to fixed redacted errors", async () => {
+  const cases: Array<{ status: number; payload: unknown; expected: RegExp; statusCode: number }> = [
+    { status: 401, payload: { code: -2015, msg: "private-key private-secret" }, expected: /binance_unauthorized/, statusCode: 400 },
+    { status: 429, payload: { code: -1003, msg: "private-key private-secret" }, expected: /binance_rate_limited/, statusCode: 429 },
+    { status: 503, payload: "private-key private-secret", expected: /binance_unavailable/, statusCode: 503 },
+    { status: 200, payload: { raw: "private-key private-secret" }, expected: /binance_invalid_candles/, statusCode: 502 },
+  ];
+  for (const fixture of cases) {
+    const adapter = new BinanceTradingProviderAdapter("https://fapi.binance.com", async () => json(fixture.payload, fixture.status));
+    await assert.rejects(
+      () => adapter.fetchCandles(account({ api_key: "private-key", secret_key: "private-secret" }), candleRequest()),
+      (error: unknown) => {
+        assert.equal(error instanceof Error, true);
+        const safe = error as Error & { statusCode?: number };
+        assert.match(safe.message, fixture.expected);
+        assert.equal(safe.statusCode, fixture.statusCode);
+        assert.equal(safe.message.includes("private-key"), false);
+        assert.equal(safe.message.includes("private-secret"), false);
+        return true;
+      },
+    );
+  }
 });
