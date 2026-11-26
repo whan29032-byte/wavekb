@@ -1,6 +1,7 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
 
+// Ubuntu CI is the authority for filesystem/deployment security semantics.
 const posixOnlyRootTests = new Set([
   "tests/configure-wallet-runtime.test.mjs",
   "tests/deploy-release.test.mjs",

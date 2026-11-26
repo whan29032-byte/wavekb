@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { rootTestFiles } from "../scripts/lib/root-test-manifest.mjs";
@@ -18,6 +18,7 @@ const discoveredRootTests = readdirSync(testDirectory, { withFileTypes: true })
   .filter((entry) => entry.isFile() && entry.name.endsWith(".test.mjs"))
   .map((entry) => path.posix.join(testDirectory, entry.name))
   .sort();
+const releaseWorkflow = readFileSync(".github/workflows/verify-release.yml", "utf8");
 
 test("selects portable root suites on Windows and Linux", () => {
   for (const platform of ["win32", "linux"]) {
@@ -35,6 +36,31 @@ test("omits the POSIX-only root suites only on Windows", () => {
     assert.ok(!windows.selected.includes(file), `Windows selected ${file}`);
     assert.ok(linux.selected.includes(file), `Linux omitted ${file}`);
   }
+});
+
+test("selects every POSIX-only suite on Linux without selected and omitted basename overlap", () => {
+  const windows = rootTestFiles({ platform: "win32", testDirectory });
+  const linux = rootTestFiles({ platform: "linux", testDirectory });
+
+  for (const file of windows.omitted) {
+    assert.ok(linux.selected.includes(file), `Linux did not select POSIX suite ${file}`);
+  }
+  for (const [platform, { selected, omitted }] of Object.entries({ windows, linux })) {
+    const selectedBasenames = new Set(selected.map((file) => path.posix.basename(file)));
+    const omittedBasenames = new Set(omitted.map((file) => path.posix.basename(file)));
+    assert.ok(
+      [...selectedBasenames].every((basename) => !omittedBasenames.has(basename)),
+      `${platform} selected and omitted the same root-test basename`,
+    );
+  }
+});
+
+test("release verification runs the full default test command on Ubuntu", () => {
+  assert.match(releaseWorkflow, /verify:\s*\n\s+runs-on: ubuntu-latest/);
+  assert.match(
+    releaseWorkflow,
+    /- name: Full Linux test suite\s*\n\s+run: pnpm test/,
+  );
 });
 
 test("returns a sorted, complete manifest without stale or duplicate entries", () => {
