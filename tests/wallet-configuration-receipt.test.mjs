@@ -5,7 +5,7 @@ import test from "node:test";
 import { projectWalletConfigurationReceipt } from "../scripts/project-wallet-configuration.mjs";
 
 const receipt = operation => ({ ok: true, operation, enabled: operation === "enable", workerRunning: true,
-  ethereumReady: true, baseReady: true, tronReady: true, changed: operation === "enable" });
+  ethereumReady: true, baseReady: true, bscReady: true, tronReady: true, changed: operation === "enable" });
 const bytes = value => Buffer.from(JSON.stringify(value));
 const script = fileURLToPath(new URL("../scripts/project-wallet-configuration.mjs", import.meta.url));
 
@@ -13,7 +13,7 @@ test("only complete operation-bound worker and chain readiness receipts pass", (
   for (const operation of ["enable", "probe"]) assert.deepEqual(projectWalletConfigurationReceipt(bytes(receipt(operation)), operation), receipt(operation));
   assert.doesNotThrow(() => projectWalletConfigurationReceipt(bytes({ ...receipt("enable"), changed: false }), "enable"));
   assert.doesNotThrow(() => projectWalletConfigurationReceipt(bytes({ ...receipt("probe"), enabled: true }), "probe"));
-  for (const field of ["ok", "enabled", "workerRunning", "ethereumReady", "baseReady", "tronReady"])
+  for (const field of ["ok", "enabled", "workerRunning", "ethereumReady", "baseReady", "bscReady", "tronReady"])
     assert.throws(() => projectWalletConfigurationReceipt(bytes({ ...receipt("enable"), [field]: false }), "enable"));
   assert.throws(() => projectWalletConfigurationReceipt(bytes(receipt("enable")), "probe"));
   assert.throws(() => projectWalletConfigurationReceipt(bytes({ ...receipt("probe"), changed: true }), "probe"));

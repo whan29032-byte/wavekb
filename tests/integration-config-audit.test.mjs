@@ -19,17 +19,18 @@ test("probe fails closed for ambiguous duplicates and has no network or write op
   assert.match(source, /readFileSync\("\/etc\/elliott-wave\/gateway\.env"/);
 });
 
-test("wallet presence includes exactly six settings without leaking any configured value", () => {
+test("wallet presence includes exactly seven settings without leaking any configured value", () => {
   const result = integrationConfigPresence(`MEMBERSHIP_WALLET_ENABLED="false"
 MEMBERSHIP_WALLET_ETHEREUM_RPC_URL=https://eth.private.example/v1/private-key
 MEMBERSHIP_WALLET_BASE_RPC_URL='https://base.private.example/private-rpc-key'
+MEMBERSHIP_WALLET_BSC_RPC_URL='https://bsc.private.example/private-rpc-key'
 MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS=eth.private.example,base.private.example
 MEMBERSHIP_WALLET_TRONGRID_API_KEY=private-trongrid-key
 MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE=2
 MEMBERSHIP_WALLET_RECIPIENT=private-recipient
 SUPABASE_SERVICE_ROLE_KEY=private-service-role`);
   const wallet = Object.entries(result.configuration_presence).filter(([key]) => key.startsWith("MEMBERSHIP_WALLET_"));
-  assert.equal(wallet.length, 6);
+  assert.equal(wallet.length, 7);
   assert.ok(wallet.every(([, present]) => present === true));
   assert.equal(result.wallet_flag_valid, true);
   assert.equal(result.wallet_enabled, false);
@@ -92,7 +93,7 @@ test("worker-state CLI reads stdin only and projects without an environment-file
 });
 
 test("integration workflow queries one fixed read-only worker target then safely projects stdout", () => {
-  const source = readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
   const step = source.slice(source.indexOf("      - name: Read only fixed AI worker service state"));
   assert.match(step, /if: inputs\.operation == 'integration-config'/);
   assert.match(step, /sudo -n \/usr\/bin\/systemctl show elliott-wave-ai-worker\.service --property=LoadState --property=ActiveState --property=SubState/);
@@ -105,7 +106,7 @@ test("integration workflow queries one fixed read-only worker target then safely
 });
 
 test("actual workflow shell keeps simulated SSH stdout and stderr private on success and failure", () => {
-  const source = readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8").replaceAll("\r\n", "\n");
   const step = source.slice(source.indexOf("      - name: Read only fixed AI worker service state"));
   const run = step.slice(step.indexOf("        run: |\n") + "        run: |\n".length).split("\n").map(line => line.slice(10)).join("\n");
   for (const failure of [false, true]) {
@@ -113,7 +114,7 @@ test("actual workflow shell keeps simulated SSH stdout and stderr private on suc
     // are accessed. Run the real workflow branch and the real pure projection.
     const output = failure ? "private-ssh-stdout" : "LoadState=loaded\nActiveState=active\nSubState=running\n";
     const fakeSsh = `ssh() { printf '%s' '${output}'; printf '%s' 'private-ssh-stderr' >&2; return ${failure ? 1 : 0}; }`;
-    const probe = spawnSync("/bin/bash", ["-c", `${fakeSsh}\n${run}`], {
+    const probe = spawnSync("bash", ["-c", `${fakeSsh}\n${run}`], {
       cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8",
       env: { ...process.env, DEPLOY_USER: "fixture-deployer", DEPLOY_HOST: "not-used.invalid" },
     });
