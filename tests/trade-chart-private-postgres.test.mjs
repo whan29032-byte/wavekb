@@ -1364,6 +1364,8 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
       { drawings: [{ ...validDrawing, id: "position-9", tool: "short-position", points: validDrawing.points, style: {}, properties: { stopTime: 240, stopPrice: 1100000000000000000 } }] },
       { drawings: [{ ...validDrawing, id: "position-10", tool: "long-position", points: validDrawing.points, style: {}, properties: { stopTime: 240, stopPrice: 80, controllerPoint: {} } }] },
       { drawings: [{ ...validDrawing, id: "trend-invalid-stats", tool: "trend-line", style: { showStats: "yes" } }] },
+      { drawings: [{ ...validDrawing, id: "trend-enum-array", style: { lineStyle: ["solid"] } }] },
+      { drawings: [{ ...validDrawing, id: "rectangle-enum-array", tool: "rectangle", text: { value: "note", align: ["left"] } }] },
       { priceType: "bid" },
     ]) {
       await assert.rejects(

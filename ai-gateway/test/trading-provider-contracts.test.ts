@@ -5,6 +5,7 @@ import {
   assertCanonicalHistoryBatch,
   assertProviderCapabilities,
   normalizeProviderCapabilities,
+  unavailableCandleBatch,
   type CandleRequest,
   type CanonicalCandleBatch,
   type CanonicalHistoryBatch,
@@ -373,6 +374,103 @@ test("provider candle capabilities are a truthful discriminated union", () => {
     price_modes: [],
     unavailable_reason: "legacy_capability_missing",
   });
+});
+
+test("provider capabilities reject coercible non-string enum values", async () => {
+  const base = await adapter("binance").discoverCapabilities({} as ProviderAccount);
+  for (const pagination of [
+    ["time"],
+    { 0: "time" },
+    1,
+    { toString: () => "time" },
+  ]) {
+    const capabilities = structuredClone(base) as Record<string, any>;
+    capabilities.pagination = pagination;
+    assert.throws(() => assertProviderCapabilities(capabilities), /provider_capabilities_invalid_pagination/);
+  }
+
+  const grouping = structuredClone(base) as Record<string, any>;
+  grouping.position_grouping = ["net_zero_cycle"];
+  assert.throws(() => assertProviderCapabilities(grouping), /provider_capabilities_invalid_position_grouping/);
+});
+
+test("candle contracts reject single-element arrays instead of coercing enums", () => {
+  for (const [field, expected] of [
+    ["product", /canonical_candles_invalid_request_product/],
+    ["timeframe", /canonical_candles_invalid_request_timeframe/],
+    ["price_mode", /canonical_candles_invalid_request_price_mode/],
+  ] as const) {
+    const request = structuredClone(candleRequest) as Record<string, any>;
+    request[field] = [request[field]];
+    assert.throws(() => unavailableCandleBatch("binance", request as CandleRequest), expected);
+  }
+
+  for (const { error, mutate } of [{
+    error: /canonical_candles_invalid_series_basis/,
+    mutate(value: Record<string, any>) {
+      value.candles[0].series_basis = ["trade"];
+    },
+  }, {
+    error: /canonical_candles_invalid_source/,
+    mutate(value: Record<string, any>) {
+      value.candles[0].source = ["public_api"];
+    },
+  }, {
+    error: /canonical_candles_invalid_status/,
+    mutate(value: Record<string, any>) {
+      value.candles[0].status = ["final"];
+    },
+  }, {
+    error: /canonical_candles_invalid_coverage_source/,
+    mutate(value: Record<string, any>) {
+      value.coverage.source = ["public_api"];
+    },
+  }, {
+    error: /canonical_candles_invalid_gaps/,
+    mutate(value: Record<string, any>) {
+      value.coverage.gaps[0].series_basis = ["trade"];
+    },
+  }]) {
+    const batch = structuredClone(validCandleBatch()) as Record<string, any>;
+    mutate(batch);
+    assert.throws(() => assertCanonicalCandleBatch(batch), error);
+  }
+
+  const coverageStatus = structuredClone(validCandleBatch()) as Record<string, any>;
+  coverageStatus.request.to = coverageStatus.candles[0].close_time;
+  coverageStatus.request.limit = 1;
+  coverageStatus.candles = [{ ...coverageStatus.candles[0], gap_after: false }];
+  coverageStatus.coverage = {
+    ...coverageStatus.coverage,
+    status: ["complete"],
+    range_end: coverageStatus.request.to,
+    gaps: [],
+  };
+  coverageStatus.warnings = [];
+  assert.throws(() => assertCanonicalCandleBatch(coverageStatus), /canonical_candles_invalid_coverage_status/);
+});
+
+test("canonical history rejects single-element arrays across enum fields", () => {
+  const cases: Array<{ field: string; error: RegExp }> = [
+    { field: "product", error: /canonical_history_invalid_product/ },
+    { field: "side", error: /canonical_history_invalid_side/ },
+    { field: "position_side", error: /canonical_history_invalid_position_side/ },
+    { field: "action", error: /canonical_history_invalid_action/ },
+    { field: "liquidity", error: /canonical_history_invalid_liquidity/ },
+  ];
+  for (const { field, error } of cases) {
+    const batch = validBatch() as unknown as Record<string, any>;
+    batch.fills[0][field] = [batch.fills[0][field]];
+    assert.throws(() => assertCanonicalHistoryBatch(batch), error);
+  }
+
+  const cashType = validBatch() as unknown as Record<string, any>;
+  cashType.cash_events[0].type = ["funding"];
+  assert.throws(() => assertCanonicalHistoryBatch(cashType), /canonical_history_invalid_cash_event_type/);
+
+  const cursorKind = validBatch() as unknown as Record<string, any>;
+  cursorKind.next_cursor.kind = ["time"];
+  assert.throws(() => assertCanonicalHistoryBatch(cursorKind), /canonical_history_invalid_cursor_kind/);
 });
 
 test("canonical candle contracts reject hidden and symbol-keyed fields", () => {

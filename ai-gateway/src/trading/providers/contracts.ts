@@ -297,6 +297,10 @@ function invalidCapabilities(field: string): never {
   throw Object.assign(new Error(`provider_capabilities_invalid_${field}`), { statusCode: 502 });
 }
 
+function isAllowedString(value: unknown, allowed: ReadonlySet<string>): value is string {
+  return typeof value === "string" && allowed.has(value);
+}
+
 function capabilityRecord(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalidCapabilities(field);
   return value as Record<string, unknown>;
@@ -330,8 +334,8 @@ export function assertProviderCapabilities(value: unknown): ProviderCapabilities
     const minimum = key === "history_age_days" ? 0 : 1;
     if (!Number.isInteger(capabilities[key]) || (capabilities[key] as number) < minimum) invalidCapabilities(key);
   }
-  if (!new Set(["time", "page", "opaque"]).has(String(capabilities.pagination))) invalidCapabilities("pagination");
-  if (!new Set(["net_zero_cycle", "hedge_zero_cycle", "position_id_cycle"]).has(String(capabilities.position_grouping))) {
+  if (!isAllowedString(capabilities.pagination, new Set(["time", "page", "opaque"]))) invalidCapabilities("pagination");
+  if (!isAllowedString(capabilities.position_grouping, new Set(["net_zero_cycle", "hedge_zero_cycle", "position_id_cycle"]))) {
     invalidCapabilities("position_grouping");
   }
   for (const key of [
@@ -424,13 +428,13 @@ function compareCanonicalUnsignedDecimals(left: string, right: string): number {
 function validateCandleRequest(value: unknown): CandleRequest {
   const request = candleRecord(value, "request");
   exactKeys(request, ["product", "native_symbol", "normalized_symbol", "timeframe", "price_mode", "from", "to", "limit"], "request_keys");
-  if (!tradingProducts.has(String(request.product))) invalidCandles("request_product");
+  if (!isAllowedString(request.product, tradingProducts)) invalidCandles("request_product");
   const nativeSymbol = candleString(request.native_symbol, "request_native_symbol", 100);
   if (!safeSymbolPattern.test(nativeSymbol)) invalidCandles("request_native_symbol");
   const normalizedSymbol = candleString(request.normalized_symbol, "request_normalized_symbol", 100);
   if (!safeSymbolPattern.test(normalizedSymbol)) invalidCandles("request_normalized_symbol");
-  if (!candleTimeframes.has(String(request.timeframe))) invalidCandles("request_timeframe");
-  if (!candlePriceModes.has(String(request.price_mode))) invalidCandles("request_price_mode");
+  if (!isAllowedString(request.timeframe, candleTimeframes)) invalidCandles("request_timeframe");
+  if (!isAllowedString(request.price_mode, candlePriceModes)) invalidCandles("request_price_mode");
   const from = candleTimestamp(request.from, "request_from");
   const to = candleTimestamp(request.to, "request_to");
   if (Date.parse(from) >= Date.parse(to)) invalidCandles("request_range");
@@ -449,7 +453,7 @@ function validateCanonicalCandle(value: unknown, request: CandleRequest, provide
   if (item.native_symbol !== request.native_symbol) invalidCandles("native_symbol");
   if (item.normalized_symbol !== request.normalized_symbol) invalidCandles("normalized_symbol");
   if (item.timeframe !== request.timeframe) invalidCandles("timeframe");
-  if (!candleSeriesBases.has(String(item.series_basis))) invalidCandles("series_basis");
+  if (!isAllowedString(item.series_basis, candleSeriesBases)) invalidCandles("series_basis");
   if (request.price_mode === "both") {
     if (item.series_basis !== "bid" && item.series_basis !== "ask") invalidCandles("series_basis");
   } else if (item.series_basis !== request.price_mode) invalidCandles("series_basis");
@@ -466,21 +470,21 @@ function validateCanonicalCandle(value: unknown, request: CandleRequest, provide
     || compareCanonicalUnsignedDecimals(low, open) > 0
     || compareCanonicalUnsignedDecimals(low, close) > 0) invalidCandles("ohlc");
   if (item.volume !== null) canonicalUnsignedDecimal(item.volume, "volume", false);
-  if (!candleSources.has(String(item.source))) invalidCandles("source");
+  if (!isAllowedString(item.source, candleSources)) invalidCandles("source");
   if ((provider === "exness"
     && (item.product !== "cfd" || item.source !== "signed_account"
-      || !new Set(["bid", "ask"]).has(String(item.series_basis))
+      || !isAllowedString(item.series_basis, new Set(["bid", "ask"]))
       || !new Set(["bid", "ask", "both"]).has(request.price_mode)))
     || (provider !== "exness"
       && (item.product === "cfd" || item.source !== "public_api"
-        || !new Set(["trade", "mark"]).has(String(item.series_basis))
+        || !isAllowedString(item.series_basis, new Set(["trade", "mark"]))
         || !new Set(["trade", "mark"]).has(request.price_mode)))) {
     invalidCandles("source");
   }
   const sourceTimestamp = candleTimestamp(item.source_timestamp, "source_timestamp");
   const fetchedAt = candleTimestamp(item.fetched_at, "fetched_at");
   if (Date.parse(sourceTimestamp) > Date.parse(fetchedAt)) invalidCandles("source_time");
-  if (!candleStatuses.has(String(item.status))) invalidCandles("status");
+  if (!isAllowedString(item.status, candleStatuses)) invalidCandles("status");
   if (typeof item.gap_before !== "boolean" || typeof item.gap_after !== "boolean") invalidCandles("gap_flags");
   return value as CanonicalCandle;
 }
@@ -536,11 +540,11 @@ export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch
 
   const coverage = candleRecord(batch.coverage, "coverage");
   exactKeys(coverage, ["status", "range_start", "range_end", "source", "fetched_at", "gaps", "unavailable_reason"], "coverage_keys");
-  if (!candleCoverageStatuses.has(String(coverage.status))) invalidCandles("coverage_status");
+  if (!isAllowedString(coverage.status, candleCoverageStatuses)) invalidCandles("coverage_status");
   const rangeStart = candleTimestamp(coverage.range_start, "coverage_range_start");
   const rangeEnd = candleTimestamp(coverage.range_end, "coverage_range_end");
   if (rangeStart !== request.from || rangeEnd !== request.to) invalidCandles("coverage_range");
-  if (coverage.source !== null && !candleSources.has(String(coverage.source))) invalidCandles("coverage_source");
+  if (coverage.source !== null && !isAllowedString(coverage.source, candleSources)) invalidCandles("coverage_source");
   const coverageFetchedAt = coverage.fetched_at === null ? null : candleTimestamp(coverage.fetched_at, "coverage_fetched_at");
   if (!Array.isArray(coverage.gaps) || coverage.gaps.length > 1_000) invalidCandles("gaps");
   const declaredGaps: Array<{ series_basis: TradeChartCandleSeriesBasis; from: string; to: string }> = [];
@@ -548,17 +552,18 @@ export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch
   for (const value of coverage.gaps) {
     const gap = candleRecord(value, "gap");
     exactKeys(gap, ["series_basis", "from", "to"], "gap_keys");
-    if (!candleSeriesBases.has(String(gap.series_basis))) invalidCandles("gaps");
-    if (request.price_mode === "both" ? gap.series_basis !== "bid" && gap.series_basis !== "ask" : gap.series_basis !== request.price_mode) {
+    if (!isAllowedString(gap.series_basis, candleSeriesBases)) invalidCandles("gaps");
+    const gapSeriesBasis = gap.series_basis;
+    if (request.price_mode === "both" ? gapSeriesBasis !== "bid" && gapSeriesBasis !== "ask" : gapSeriesBasis !== request.price_mode) {
       invalidCandles("gaps");
     }
     const from = candleTimestamp(gap.from, "gap_from");
     const to = candleTimestamp(gap.to, "gap_to");
     if (Date.parse(from) >= Date.parse(to) || Date.parse(from) < Date.parse(request.from)
       || Date.parse(to) > Date.parse(request.to)
-      || Date.parse(from) < (previousGapEnd.get(String(gap.series_basis)) ?? 0)) invalidCandles("gaps");
-    previousGapEnd.set(String(gap.series_basis), Date.parse(to));
-    declaredGaps.push({ series_basis: gap.series_basis as TradeChartCandleSeriesBasis, from, to });
+      || Date.parse(from) < (previousGapEnd.get(gapSeriesBasis) ?? 0)) invalidCandles("gaps");
+    previousGapEnd.set(gapSeriesBasis, Date.parse(to));
+    declaredGaps.push({ series_basis: gapSeriesBasis as TradeChartCandleSeriesBasis, from, to });
   }
 
   const expectedBases: TradeChartCandleSeriesBasis[] = request.price_mode === "both"
@@ -662,17 +667,17 @@ function fill(value: unknown): void {
   if (item.native_position_id !== null) string(item.native_position_id, "native_position_id");
   string(item.symbol, "symbol");
   string(item.native_symbol, "native_symbol");
-  if (!tradingProducts.has(String(item.product))) invalid("product");
-  if (!fillSides.has(String(item.side))) invalid("side");
-  if (!positionSides.has(String(item.position_side))) invalid("position_side");
-  if (!fillActions.has(String(item.action))) invalid("action");
+  if (!isAllowedString(item.product, tradingProducts)) invalid("product");
+  if (!isAllowedString(item.side, fillSides)) invalid("side");
+  if (!isAllowedString(item.position_side, positionSides)) invalid("position_side");
+  if (!isAllowedString(item.action, fillActions)) invalid("action");
   decimal(item.price, "price");
   decimal(item.quantity, "quantity");
   decimal(item.contract_multiplier, "contract_multiplier");
   timestamp(item.occurred_at, "occurred_at");
   money(item.realized_pnl, "realized_pnl");
   money(item.fee, "fee");
-  if (!liquidityValues.has(String(item.liquidity))) invalid("liquidity");
+  if (!isAllowedString(item.liquidity, liquidityValues)) invalid("liquidity");
 }
 
 function cashEvent(value: unknown): void {
@@ -681,7 +686,7 @@ function cashEvent(value: unknown): void {
   string(item.connection_id, "connection_id");
   string(item.native_event_id, "native_event_id");
   string(item.native_type, "native_type", true);
-  if (!cashEventTypes.has(String(item.type))) invalid("cash_event_type");
+  if (!isAllowedString(item.type, cashEventTypes)) invalid("cash_event_type");
   decimal(item.amount, "cash_event_amount");
   string(item.asset, "cash_event_asset");
   nullableDecimal(item.usd_value, "cash_event_usd_value");
@@ -698,7 +703,7 @@ export function assertCanonicalHistoryBatch(value: unknown): CanonicalHistoryBat
   for (const item of batch.cash_events) cashEvent(item);
   if (batch.next_cursor !== null) {
     const cursor = record(batch.next_cursor, "cursor");
-    if (!new Set(["time", "page", "opaque"]).has(String(cursor.kind))) invalid("cursor_kind");
+    if (!isAllowedString(cursor.kind, new Set(["time", "page", "opaque"]))) invalid("cursor_kind");
     if (cursor.value !== null) string(cursor.value, "cursor_value");
   }
   if (typeof batch.exhausted !== "boolean") invalid("exhausted");

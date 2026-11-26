@@ -168,6 +168,141 @@ test("accepts public two-anchor position inputs and bounded audited drawing sett
   assert.throws(() => assertChartStateV1(unknownPositionProperty), /trade_chart_invalid_drawing_properties/);
 });
 
+test("rejects coercible non-string drawing enum values", () => {
+  for (const align of [
+    ["left"],
+    { 0: "left" },
+    1,
+    { toString: () => "left" },
+  ]) {
+    const state = structuredClone(validProjection().chart_state) as Record<string, any>;
+    state.drawings[0] = {
+      ...validDrawing,
+      tool: "rectangle",
+      text: { value: "note", align },
+    };
+    assert.throws(() => assertChartStateV1(state), /trade_chart_invalid_drawing_text/);
+  }
+});
+
+test("rejects single-element arrays across every chart enum family", () => {
+  const cases: Array<{
+    error: RegExp;
+    mutate(value: Record<string, any>): void;
+  }> = [{
+    error: /trade_chart_invalid_indicator_settings/,
+    mutate(value) {
+      value.chart_state.indicators = [
+        { instanceId: "keltner-1", indicatorId: "keltner-channel", settings: { bandsStyle: ["Range"] } },
+      ];
+    },
+  }, {
+    error: /trade_chart_invalid_indicator_settings/,
+    mutate(value) {
+      value.chart_state.indicators = [
+        { instanceId: "pivot-kind-1", indicatorId: "pivot-points", settings: { kind: ["traditional"] } },
+      ];
+    },
+  }, {
+    error: /trade_chart_invalid_indicator_settings/,
+    mutate(value) {
+      value.chart_state.indicators = [
+        { instanceId: "pivot-frame-1", indicatorId: "pivot-points", settings: { frame: ["daily"] } },
+      ];
+    },
+  }, {
+    error: /trade_chart_invalid_indicator_settings/,
+    mutate(value) {
+      value.chart_state.indicators = [
+        { instanceId: "obv-1", indicatorId: "obv", settings: { maType: ["EMA"] } },
+      ];
+    },
+  }, {
+    error: /trade_chart_invalid_drawing_style/,
+    mutate(value) {
+      value.chart_state.drawings[0].style.lineStyle = ["solid"];
+    },
+  }, {
+    error: /trade_chart_invalid_drawing_text/,
+    mutate(value) {
+      value.chart_state.drawings[0] = {
+        ...validDrawing,
+        tool: "rectangle",
+        text: { value: "note", valign: ["top"] },
+      };
+    },
+  }, {
+    error: /trade_chart_invalid_drawing_properties/,
+    mutate(value) {
+      value.chart_state.drawings[0] = {
+        ...validDrawing,
+        tool: "elliott-correction",
+        points: Array.from({ length: 4 }, (_, index) => ({
+          time: 1_795_520_280_000 + index * 60_000,
+          price: 60_000 + index * 100,
+        })),
+        properties: { degree: ["primary"] },
+      };
+    },
+  }, {
+    error: /trade_chart_invalid_drawing_properties/,
+    mutate(value) {
+      value.chart_state.drawings[0] = {
+        ...validDrawing,
+        tool: "elliott-correction",
+        points: Array.from({ length: 4 }, (_, index) => ({
+          time: 1_795_520_280_000 + index * 60_000,
+          price: 60_000 + index * 100,
+        })),
+        properties: { labelStyle: ["plain"] },
+      };
+    },
+  }, {
+    error: /trade_chart_invalid_marker_role/,
+    mutate(value) {
+      value.markers[0].allocation_role = ["open"];
+    },
+  }, {
+    error: /trade_chart_invalid_marker_side/,
+    mutate(value) {
+      value.markers[0].side = ["buy"];
+    },
+  }, {
+    error: /trade_chart_invalid_marker_position_side/,
+    mutate(value) {
+      value.markers[0].position_side = ["long"];
+    },
+  }, {
+    error: /trade_chart_invalid_marker_liquidity/,
+    mutate(value) {
+      value.markers[0].liquidity = ["taker"];
+    },
+  }, {
+    error: /trade_chart_invalid_annotation_remap/,
+    mutate(value) {
+      value.markers[0].annotation = {
+        id: "22222222-2222-4222-8222-222222222222",
+        body: "note",
+        tags: [],
+        image_count: 0,
+        version: 1,
+        remap_status: ["current"],
+      };
+    },
+  }, {
+    error: /canonical_candles_invalid_gaps/,
+    mutate(value) {
+      value.coverage.gaps[0].series_basis = ["trade"];
+    },
+  }];
+
+  for (const { error, mutate } of cases) {
+    const projection = structuredClone(validProjection()) as Record<string, any>;
+    mutate(projection);
+    assert.throws(() => assertTradeChartProjection(projection), error);
+  }
+});
+
 test("rejects unknown indicator settings and unsafe or unsupported drawings", () => {
   const unknownSetting = structuredClone(validProjection().chart_state) as Record<string, any>;
   unknownSetting.indicators[0].settings.callback = "alert(1)";

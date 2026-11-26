@@ -428,9 +428,11 @@ describe.sequential("WaveKB chart engine boundary", () => {
 
     for (const drawing of [
       { ...base, style: { showStats: "yes" } },
+      { ...base, style: { lineStyle: ["solid"] } },
       { ...base, style: { lineWidth: 0 } },
       { ...base, unknownState: true },
       { ...base, tool: "rectangle" as const, text: { value: "note", align: "diagonal" } },
+      { ...base, tool: "rectangle" as const, text: { value: "note", align: ["left"] } },
       {
         ...base,
         tool: "long-position" as const,

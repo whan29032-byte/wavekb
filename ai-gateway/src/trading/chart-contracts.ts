@@ -115,6 +115,10 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[], f
   if (Reflect.ownKeys(value).some((key) => typeof key !== "string" || !allowed.includes(key))) invalid(field);
 }
 
+function isAllowedString(value: unknown, allowed: ReadonlySet<string>): value is string {
+  return typeof value === "string" && allowed.has(value);
+}
+
 function boundedString(value: unknown, field: string, maximum: number, allowEmpty = false): string {
   if (typeof value !== "string" || value.length > maximum || (!allowEmpty && value.length === 0)) invalid(field);
   return value;
@@ -184,15 +188,15 @@ function indicatorSettings(value: unknown, indicatorId: string, timeframe: Trade
     } else if (key === "calcMode") {
       if (setting !== "stdev" && setting !== "percent") invalid("indicator_settings");
     } else if (key === "bandsStyle") {
-      if (!new Set(["Average True Range", "True Range", "Range"]).has(String(setting))) invalid("indicator_settings");
+      if (!isAllowedString(setting, new Set(["Average True Range", "True Range", "Range"]))) invalid("indicator_settings");
     } else if (key === "kind") {
-      if (!new Set(["traditional", "fibonacci", "woodie", "classic", "demark", "camarilla"]).has(String(setting))) invalid("indicator_settings");
+      if (!isAllowedString(setting, new Set(["traditional", "fibonacci", "woodie", "classic", "demark", "camarilla"]))) invalid("indicator_settings");
     } else if (key === "frame") {
-      if (!new Set(["auto", "daily", "weekly", "monthly", "quarterly", "yearly"]).has(String(setting))) invalid("indicator_settings");
+      if (!isAllowedString(setting, new Set(["auto", "daily", "weekly", "monthly", "quarterly", "yearly"]))) invalid("indicator_settings");
     } else if (key === "pivotMode") {
       if (setting !== "auto" && setting !== "manual") invalid("indicator_settings");
     } else if (key === "maType") {
-      if (!new Set(["None", "SMA", "SMA + Bollinger Bands", "EMA", "SMMA (RMA)", "WMA", "VWMA"]).has(String(setting))) invalid("indicator_settings");
+      if (!isAllowedString(setting, new Set(["None", "SMA", "SMA + Bollinger Bands", "EMA", "SMMA (RMA)", "WMA", "VWMA"]))) invalid("indicator_settings");
     } else {
       finiteNumber(setting, "indicator_settings", -500, 1_000);
       const number = setting as number;
@@ -238,7 +242,7 @@ function validateDrawingStyle(value: unknown, tool: TradeChartDrawingToolId): vo
   if (style.fillColor !== undefined) color(style.fillColor, "drawing_style");
   if (style.lineWidth !== undefined) finiteNumber(style.lineWidth, "drawing_style", 0.5, 20);
   if (style.fillOpacity !== undefined) finiteNumber(style.fillOpacity, "drawing_style", 0, 1);
-  if (style.lineStyle !== undefined && !new Set(["solid", "dashed", "dotted"]).has(String(style.lineStyle))) invalid("drawing_style");
+  if (style.lineStyle !== undefined && !isAllowedString(style.lineStyle, new Set(["solid", "dashed", "dotted"]))) invalid("drawing_style");
   for (const key of ["fill", "extendLeft", "extendRight", "showLabels", "showStats"] as const) {
     if (style[key] !== undefined && typeof style[key] !== "boolean") invalid("drawing_style");
   }
@@ -267,15 +271,15 @@ function validateDrawingText(value: unknown, tool: TradeChartDrawingToolId): voi
   if (text.fontSize !== undefined) finiteNumber(text.fontSize, "drawing_text", 6, 96);
   if (text.fontFamily !== undefined && (typeof text.fontFamily !== "string" || !/^[A-Za-z0-9 _,-]{0,128}$/.test(text.fontFamily))) invalid("drawing_text");
   for (const key of ["bold", "italic"] as const) if (text[key] !== undefined && typeof text[key] !== "boolean") invalid("drawing_text");
-  if (text.align !== undefined && !new Set(["left", "center", "right"]).has(String(text.align))) invalid("drawing_text");
-  if (text.valign !== undefined && !new Set(["top", "middle", "bottom"]).has(String(text.valign))) invalid("drawing_text");
+  if (text.align !== undefined && !isAllowedString(text.align, new Set(["left", "center", "right"]))) invalid("drawing_text");
+  if (text.valign !== undefined && !isAllowedString(text.valign, new Set(["top", "middle", "bottom"]))) invalid("drawing_text");
 }
 
 function validateDrawingProperties(value: unknown, tool: TradeChartDrawingToolId): void {
   const properties = record(value, "drawing_properties");
   exactKeys(properties, TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool].propertyKeys, "drawing_properties");
-  if (properties.degree !== undefined && !new Set(["grand-supercycle", "supercycle", "cycle", "primary", "intermediate", "minor", "minute", "minuette", "subminuette"]).has(String(properties.degree))) invalid("drawing_properties");
-  if (properties.labelStyle !== undefined && !new Set(["degree", "plain", "parentheses", "circled"]).has(String(properties.labelStyle))) invalid("drawing_properties");
+  if (properties.degree !== undefined && !isAllowedString(properties.degree, new Set(["grand-supercycle", "supercycle", "cycle", "primary", "intermediate", "minor", "minute", "minuette", "subminuette"]))) invalid("drawing_properties");
+  if (properties.labelStyle !== undefined && !isAllowedString(properties.labelStyle, new Set(["degree", "plain", "parentheses", "circled"]))) invalid("drawing_properties");
   for (const key of ["showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices"] as const) {
     if (properties[key] !== undefined && typeof properties[key] !== "boolean") invalid("drawing_properties");
   }
@@ -357,11 +361,11 @@ function validateMarker(value: unknown): void {
   utcTimestamp(marker.occurred_at, "marker_time");
   canonicalUnsignedDecimal(marker.price, "marker_price", true);
   canonicalUnsignedDecimal(marker.allocated_quantity, "marker_quantity", true);
-  if (!new Set(["open", "add", "reduce", "close", "reverse_open"]).has(String(marker.allocation_role))) invalid("marker_role");
+  if (!isAllowedString(marker.allocation_role, new Set(["open", "add", "reduce", "close", "reverse_open"]))) invalid("marker_role");
   if (!Number.isInteger(marker.sort_order) || (marker.sort_order as number) < 0) invalid("marker_sort_order");
-  if (!new Set(["buy", "sell"]).has(String(marker.side))) invalid("marker_side");
-  if (!new Set(["both", "long", "short"]).has(String(marker.position_side))) invalid("marker_position_side");
-  if (!new Set(["maker", "taker", "unknown"]).has(String(marker.liquidity))) invalid("marker_liquidity");
+  if (!isAllowedString(marker.side, new Set(["buy", "sell"]))) invalid("marker_side");
+  if (!isAllowedString(marker.position_side, new Set(["both", "long", "short"]))) invalid("marker_position_side");
+  if (!isAllowedString(marker.liquidity, new Set(["maker", "taker", "unknown"]))) invalid("marker_liquidity");
   const providerMask = boundedString(marker.provider_fill_id_mask, "marker_mask", 80);
   if (!/^(?:\u2022{4}|\*{4})[A-Za-z0-9]{4}$/u.test(providerMask)) invalid("marker_mask");
   if (marker.annotation !== null) {
@@ -377,7 +381,7 @@ function validateMarker(value: unknown): void {
     }
     if (!Number.isInteger(annotation.image_count) || (annotation.image_count as number) < 0 || (annotation.image_count as number) > 5) invalid("annotation_images");
     positiveInteger(annotation.version, "annotation_version");
-    if (!new Set(["current", "remapped", "needs_confirmation"]).has(String(annotation.remap_status))) invalid("annotation_remap");
+    if (!isAllowedString(annotation.remap_status, new Set(["current", "remapped", "needs_confirmation"]))) invalid("annotation_remap");
   }
 }
 
@@ -389,19 +393,21 @@ function validateProjectionCoverage(value: unknown, projection: Record<string, u
   if (coverage.fetched_at !== null) utcTimestamp(coverage.fetched_at, "coverage_fetched_at");
   if (!Array.isArray(coverage.gaps) || coverage.gaps.length > 1_000) invalid("coverage_gaps");
   const range = record(projection.range, "range");
+  const rangeFrom = utcTimestamp(range.from, "coverage_range");
+  const rangeTo = utcTimestamp(range.to, "coverage_range");
   const previousEnd = new Map<string, number>();
   for (const candidate of coverage.gaps) {
     const gap = record(candidate, "coverage_gap");
     exactKeys(gap, ["series_basis", "from", "to"], "coverage_gap");
-    const seriesBasis = String(gap.series_basis);
-    if (!new Set(["trade", "mark", "bid", "ask"]).has(seriesBasis)
-      || (projection.price_type === "both" ? seriesBasis !== "bid" && seriesBasis !== "ask" : seriesBasis !== projection.price_type)) {
+    if (!isAllowedString(gap.series_basis, new Set(["trade", "mark", "bid", "ask"]))) invalid("coverage_gap");
+    const seriesBasis = gap.series_basis;
+    if (projection.price_type === "both" ? seriesBasis !== "bid" && seriesBasis !== "ask" : seriesBasis !== projection.price_type) {
       invalid("coverage_gap");
     }
     const from = utcTimestamp(gap.from, "coverage_gap");
     const to = utcTimestamp(gap.to, "coverage_gap");
-    if (Date.parse(from) >= Date.parse(to) || Date.parse(from) < Date.parse(String(range.from))
-      || Date.parse(to) > Date.parse(String(range.to))
+    if (Date.parse(from) >= Date.parse(to) || Date.parse(from) < Date.parse(rangeFrom)
+      || Date.parse(to) > Date.parse(rangeTo)
       || Date.parse(from) < (previousEnd.get(seriesBasis) ?? 0)) invalid("coverage_gaps");
     previousEnd.set(seriesBasis, Date.parse(to));
   }
