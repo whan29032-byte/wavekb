@@ -1,3 +1,29 @@
+# Store all detected text with LF line endings.
+* text=auto eol=lf
+
+# Preserve binary asset bytes, including image metadata, font tables, and
+# compressed archive contents.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.bz2 binary
+*.xz binary
+*.7z binary
+*.rar binary
+
 # Preserve PDF bytes, including cross-reference offsets and checksums.
 assets/books/*.pdf binary
 
