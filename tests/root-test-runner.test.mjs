@@ -6,7 +6,7 @@ import { rootTestFiles } from "../scripts/lib/root-test-manifest.mjs";
 import { nodeTestArguments } from "../scripts/run-root-tests.mjs";
 
 const testDirectory = "tests";
-const windowsOnly = [
+const posixOnly = [
   "tests/configure-wallet-runtime.test.mjs",
   "tests/deploy-release.test.mjs",
   "tests/diagnose-knowledge-transport.test.mjs",
@@ -79,8 +79,8 @@ test("omits the POSIX-only root suites only on Windows", () => {
   const windows = rootTestFiles({ platform: "win32", testDirectory });
   const linux = rootTestFiles({ platform: "linux", testDirectory });
 
-  assert.deepEqual(windows.omitted, windowsOnly);
-  for (const file of windowsOnly) {
+  assert.deepEqual(windows.omitted, posixOnly);
+  for (const file of posixOnly) {
     assert.ok(!windows.selected.includes(file), `Windows selected ${file}`);
     assert.ok(linux.selected.includes(file), `Linux omitted ${file}`);
   }
@@ -144,7 +144,7 @@ test("passes every discovered root suite to Node on Linux", () => {
 });
 
 test("passes only portable root suites to Node on Windows", () => {
-  const portableTests = discoveredRootTests.filter((file) => !windowsOnly.includes(file));
+  const portableTests = discoveredRootTests.filter((file) => !posixOnly.includes(file));
 
   assert.deepEqual(
     nodeTestArguments({ platform: "win32", testDirectory, posixOnly: false }),
@@ -155,7 +155,7 @@ test("passes only portable root suites to Node on Windows", () => {
 test("runs exactly the POSIX root suite when requested", () => {
   assert.deepEqual(
     nodeTestArguments({ platform: "linux", testDirectory, posixOnly: true }),
-    ["--test", ...windowsOnly],
+    ["--test", ...posixOnly],
   );
 });
 

@@ -6,7 +6,11 @@ import { gatewayTestFiles } from "../scripts/lib/test-manifest.ts";
 import { nodeTestArguments, runGatewayTests } from "../scripts/run-tests.ts";
 
 const testDirectory = "test";
-const windowsOnly = [
+const posixOnly = [
+  "test/research-configure-runtime-posix.test.ts",
+  "test/youtube-configure-runtime-posix.test.ts",
+];
+const portableSecurityTests = [
   "test/private-theory.test.ts",
   "test/research-configure-runtime.test.ts",
   "test/youtube-configure-runtime.test.ts",
@@ -29,11 +33,12 @@ test("returns a sorted, complete gateway test manifest without stale or duplicat
   }
 });
 
-test("omits exactly the Windows-incompatible gateway security suites", () => {
+test("omits exactly the POSIX filesystem and service integration suites on Windows", () => {
   const windows = gatewayTestFiles({ platform: "win32", testDirectory });
 
-  assert.deepEqual(windows.omitted, windowsOnly);
-  for (const file of windowsOnly) assert.ok(!windows.selected.includes(file), `Windows selected ${file}`);
+  assert.deepEqual(windows.omitted, posixOnly);
+  for (const file of posixOnly) assert.ok(!windows.selected.includes(file), `Windows selected ${file}`);
+  for (const file of portableSecurityTests) assert.ok(windows.selected.includes(file), `Windows omitted portable test ${file}`);
 });
 
 test("Linux selects every direct gateway test and omits none", () => {
@@ -41,15 +46,15 @@ test("Linux selects every direct gateway test and omits none", () => {
 
   assert.deepEqual(linux.omitted, []);
   assert.deepEqual(linux.selected, discoveredGatewayTests);
-  for (const file of windowsOnly) assert.ok(linux.selected.includes(file), `Linux omitted ${file}`);
+  for (const file of posixOnly) assert.ok(linux.selected.includes(file), `Linux omitted ${file}`);
 });
 
 test("builds exact default and POSIX-only Node arguments", () => {
-  const portable = discoveredGatewayTests.filter((file) => !windowsOnly.includes(file));
+  const portable = discoveredGatewayTests.filter((file) => !posixOnly.includes(file));
 
   assert.deepEqual(nodeTestArguments({ platform: "win32", testDirectory, posixOnly: false }), ["--test", ...portable]);
   assert.deepEqual(nodeTestArguments({ platform: "linux", testDirectory, posixOnly: false }), ["--test", ...discoveredGatewayTests]);
-  assert.deepEqual(nodeTestArguments({ platform: "linux", testDirectory, posixOnly: true }), ["--test", ...windowsOnly]);
+  assert.deepEqual(nodeTestArguments({ platform: "linux", testDirectory, posixOnly: true }), ["--test", ...posixOnly]);
 });
 
 test("rejects POSIX-only gateway tests on Windows", () => {
@@ -73,7 +78,7 @@ test("prints Windows omissions and propagates child exit status", () => {
   assert.equal(call?.[0], process.execPath);
   assert.deepEqual(call?.[1], nodeTestArguments({ platform: "win32", testDirectory, posixOnly: false }));
   assert.deepEqual(call?.[2], { stdio: "inherit" });
-  assert.deepEqual(output, ["Skipping POSIX-only gateway test suites on Windows:", ...windowsOnly.map((file) => `- ${file}`)]);
+  assert.deepEqual(output, ["Skipping POSIX-only gateway test suites on Windows:", ...posixOnly.map((file) => `- ${file}`)]);
 });
 
 test("treats a signaled gateway test child as failure", () => {

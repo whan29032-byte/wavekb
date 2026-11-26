@@ -4,9 +4,8 @@ import path from "node:path";
 type TestFileOptions = { platform: string; testDirectory: string };
 
 const posixOnlyGatewayTests = new Set([
-  "test/private-theory.test.ts",
-  "test/research-configure-runtime.test.ts",
-  "test/youtube-configure-runtime.test.ts",
+  "test/research-configure-runtime-posix.test.ts",
+  "test/youtube-configure-runtime-posix.test.ts",
 ]);
 
 export function gatewayTestFiles({ platform, testDirectory }: TestFileOptions) {
