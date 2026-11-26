@@ -181,13 +181,14 @@ function fill(nativeFillId, occurredAt, { action = "open", side = "buy" } = {}) 
   };
 }
 
-function cycle({ revision, fillIds, allocations, closedAt = null }) {
+function cycle({ revision, fillIds, allocations, closedAt = null, allocationDigest = `allocation-${revision}` }) {
   return {
     id: cycleOne,
     stable_key: "binance:connection:BTCUSDT:long:open-1",
     anchor_fill_id: "open-1",
     fill_ids: fillIds,
     allocations,
+    allocation_digest: allocationDigest,
     revision,
     fill_digest: `digest-${revision}`,
     product: "usdt_perpetual",
@@ -263,6 +264,7 @@ test("trade cycle allocation schema enforces composite identity, ownership, chec
     assert.match(byName.get("trading_trade_cycle_fills_quantity_check")?.definition ?? "", /allocation_quantity > .*0/);
     assert.match(byName.get("trading_trade_cycle_fills_role_check")?.definition ?? "", /open.*add.*reduce.*close.*reverse_open/);
     assert.match(byName.get("trading_trade_cycle_fills_sort_order_check")?.definition ?? "", /sort_order >= 0/);
+    assert.match(byName.get("trading_trade_cycle_fills_cycle_sort_unique")?.definition ?? "", /UNIQUE \(cycle_id, cycle_revision, sort_order\)/);
 
     const indexes = await database.query(`
       select indexname from pg_indexes
@@ -273,7 +275,8 @@ test("trade cycle allocation schema enforces composite identity, ownership, chec
       "trading_trade_cycle_fills_fill_lookup_idx",
       "trading_trade_cycle_fills_owner_cycle_order_idx",
       "trading_trade_cycle_fills_pkey",
-    ]);
+      "trading_trade_cycle_fills_cycle_sort_unique",
+    ].sort());
 
     const security = await database.query(`
       select relrowsecurity from pg_class where oid = 'public.trading_trade_cycle_fills'::regclass
@@ -328,8 +331,66 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
     });
     assert.equal(Number(first.rows[0]?.generation), 1);
 
-    const second = await publish(database, {
+    await database.query(`
+      delete from public.trading_trade_cycle_fills
+      where cycle_id = $1 and cycle_revision = 1
+    `, [cycleOne]);
+    await database.query(`
+      update public.trading_trade_cycle_revisions
+      set facts = facts - 'allocations' - 'allocation_digest'
+      where cycle_id = $1 and revision = 1
+    `, [cycleOne]);
+
+    const backfill = await publish(database, {
       expectedGeneration: 1,
+      capturedAt: "2026-11-24T09:01:00.000Z",
+      fills: [fill("open-1", openedAt)],
+      cycles: [cycle({
+        revision: 1,
+        fillIds: ["open-1"],
+        allocations: [{ native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 }],
+      })],
+    });
+    assert.equal(Number(backfill.rows[0]?.generation), 2);
+
+    const replay = await publish(database, {
+      expectedGeneration: 2,
+      capturedAt: "2026-11-24T09:02:00.000Z",
+      fills: [fill("open-1", openedAt)],
+      cycles: [cycle({
+        revision: 1,
+        fillIds: ["open-1"],
+        allocations: [{ native_fill_id: "open-1", quantity: "1.000000000000000000", role: "open", sort_order: 0 }],
+      })],
+    });
+    assert.equal(Number(replay.rows[0]?.generation), 3);
+    const replayedAllocation = await database.query(`
+      select generation, allocation_quantity::text
+      from public.trading_trade_cycle_fills
+      where cycle_id = $1 and cycle_revision = 1
+    `, [cycleOne]);
+    assert.deepEqual(replayedAllocation.rows, [{ generation: 2, allocation_quantity: "1.000000000000000000" }]);
+
+    await assert.rejects(
+      publish(database, {
+        expectedGeneration: 3,
+        capturedAt: "2026-11-24T09:03:00.000Z",
+        fills: [fill("open-1", openedAt)],
+        cycles: [cycle({
+          revision: 1,
+          fillIds: ["open-1"],
+          allocations: [{ native_fill_id: "open-1", quantity: "0.5", role: "open", sort_order: 0 }],
+        })],
+      }),
+      /immutable_trade_cycle_allocations/,
+    );
+    const unchangedAfterAllocationMutation = await database.query(`
+      select sync_generation from public.exchange_connections where id = $1
+    `, [connectionOne]);
+    assert.equal(Number(unchangedAfterAllocationMutation.rows[0]?.sync_generation), 3);
+
+    const second = await publish(database, {
+      expectedGeneration: 3,
       capturedAt: "2026-11-24T09:05:00.000Z",
       fills: [fill("open-1", openedAt), fill("close-1", closedAt, { action: "close", side: "sell" })],
       cycles: [cycle({
@@ -342,17 +403,18 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
         ],
       })],
     });
-    assert.equal(Number(second.rows[0]?.generation), 2);
+    assert.equal(Number(second.rows[0]?.generation), 4);
 
     const revisions = await database.query(`
-      select revision, facts->'fill_ids' as fill_ids
+      select revision, facts->'fill_ids' as fill_ids,
+             facts->>'allocation_digest' as allocation_digest
       from public.trading_trade_cycle_revisions
       where cycle_id = $1
       order by revision
     `, [cycleOne]);
     assert.deepEqual(revisions.rows, [
-      { revision: 1, fill_ids: ["open-1"] },
-      { revision: 2, fill_ids: ["open-1", "close-1"] },
+      { revision: 1, fill_ids: ["open-1"], allocation_digest: "allocation-1" },
+      { revision: 2, fill_ids: ["open-1", "close-1"], allocation_digest: "allocation-2" },
     ]);
 
     const allocations = await database.query(`
@@ -363,10 +425,72 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
       order by cycle_revision, sort_order
     `, [cycleOne]);
     assert.deepEqual(allocations.rows, [
-      { cycle_revision: 1, native_fill_id: "open-1", allocation_quantity: "1.000000000000000000", allocation_role: "open", sort_order: 0, generation: 1 },
-      { cycle_revision: 2, native_fill_id: "open-1", allocation_quantity: "1.000000000000000000", allocation_role: "open", sort_order: 0, generation: 2 },
-      { cycle_revision: 2, native_fill_id: "close-1", allocation_quantity: "1.000000000000000000", allocation_role: "close", sort_order: 1, generation: 2 },
+      { cycle_revision: 1, native_fill_id: "open-1", allocation_quantity: "1.000000000000000000", allocation_role: "open", sort_order: 0, generation: 2 },
+      { cycle_revision: 2, native_fill_id: "open-1", allocation_quantity: "1.000000000000000000", allocation_role: "open", sort_order: 0, generation: 4 },
+      { cycle_revision: 2, native_fill_id: "close-1", allocation_quantity: "1.000000000000000000", allocation_role: "close", sort_order: 1, generation: 4 },
     ]);
+
+    await database.exec(`
+      insert into public.trading_fills (
+        connection_id, owner_id, provider, native_fill_id, native_order_id,
+        symbol, native_symbol, product, side, position_side, action,
+        price, quantity, contract_multiplier, occurred_at, realized_pnl,
+        realized_pnl_asset, fee, fee_asset, liquidity, generation
+      ) values (
+        '${connectionOne}', '${ownerOne}', 'binance', 'wrong-fill', 'wrong-order',
+        'BTCUSDT', 'BTCUSDT', 'usdt_perpetual', 'buy', 'both', 'open',
+        100, 1, 1, now(), 0, 'USDT', 0, 'USDT', 'taker', 4
+      )
+    `);
+
+    const invalidAllocationCases = [
+      {
+        name: "unrelated same-account fill",
+        allocations: [
+          { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+          { native_fill_id: "wrong-fill", quantity: "1", role: "close", sort_order: 1 },
+        ],
+      },
+      {
+        name: "missing declared fill",
+        allocations: [{ native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 }],
+      },
+      {
+        name: "duplicate sort order",
+        allocations: [
+          { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+          { native_fill_id: "close-1", quantity: "1", role: "close", sort_order: 0 },
+        ],
+      },
+      {
+        name: "non-contiguous sort order",
+        allocations: [
+          { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+          { native_fill_id: "close-1", quantity: "1", role: "close", sort_order: 2 },
+        ],
+      },
+    ];
+    for (const invalid of invalidAllocationCases) {
+      await assert.rejects(
+        publish(database, {
+          expectedGeneration: 4,
+          capturedAt: "2026-11-24T09:06:00.000Z",
+          fills: [],
+          cycles: [cycle({
+            revision: 2,
+            fillIds: ["open-1", "close-1"],
+            closedAt,
+            allocations: invalid.allocations,
+          })],
+        }),
+        /invalid_trade_cycle_allocations/,
+        invalid.name,
+      );
+      const rolledBackInvalid = await database.query(`
+        select sync_generation from public.exchange_connections where id = $1
+      `, [connectionOne]);
+      assert.equal(Number(rolledBackInvalid.rows[0]?.sync_generation), 4, invalid.name);
+    }
 
     await database.exec(`
       insert into public.exchange_credential_sets (owner_id, provider, label)
@@ -396,7 +520,7 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
 
     await assert.rejects(
       publish(database, {
-        expectedGeneration: 2,
+        expectedGeneration: 4,
         capturedAt: "2026-11-24T09:10:00.000Z",
         fills: [],
         cycles: [{
@@ -415,7 +539,7 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
     const rolledBack = await database.query(`
       select sync_generation from public.exchange_connections where id = $1
     `, [connectionOne]);
-    assert.equal(Number(rolledBack.rows[0]?.sync_generation), 2);
+    assert.equal(Number(rolledBack.rows[0]?.sync_generation), 4);
     const cycleCount = await database.query(`
       select count(*)::integer as count from public.trading_trade_cycles where connection_id = $1
     `, [connectionOne]);
@@ -429,7 +553,7 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
         insert into public.trading_trade_cycle_fills (
           cycle_id, cycle_revision, owner_id, connection_id, fill_id,
           native_fill_id, allocation_quantity, allocation_role, sort_order, generation
-        ) values ($1, 2, $2, $3, $4, 'alien-fill', 1, 'open', 9, 2)
+        ) values ($1, 2, $2, $3, $4, 'alien-fill', 1, 'open', 9, 4)
       `, [cycleOne, ownerOne, connectionOne, alienFill.rows[0]?.id]),
       /trading_trade_cycle_fills_fill_owner_fkey/,
     );

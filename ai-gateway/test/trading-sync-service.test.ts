@@ -13,6 +13,7 @@ import type {
   TradingProviderAdapter,
 } from "../src/trading/providers/contracts.ts";
 import {
+  SupabaseTradingSyncStore,
   TradingSyncService,
   hashExternalTradingAccount,
   type SyncConnectionRecord,
@@ -196,6 +197,72 @@ test("rebuilds a reviewed cycle identity when a late closing fill arrives", asyn
     { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
     { native_fill_id: "close-1", quantity: "1", role: "close", sort_order: 1 },
   ]);
+});
+
+test("advances the cycle revision when normalized allocation facts change without changing fill IDs", async () => {
+  const firstStore = new Store();
+  const original = fill("same-fill", "2026-11-20T00:00:00.000Z", "open", "buy");
+  await service(firstStore, new Adapter([batch({ fills: [original] })])).syncConnection(connectionId);
+  const firstCycle = firstStore.publication?.cycles[0];
+  assert.ok(firstCycle);
+  assert.equal(firstCycle.revision, 1);
+
+  const corrected = { ...original, quantity: "2" };
+  const secondStore = new Store();
+  secondStore.existingFills = [corrected];
+  secondStore.previousCycles = [{
+    id: firstCycle.id,
+    created_at: "2026-11-20T00:05:00.000Z",
+    anchor_fill_id: firstCycle.anchor_fill_id,
+    fill_ids: firstCycle.fill_ids,
+    revision: firstCycle.revision,
+    fill_digest: firstCycle.fill_digest,
+    allocation_digest: firstCycle.allocation_digest,
+    has_review: false,
+  }];
+  await service(secondStore, new Adapter([batch()])).syncConnection(connectionId);
+
+  assert.equal(secondStore.publication?.cycles[0]?.id, firstCycle.id);
+  assert.equal(secondStore.publication?.cycles[0]?.fill_digest, firstCycle.fill_digest);
+  assert.notEqual(secondStore.publication?.cycles[0]?.allocation_digest, firstCycle.allocation_digest);
+  assert.equal(secondStore.publication?.cycles[0]?.revision, 2);
+});
+
+test("loads allocation digest evidence from immutable revision facts", async () => {
+  const requests: string[] = [];
+  const database = {
+    async request(path: string) {
+      requests.push(path);
+      if (path.includes("/trading_fills?")) return [];
+      if (path.includes("/trading_cash_events?")) return [];
+      if (path.includes("/trading_trade_cycles?")) {
+        return [{
+          id: "55555555-5555-4555-8555-555555555555",
+          created_at: "2026-11-20T00:05:00.000Z",
+          revision: 3,
+          fill_digest: "fill-digest",
+        }];
+      }
+      if (path.includes("/trading_trade_cycle_revisions?")) {
+        return [{
+          cycle_id: "55555555-5555-4555-8555-555555555555",
+          facts: {
+            anchor_fill_id: "open-1",
+            fill_ids: ["open-1"],
+            allocation_digest: "allocation-digest",
+          },
+        }];
+      }
+      if (path.includes("/trading_trade_reviews?")) return [];
+      throw new Error(`unexpected_request:${path}`);
+    },
+  };
+  const store = new SupabaseTradingSyncStore(database);
+
+  const history = await store.loadHistory(connectionId);
+
+  assert.equal(history.previous_cycles[0]?.allocation_digest, "allocation-digest");
+  assert.equal(requests.length, 5);
 });
 
 test("isolates one connection failure while synchronizing the remaining due accounts", async () => {

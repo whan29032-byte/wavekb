@@ -210,6 +210,7 @@ export class SupabaseTradingSyncStore implements TradingSyncStore {
           id: row.id, created_at: row.created_at, anchor_fill_id: facts.anchor_fill_id,
           fill_ids: facts.fill_ids.filter((item: unknown): item is string => typeof item === "string"),
           revision: Number(row.revision), fill_digest: String(row.fill_digest), has_review: reviewedIds.has(row.id),
+          ...(typeof facts.allocation_digest === "string" ? { allocation_digest: facts.allocation_digest } : {}),
         }];
       }),
     };

@@ -36,7 +36,9 @@ create table public.trading_trade_cycle_fills (
   constraint trading_trade_cycle_fills_role_check
     check (allocation_role in ('open', 'add', 'reduce', 'close', 'reverse_open')),
   constraint trading_trade_cycle_fills_sort_order_check
-    check (sort_order >= 0)
+    check (sort_order >= 0),
+  constraint trading_trade_cycle_fills_cycle_sort_unique
+    unique (cycle_id, cycle_revision, sort_order)
 );
 
 create index trading_trade_cycle_fills_owner_cycle_order_idx
@@ -80,7 +82,16 @@ declare
   item jsonb;
   allocation jsonb;
   persisted_cycle public.trading_trade_cycles;
+  persisted_revision public.trading_trade_cycle_revisions;
   persisted_fill public.trading_fills;
+  declared_fill_count integer;
+  declared_distinct_fill_count integer;
+  incoming_allocation_count integer;
+  incoming_distinct_fill_count integer;
+  incoming_distinct_sort_count integer;
+  incoming_minimum_sort integer;
+  incoming_maximum_sort integer;
+  existing_allocation_count integer;
   path text[];
 begin
   select * into connection
@@ -236,6 +247,50 @@ begin
 
   for item in select value from jsonb_array_elements(p_cycles) loop
     if item ? 'allocations' then
+      if coalesce(jsonb_typeof(item->'fill_ids'), 'null') <> 'array'
+         or coalesce(jsonb_typeof(item->'allocations'), 'null') <> 'array'
+         or jsonb_array_length(item->'fill_ids') = 0
+         or jsonb_array_length(item->'allocations') = 0
+         or exists (
+           select 1
+           from jsonb_array_elements(item->'allocations') proposed
+           where jsonb_typeof(proposed) <> 'object'
+         ) then
+        raise exception 'invalid_trade_cycle_allocations';
+      end if;
+
+      select count(*), count(distinct declared)
+      into declared_fill_count, declared_distinct_fill_count
+      from jsonb_array_elements_text(item->'fill_ids') declared;
+
+      select count(*),
+             count(distinct proposed->>'native_fill_id'),
+             count(distinct (proposed->>'sort_order')::integer),
+             min((proposed->>'sort_order')::integer),
+             max((proposed->>'sort_order')::integer)
+      into incoming_allocation_count, incoming_distinct_fill_count,
+           incoming_distinct_sort_count, incoming_minimum_sort,
+           incoming_maximum_sort
+      from jsonb_array_elements(item->'allocations') proposed;
+
+      if declared_fill_count <> incoming_allocation_count
+         or declared_distinct_fill_count <> declared_fill_count
+         or incoming_distinct_fill_count <> incoming_allocation_count
+         or incoming_distinct_sort_count <> incoming_allocation_count
+         or incoming_minimum_sort <> 0
+         or incoming_maximum_sort <> incoming_allocation_count - 1
+         or exists (
+           select 1
+           from jsonb_array_elements_text(item->'fill_ids') declared(native_fill_id)
+           where not exists (
+             select 1
+             from jsonb_array_elements(item->'allocations') proposed
+             where proposed->>'native_fill_id' = declared.native_fill_id
+           )
+         ) then
+        raise exception 'invalid_trade_cycle_allocations';
+      end if;
+
       select * into persisted_cycle
       from public.trading_trade_cycles
       where id = (item->>'id')::uuid
@@ -246,34 +301,77 @@ begin
         raise exception 'trade_cycle_allocation_cycle_not_found';
       end if;
 
-      delete from public.trading_trade_cycle_fills
+      select * into persisted_revision
+      from public.trading_trade_cycle_revisions
+      where cycle_id = persisted_cycle.id
+        and revision = persisted_cycle.revision;
+      if persisted_revision.cycle_id is null then
+        raise exception 'trade_cycle_allocation_revision_not_found';
+      end if;
+      if persisted_revision.facts->'fill_ids' is distinct from item->'fill_ids'
+         or (
+           persisted_revision.facts ? 'allocation_digest'
+           and persisted_revision.facts->>'allocation_digest' is distinct from item->>'allocation_digest'
+         ) then
+        raise exception 'immutable_trade_cycle_revision';
+      end if;
+
+      select count(*) into existing_allocation_count
+      from public.trading_trade_cycle_fills
       where cycle_id = persisted_cycle.id
         and cycle_revision = persisted_cycle.revision;
 
-      for allocation in select value from jsonb_array_elements(item->'allocations') loop
-        if jsonb_typeof(allocation) <> 'object' then
-          raise exception 'invalid_trade_cycle_allocation';
+      if existing_allocation_count > 0 then
+        if existing_allocation_count <> incoming_allocation_count
+           or exists (
+             select 1
+             from jsonb_array_elements(item->'allocations') proposed
+             where not exists (
+               select 1
+               from public.trading_trade_cycle_fills stored
+               where stored.cycle_id = persisted_cycle.id
+                 and stored.cycle_revision = persisted_cycle.revision
+                 and stored.native_fill_id = proposed->>'native_fill_id'
+                 and stored.allocation_quantity = (proposed->>'quantity')::numeric
+                 and stored.allocation_role = proposed->>'role'
+                 and stored.sort_order = (proposed->>'sort_order')::integer
+             )
+           ) then
+          raise exception 'immutable_trade_cycle_allocations';
         end if;
-        select * into persisted_fill
-        from public.trading_fills
-        where connection_id = connection.id
-          and owner_id = connection.owner_id
-          and native_fill_id = allocation->>'native_fill_id';
-        if persisted_fill.id is null then
-          raise exception 'trade_cycle_allocation_fill_not_found';
-        end if;
+      else
+        for allocation in select value from jsonb_array_elements(item->'allocations') loop
+          select * into persisted_fill
+          from public.trading_fills
+          where connection_id = connection.id
+            and owner_id = connection.owner_id
+            and native_fill_id = allocation->>'native_fill_id';
+          if persisted_fill.id is null then
+            raise exception 'trade_cycle_allocation_fill_not_found';
+          end if;
 
-        insert into public.trading_trade_cycle_fills (
-          cycle_id, cycle_revision, owner_id, connection_id, fill_id,
-          native_fill_id, allocation_quantity, allocation_role, sort_order,
-          generation
-        ) values (
-          persisted_cycle.id, persisted_cycle.revision, connection.owner_id,
-          connection.id, persisted_fill.id, persisted_fill.native_fill_id,
-          (allocation->>'quantity')::numeric, allocation->>'role',
-          (allocation->>'sort_order')::integer, next_generation
-        );
-      end loop;
+          insert into public.trading_trade_cycle_fills (
+            cycle_id, cycle_revision, owner_id, connection_id, fill_id,
+            native_fill_id, allocation_quantity, allocation_role, sort_order,
+            generation
+          ) values (
+            persisted_cycle.id, persisted_cycle.revision, connection.owner_id,
+            connection.id, persisted_fill.id, persisted_fill.native_fill_id,
+            (allocation->>'quantity')::numeric, allocation->>'role',
+            (allocation->>'sort_order')::integer, next_generation
+          );
+        end loop;
+      end if;
+
+      if not (persisted_revision.facts ? 'allocation_digest') then
+        update public.trading_trade_cycle_revisions
+        set facts = facts || jsonb_build_object(
+          'allocations', item->'allocations',
+          'allocation_digest', item->'allocation_digest'
+        )
+        where cycle_id = persisted_cycle.id
+          and revision = persisted_cycle.revision;
+      end if;
     end if;
   end loop;
 

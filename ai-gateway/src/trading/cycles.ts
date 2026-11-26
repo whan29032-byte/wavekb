@@ -113,6 +113,7 @@ export type ReconstructedCycle = {
   fill_ids: string[];
   allocations: CycleFillAllocation[];
   fill_digest: string;
+  allocation_digest: string;
   opened_at: string;
   closed_at: string | null;
   entry_price: string;
@@ -171,8 +172,20 @@ function uniqueSortedFills(fills: CanonicalFill[]): CanonicalFill[] {
   }
   return [...byId.values()].sort((left, right) => {
     const time = Date.parse(left.occurred_at) - Date.parse(right.occurred_at);
-    return time || left.native_fill_id.localeCompare(right.native_fill_id);
+    return time || compareCodePoints(left.native_fill_id, right.native_fill_id);
   });
+}
+
+function compareCodePoints(left: string, right: string): number {
+  const leftPoints = [...left];
+  const rightPoints = [...right];
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPoint = leftPoints[index]!.codePointAt(0)!;
+    const rightPoint = rightPoints[index]!.codePointAt(0)!;
+    if (leftPoint !== rightPoint) return leftPoint < rightPoint ? -1 : 1;
+  }
+  return leftPoints.length < rightPoints.length ? -1 : leftPoints.length > rightPoints.length ? 1 : 0;
 }
 
 function fillDelta(fill: CanonicalFill): Decimal {
@@ -252,12 +265,29 @@ function digestFillIds(fillIds: readonly string[]): string {
   return createHash("sha256").update([...fillIds].sort().join("\n")).digest("hex");
 }
 
+function digestAllocations(allocations: readonly CycleFillAllocation[]): string {
+  return createHash("sha256")
+    .update(allocations.map((allocation) => [
+      allocation.native_fill_id,
+      allocation.quantity,
+      allocation.role,
+      String(allocation.sort_order),
+    ].join("\u001f")).join("\n"))
+    .digest("hex");
+}
+
 function finalize(cycle: MutableCycle): ReconstructedCycle {
   const anchorFillId = cycle.fillIds[0] ?? "missing-anchor";
   const entryQuantity = isZero(cycle.openingQuantity) ? cycle.closingQuantity : cycle.openingQuantity;
   const entryPrice = isZero(cycle.openingQuantity) ? ZERO : divide(cycle.entryNotional, cycle.openingQuantity);
   const exitPrice = isZero(cycle.closingQuantity) ? null : format(divide(cycle.exitNotional, cycle.closingQuantity));
   const netPnl = add(add(add(cycle.realizedPnl, cycle.fees), cycle.fundingOrSwap), cycle.dividends);
+  const allocations = cycle.allocations.map((allocation, sort_order) => ({
+    native_fill_id: allocation.native_fill_id,
+    quantity: format(allocation.quantity),
+    role: allocation.role,
+    sort_order,
+  }));
   return {
     provider: cycle.provider,
     connection_id: cycle.connectionId,
@@ -269,13 +299,9 @@ function finalize(cycle: MutableCycle): ReconstructedCycle {
     stable_key: `${cycle.provider}:${cycle.connectionId}:${cycle.symbol}:${cycle.direction}:${anchorFillId}`,
     anchor_fill_id: anchorFillId,
     fill_ids: [...cycle.fillIds],
-    allocations: cycle.allocations.map((allocation, sort_order) => ({
-      native_fill_id: allocation.native_fill_id,
-      quantity: format(allocation.quantity),
-      role: allocation.role,
-      sort_order,
-    })),
+    allocations,
     fill_digest: digestFillIds(cycle.fillIds),
+    allocation_digest: digestAllocations(allocations),
     opened_at: cycle.openedAt,
     closed_at: cycle.closedAt,
     entry_price: format(entryPrice),
@@ -395,6 +421,7 @@ export type PreviousCycleIdentity = {
   fill_ids: string[];
   revision: number;
   fill_digest: string;
+  allocation_digest?: string;
   has_review: boolean;
 };
 
@@ -403,6 +430,7 @@ export type NextCycleCandidate = {
   anchor_fill_id: string;
   fill_ids: string[];
   fill_digest: string;
+  allocation_digest: string;
 };
 
 export type CycleReconciliation = {
@@ -448,7 +476,10 @@ export function reconcileCycleLineage(
     return {
       candidate_index: candidateIndex,
       id: canonical.id,
-      revision: canonical.fill_digest === candidate.fill_digest ? canonical.revision : canonical.revision + 1,
+      revision: canonical.fill_digest === candidate.fill_digest
+        && (canonical.allocation_digest === undefined || canonical.allocation_digest === candidate.allocation_digest)
+        ? canonical.revision
+        : canonical.revision + 1,
       previous_ids: matches.map((cycle) => cycle.id),
     };
   });
