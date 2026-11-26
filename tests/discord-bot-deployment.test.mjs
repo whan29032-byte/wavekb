@@ -64,6 +64,10 @@ test('deployment transaction seeds SQLite once and rolls every mutable release s
   assert.match(source, /discord-bot\.env/);
   assert.match(source, /elliott-wave-discord-bot\.service/);
   assert.match(source, /sudo systemctl enable --now elliott-wave-discord-bot\.service/);
+  assert.match(
+    source,
+    /if \[ "\$service_was_active" = active \]; then\s+sudo systemctl enable "\$service"\s+sudo systemctl restart "\$service"\s+else\s+sudo systemctl enable --now elliott-wave-discord-bot\.service\s+fi/
+  );
   assert.match(source, /journalctl -u elliott-wave-discord-bot\.service --since "\$started_at"/);
   assert.match(source, /grep -F '已上线'/);
 });

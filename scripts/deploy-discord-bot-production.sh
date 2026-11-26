@@ -162,7 +162,12 @@ sudo mv -Tf "$candidate_link" "$current_link"
 sudo systemctl daemon-reload
 
 started_at=$(date --iso-8601=seconds)
-sudo systemctl enable --now elliott-wave-discord-bot.service
+if [ "$service_was_active" = active ]; then
+  sudo systemctl enable "$service"
+  sudo systemctl restart "$service"
+else
+  sudo systemctl enable --now elliott-wave-discord-bot.service
+fi
 ready=0
 for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
   if sudo systemctl is-active --quiet "$service" \
