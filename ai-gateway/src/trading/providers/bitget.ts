@@ -1,5 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
-import { assertCanonicalCandleBatch } from "./contracts.ts";
+import { createCandleFetchGuard, finalizeCanonicalCandleBatch } from "./contracts.ts";
 import type {
   CandleRequest,
   CanonicalCandle,
@@ -105,8 +105,8 @@ function finiteTimestamp(value: unknown, field: string): number {
 }
 
 function canonicalUnsignedDecimal(value: unknown, field: string, allowZero: boolean): string {
-  if (typeof value !== "string" && typeof value !== "number") throw candleFailure(`bitget_invalid_${field}`, 502);
-  const raw = String(value);
+  if (typeof value !== "string") throw candleFailure(`bitget_invalid_${field}`, 502);
+  const raw = value;
   if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) throw candleFailure(`bitget_invalid_${field}`, 502);
   const [whole = "0", fraction = ""] = raw.split(".");
   const normalizedFraction = fraction.replace(/0+$/, "");
@@ -118,6 +118,12 @@ function canonicalUnsignedDecimal(value: unknown, field: string, allowZero: bool
 function candleRow(value: unknown): unknown[] {
   if (!Array.isArray(value) || value.length < 7) throw candleFailure("bitget_invalid_candles", 502);
   return value;
+}
+
+function candleQueryStart(timestamp: number, timeframe: CandleRequest["timeframe"]): number {
+  const milliseconds = timeframeMilliseconds[timeframe];
+  if (!milliseconds) throw candleFailure("bitget_invalid_candle_request", 400);
+  return Math.floor(timestamp / milliseconds) * milliseconds;
 }
 
 function parseHistoryPayload(page: ProviderHistoryPage) {
@@ -180,12 +186,12 @@ export class BitgetTradingProviderAdapter implements TradingProviderAdapter {
     return { data: root.data };
   }
 
-  private async publicCandles(parameters: Record<string, string>): Promise<{ rows: unknown[]; sourceTime: number }> {
+  private async publicCandles(parameters: Record<string, string>, signal: AbortSignal): Promise<{ rows: unknown[]; sourceTime: number }> {
     const query = new URLSearchParams(parameters);
     let response: Response;
     try {
       response = await this.fetcher(`${this.baseUrl}${BITGET_CANDLE_PATH}?${query}`, {
-        method: "GET", redirect: "error", signal: AbortSignal.timeout(12_000), headers: { accept: "application/json" },
+        method: "GET", redirect: "error", signal, headers: { accept: "application/json" },
       });
     } catch {
       throw candleFailure("bitget_unavailable", 503);
@@ -286,13 +292,28 @@ export class BitgetTradingProviderAdapter implements TradingProviderAdapter {
     const fetchedAtMs = this.now();
     const fetchedAt = new Date(fetchedAtMs).toISOString();
     const rows = new Map<number, { row: unknown[]; sourceTime: number }>();
-    let cursor = from - 1;
-    let providerLimitReached = false;
+    let cursor = candleQueryStart(from, request.timeframe) - 1;
+    let stopReason: "complete" | "provider_limit" | "time_limit" = "complete";
+    const guard = createCandleFetchGuard(request.limit, BITGET_CANDLE_MAXIMUM_PAGE_SIZE, fetchedAtMs, this.now);
     while (cursor < to && rows.size < request.limit) {
-      const page = await this.publicCandles({
-        category: "USDT-FUTURES", symbol: request.native_symbol, interval, startTime: String(cursor), endTime: String(to),
-        type: request.price_mode === "mark" ? "mark" : "market", limit: String(Math.min(BITGET_CANDLE_MAXIMUM_PAGE_SIZE, request.limit - rows.size)),
-      });
+      const decision = guard.nextPage();
+      if (decision !== "request") {
+        stopReason = decision;
+        break;
+      }
+      let page: { rows: unknown[]; sourceTime: number };
+      try {
+        page = await this.publicCandles({
+          category: "USDT-FUTURES", symbol: request.native_symbol, interval, startTime: String(cursor), endTime: String(to),
+          type: request.price_mode === "mark" ? "mark" : "market", limit: String(Math.min(BITGET_CANDLE_MAXIMUM_PAGE_SIZE, request.limit - rows.size)),
+        }, guard.signal);
+      } catch (error) {
+        if (guard.signal.aborted) {
+          stopReason = "time_limit";
+          break;
+        }
+        throw error;
+      }
       if (page.rows.length === 0) break;
       let latest = -1;
       for (const value of page.rows) {
@@ -300,13 +321,16 @@ export class BitgetTradingProviderAdapter implements TradingProviderAdapter {
         const openTime = finiteTimestamp(row[0], "candle_time");
         latest = Math.max(latest, openTime);
         const closeTime = candleEnd(openTime, request.timeframe);
-        if (openTime >= from && closeTime <= to && rows.size < request.limit) rows.set(openTime, { row, sourceTime: page.sourceTime });
+        if (openTime < to && closeTime > from && rows.size < request.limit) rows.set(openTime, { row, sourceTime: page.sourceTime });
       }
-      if (latest <= cursor) throw candleFailure("bitget_invalid_candle_order", 502);
+      if (latest <= cursor) {
+        stopReason = "provider_limit";
+        break;
+      }
       cursor = latest;
       if (candleEnd(latest, request.timeframe) >= to) break;
     }
-    if (rows.size >= request.limit && candleEnd(cursor, request.timeframe) < to) providerLimitReached = true;
+    if (rows.size >= request.limit && candleEnd(cursor, request.timeframe) < to) stopReason = "provider_limit";
     const candles: CanonicalCandle[] = [...rows.entries()].sort(([left], [right]) => left - right).map(([openTime, value]) => {
       const closeTime = candleEnd(openTime, request.timeframe);
       return {
@@ -320,28 +344,7 @@ export class BitgetTradingProviderAdapter implements TradingProviderAdapter {
         status: closeTime <= fetchedAtMs ? "final" : "partial", gap_before: false, gap_after: false,
       };
     });
-    const gaps: CanonicalCandleBatch["coverage"]["gaps"] = [];
-    let expectedOpen = from;
-    for (let index = 0; index < candles.length; index += 1) {
-      const candle = candles[index]!;
-      const openTime = Date.parse(candle.open_time);
-      if (openTime > expectedOpen) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: candle.open_time });
-      candle.gap_before = openTime > expectedOpen;
-      const next = candles[index + 1];
-      candle.gap_after = next ? Date.parse(next.open_time) > Date.parse(candle.close_time) : to > Date.parse(candle.close_time);
-      expectedOpen = Date.parse(candle.close_time);
-    }
-    if (candles.length > 0 && expectedOpen < to) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: request.to });
-    const warnings: CanonicalCandleBatch["warnings"] = [];
-    if (gaps.length > 0) warnings.push("historical_gap");
-    if (providerLimitReached) warnings.push("provider_limit_reached");
-    if (candles.length === 0) warnings.push("empty_range");
-    return assertCanonicalCandleBatch({
-      provider: this.provider, request, candles,
-      coverage: { status: candles.length === 0 ? "empty" : gaps.length > 0 ? "gapped" : "complete", range_start: request.from,
-        range_end: request.to, source: "public_api", fetched_at: fetchedAt, gaps, unavailable_reason: null },
-      warnings,
-    });
+    return finalizeCanonicalCandleBatch(this.provider, request, candles, fetchedAt, stopReason);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

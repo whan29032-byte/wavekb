@@ -146,6 +146,75 @@ test("rejects unsafe OKX candle symbols before any upstream request", async () =
   assert.equal(calls, 0);
 });
 
+test("keeps the OKX candle intersecting a live right boundary without inventing a historical gap", async () => {
+  const liveTo = candleStart + minute + 30_000;
+  const adapter = new OkxTradingProviderAdapter("https://www.okx.com", async () => json({ code: "0", data: [
+    okxCandle(candleStart + minute, "102", "0"),
+    okxCandle(candleStart),
+  ] }), () => liveTo);
+  const batch = await adapter.fetchCandles(account(), candleRequest({ to: new Date(liveTo).toISOString(), limit: 3 }));
+  assert.deepEqual(batch.candles.map((candle) => [candle.open_time, candle.status]), [
+    [new Date(candleStart).toISOString(), "final"],
+    [new Date(candleStart + minute).toISOString(), "partial"],
+  ]);
+  assert.equal(batch.coverage.status, "complete");
+  assert.deepEqual(batch.coverage.gaps, []);
+  assert.deepEqual(batch.warnings, []);
+});
+
+test("rejects numeric OKX OHLCV fields before JavaScript can round them", async () => {
+  const row = okxCandle(candleStart);
+  row[1] = 9_007_199_254_740_993;
+  row[2] = "9007199254740994";
+  const adapter = new OkxTradingProviderAdapter("https://www.okx.com", async () => json({ code: "0", data: [row] }), () => candleStart + minute);
+  await assert.rejects(
+    () => adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + minute).toISOString(), limit: 1 })),
+    /okx_invalid_candle_open/,
+  );
+});
+
+test("bounds OKX short and stalled pages with one request-scoped abort signal", async () => {
+  let calls = 0;
+  const signals: AbortSignal[] = [];
+  const adapter = new OkxTradingProviderAdapter("https://www.okx.com", async (_input, init) => {
+    calls += 1;
+    signals.push(init?.signal as AbortSignal);
+    return json({ code: "0", data: [okxCandle(candleStart + (10 - calls) * minute)] });
+  }, () => candleStart + 10 * minute);
+  const partial = await adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 101 }));
+  assert.equal(calls, 3);
+  assert.equal(new Set(signals).size, 1);
+  assert.equal(partial.coverage.status, "partial");
+  assert.equal(partial.warnings.includes("provider_limit_reached"), true);
+  assert.equal(partial.warnings.includes("historical_gap"), false);
+  assert.deepEqual(partial.coverage.gaps, []);
+
+  calls = 0;
+  const stalled = await new OkxTradingProviderAdapter("https://www.okx.com", async () => {
+    calls += 1;
+    return json({ code: "0", data: [okxCandle(candleStart + 9 * minute)] });
+  }, () => candleStart + 10 * minute).fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 101 }));
+  assert.equal(calls, 2);
+  assert.equal(stalled.coverage.status, "partial");
+  assert.equal(stalled.warnings.includes("provider_limit_reached"), true);
+  assert.equal(stalled.warnings.includes("historical_gap"), false);
+});
+
+test("returns structured OKX time-limit coverage when the whole fetch deadline expires", async () => {
+  let calls = 0;
+  let clockCalls = 0;
+  const clock = () => [candleStart + 10 * minute, candleStart + 10 * minute, candleStart + 10 * minute + 12_001][Math.min(clockCalls++, 2)]!;
+  const adapter = new OkxTradingProviderAdapter("https://www.okx.com", async () => {
+    calls += 1;
+    return json({ code: "0", data: [okxCandle(candleStart + (10 - calls) * minute)] });
+  }, clock);
+  const batch = await adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 101 }));
+  assert.equal(calls, 1);
+  assert.equal(batch.coverage.status, "partial");
+  assert.equal(batch.warnings.includes("time_limit_reached"), true);
+  assert.equal(batch.warnings.includes("historical_gap"), false);
+});
+
 test("loads descending OKX history pages through the gateway and returns deduplicated ascending candles with gaps", async () => {
   const calls: Array<{ url: URL; headers: Headers }> = [];
   const fetcher: typeof fetch = async (input, init) => {

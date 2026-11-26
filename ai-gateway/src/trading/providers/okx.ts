@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { assertCanonicalCandleBatch } from "./contracts.ts";
+import { createCandleFetchGuard, finalizeCanonicalCandleBatch } from "./contracts.ts";
 import type {
   CandleRequest,
   CanonicalCandle,
@@ -114,8 +114,8 @@ function finiteTimestamp(value: unknown, field: string): number {
 }
 
 function canonicalUnsignedDecimal(value: unknown, field: string, allowZero: boolean): string {
-  if (typeof value !== "string" && typeof value !== "number") throw candleFailure(`okx_invalid_${field}`, 502);
-  const raw = String(value);
+  if (typeof value !== "string") throw candleFailure(`okx_invalid_${field}`, 502);
+  const raw = value;
   if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) throw candleFailure(`okx_invalid_${field}`, 502);
   const [whole = "0", fraction = ""] = raw.split(".");
   const normalizedFraction = fraction.replace(/0+$/, "");
@@ -193,13 +193,13 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
     return { code, data: root.data.map((item) => record(item, "response_item")) };
   }
 
-  private async publicCandles(path: string, parameters: Record<string, string>): Promise<unknown[]> {
+  private async publicCandles(path: string, parameters: Record<string, string>, signal: AbortSignal): Promise<unknown[]> {
     if (!ALLOWED_CANDLE_PATHS.has(path)) throw candleFailure("okx_path_not_allowed", 500);
     const query = new URLSearchParams(parameters);
     let response: Response;
     try {
       response = await this.fetcher(`${this.baseUrl}${path}?${query}`, {
-        method: "GET", redirect: "error", signal: AbortSignal.timeout(12_000), headers: { accept: "application/json" },
+        method: "GET", redirect: "error", signal, headers: { accept: "application/json" },
       });
     } catch {
       throw candleFailure("okx_unavailable", 503);
@@ -303,12 +303,28 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
     const fetchedAt = new Date(fetchedAtMs).toISOString();
     const rows = new Map<number, unknown[]>();
     let cursor = to;
-    let providerLimitReached = false;
+    let stopReason: "complete" | "provider_limit" | "time_limit" = "complete";
+    const guard = createCandleFetchGuard(request.limit, OKX_CANDLE_MAXIMUM_PAGE_SIZE, fetchedAtMs, this.now);
     while (cursor > from && rows.size < request.limit) {
-      const page = await this.publicCandles(
-        request.price_mode === "mark" ? "/api/v5/market/history-mark-price-candles" : "/api/v5/market/history-candles",
-        { instId: request.native_symbol, bar, after: String(cursor), limit: String(Math.min(OKX_CANDLE_MAXIMUM_PAGE_SIZE, request.limit - rows.size)) },
-      );
+      const decision = guard.nextPage();
+      if (decision !== "request") {
+        stopReason = decision;
+        break;
+      }
+      let page: unknown[];
+      try {
+        page = await this.publicCandles(
+          request.price_mode === "mark" ? "/api/v5/market/history-mark-price-candles" : "/api/v5/market/history-candles",
+          { instId: request.native_symbol, bar, after: String(cursor), limit: String(Math.min(OKX_CANDLE_MAXIMUM_PAGE_SIZE, request.limit - rows.size)) },
+          guard.signal,
+        );
+      } catch (error) {
+        if (guard.signal.aborted) {
+          stopReason = "time_limit";
+          break;
+        }
+        throw error;
+      }
       if (page.length === 0) break;
       let earliest = Number.POSITIVE_INFINITY;
       for (const value of page) {
@@ -316,12 +332,15 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
         const openTime = finiteTimestamp(row[0], "candle_time");
         earliest = Math.min(earliest, openTime);
         const closeTime = candleEnd(openTime, request.timeframe);
-        if (openTime >= from && closeTime <= to && rows.size < request.limit) rows.set(openTime, row);
+        if (openTime < to && closeTime > from && rows.size < request.limit) rows.set(openTime, row);
       }
-      if (!Number.isFinite(earliest) || earliest >= cursor) throw candleFailure("okx_invalid_candle_order", 502);
+      if (!Number.isFinite(earliest) || earliest >= cursor) {
+        stopReason = "provider_limit";
+        break;
+      }
       cursor = earliest;
     }
-    if (rows.size >= request.limit && cursor > from) providerLimitReached = true;
+    if (rows.size >= request.limit && cursor > from) stopReason = "provider_limit";
     const candles: CanonicalCandle[] = [...rows.entries()].sort(([left], [right]) => left - right).map(([openTime, row]) => {
       const closeTime = candleEnd(openTime, request.timeframe);
       const confirm = row.at(-1);
@@ -337,28 +356,7 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
         status: (confirm === "1" || confirm === 1) && closeTime <= fetchedAtMs ? "final" : "partial", gap_before: false, gap_after: false,
       };
     });
-    const gaps: CanonicalCandleBatch["coverage"]["gaps"] = [];
-    let expectedOpen = from;
-    for (let index = 0; index < candles.length; index += 1) {
-      const candle = candles[index]!;
-      const openTime = Date.parse(candle.open_time);
-      if (openTime > expectedOpen) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: candle.open_time });
-      candle.gap_before = openTime > expectedOpen;
-      const next = candles[index + 1];
-      candle.gap_after = next ? Date.parse(next.open_time) > Date.parse(candle.close_time) : to > Date.parse(candle.close_time);
-      expectedOpen = Date.parse(candle.close_time);
-    }
-    if (candles.length > 0 && expectedOpen < to) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: request.to });
-    const warnings: CanonicalCandleBatch["warnings"] = [];
-    if (gaps.length > 0) warnings.push("historical_gap");
-    if (providerLimitReached) warnings.push("provider_limit_reached");
-    if (candles.length === 0) warnings.push("empty_range");
-    return assertCanonicalCandleBatch({
-      provider: this.provider, request, candles,
-      coverage: { status: candles.length === 0 ? "empty" : gaps.length > 0 ? "gapped" : "complete", range_start: request.from,
-        range_end: request.to, source: "public_api", fetched_at: fetchedAt, gaps, unavailable_reason: null },
-      warnings,
-    });
+    return finalizeCanonicalCandleBatch(this.provider, request, candles, fetchedAt, stopReason);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

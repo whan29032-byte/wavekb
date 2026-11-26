@@ -278,7 +278,7 @@ const candleSources = new Set<string>(["public_api", "signed_account"]);
 const candleStatuses = new Set<string>(["final", "partial"]);
 const candleCoverageStatuses = new Set<string>(["complete", "partial", "gapped", "stale", "empty", "unavailable"]);
 const candleWarningCodes = new Set<string>([
-  "historical_gap", "candles_unavailable", "empty_range", "partial_coverage", "stale_cache", "rate_limited", "provider_limit_reached",
+  "historical_gap", "candles_unavailable", "empty_range", "partial_coverage", "stale_cache", "rate_limited", "provider_limit_reached", "time_limit_reached",
 ]);
 const candleUnavailableReasons = new Set<string>(CANDLE_UNAVAILABLE_REASONS);
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/;
@@ -525,10 +525,24 @@ export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch
   if (!Array.isArray(batch.candles) || batch.candles.length > request.limit || batch.candles.length > 3_000) invalidCandles("candles");
   const candles = batch.candles.map((item) => validateCanonicalCandle(item, request, provider));
   const basisOrder = new Map<string, number>([["trade", 0], ["mark", 1], ["bid", 2], ["ask", 3]]);
+  const leftBoundaryIntersections = new Map<string, number>();
+  const rightBoundaryIntersections = new Map<string, number>();
+  const requestStart = Date.parse(request.from);
+  const requestEnd = Date.parse(request.to);
   for (let index = 0; index < candles.length; index += 1) {
     const candle = candles[index]!;
-    if (Date.parse(candle.open_time) < Date.parse(request.from) || Date.parse(candle.close_time) > Date.parse(request.to)) {
-      invalidCandles("range");
+    const openTime = Date.parse(candle.open_time);
+    const closeTime = Date.parse(candle.close_time);
+    if (closeTime <= requestStart || openTime >= requestEnd) invalidCandles("range");
+    if (openTime < requestStart) {
+      const count = (leftBoundaryIntersections.get(candle.series_basis) ?? 0) + 1;
+      leftBoundaryIntersections.set(candle.series_basis, count);
+      if (count > 1) invalidCandles("range");
+    }
+    if (closeTime > requestEnd) {
+      const count = (rightBoundaryIntersections.get(candle.series_basis) ?? 0) + 1;
+      rightBoundaryIntersections.set(candle.series_basis, count);
+      if (count > 1) invalidCandles("range");
     }
     if (index > 0) {
       const previous = candles[index - 1]!;
@@ -574,22 +588,24 @@ export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch
     for (let index = 1; index < series.length; index += 1) {
       if (Date.parse(series[index]!.open_time) < Date.parse(series[index - 1]!.close_time)) invalidCandles("overlap");
     }
-    let cursor = request.from;
+    let cursor = requestStart;
     for (let index = 0; index < series.length; index += 1) {
       const candle = series[index]!;
-      if (Date.parse(candle.open_time) < Date.parse(cursor)) invalidCandles("overlap");
-      const hasGapBefore = Date.parse(candle.open_time) > Date.parse(cursor);
-      if (hasGapBefore) actualGaps.push({ series_basis: seriesBasis, from: cursor, to: candle.open_time });
+      const intervalStart = Math.max(Date.parse(candle.open_time), requestStart);
+      const intervalEnd = Math.min(Date.parse(candle.close_time), requestEnd);
+      if (intervalStart < cursor) invalidCandles("overlap");
+      const hasGapBefore = intervalStart > cursor && (index > 0 || coverage.status !== "partial");
+      if (hasGapBefore) actualGaps.push({ series_basis: seriesBasis, from: new Date(cursor).toISOString(), to: new Date(intervalStart).toISOString() });
       const next = series[index + 1];
-      const hasGapAfter = next ? Date.parse(next.open_time) > Date.parse(candle.close_time)
-        : Date.parse(request.to) > Date.parse(candle.close_time);
+      const hasGapAfter = next ? Math.max(Date.parse(next.open_time), requestStart) > intervalEnd
+        : coverage.status !== "partial" && requestEnd > intervalEnd;
       if (candle.gap_before !== hasGapBefore || candle.gap_after !== hasGapAfter) invalidCandles("gap_flags");
-      cursor = candle.close_time;
+      cursor = intervalEnd;
     }
     if (series.length === 0) {
-      if (candles.length > 0) actualGaps.push({ series_basis: seriesBasis, from: request.from, to: request.to });
-    } else if (Date.parse(cursor) < Date.parse(request.to)) {
-      actualGaps.push({ series_basis: seriesBasis, from: cursor, to: request.to });
+      if (candles.length > 0 && coverage.status !== "partial") actualGaps.push({ series_basis: seriesBasis, from: request.from, to: request.to });
+    } else if (cursor < requestEnd && coverage.status !== "partial") {
+      actualGaps.push({ series_basis: seriesBasis, from: new Date(cursor).toISOString(), to: request.to });
     }
   }
 
@@ -602,6 +618,10 @@ export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch
       const expectedSource = provider === "exness" ? "signed_account" : "public_api";
       if (coverage.source !== expectedSource || coverageFetchedAt === null || declaredGaps.length > 0
         || coverage.unavailable_reason !== null) invalidCandles("empty");
+    } else if (coverage.status === "partial") {
+      const expectedSource = provider === "exness" ? "signed_account" : "public_api";
+      if (coverage.source !== expectedSource || coverageFetchedAt === null || declaredGaps.length > 0
+        || coverage.unavailable_reason !== null) invalidCandles("partial");
     } else invalidCandles("empty");
   } else {
     const expectedSource = provider === "exness" ? "signed_account" : "public_api";
@@ -610,7 +630,8 @@ export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch
     if (candles.some((candle) => candle.source !== coverage.source)) invalidCandles("coverage_source");
     if (candles.some((candle) => candle.fetched_at !== coverageFetchedAt)) invalidCandles("coverage_fetched_at");
     if (coverage.unavailable_reason !== null) invalidCandles("coverage_available");
-    if (actualGaps.length > 0 ? coverage.status !== "gapped" : coverage.status === "gapped" || coverage.status === "empty" || coverage.status === "unavailable") {
+    if (coverage.status !== "partial" && (actualGaps.length > 0 ? coverage.status !== "gapped"
+      : coverage.status === "gapped" || coverage.status === "empty" || coverage.status === "unavailable")) {
       invalidCandles("gaps");
     }
   }
@@ -622,7 +643,83 @@ export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch
         : coverage.status === "partial" ? "partial_coverage"
           : coverage.status === "stale" ? "stale_cache" : null;
   if (requiredWarning !== null && !batch.warnings.includes(requiredWarning)) invalidCandles("warnings");
+  if (declaredGaps.length > 0 && !batch.warnings.includes("historical_gap")) invalidCandles("warnings");
+  if ((batch.warnings.includes("provider_limit_reached") || batch.warnings.includes("time_limit_reached"))
+    && coverage.status !== "partial") invalidCandles("warnings");
   return value as CanonicalCandleBatch;
+}
+
+export type CandleFetchStopReason = "complete" | "provider_limit" | "time_limit";
+
+export function createCandleFetchGuard(limit: number, maximumPageSize: number, startedAt: number, now: () => number) {
+  const signal = AbortSignal.timeout(12_000);
+  const pageBudget = Math.max(1, Math.ceil(limit / maximumPageSize)) + 1;
+  let pages = 0;
+  return {
+    signal,
+    nextPage(): "request" | Exclude<CandleFetchStopReason, "complete"> {
+      if (signal.aborted || now() >= startedAt + 12_000) return "time_limit";
+      if (pages >= pageBudget) return "provider_limit";
+      pages += 1;
+      return "request";
+    },
+  };
+}
+
+export function finalizeCanonicalCandleBatch(
+  provider: TradingProvider,
+  request: CandleRequest,
+  candles: CanonicalCandle[],
+  fetchedAt: string,
+  stopReason: CandleFetchStopReason,
+): CanonicalCandleBatch {
+  const requestStart = Date.parse(request.from);
+  const requestEnd = Date.parse(request.to);
+  const partial = stopReason !== "complete";
+  const gaps: CanonicalCandleBatch["coverage"]["gaps"] = [];
+  const bases = request.price_mode === "both" ? ["bid", "ask"] as const : [request.price_mode as TradeChartCandleSeriesBasis];
+  for (const seriesBasis of bases) {
+    const series = candles.filter((candle) => candle.series_basis === seriesBasis);
+    let cursor = requestStart;
+    for (let index = 0; index < series.length; index += 1) {
+      const candle = series[index]!;
+      const intervalStart = Math.max(Date.parse(candle.open_time), requestStart);
+      const intervalEnd = Math.min(Date.parse(candle.close_time), requestEnd);
+      const hasGapBefore = intervalStart > cursor && (index > 0 || !partial);
+      if (hasGapBefore) gaps.push({ series_basis: seriesBasis, from: new Date(cursor).toISOString(), to: new Date(intervalStart).toISOString() });
+      const next = series[index + 1];
+      const hasGapAfter = next ? Math.max(Date.parse(next.open_time), requestStart) > intervalEnd : !partial && requestEnd > intervalEnd;
+      candle.gap_before = hasGapBefore;
+      candle.gap_after = hasGapAfter;
+      cursor = intervalEnd;
+    }
+    if (series.length === 0 && candles.length > 0 && !partial) {
+      gaps.push({ series_basis: seriesBasis, from: request.from, to: request.to });
+    } else if (series.length > 0 && cursor < requestEnd && !partial) {
+      gaps.push({ series_basis: seriesBasis, from: new Date(cursor).toISOString(), to: request.to });
+    }
+  }
+  const warnings: TradeChartWarningCode[] = [];
+  if (gaps.length > 0) warnings.push("historical_gap");
+  if (partial) {
+    warnings.push("partial_coverage");
+    warnings.push(stopReason === "time_limit" ? "time_limit_reached" : "provider_limit_reached");
+  } else if (candles.length === 0) warnings.push("empty_range");
+  return assertCanonicalCandleBatch({
+    provider,
+    request,
+    candles,
+    coverage: {
+      status: partial ? "partial" : candles.length === 0 ? "empty" : gaps.length > 0 ? "gapped" : "complete",
+      range_start: request.from,
+      range_end: request.to,
+      source: provider === "exness" ? "signed_account" : "public_api",
+      fetched_at: fetchedAt,
+      gaps,
+      unavailable_reason: null,
+    },
+    warnings,
+  });
 }
 
 function record(value: unknown, field: string): Record<string, unknown> {

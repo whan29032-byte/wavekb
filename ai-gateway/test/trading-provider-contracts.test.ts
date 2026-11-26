@@ -202,6 +202,38 @@ test("canonical candle batches preserve exact decimals and complete source metad
   assert.equal(batch.candles[1]?.volume, null);
 });
 
+test("canonical candle batches allow one candle intersecting each request boundary", () => {
+  const request: CandleRequest = {
+    ...candleRequest,
+    from: "2026-11-24T07:58:30.000Z",
+    to: "2026-11-24T08:00:30.000Z",
+    limit: 3,
+  };
+  const template = validCandleBatch().candles[0]!;
+  const fetchedAt = request.to;
+  const batch = assertCanonicalCandleBatch({
+    provider: "binance",
+    request,
+    candles: [
+      { ...template, open_time: "2026-11-24T07:58:00.000Z", close_time: "2026-11-24T07:59:00.000Z", source_timestamp: "2026-11-24T07:59:00.000Z", fetched_at: fetchedAt, status: "final", gap_before: false, gap_after: false },
+      { ...template, open_time: "2026-11-24T07:59:00.000Z", close_time: "2026-11-24T08:00:00.000Z", source_timestamp: "2026-11-24T08:00:00.000Z", fetched_at: fetchedAt, status: "final", gap_before: false, gap_after: false },
+      { ...template, open_time: "2026-11-24T08:00:00.000Z", close_time: "2026-11-24T08:01:00.000Z", source_timestamp: fetchedAt, fetched_at: fetchedAt, status: "partial", gap_before: false, gap_after: false },
+    ],
+    coverage: {
+      status: "complete",
+      range_start: request.from,
+      range_end: request.to,
+      source: "public_api",
+      fetched_at: fetchedAt,
+      gaps: [],
+      unavailable_reason: null,
+    },
+    warnings: [],
+  });
+  assert.equal(batch.candles.length, 3);
+  assert.equal(batch.candles[2]?.status, "partial");
+});
+
 test("canonical candle batches preserve separate Exness bid and ask series for both mode", () => {
   const batch = structuredClone(validCandleBatch()) as Record<string, any>;
   batch.provider = "exness";

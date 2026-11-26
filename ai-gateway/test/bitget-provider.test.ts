@@ -125,6 +125,76 @@ test("rejects unsafe Bitget candle symbols before any upstream request", async (
   assert.equal(calls, 0);
 });
 
+test("keeps the Bitget candle intersecting a live right boundary without inventing a historical gap", async () => {
+  const liveTo = candleStart + minute + 30_000;
+  const adapter = new BitgetTradingProviderAdapter("https://api.bitget.com", async () => json({
+    code: "00000",
+    requestTime: liveTo,
+    data: [bitgetCandle(candleStart), bitgetCandle(candleStart + minute, "102")],
+  }), () => liveTo);
+  const batch = await adapter.fetchCandles(account(), candleRequest({ to: new Date(liveTo).toISOString(), limit: 3 }));
+  assert.deepEqual(batch.candles.map((candle) => [candle.open_time, candle.status]), [
+    [new Date(candleStart).toISOString(), "final"],
+    [new Date(candleStart + minute).toISOString(), "partial"],
+  ]);
+  assert.equal(batch.coverage.status, "complete");
+  assert.deepEqual(batch.coverage.gaps, []);
+  assert.deepEqual(batch.warnings, []);
+});
+
+test("rejects numeric Bitget OHLCV fields before JavaScript can round them", async () => {
+  const row = bitgetCandle(candleStart);
+  row[1] = 9_007_199_254_740_993;
+  row[2] = "9007199254740994";
+  const adapter = new BitgetTradingProviderAdapter("https://api.bitget.com", async () => json({ code: "00000", requestTime: candleStart + minute, data: [row] }), () => candleStart + minute);
+  await assert.rejects(
+    () => adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + minute).toISOString(), limit: 1 })),
+    /bitget_invalid_candle_open/,
+  );
+});
+
+test("bounds Bitget short and stalled pages with one request-scoped abort signal", async () => {
+  let calls = 0;
+  const signals: AbortSignal[] = [];
+  const adapter = new BitgetTradingProviderAdapter("https://api.bitget.com", async (_input, init) => {
+    calls += 1;
+    signals.push(init?.signal as AbortSignal);
+    return json({ code: "00000", requestTime: candleStart + 10 * minute, data: [bitgetCandle(candleStart + (calls - 1) * minute)] });
+  }, () => candleStart + 10 * minute);
+  const partial = await adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 101 }));
+  assert.equal(calls, 3);
+  assert.equal(new Set(signals).size, 1);
+  assert.equal(partial.coverage.status, "partial");
+  assert.equal(partial.warnings.includes("provider_limit_reached"), true);
+  assert.equal(partial.warnings.includes("historical_gap"), false);
+  assert.deepEqual(partial.coverage.gaps, []);
+
+  calls = 0;
+  const stalled = await new BitgetTradingProviderAdapter("https://api.bitget.com", async () => {
+    calls += 1;
+    return json({ code: "00000", requestTime: candleStart + 10 * minute, data: [bitgetCandle(candleStart)] });
+  }, () => candleStart + 10 * minute).fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 101 }));
+  assert.equal(calls, 2);
+  assert.equal(stalled.coverage.status, "partial");
+  assert.equal(stalled.warnings.includes("provider_limit_reached"), true);
+  assert.equal(stalled.warnings.includes("historical_gap"), false);
+});
+
+test("returns structured Bitget time-limit coverage when the whole fetch deadline expires", async () => {
+  let calls = 0;
+  let clockCalls = 0;
+  const clock = () => [candleStart + 10 * minute, candleStart + 10 * minute, candleStart + 10 * minute + 12_001][Math.min(clockCalls++, 2)]!;
+  const adapter = new BitgetTradingProviderAdapter("https://api.bitget.com", async () => {
+    calls += 1;
+    return json({ code: "00000", requestTime: candleStart + 10 * minute, data: [bitgetCandle(candleStart + (calls - 1) * minute)] });
+  }, clock);
+  const batch = await adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 101 }));
+  assert.equal(calls, 1);
+  assert.equal(batch.coverage.status, "partial");
+  assert.equal(batch.warnings.includes("time_limit_reached"), true);
+  assert.equal(batch.warnings.includes("historical_gap"), false);
+});
+
 test("loads Bitget V3 public history pages without signatures and returns deduplicated ascending partial candles plus gaps", async () => {
   const calls: Array<{ url: URL; headers: Headers }> = [];
   const fetcher: typeof fetch = async (input, init) => {

@@ -141,6 +141,76 @@ test("rejects unsafe Bybit candle symbols before any upstream request", async ()
   assert.equal(calls, 0);
 });
 
+test("keeps the Bybit candle intersecting a live right boundary without inventing a historical gap", async () => {
+  const liveTo = candleStart + minute + 30_000;
+  const adapter = new BybitTradingProviderAdapter("https://api.bybit.com", async () => json({
+    retCode: 0,
+    result: { list: [bybitCandle(candleStart + minute, "102"), bybitCandle(candleStart)] },
+    time: liveTo,
+  }), () => liveTo);
+  const batch = await adapter.fetchCandles(account(), candleRequest({ to: new Date(liveTo).toISOString(), limit: 3 }));
+  assert.deepEqual(batch.candles.map((candle) => [candle.open_time, candle.status]), [
+    [new Date(candleStart).toISOString(), "final"],
+    [new Date(candleStart + minute).toISOString(), "partial"],
+  ]);
+  assert.equal(batch.coverage.status, "complete");
+  assert.deepEqual(batch.coverage.gaps, []);
+  assert.deepEqual(batch.warnings, []);
+});
+
+test("rejects numeric Bybit OHLCV fields before JavaScript can round them", async () => {
+  const row = bybitCandle(candleStart);
+  row[1] = 9_007_199_254_740_993;
+  row[2] = "9007199254740994";
+  const adapter = new BybitTradingProviderAdapter("https://api.bybit.com", async () => json({ retCode: 0, result: { list: [row] }, time: candleStart + minute }), () => candleStart + minute);
+  await assert.rejects(
+    () => adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + minute).toISOString(), limit: 1 })),
+    /bybit_invalid_candle_open/,
+  );
+});
+
+test("bounds Bybit short and stalled pages with one request-scoped abort signal", async () => {
+  let calls = 0;
+  const signals: AbortSignal[] = [];
+  const adapter = new BybitTradingProviderAdapter("https://api.bybit.com", async (_input, init) => {
+    calls += 1;
+    signals.push(init?.signal as AbortSignal);
+    return json({ retCode: 0, result: { list: [bybitCandle(candleStart + (10 - calls) * minute)] }, time: candleStart + 10 * minute });
+  }, () => candleStart + 10 * minute);
+  const partial = await adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 1_001 }));
+  assert.equal(calls, 3);
+  assert.equal(new Set(signals).size, 1);
+  assert.equal(partial.coverage.status, "partial");
+  assert.equal(partial.warnings.includes("provider_limit_reached"), true);
+  assert.equal(partial.warnings.includes("historical_gap"), false);
+  assert.deepEqual(partial.coverage.gaps, []);
+
+  calls = 0;
+  const stalled = await new BybitTradingProviderAdapter("https://api.bybit.com", async () => {
+    calls += 1;
+    return json({ retCode: 0, result: { list: [bybitCandle(candleStart + 9 * minute)] }, time: candleStart + 10 * minute });
+  }, () => candleStart + 10 * minute).fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 1_001 }));
+  assert.equal(calls, 2);
+  assert.equal(stalled.coverage.status, "partial");
+  assert.equal(stalled.warnings.includes("provider_limit_reached"), true);
+  assert.equal(stalled.warnings.includes("historical_gap"), false);
+});
+
+test("returns structured Bybit time-limit coverage when the whole fetch deadline expires", async () => {
+  let calls = 0;
+  let clockCalls = 0;
+  const clock = () => [candleStart + 10 * minute, candleStart + 10 * minute, candleStart + 10 * minute + 12_001][Math.min(clockCalls++, 2)]!;
+  const adapter = new BybitTradingProviderAdapter("https://api.bybit.com", async () => {
+    calls += 1;
+    return json({ retCode: 0, result: { list: [bybitCandle(candleStart + (10 - calls) * minute)] }, time: candleStart + 10 * minute });
+  }, clock);
+  const batch = await adapter.fetchCandles(account(), candleRequest({ to: new Date(candleStart + 10 * minute).toISOString(), limit: 1_001 }));
+  assert.equal(calls, 1);
+  assert.equal(batch.coverage.status, "partial");
+  assert.equal(batch.warnings.includes("time_limit_reached"), true);
+  assert.equal(batch.warnings.includes("historical_gap"), false);
+});
+
 test("loads reverse-sorted Bybit public pages without signatures and emits ascending partial candles plus gap evidence", async () => {
   const calls: Array<{ url: URL; headers: Headers }> = [];
   const fetcher: typeof fetch = async (input, init) => {

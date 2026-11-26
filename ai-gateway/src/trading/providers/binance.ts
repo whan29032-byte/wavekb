@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { BinanceFuturesClient } from "../binance-futures.ts";
-import { assertCanonicalCandleBatch } from "./contracts.ts";
+import { createCandleFetchGuard, finalizeCanonicalCandleBatch } from "./contracts.ts";
 import type {
   CandleRequest,
   CanonicalCandle,
@@ -101,8 +101,8 @@ function candleEnd(openTime: number, timeframe: CandleRequest["timeframe"]): num
 }
 
 function canonicalUnsignedDecimal(value: unknown, field: string, allowZero: boolean): string {
-  if (typeof value !== "string" && typeof value !== "number") throw candleFailure(`binance_invalid_${field}`, 502);
-  const raw = String(value);
+  if (typeof value !== "string") throw candleFailure(`binance_invalid_${field}`, 502);
+  const raw = value;
   if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) throw candleFailure(`binance_invalid_${field}`, 502);
   const [whole = "0", fraction = ""] = raw.split(".");
   const normalizedWhole = whole.replace(/^0+(?=\d)/, "");
@@ -121,6 +121,12 @@ function finiteTimestamp(value: unknown, field: string): number {
 function candleRow(value: unknown): unknown[] {
   if (!Array.isArray(value) || value.length < 7) throw candleFailure("binance_invalid_candles", 502);
   return value;
+}
+
+function candleQueryStart(timestamp: number, timeframe: CandleRequest["timeframe"]): number {
+  if (timeframe !== "1M") return Math.floor(timestamp / timeframeMilliseconds[timeframe]) * timeframeMilliseconds[timeframe];
+  const date = new Date(timestamp);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
 }
 
 function safeCandleError(status: number): Error {
@@ -249,9 +255,15 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
     const fetchedAtMs = this.now();
     const fetchedAt = new Date(fetchedAtMs).toISOString();
     const rows = new Map<number, unknown[]>();
-    let cursor = from;
-    let providerLimitReached = false;
+    let cursor = candleQueryStart(from, request.timeframe);
+    let stopReason: "complete" | "provider_limit" | "time_limit" = "complete";
+    const guard = createCandleFetchGuard(request.limit, BINANCE_CANDLE_MAXIMUM_PAGE_SIZE, fetchedAtMs, this.now);
     while (cursor < to && rows.size < request.limit) {
+      const decision = guard.nextPage();
+      if (decision !== "request") {
+        stopReason = decision;
+        break;
+      }
       const pageLimit = Math.min(BINANCE_CANDLE_MAXIMUM_PAGE_SIZE, request.limit - rows.size);
       const url = new URL(request.price_mode === "mark" ? "/fapi/v1/markPriceKlines" : "/fapi/v1/klines", this.baseUrl);
       url.searchParams.set("symbol", request.native_symbol);
@@ -261,8 +273,12 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
       url.searchParams.set("limit", String(pageLimit));
       let response: Response;
       try {
-        response = await this.fetcher(url, { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(12_000) });
+        response = await this.fetcher(url, { method: "GET", headers: { accept: "application/json" }, redirect: "error", signal: guard.signal });
       } catch {
+        if (guard.signal.aborted) {
+          stopReason = "time_limit";
+          break;
+        }
         throw candleFailure("binance_unavailable", 503);
       }
       const payload: unknown = await response.json().catch(() => null);
@@ -275,14 +291,20 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
         const openTime = finiteTimestamp(row[0], "candle_time");
         latestOpen = Math.max(latestOpen, openTime);
         const closeTime = candleEnd(openTime, request.timeframe);
-        if (openTime >= from && closeTime <= to && rows.size < request.limit) rows.set(openTime, row);
+        if (openTime < to && closeTime > from && rows.size < request.limit) rows.set(openTime, row);
       }
-      if (latestOpen < cursor) throw candleFailure("binance_invalid_candle_order", 502);
+      if (latestOpen < cursor) {
+        stopReason = "provider_limit";
+        break;
+      }
       const nextCursor = candleEnd(latestOpen, request.timeframe);
-      if (nextCursor <= cursor) throw candleFailure("binance_invalid_candle_order", 502);
+      if (nextCursor <= cursor) {
+        stopReason = "provider_limit";
+        break;
+      }
       cursor = nextCursor;
     }
-    if (rows.size >= request.limit && cursor < to) providerLimitReached = true;
+    if (rows.size >= request.limit && cursor < to) stopReason = "provider_limit";
 
     const candles: CanonicalCandle[] = [...rows.entries()].sort(([left], [right]) => left - right).map(([openTime, row]) => {
       const closeTime = candleEnd(openTime, request.timeframe);
@@ -301,31 +323,7 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
       };
     });
 
-    const gaps: CanonicalCandleBatch["coverage"]["gaps"] = [];
-    let expectedOpen = from;
-    for (let index = 0; index < candles.length; index += 1) {
-      const candle = candles[index]!;
-      const openTime = Date.parse(candle.open_time);
-      if (openTime > expectedOpen) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: candle.open_time });
-      candle.gap_before = openTime > expectedOpen;
-      const next = candles[index + 1];
-      candle.gap_after = next ? Date.parse(next.open_time) > Date.parse(candle.close_time) : to > Date.parse(candle.close_time);
-      expectedOpen = Date.parse(candle.close_time);
-    }
-    if (candles.length > 0 && expectedOpen < to) gaps.push({ series_basis: seriesBasis, from: new Date(expectedOpen).toISOString(), to: request.to });
-    const warnings: CanonicalCandleBatch["warnings"] = [];
-    if (gaps.length > 0) warnings.push("historical_gap");
-    if (providerLimitReached) warnings.push("provider_limit_reached");
-    if (candles.length === 0) warnings.push("empty_range");
-    return assertCanonicalCandleBatch({
-      provider: this.provider, request, candles,
-      coverage: {
-        status: candles.length === 0 ? "empty" : gaps.length > 0 ? "gapped" : "complete",
-        range_start: request.from, range_end: request.to, source: "public_api", fetched_at: fetchedAt,
-        gaps, unavailable_reason: null,
-      },
-      warnings,
-    });
+    return finalizeCanonicalCandleBatch(this.provider, request, candles, fetchedAt, stopReason);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

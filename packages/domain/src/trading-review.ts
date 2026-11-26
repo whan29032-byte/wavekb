@@ -43,6 +43,7 @@ export const TRADE_CHART_WARNING_CODES = [
   "stale_cache",
   "rate_limited",
   "provider_limit_reached",
+  "time_limit_reached",
 ] as const;
 export type TradeChartWarningCode = (typeof TRADE_CHART_WARNING_CODES)[number];
 
