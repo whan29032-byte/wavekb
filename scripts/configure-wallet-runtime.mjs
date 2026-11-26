@@ -90,7 +90,8 @@ function candidateEnvironment(parsed) {
   if (key && (key.length > 512 || /\s/.test(key))) fail("wallet_configuration_invalid");
   const batch = env.MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE;
   if (batch && (!/^(?:[1-9]|10)$/.test(batch))) fail("wallet_configuration_invalid");
-  const values = Object.fromEntries(Object.entries(fields).map(([name, fallback]) => [name, name === "MEMBERSHIP_WALLET_ENABLED" ? "true" : env[name] || fallback]));
+  const values = Object.fromEntries(Object.entries(fields).map(([name, fallback]) => [name,
+    name === "MEMBERSHIP_WALLET_ENABLED" || name === "MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS" ? fallback : env[name] || fallback]));
   const remaining = new Set(Object.keys(values)), newline = parsed.lines.find(line => line.ending)?.ending ?? "\n";
   let output = parsed.lines.map(line => line.key && remaining.delete(line.key)
     ? `${line.prefix}${line.quote}${values[line.key]}${line.quote}${line.suffix}${line.ending}` : `${line.raw}${line.ending}`).join("");
