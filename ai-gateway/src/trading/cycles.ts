@@ -111,6 +111,7 @@ export type ReconstructedCycle = {
   stable_key: string;
   anchor_fill_id: string;
   fill_ids: string[];
+  allocations: CycleFillAllocation[];
   fill_digest: string;
   opened_at: string;
   closed_at: string | null;
@@ -125,6 +126,17 @@ export type ReconstructedCycle = {
   completeness: "complete" | "open" | "incomplete_opening_history";
 };
 
+export type CycleFillAllocation = {
+  native_fill_id: string;
+  quantity: string;
+  role: "open" | "add" | "reduce" | "close" | "reverse_open";
+  sort_order: number;
+};
+
+type MutableCycleFillAllocation = Omit<CycleFillAllocation, "quantity" | "sort_order"> & {
+  quantity: Decimal;
+};
+
 type MutableCycle = {
   provider: TradingProvider;
   connectionId: string;
@@ -134,6 +146,7 @@ type MutableCycle = {
   nativePositionId: string | null;
   direction: "long" | "short";
   fillIds: string[];
+  allocations: MutableCycleFillAllocation[];
   openedAt: string;
   closedAt: string | null;
   openingQuantity: Decimal;
@@ -179,6 +192,7 @@ function startCycle(input: ReconstructionInput, fill: CanonicalFill, direction: 
     nativePositionId: fill.native_position_id,
     direction,
     fillIds: [],
+    allocations: [],
     openedAt: new Date(fill.occurred_at).toISOString(),
     closedAt: null,
     openingQuantity: ZERO,
@@ -193,23 +207,41 @@ function startCycle(input: ReconstructionInput, fill: CanonicalFill, direction: 
   };
 }
 
-function addFillId(cycle: MutableCycle, fill: CanonicalFill): void {
+function addAllocation(
+  cycle: MutableCycle,
+  fill: CanonicalFill,
+  quantity: Decimal,
+  role: CycleFillAllocation["role"],
+): void {
   if (!cycle.fillIds.includes(fill.native_fill_id)) cycle.fillIds.push(fill.native_fill_id);
+  cycle.allocations.push({ native_fill_id: fill.native_fill_id, quantity, role });
 }
 
 function allocated(value: Decimal, portion: Decimal, total: Decimal): Decimal {
   return compare(portion, total) === 0 ? value : multiply(value, divide(portion, total));
 }
 
-function addOpening(cycle: MutableCycle, fill: CanonicalFill, quantity: Decimal, total: Decimal): void {
-  addFillId(cycle, fill);
+function addOpening(
+  cycle: MutableCycle,
+  fill: CanonicalFill,
+  quantity: Decimal,
+  total: Decimal,
+  role: Extract<CycleFillAllocation["role"], "open" | "add" | "reverse_open">,
+): void {
+  addAllocation(cycle, fill, quantity, role);
   cycle.openingQuantity = add(cycle.openingQuantity, quantity);
   cycle.entryNotional = add(cycle.entryNotional, multiply(decimal(fill.price), quantity));
   cycle.fees = add(cycle.fees, allocated(moneyAmount(fill.fee), quantity, total));
 }
 
-function addClosing(cycle: MutableCycle, fill: CanonicalFill, quantity: Decimal, total: Decimal): void {
-  addFillId(cycle, fill);
+function addClosing(
+  cycle: MutableCycle,
+  fill: CanonicalFill,
+  quantity: Decimal,
+  total: Decimal,
+  role: Extract<CycleFillAllocation["role"], "reduce" | "close">,
+): void {
+  addAllocation(cycle, fill, quantity, role);
   cycle.closingQuantity = add(cycle.closingQuantity, quantity);
   cycle.exitNotional = add(cycle.exitNotional, multiply(decimal(fill.price), quantity));
   cycle.realizedPnl = add(cycle.realizedPnl, allocated(moneyAmount(fill.realized_pnl), quantity, minimum(quantity, total)));
@@ -237,6 +269,12 @@ function finalize(cycle: MutableCycle): ReconstructedCycle {
     stable_key: `${cycle.provider}:${cycle.connectionId}:${cycle.symbol}:${cycle.direction}:${anchorFillId}`,
     anchor_fill_id: anchorFillId,
     fill_ids: [...cycle.fillIds],
+    allocations: cycle.allocations.map((allocation, sort_order) => ({
+      native_fill_id: allocation.native_fill_id,
+      quantity: format(allocation.quantity),
+      role: allocation.role,
+      sort_order,
+    })),
     fill_digest: digestFillIds(cycle.fillIds),
     opened_at: cycle.openedAt,
     closed_at: cycle.closedAt,
@@ -265,26 +303,27 @@ function reconstructGroup(input: ReconstructionInput, fills: CanonicalFill[]): M
     if (isZero(position)) {
       if (fill.action === "close") {
         const incomplete = startCycle(input, fill, sign(delta) < 0 ? "long" : "short", "incomplete_opening_history");
-        addClosing(incomplete, fill, total, total);
+        addClosing(incomplete, fill, total, total, "close");
         incomplete.closedAt = new Date(fill.occurred_at).toISOString();
         completed.push(incomplete);
         continue;
       }
       current = startCycle(input, fill, sign(delta) > 0 ? "long" : "short", "open");
-      addOpening(current, fill, total, total);
+      addOpening(current, fill, total, total, "open");
       position = delta;
       continue;
     }
 
     if (!current) throw new Error("cycle_state_missing");
     if (sign(position) === sign(delta)) {
-      addOpening(current, fill, total, total);
+      addOpening(current, fill, total, total, "add");
       position = add(position, delta);
       continue;
     }
 
     const closingQuantity = minimum(absolute(position), total);
-    addClosing(current, fill, closingQuantity, total);
+    const closingRole = compare(closingQuantity, absolute(position)) === 0 ? "close" : "reduce";
+    addClosing(current, fill, closingQuantity, total, closingRole);
     const nextPosition = add(position, delta);
     if (isZero(nextPosition) || sign(nextPosition) !== sign(position)) {
       current.closedAt = new Date(fill.occurred_at).toISOString();
@@ -296,7 +335,7 @@ function reconstructGroup(input: ReconstructionInput, fills: CanonicalFill[]): M
     if (!isZero(nextPosition) && sign(nextPosition) !== sign(position)) {
       const openingQuantity = subtract(total, closingQuantity);
       current = startCycle(input, fill, sign(nextPosition) > 0 ? "long" : "short", "open");
-      addOpening(current, fill, openingQuantity, total);
+      addOpening(current, fill, openingQuantity, total, "reverse_open");
     }
     position = nextPosition;
   }

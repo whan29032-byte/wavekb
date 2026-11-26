@@ -467,7 +467,9 @@ export class TradingSyncService {
         const cycle = reconstructed[assignment.candidate_index]!;
         const valuation = cycleUsdValue(cycle, snapshot);
         return {
-          ...cycle, id: assignment.id, revision: assignment.revision,
+          ...cycle,
+          allocations: cycle.allocations.map((allocation) => ({ ...allocation })),
+          id: assignment.id, revision: assignment.revision,
           usd_net_pnl: valuation.usd_value, valuation_status: valuation.status,
           is_current: true as const, needs_reconciliation: reconciliationIds.has(assignment.id),
         };

@@ -139,6 +139,10 @@ test("performs the first 90-day backfill and deduplicates overlapping facts befo
   assert.deepEqual(adapter.cursors, [{ kind: "time", value: null }]);
   assert.equal(store.publication?.fills.length, 2);
   assert.equal(store.publication?.cycles.length, 1);
+  assert.deepEqual(store.publication?.cycles[0]?.allocations, [
+    { native_fill_id: "fill-1", quantity: "1", role: "open", sort_order: 0 },
+    { native_fill_id: "fill-2", quantity: "1", role: "close", sort_order: 1 },
+  ]);
   assert.equal(store.publication?.coverage_started_at, "2026-08-26T12:00:00.000Z");
   assert.equal(store.publications, 1);
 });
@@ -187,6 +191,11 @@ test("rebuilds a reviewed cycle identity when a late closing fill arrives", asyn
   assert.equal(store.publication?.cycles[0]?.id, "55555555-5555-4555-8555-555555555555");
   assert.equal(store.publication?.cycles[0]?.revision, 2);
   assert.equal(store.publication?.cycles[0]?.closed_at, "2026-11-21T00:00:00.000Z");
+  assert.deepEqual(store.publication?.cycles[0]?.fill_ids, ["open-1", "close-1"]);
+  assert.deepEqual(store.publication?.cycles[0]?.allocations, [
+    { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+    { native_fill_id: "close-1", quantity: "1", role: "close", sort_order: 1 },
+  ]);
 });
 
 test("isolates one connection failure while synchronizing the remaining due accounts", async () => {
