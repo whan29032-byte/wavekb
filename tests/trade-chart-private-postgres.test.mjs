@@ -492,6 +492,39 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
       assert.equal(Number(rolledBackInvalid.rows[0]?.sync_generation), 4, invalid.name);
     }
 
+    const immutableIdentityCases = [
+      { name: "changed anchor", override: { anchor_fill_id: "close-1" } },
+      { name: "changed stable key", override: { stable_key: "changed-stable-key" } },
+      { name: "changed fill digest", override: { fill_digest: "changed-fill-digest" } },
+    ];
+    for (const immutable of immutableIdentityCases) {
+      await assert.rejects(
+        publish(database, {
+          expectedGeneration: 4,
+          capturedAt: "2026-11-24T09:07:00.000Z",
+          fills: [],
+          cycles: [{
+            ...cycle({
+              revision: 2,
+              fillIds: ["open-1", "close-1"],
+              closedAt,
+              allocations: [
+                { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+                { native_fill_id: "close-1", quantity: "1", role: "close", sort_order: 1 },
+              ],
+            }),
+            ...immutable.override,
+          }],
+        }),
+        /immutable_trade_cycle_revision/,
+        immutable.name,
+      );
+      const rolledBackIdentity = await database.query(`
+        select sync_generation from public.exchange_connections where id = $1
+      `, [connectionOne]);
+      assert.equal(Number(rolledBackIdentity.rows[0]?.sync_generation), 4, immutable.name);
+    }
+
     await database.exec(`
       insert into public.exchange_credential_sets (owner_id, provider, label)
       values ('${ownerTwo}', 'binance', 'Other owner');
@@ -557,6 +590,71 @@ test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner
       `, [cycleOne, ownerOne, connectionOne, alienFill.rows[0]?.id]),
       /trading_trade_cycle_fills_fill_owner_fkey/,
     );
+  } finally {
+    await database.close();
+  }
+});
+
+test("a legacy locale-ordered fill set can advance to a code-point-ordered revision", async () => {
+  const database = await migratedDatabase();
+  try {
+    const occurredAt = "2026-11-24T07:00:00.000Z";
+    const oldRevision = {
+      ...cycle({
+        revision: 1,
+        fillIds: ["a", "Z"],
+        allocations: [
+          { native_fill_id: "a", quantity: "1", role: "open", sort_order: 0 },
+          { native_fill_id: "Z", quantity: "1", role: "add", sort_order: 1 },
+        ],
+        allocationDigest: "legacy-allocation-digest",
+      }),
+      stable_key: "binance:connection:BTCUSDT:long:a",
+      anchor_fill_id: "a",
+      fill_digest: "same-unordered-fill-digest",
+    };
+    const newRevision = {
+      ...cycle({
+        revision: 2,
+        fillIds: ["Z", "a"],
+        allocations: [
+          { native_fill_id: "Z", quantity: "1", role: "open", sort_order: 0 },
+          { native_fill_id: "a", quantity: "1", role: "add", sort_order: 1 },
+        ],
+        allocationDigest: "code-point-allocation-digest",
+      }),
+      stable_key: "binance:connection:BTCUSDT:long:Z",
+      anchor_fill_id: "Z",
+      fill_digest: "same-unordered-fill-digest",
+    };
+
+    const first = await publish(database, {
+      expectedGeneration: 0,
+      capturedAt: "2026-11-24T09:00:00.000Z",
+      fills: [fill("a", occurredAt), fill("Z", occurredAt)],
+      cycles: [oldRevision],
+    });
+    assert.equal(Number(first.rows[0]?.generation), 1);
+
+    const second = await publish(database, {
+      expectedGeneration: 1,
+      capturedAt: "2026-11-24T09:05:00.000Z",
+      fills: [fill("a", occurredAt), fill("Z", occurredAt)],
+      cycles: [newRevision],
+    });
+    assert.equal(Number(second.rows[0]?.generation), 2);
+
+    const revisions = await database.query(`
+      select revision, facts->>'anchor_fill_id' as anchor_fill_id,
+             facts->'fill_ids' as fill_ids
+      from public.trading_trade_cycle_revisions
+      where cycle_id = $1
+      order by revision
+    `, [cycleOne]);
+    assert.deepEqual(revisions.rows, [
+      { revision: 1, anchor_fill_id: "a", fill_ids: ["a", "Z"] },
+      { revision: 2, anchor_fill_id: "Z", fill_ids: ["Z", "a"] },
+    ]);
   } finally {
     await database.close();
   }

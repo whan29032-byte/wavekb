@@ -247,6 +247,7 @@ test("loads allocation digest evidence from immutable revision facts", async () 
         return [{
           cycle_id: "55555555-5555-4555-8555-555555555555",
           facts: {
+            stable_key: "stable-cycle-key",
             anchor_fill_id: "open-1",
             fill_ids: ["open-1"],
             allocation_digest: "allocation-digest",
@@ -262,7 +263,40 @@ test("loads allocation digest evidence from immutable revision facts", async () 
   const history = await store.loadHistory(connectionId);
 
   assert.equal(history.previous_cycles[0]?.allocation_digest, "allocation-digest");
+  assert.equal(history.previous_cycles[0]?.stable_key, "stable-cycle-key");
   assert.equal(requests.length, 5);
+});
+
+test("legacy locale-ordered fill facts advance revision under code-point reconstruction without a sync deadlock", async () => {
+  const store = new Store();
+  const timestamp = "2026-11-20T00:00:00.000Z";
+  store.existingFills = [
+    fill("a", timestamp, "open", "buy"),
+    fill("Z", timestamp, "open", "buy"),
+  ];
+  const baselineStore = new Store();
+  baselineStore.existingFills = [...store.existingFills];
+  await service(baselineStore, new Adapter([batch()])).syncConnection(connectionId);
+  const reconstructed = baselineStore.publication?.cycles[0];
+  assert.ok(reconstructed);
+  assert.deepEqual(reconstructed.fill_ids, ["Z", "a"]);
+
+  store.previousCycles = [{
+    id: "55555555-5555-4555-8555-555555555555",
+    created_at: "2026-11-20T00:05:00.000Z",
+    anchor_fill_id: "a",
+    fill_ids: ["a", "Z"],
+    revision: 1,
+    fill_digest: reconstructed.fill_digest,
+    has_review: false,
+  }];
+
+  const result = await service(store, new Adapter([batch()])).syncConnection(connectionId);
+
+  assert.equal(result.status, "published");
+  assert.equal(store.publication?.cycles[0]?.id, "55555555-5555-4555-8555-555555555555");
+  assert.equal(store.publication?.cycles[0]?.revision, 2);
+  assert.deepEqual(store.publication?.cycles[0]?.fill_ids, ["Z", "a"]);
 });
 
 test("isolates one connection failure while synchronizing the remaining due accounts", async () => {

@@ -200,6 +200,30 @@ test("allocation fact changes advance a known allocation-aware revision but lega
   assert.equal(legacy.assignments[0]?.revision, 1);
 });
 
+test("legacy locale-ordered fill identity advances instead of reusing an immutable revision", () => {
+  const result = reconcileCycleLineage(
+    [{
+      ...previous({ id: "cycle-id", created_at: "2026-11-24T01:00:00Z", anchor_fill_id: "a", fill_ids: ["a", "Z"] }),
+      fill_digest: "same-unordered-digest",
+    }],
+    [{
+      stable_key: "code-point-order",
+      anchor_fill_id: "Z",
+      fill_ids: ["Z", "a"],
+      fill_digest: "same-unordered-digest",
+      allocation_digest: "new-allocation-digest",
+    }],
+    () => "unused",
+  );
+
+  assert.deepEqual(result.assignments, [{
+    candidate_index: 0,
+    id: "cycle-id",
+    revision: 2,
+    previous_ids: ["cycle-id"],
+  }]);
+});
+
 test("a closing fill before any opening evidence is excluded as incomplete opening history", () => {
   const cycles = reconstructNetZeroCycles({
     provider: "bitget", connection_id: connectionId, account_currency: "USDT", cash_events: [],

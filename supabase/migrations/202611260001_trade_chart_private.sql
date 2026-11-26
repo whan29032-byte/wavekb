@@ -308,7 +308,13 @@ begin
       if persisted_revision.cycle_id is null then
         raise exception 'trade_cycle_allocation_revision_not_found';
       end if;
-      if persisted_revision.facts->'fill_ids' is distinct from item->'fill_ids'
+      if persisted_revision.fill_digest is distinct from item->>'fill_digest'
+         or persisted_revision.facts->>'anchor_fill_id' is distinct from item->>'anchor_fill_id'
+         or persisted_revision.facts->'fill_ids' is distinct from item->'fill_ids'
+         or (
+           persisted_revision.facts ? 'stable_key'
+           and persisted_revision.facts->>'stable_key' is distinct from item->>'stable_key'
+         )
          or (
            persisted_revision.facts ? 'allocation_digest'
            and persisted_revision.facts->>'allocation_digest' is distinct from item->>'allocation_digest'

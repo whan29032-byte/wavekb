@@ -417,6 +417,7 @@ export function reconstructPositionIdCycles(input: ReconstructionInput): Reconst
 export type PreviousCycleIdentity = {
   id: string;
   created_at: string;
+  stable_key?: string;
   anchor_fill_id: string;
   fill_ids: string[];
   revision: number;
@@ -442,6 +443,10 @@ export type CycleReconciliation = {
 function overlapCount(left: readonly string[], right: readonly string[]): number {
   const rightSet = new Set(right);
   return left.reduce((count, fillId) => count + (rightSet.has(fillId) ? 1 : 0), 0);
+}
+
+function orderedFillIdsEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((fillId, index) => fillId === right[index]);
 }
 
 export function reconcileCycleLineage(
@@ -477,6 +482,9 @@ export function reconcileCycleLineage(
       candidate_index: candidateIndex,
       id: canonical.id,
       revision: canonical.fill_digest === candidate.fill_digest
+        && canonical.anchor_fill_id === candidate.anchor_fill_id
+        && orderedFillIdsEqual(canonical.fill_ids, candidate.fill_ids)
+        && (canonical.stable_key === undefined || canonical.stable_key === candidate.stable_key)
         && (canonical.allocation_digest === undefined || canonical.allocation_digest === candidate.allocation_digest)
         ? canonical.revision
         : canonical.revision + 1,
