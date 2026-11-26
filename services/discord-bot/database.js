@@ -26,6 +26,17 @@ const CREATE_USERS_TABLE = `
   )
 `;
 
+const CREATE_MEMBER_WELCOMES_TABLE = `
+  CREATE TABLE IF NOT EXISTS member_welcomes (
+    guild_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    joined_at INTEGER NOT NULL,
+    message_id TEXT NOT NULL,
+    welcomed_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, user_id, joined_at)
+  )
+`;
+
 function migrateSchema(connection) {
   const tableExists = connection.prepare(`
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'
@@ -33,7 +44,8 @@ function migrateSchema(connection) {
 
   if (!tableExists) {
     connection.exec(CREATE_USERS_TABLE);
-    connection.pragma('user_version = 2');
+    connection.exec(CREATE_MEMBER_WELCOMES_TABLE);
+    connection.pragma('user_version = 3');
     return;
   }
 
@@ -66,7 +78,8 @@ function migrateSchema(connection) {
     connection.exec('ALTER TABLE users ADD COLUMN last_xp_at INTEGER NOT NULL DEFAULT 0');
   }
 
-  connection.pragma('user_version = 2');
+  connection.exec(CREATE_MEMBER_WELCOMES_TABLE);
+  connection.pragma('user_version = 3');
 }
 
 function createDatabase(filename) {
@@ -118,6 +131,16 @@ function createDatabase(filename) {
     WHERE guild_id = ? AND path = ?
     ORDER BY total_xp DESC, user_id ASC
     LIMIT ?
+  `);
+  const selectMemberWelcome = connection.prepare(`
+    SELECT 1
+    FROM member_welcomes
+    WHERE guild_id = ? AND user_id = ? AND joined_at = ?
+  `);
+  const insertMemberWelcome = connection.prepare(`
+    INSERT OR IGNORE INTO member_welcomes (
+      guild_id, user_id, joined_at, message_id, welcomed_at
+    ) VALUES (?, ?, ?, ?, ?)
   `);
 
   function getUser(guildId, userId) {
@@ -217,6 +240,14 @@ function createDatabase(filename) {
       : selectLeaderboardByPath.all(guildId, profilePath, limit);
   }
 
+  function hasMemberWelcome(guildId, userId, joinedAt) {
+    return Boolean(selectMemberWelcome.get(guildId, userId, joinedAt));
+  }
+
+  function recordMemberWelcome(guildId, userId, joinedAt, messageId, welcomedAt = Date.now()) {
+    insertMemberWelcome.run(guildId, userId, joinedAt, messageId, welcomedAt);
+  }
+
   return {
     getUser,
     getOrCreateUser,
@@ -225,6 +256,8 @@ function createDatabase(filename) {
     awardMessageXp,
     getRank,
     getLeaderboard,
+    hasMemberWelcome,
+    recordMemberWelcome,
     close() {
       connection.close();
     }

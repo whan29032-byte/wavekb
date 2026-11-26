@@ -99,6 +99,22 @@ test('message cooldown survives closing and reopening the database', t => {
   assert.equal(result.user.total_xp, 10);
 });
 
+test('member welcome ledger persists one delivery for each guild, user, and join timestamp', t => {
+  const holder = temporaryDatabase(t);
+  const joinedAt = 1_700_000_000_000;
+
+  assert.equal(holder.database.hasMemberWelcome('guild-1', 'user-1', joinedAt), false);
+  holder.database.recordMemberWelcome('guild-1', 'user-1', joinedAt, 'message-1', joinedAt + 1_000);
+
+  assert.equal(holder.database.hasMemberWelcome('guild-1', 'user-1', joinedAt), true);
+  assert.equal(holder.database.hasMemberWelcome('guild-1', 'user-1', joinedAt + 1), false);
+  assert.equal(holder.database.hasMemberWelcome('guild-2', 'user-1', joinedAt), false);
+  assert.equal(holder.database.hasMemberWelcome('guild-1', 'user-2', joinedAt), false);
+
+  const reopened = holder.reopen();
+  assert.equal(reopened.hasMemberWelcome('guild-1', 'user-1', joinedAt), true);
+});
+
 test('awardMessageXp can level multiple times in one transaction', t => {
   const { database } = temporaryDatabase(t);
 
