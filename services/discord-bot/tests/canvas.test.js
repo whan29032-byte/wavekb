@@ -6,6 +6,7 @@ const path = require('node:path');
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 
 const { drawCard, drawImageCover, fitText, getTheme } = require('../canvas');
+const { BUNDLED_FONT_FAMILY } = require('../font-registry');
 const { getCardData } = require('../profile');
 
 const backgroundPaths = {
@@ -101,9 +102,9 @@ test('drawImageCover crops the source to the destination aspect ratio', () => {
 test('fitText keeps long real-font card fields within every production pixel limit', () => {
   const context = createCanvas(900, 320).getContext('2d');
   const cases = [
-    { font: 'bold 25px "Microsoft YaHei", sans-serif', width: 430, text: '极长Discord用户名'.repeat(20) },
-    { font: '15px "Microsoft YaHei", sans-serif', width: 650, text: '极长能力或术式名称'.repeat(30) },
-    { font: '15px "Microsoft YaHei", sans-serif', width: 680, text: '极长发动词或魔法咏唱'.repeat(30) }
+    { font: `bold 25px ${BUNDLED_FONT_FAMILY}`, width: 430, text: '极长Discord用户名'.repeat(20) },
+    { font: `15px ${BUNDLED_FONT_FAMILY}`, width: 650, text: '极长能力或术式名称'.repeat(30) },
+    { font: `15px ${BUNDLED_FONT_FAMILY}`, width: 680, text: '极长发动词或魔法咏唱'.repeat(30) }
   ];
 
   for (const entry of cases) {

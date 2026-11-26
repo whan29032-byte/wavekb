@@ -2,10 +2,11 @@
 
 const path = require('node:path');
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
+const { BUNDLED_FONT_FAMILY } = require('./font-registry');
 
 const WIDTH = 900;
 const HEIGHT = 320;
-const FONT_FAMILY = '"Microsoft YaHei", "Noto Sans CJK SC", sans-serif';
+const FONT_FAMILY = BUNDLED_FONT_FAMILY;
 const DEFAULT_BACKGROUND_PATHS = {
   esper: path.resolve(__dirname, 'assets/bg-esper.png'),
   magician: path.resolve(__dirname, 'assets/bg-magician.png')
