@@ -48,6 +48,7 @@ create index trading_trade_cycle_fills_fill_lookup_idx
 on public.trading_trade_cycle_fills(fill_id, cycle_id, cycle_revision);
 
 alter table public.trading_trade_cycle_fills enable row level security;
+alter table public.trading_trade_cycle_fills force row level security;
 
 revoke all on table public.trading_trade_cycle_fills from public, anon, authenticated;
 grant select, insert, update, delete on table public.trading_trade_cycle_fills to service_role;
@@ -471,31 +472,356 @@ as $$
     and jsonb_typeof(p_viewport->'from') = 'number'
     and jsonb_typeof(p_viewport->'to') = 'number'
     and (p_viewport->>'from')::numeric < (p_viewport->>'to')::numeric
-    and abs((p_viewport->>'from')::numeric) <= 1000000000
-    and abs((p_viewport->>'to')::numeric) <= 1000000000
+    and abs((p_viewport->>'from')::numeric) <= 10000000000000
+    and abs((p_viewport->>'to')::numeric) <= 10000000000000
     and not exists (
       select 1 from jsonb_object_keys(p_viewport) key
       where key not in ('from', 'to')
     ), false)
 $$;
 
-create or replace function public.trade_chart_json_array_valid(
-  p_value jsonb,
-  p_maximum_count integer,
-  p_maximum_bytes integer
+create or replace function public.trade_chart_plain_text_valid(
+  p_value text,
+  p_maximum_length integer
 )
 returns boolean
 language sql
 immutable
 set search_path = ''
 as $$
-  select coalesce(jsonb_typeof(p_value) = 'array'
-    and jsonb_array_length(p_value) <= p_maximum_count
-    and octet_length(p_value::text) <= p_maximum_bytes
+  select coalesce(p_value is not null
+    and char_length(p_value) <= p_maximum_length
+    and position('<' in p_value) = 0
+    and position('>' in p_value) = 0
+    and position('javascript:' in lower(p_value)) = 0
+    and position('data:text/html' in lower(p_value)) = 0
+    and position('expression(' in replace(lower(p_value), ' ', '')) = 0
+    and position('url(' in replace(lower(p_value), ' ', '')) = 0, false)
+$$;
+
+create or replace function public.trade_chart_color_valid(p_value text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(p_value ~ '^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$', false)
+$$;
+
+create or replace function public.trade_chart_indicator_settings_valid(
+  p_indicator_id text,
+  p_settings jsonb,
+  p_timeframe text
+)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  allowed_keys text[];
+  setting_key text;
+  setting_value jsonb;
+  numeric_value numeric;
+begin
+  if jsonb_typeof(p_settings) <> 'object' or octet_length(p_settings::text) > 16384 then
+    return false;
+  end if;
+
+  allowed_keys := case p_indicator_id
+    when 'sma' then array['length','source','color','timeframe']
+    when 'ema' then array['length','source','color','timeframe']
+    when 'wma' then array['length','source','color','timeframe']
+    when 'hma' then array['length','source','color','timeframe']
+    when 'vwap' then array['anchor','source','offset','calcMode','showBand1','bandMult1','showBand2','bandMult2','showBand3','bandMult3','color','band1Color','band2Color','band3Color']
+    when 'bollinger' then array['length','stdDev','source','basisColor','bandColor','timeframe']
+    when 'rsi' then array['length','source','color','overbought','oversold','bandColor','timeframe']
+    when 'macd' then array['fastPeriod','slowPeriod','signalPeriod','source','macdColor','histUpColor','histUpFadeColor','histDownColor','histDownFadeColor','signalColor','timeframe']
+    when 'stochastic' then array['kPeriod','kSmoothing','dPeriod','kColor','dColor','bandColor','timeframe']
+    when 'adx' then array['period','adxPeriod','adxColor','plusColor','minusColor','timeframe']
+    when 'atr' then array['period','color','timeframe']
+    when 'supertrend' then array['period','multiplier','upColor','downColor','timeframe']
+    when 'ichimoku' then array['conversionPeriod','basePeriod','laggingSpanPeriod','displacement','conversionColor','baseColor','spanAColor','spanBColor','laggingColor','cloudUpColor','cloudDownColor']
+    when 'donchian' then array['length','offset','basisColor','bandColor','fillColor','timeframe']
+    when 'keltner-channel' then array['length','mult','source','exp','bandsStyle','atrlength','basisColor','bandColor','fillColor','timeframe']
+    when 'chandelier-exit' then array['length','atrLength','atrMultiplier','longColor','shortColor']
+    when 'zigzag' then array['deviation','color']
+    when 'williams-fractals' then array['periods','showUp','showDown','upColor','downColor']
+    when 'pivot-points' then array['kind','frame','showP','show1','show2','show3','show4','show5','pivotColor','supportColor','resistanceColor']
+    when 'cpr' then array['pivotMode','showDaily','showWeekly','showMonthly','displaypivots','displaysupport','displayresistance','displaycpr','displayS1R1','dPivotColor','dSupportColor','dResistanceColor','dCprColor','dFillColor','wPivotColor','wSupportColor','wResistanceColor','wCprColor','wFillColor','mPivotColor','mSupportColor','mResistanceColor','mCprColor','mFillColor']
+    when 'obv' then array['color','maType','maLength','bbMult','maColor','bbUpperColor','bbLowerColor']
+    when 'mfi' then array['period','color','bandColor']
+    when 'chaikin-money-flow' then array['length','color']
+    else null
+  end;
+  if allowed_keys is null then
+    return false;
+  end if;
+
+  for setting_key, setting_value in select key, value from jsonb_each(p_settings)
+  loop
+    if not (setting_key = any(allowed_keys)) then
+      return false;
+    end if;
+    if setting_key = 'source' then
+      if jsonb_typeof(setting_value) <> 'string'
+         or setting_value #>> '{}' not in ('open','high','low','close','hl2','hlc3','ohlc4') then
+        return false;
+      end if;
+    elsif setting_key = 'timeframe' then
+      if jsonb_typeof(setting_value) <> 'string'
+         or setting_value #>> '{}' not in ('', p_timeframe) then
+        return false;
+      end if;
+    elsif setting_key = any(array[
+      'showBand1','showBand2','showBand3','exp','showUp','showDown','showP','show1','show2','show3','show4','show5',
+      'showDaily','showWeekly','showMonthly','displaypivots','displaysupport','displayresistance','displaycpr','displayS1R1'
+    ]) then
+      if jsonb_typeof(setting_value) <> 'boolean' then return false; end if;
+    elsif setting_key = any(array[
+      'color','band1Color','band2Color','band3Color','basisColor','bandColor','macdColor','histUpColor','histUpFadeColor',
+      'histDownColor','histDownFadeColor','signalColor','kColor','dColor','adxColor','plusColor','minusColor','upColor','downColor',
+      'conversionColor','baseColor','spanAColor','spanBColor','laggingColor','cloudUpColor','cloudDownColor','fillColor','longColor',
+      'shortColor','pivotColor','supportColor','resistanceColor','dPivotColor','dSupportColor','dResistanceColor','dCprColor','dFillColor',
+      'wPivotColor','wSupportColor','wResistanceColor','wCprColor','wFillColor','mPivotColor','mSupportColor','mResistanceColor',
+      'mCprColor','mFillColor','maColor','bbUpperColor','bbLowerColor'
+    ]) then
+      if jsonb_typeof(setting_value) <> 'string'
+         or not public.trade_chart_color_valid(setting_value #>> '{}') then return false; end if;
+    elsif setting_key = 'anchor' then
+      if jsonb_typeof(setting_value) <> 'string' or setting_value #>> '{}' not in ('session','week','month','quarter','year','continuous') then return false; end if;
+    elsif setting_key = 'calcMode' then
+      if jsonb_typeof(setting_value) <> 'string' or setting_value #>> '{}' not in ('stdev','percent') then return false; end if;
+    elsif setting_key = 'bandsStyle' then
+      if jsonb_typeof(setting_value) <> 'string' or setting_value #>> '{}' not in ('Average True Range','True Range','Range') then return false; end if;
+    elsif setting_key = 'kind' then
+      if jsonb_typeof(setting_value) <> 'string' or setting_value #>> '{}' not in ('traditional','fibonacci','woodie','classic','demark','camarilla') then return false; end if;
+    elsif setting_key = 'frame' then
+      if jsonb_typeof(setting_value) <> 'string' or setting_value #>> '{}' not in ('auto','daily','weekly','monthly','quarterly','yearly') then return false; end if;
+    elsif setting_key = 'pivotMode' then
+      if jsonb_typeof(setting_value) <> 'string' or setting_value #>> '{}' not in ('auto','manual') then return false; end if;
+    elsif setting_key = 'maType' then
+      if jsonb_typeof(setting_value) <> 'string' or setting_value #>> '{}' not in ('None','SMA','SMA + Bollinger Bands','EMA','SMMA (RMA)','WMA','VWMA') then return false; end if;
+    else
+      if jsonb_typeof(setting_value) <> 'number' then return false; end if;
+      numeric_value := (setting_value #>> '{}')::numeric;
+      if setting_key = 'offset' then
+        if numeric_value not between -500 and 500 or numeric_value <> trunc(numeric_value) then return false; end if;
+      elsif setting_key in ('stdDev','multiplier','mult','deviation','bbMult') then
+        if numeric_value <= 0 or numeric_value > 100 then return false; end if;
+      elsif setting_key in ('bandMult1','bandMult2','bandMult3','atrMultiplier') then
+        if numeric_value < 0 or numeric_value > 100 then return false; end if;
+      elsif setting_key in ('overbought','oversold') then
+        if numeric_value not between 0 and 100 then return false; end if;
+      elsif setting_key = 'displacement' then
+        if numeric_value not between 0 and 200 or numeric_value <> trunc(numeric_value) then return false; end if;
+      elsif numeric_value not between 1 and 1000 or numeric_value <> trunc(numeric_value) then
+        return false;
+      end if;
+    end if;
+  end loop;
+  return true;
+exception when others then
+  return false;
+end;
+$$;
+
+create or replace function public.trade_chart_indicators_valid(
+  p_indicators jsonb,
+  p_timeframe text
+)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  indicator jsonb;
+  pane_index numeric;
+begin
+  if jsonb_typeof(p_indicators) <> 'array'
+     or jsonb_array_length(p_indicators) > 32
+     or octet_length(p_indicators::text) > 65536 then
+    return false;
+  end if;
+  if (select count(*) from jsonb_array_elements(p_indicators)) <>
+     (select count(distinct item->>'instanceId') from jsonb_array_elements(p_indicators) item) then
+    return false;
+  end if;
+  for indicator in select value from jsonb_array_elements(p_indicators)
+  loop
+    if jsonb_typeof(indicator) <> 'object'
+       or not (indicator ?& array['instanceId','indicatorId'])
+       or exists (select 1 from jsonb_object_keys(indicator) key where key not in ('instanceId','indicatorId','settings','paneIndex'))
+       or jsonb_typeof(indicator->'instanceId') <> 'string'
+       or (indicator->>'instanceId') !~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+       or jsonb_typeof(indicator->'indicatorId') <> 'string'
+       or (indicator->>'indicatorId') not in (
+         'sma','ema','wma','hma','vwap','bollinger','rsi','macd','stochastic','adx','atr','supertrend','ichimoku',
+         'donchian','keltner-channel','chandelier-exit','zigzag','williams-fractals','pivot-points','cpr','obv','mfi','chaikin-money-flow'
+       )
+       or not public.trade_chart_indicator_settings_valid(
+         indicator->>'indicatorId', case when indicator ? 'settings' then indicator->'settings' else '{}'::jsonb end, p_timeframe
+       ) then
+      return false;
+    end if;
+    if indicator ? 'paneIndex' then
+      if jsonb_typeof(indicator->'paneIndex') <> 'number' then return false; end if;
+      pane_index := (indicator->>'paneIndex')::numeric;
+      if pane_index not between 0 and 15 or pane_index <> trunc(pane_index) then return false; end if;
+    end if;
+  end loop;
+  return true;
+exception when others then
+  return false;
+end;
+$$;
+
+create or replace function public.trade_chart_drawing_style_valid(p_style jsonb)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  level jsonb;
+  numeric_value numeric;
+begin
+  if jsonb_typeof(p_style) <> 'object'
+     or exists (select 1 from jsonb_object_keys(p_style) key where key not in ('color','lineWidth','lineStyle','fill','fillColor','fillOpacity','extendLeft','extendRight','showLabels','levels')) then
+    return false;
+  end if;
+  if p_style ? 'color' and (jsonb_typeof(p_style->'color') <> 'string' or not public.trade_chart_color_valid(p_style->>'color')) then return false; end if;
+  if p_style ? 'fillColor' and (jsonb_typeof(p_style->'fillColor') <> 'string' or not public.trade_chart_color_valid(p_style->>'fillColor')) then return false; end if;
+  if p_style ? 'lineWidth' then
+    if jsonb_typeof(p_style->'lineWidth') <> 'number' then return false; end if;
+    numeric_value := (p_style->>'lineWidth')::numeric;
+    if numeric_value not between 0.5 and 20 then return false; end if;
+  end if;
+  if p_style ? 'fillOpacity' then
+    if jsonb_typeof(p_style->'fillOpacity') <> 'number' then return false; end if;
+    numeric_value := (p_style->>'fillOpacity')::numeric;
+    if numeric_value not between 0 and 1 then return false; end if;
+  end if;
+  if p_style ? 'lineStyle' and (jsonb_typeof(p_style->'lineStyle') <> 'string' or p_style->>'lineStyle' not in ('solid','dashed','dotted')) then return false; end if;
+  if exists (
+    select 1 from unnest(array['fill','extendLeft','extendRight','showLabels']) key
+    where p_style ? key and jsonb_typeof(p_style->key) <> 'boolean'
+  ) then return false; end if;
+  if p_style ? 'levels' then
+    if jsonb_typeof(p_style->'levels') <> 'array' or jsonb_array_length(p_style->'levels') > 32 then return false; end if;
+    for level in select value from jsonb_array_elements(p_style->'levels')
+    loop
+      if jsonb_typeof(level) <> 'object'
+         or not (level ? 'ratio')
+         or exists (select 1 from jsonb_object_keys(level) key where key not in ('ratio','color','enabled','label'))
+         or jsonb_typeof(level->'ratio') <> 'number'
+         or abs((level->>'ratio')::numeric) > 1000000 then return false; end if;
+      if level ? 'color' and (jsonb_typeof(level->'color') <> 'string' or not public.trade_chart_color_valid(level->>'color')) then return false; end if;
+      if level ? 'enabled' and jsonb_typeof(level->'enabled') <> 'boolean' then return false; end if;
+      if level ? 'label' and (jsonb_typeof(level->'label') <> 'string' or not public.trade_chart_plain_text_valid(level->>'label', 128)) then return false; end if;
+    end loop;
+  end if;
+  return true;
+exception when others then
+  return false;
+end;
+$$;
+
+create or replace function public.trade_chart_drawing_text_valid(p_text jsonb)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(jsonb_typeof(p_text) = 'object'
+    and p_text ? 'value'
+    and not exists (select 1 from jsonb_object_keys(p_text) key where key not in ('value','color','fontSize','fontFamily','bold','italic','align','valign'))
+    and jsonb_typeof(p_text->'value') = 'string'
+    and public.trade_chart_plain_text_valid(p_text->>'value', 2000)
+    and (not (p_text ? 'color') or (jsonb_typeof(p_text->'color') = 'string' and public.trade_chart_color_valid(p_text->>'color')))
+    and (not (p_text ? 'fontSize') or (jsonb_typeof(p_text->'fontSize') = 'number' and (p_text->>'fontSize')::numeric between 6 and 96))
+    and (not (p_text ? 'fontFamily') or (jsonb_typeof(p_text->'fontFamily') = 'string' and p_text->>'fontFamily' ~ '^[A-Za-z0-9 _,-]{0,128}$'))
+    and (not (p_text ? 'bold') or jsonb_typeof(p_text->'bold') = 'boolean')
+    and (not (p_text ? 'italic') or jsonb_typeof(p_text->'italic') = 'boolean')
+    and (not (p_text ? 'align') or (jsonb_typeof(p_text->'align') = 'string' and p_text->>'align' in ('left','center','right')))
+    and (not (p_text ? 'valign') or (jsonb_typeof(p_text->'valign') = 'string' and p_text->>'valign' in ('top','middle','bottom'))), false)
+$$;
+
+create or replace function public.trade_chart_drawing_properties_valid(p_properties jsonb)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(jsonb_typeof(p_properties) = 'object'
+    and not exists (select 1 from jsonb_object_keys(p_properties) key where key not in ('degree','labelStyle','showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'))
+    and (not (p_properties ? 'degree') or (jsonb_typeof(p_properties->'degree') = 'string' and p_properties->>'degree' in ('grand-supercycle','supercycle','cycle','primary','intermediate','minor','minute','minuette','subminuette')))
+    and (not (p_properties ? 'labelStyle') or (jsonb_typeof(p_properties->'labelStyle') = 'string' and p_properties->>'labelStyle' in ('degree','plain','parentheses','circled')))
     and not exists (
-      select 1 from jsonb_array_elements(p_value) item
-      where jsonb_typeof(item) <> 'object'
-    ), false)
+      select 1 from unnest(array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices']) key
+      where p_properties ? key and jsonb_typeof(p_properties->key) <> 'boolean'
+    )
+    and (not (p_properties ? 'profitColor') or (jsonb_typeof(p_properties->'profitColor') = 'string' and public.trade_chart_color_valid(p_properties->>'profitColor')))
+    and (not (p_properties ? 'lossColor') or (jsonb_typeof(p_properties->'lossColor') = 'string' and public.trade_chart_color_valid(p_properties->>'lossColor'))), false)
+$$;
+
+create or replace function public.trade_chart_drawings_valid(p_drawings jsonb)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  drawing jsonb;
+  point jsonb;
+  numeric_value numeric;
+begin
+  if jsonb_typeof(p_drawings) <> 'array'
+     or jsonb_array_length(p_drawings) > 200
+     or octet_length(p_drawings::text) > 262144 then return false; end if;
+  if (select count(*) from jsonb_array_elements(p_drawings)) <>
+     (select count(distinct item->>'id') from jsonb_array_elements(p_drawings) item) then return false; end if;
+  for drawing in select value from jsonb_array_elements(p_drawings)
+  loop
+    if jsonb_typeof(drawing) <> 'object'
+       or not (drawing ?& array['id','tool','points','style','paneIndex','zIndex'])
+       or exists (select 1 from jsonb_object_keys(drawing) key where key not in ('id','tool','points','style','text','properties','paneIndex','locked','visible','zIndex'))
+       or jsonb_typeof(drawing->'id') <> 'string'
+       or (drawing->>'id') !~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+       or jsonb_typeof(drawing->'tool') <> 'string'
+       or (drawing->>'tool') not in (
+         'trend-line','ray','horizontal-line','vertical-line','rectangle','text','long-position','short-position',
+         'fib-retracement','fib-extension','fib-time-zone','fib-fan','fib-channel',
+         'elliott-impulse','elliott-correction','elliott-triangle','elliott-double-combo','elliott-triple-combo'
+       )
+       or jsonb_typeof(drawing->'points') <> 'array'
+       or jsonb_array_length(drawing->'points') > 32
+       or not public.trade_chart_drawing_style_valid(drawing->'style') then return false; end if;
+    for point in select value from jsonb_array_elements(drawing->'points')
+    loop
+      if jsonb_typeof(point) <> 'object'
+         or not (point ?& array['time','price'])
+         or exists (select 1 from jsonb_object_keys(point) key where key not in ('time','price'))
+         or jsonb_typeof(point->'time') <> 'number'
+         or jsonb_typeof(point->'price') <> 'number'
+         or abs((point->>'time')::numeric) > 10000000000000
+         or abs((point->>'price')::numeric) > 1000000000000000000 then return false; end if;
+    end loop;
+    if drawing ? 'text' and not public.trade_chart_drawing_text_valid(drawing->'text') then return false; end if;
+    if drawing ? 'properties' and not public.trade_chart_drawing_properties_valid(drawing->'properties') then return false; end if;
+    if drawing ? 'locked' and jsonb_typeof(drawing->'locked') <> 'boolean' then return false; end if;
+    if drawing ? 'visible' and jsonb_typeof(drawing->'visible') <> 'boolean' then return false; end if;
+    if jsonb_typeof(drawing->'paneIndex') <> 'number' or jsonb_typeof(drawing->'zIndex') <> 'number' then return false; end if;
+    numeric_value := (drawing->>'paneIndex')::numeric;
+    if numeric_value not between 0 and 15 or numeric_value <> trunc(numeric_value) then return false; end if;
+    numeric_value := (drawing->>'zIndex')::numeric;
+    if numeric_value not between -10000 and 10000 then return false; end if;
+  end loop;
+  return true;
+exception when others then
+  return false;
+end;
 $$;
 
 create or replace function public.trade_chart_annotation_image_path_valid(
@@ -603,9 +929,9 @@ create table public.trading_chart_states (
   price_type text not null check (price_type in ('trade', 'mark', 'bid', 'ask', 'both')),
   viewport jsonb not null check (public.trade_chart_viewport_valid(viewport)),
   indicators jsonb not null default '[]'::jsonb
-    check (public.trade_chart_json_array_valid(indicators, 32, 65536)),
+    check (public.trade_chart_indicators_valid(indicators, timeframe)),
   drawings jsonb not null default '[]'::jsonb
-    check (public.trade_chart_json_array_valid(drawings, 200, 262144)),
+    check (public.trade_chart_drawings_valid(drawings)),
   version integer not null default 1 check (version > 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -785,6 +1111,7 @@ declare
   distinct_image_count integer;
   distinct_path_count integer;
   image_ordinality bigint;
+  locked_cycle_revision integer;
 begin
   if auth.uid() is null or not public.account_is_active() then
     raise exception 'trade_chart_account_restricted';
@@ -860,23 +1187,42 @@ begin
     end if;
   end loop;
 
+  select cycle.revision into locked_cycle_revision
+  from public.trading_trade_cycles cycle
+  where cycle.id = p_cycle_id
+    and cycle.owner_id = auth.uid()
+  for update of cycle;
+  if locked_cycle_revision is null or locked_cycle_revision <> p_cycle_revision then
+    raise exception 'trade_chart_fill_not_owned';
+  end if;
+
   select fill.native_fill_id into native_fill
   from public.trading_trade_cycle_fills allocation
   join public.trading_fills fill
     on fill.id = allocation.fill_id
    and fill.owner_id = allocation.owner_id
    and fill.native_fill_id = allocation.native_fill_id
-  join public.trading_trade_cycles cycle
-    on cycle.id = allocation.cycle_id
-   and cycle.owner_id = allocation.owner_id
   where allocation.cycle_id = p_cycle_id
     and allocation.cycle_revision = p_cycle_revision
     and allocation.fill_id = p_fill_id
     and allocation.owner_id = auth.uid()
-    and cycle.revision = p_cycle_revision
   limit 1;
   if native_fill is null then
     raise exception 'trade_chart_fill_not_owned';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(p_images) candidate
+    join public.trading_fill_annotation_images stored_image
+      on stored_image.id = (candidate->>'id')::uuid
+    where stored_image.annotation_id is distinct from p_annotation_id
+       or stored_image.owner_id is distinct from auth.uid()
+       or stored_image.storage_path is distinct from candidate->>'storage_path'
+       or stored_image.mime_type is distinct from candidate->>'mime_type'
+       or stored_image.byte_size is distinct from (candidate->>'byte_size')::integer
+  ) then
+    raise exception 'invalid_trade_chart_annotation_images';
   end if;
 
   select * into current_annotation
@@ -949,13 +1295,13 @@ begin
         (image->>'byte_size')::integer, (image_ordinality - 1)::smallint, null
       )
       on conflict (id) do update
-      set storage_path = excluded.storage_path,
-          mime_type = excluded.mime_type,
-          byte_size = excluded.byte_size,
-          sort_order = excluded.sort_order,
+      set sort_order = excluded.sort_order,
           deleted_at = null
       where public.trading_fill_annotation_images.annotation_id = saved_annotation.id
-        and public.trading_fill_annotation_images.owner_id = auth.uid();
+        and public.trading_fill_annotation_images.owner_id = auth.uid()
+        and public.trading_fill_annotation_images.storage_path = excluded.storage_path
+        and public.trading_fill_annotation_images.mime_type = excluded.mime_type
+        and public.trading_fill_annotation_images.byte_size = excluded.byte_size;
     end loop;
   end if;
 
@@ -999,6 +1345,8 @@ as $$
 declare
   current_state public.trading_chart_states;
   saved_state public.trading_chart_states;
+  cycle_provider text;
+  locked_cycle_revision integer;
 begin
   if auth.uid() is null or not public.account_is_active() then
     raise exception 'trade_chart_account_restricted';
@@ -1017,21 +1365,28 @@ begin
      or p_price_type is null
      or p_price_type not in ('trade', 'mark', 'bid', 'ask', 'both')
      or not public.trade_chart_viewport_valid(p_viewport)
-     or not public.trade_chart_json_array_valid(p_indicators, 32, 65536)
-     or not public.trade_chart_json_array_valid(p_drawings, 200, 262144) then
+     or not public.trade_chart_indicators_valid(p_indicators, p_timeframe)
+     or not public.trade_chart_drawings_valid(p_drawings) then
     raise exception 'invalid_trade_chart_state';
   end if;
-  if not exists (
-    select 1 from public.trading_trade_cycles cycle
-    join public.trading_trade_cycle_revisions revision
-      on revision.cycle_id = cycle.id
-     and revision.owner_id = cycle.owner_id
-     and revision.revision = p_cycle_revision
-    where cycle.id = p_cycle_id
-      and cycle.owner_id = auth.uid()
-      and cycle.revision = p_cycle_revision
-  ) then
+  select cycle.provider, cycle.revision into cycle_provider, locked_cycle_revision
+  from public.trading_trade_cycles cycle
+  where cycle.id = p_cycle_id
+    and cycle.owner_id = auth.uid()
+  for update of cycle;
+  if locked_cycle_revision is null
+     or locked_cycle_revision <> p_cycle_revision
+     or not exists (
+       select 1 from public.trading_trade_cycle_revisions revision
+       where revision.cycle_id = p_cycle_id
+         and revision.owner_id = auth.uid()
+         and revision.revision = p_cycle_revision
+     ) then
     raise exception 'trade_chart_cycle_not_owned';
+  end if;
+  if (cycle_provider = 'exness' and p_price_type not in ('bid','ask','both'))
+     or (cycle_provider in ('binance','okx','bybit','bitget') and p_price_type not in ('trade','mark')) then
+    raise exception 'invalid_trade_chart_state';
   end if;
 
   select * into current_state
@@ -1205,6 +1560,11 @@ create policy trade_chart_annotation_images_anon_no_insert
 on storage.objects as restrictive
 for insert to anon
 with check (bucket_id <> 'trade-chart-annotation-images');
+
+create policy trade_chart_annotation_images_anon_no_delete
+on storage.objects as restrictive
+for delete to anon
+using (bucket_id <> 'trade-chart-annotation-images');
 
 create policy trade_chart_annotation_images_no_update
 on storage.objects as restrictive

@@ -447,9 +447,10 @@ test("trade cycle allocation schema enforces composite identity, ownership, chec
     ].sort());
 
     const security = await database.query(`
-      select relrowsecurity from pg_class where oid = 'public.trading_trade_cycle_fills'::regclass
+      select relrowsecurity, relforcerowsecurity from pg_class where oid = 'public.trading_trade_cycle_fills'::regclass
     `);
     assert.equal(security.rows[0]?.relrowsecurity, true);
+    assert.equal(security.rows[0]?.relforcerowsecurity, true);
     const privileges = await database.query(`
       select
         has_table_privilege('anon', 'public.trading_trade_cycle_fills', 'INSERT') as anon_insert,
@@ -828,6 +829,15 @@ test("a legacy locale-ordered fill set can advance to a code-point-ordered revis
   }
 });
 
+test("annotation and chart writes lock the current cycle row before validating its revision", async () => {
+  const migration = await fs.readFile(privateChartMigrationUrl, "utf8");
+  assert.equal(
+    migration.match(/from public\.trading_trade_cycles cycle[\s\S]{0,500}?for update of cycle/giu)?.length,
+    2,
+    "both private write RPCs must hold the cycle lock through their state write",
+  );
+});
+
 test("private trade chart schema exposes bounded owner state, private storage, and the deployment marker", async () => {
   const database = await migratedDatabase();
   try {
@@ -909,6 +919,7 @@ test("private trade chart schema exposes bounded owner state, private storage, a
       order by policyname
     `);
     assert.deepEqual(storagePolicies.rows, [
+      { policyname: "trade_chart_annotation_images_anon_no_delete", permissive: "RESTRICTIVE", cmd: "DELETE" },
       { policyname: "trade_chart_annotation_images_anon_no_insert", permissive: "RESTRICTIVE", cmd: "INSERT" },
       { policyname: "trade_chart_annotation_images_anon_no_select", permissive: "RESTRICTIVE", cmd: "SELECT" },
       { policyname: "trade_chart_annotation_images_delete_bound", permissive: "RESTRICTIVE", cmd: "DELETE" },
@@ -926,6 +937,21 @@ test("private trade chart schema exposes bounded owner state, private storage, a
     `);
     assert.ok(functions.rows[0]?.annotation);
     assert.ok(functions.rows[0]?.chart);
+    const functionDefinitions = await database.query(`
+      select pg_get_functiondef(
+        'public.upsert_trading_fill_annotation(uuid,uuid,bigint,integer,text,text[],jsonb,integer,boolean)'::regprocedure
+      ) as annotation,
+      pg_get_functiondef(
+        'public.upsert_trading_chart_state(uuid,integer,text,text,text,jsonb,jsonb,jsonb,integer,timestamp with time zone)'::regprocedure
+      ) as chart
+    `);
+    for (const name of ["annotation", "chart"]) {
+      assert.match(
+        functionDefinitions.rows[0]?.[name] ?? "",
+        /from public\.trading_trade_cycles cycle[\s\S]*?for update of cycle/iu,
+        `${name} RPC must lock the current cycle row through its write`,
+      );
+    }
     assert.equal((await database.query("select public.wavekb_schema_version() as version")).rows[0]?.version, "202611260001");
   } finally {
     await database.close();
@@ -1001,6 +1027,15 @@ test("annotation RPC normalizes bounded content, preserves remap state, and isol
       `, [`${ownerOne}/${annotationId}/77777777-aaaa-4777-8777-777777777777.png`]),
       /row-level security/u,
     );
+    await database.query(`
+      delete from storage.objects
+      where bucket_id = 'trade-chart-annotation-images' and name = $1
+    `, [firstImage.storage_path]);
+    await database.exec("reset role");
+    assert.equal((await database.query(`
+      select count(*)::integer as count from storage.objects
+      where bucket_id = 'trade-chart-annotation-images' and name = $1
+    `, [firstImage.storage_path])).rows[0]?.count, 1, "a broad legacy anon DELETE policy must not delete private images");
     await actor(database, ownerOne);
     await assert.rejects(
       database.query("insert into storage.objects(bucket_id, name) values ('trade-chart-annotation-images', $1)", [
@@ -1026,6 +1061,38 @@ test("annotation RPC normalizes bounded content, preserves remap state, and isol
         /invalid_trade_chart_annotation|invalid_trade_chart_annotation_images/u,
       );
     }
+    for (const replacement of [
+      annotationImage(ownerOne, annotationId, firstImage.id, { mime_type: "image/jpeg" }),
+      annotationImage(ownerOne, annotationId, firstImage.id, { byte_size: 2048 }),
+    ]) {
+      await assert.rejects(
+        upsertAnnotation(database, {
+          fillId: ownerOneFillId,
+          annotationId,
+          expectedVersion: 1,
+          images: [replacement, secondImage],
+        }),
+        /invalid_trade_chart_annotation_images/u,
+        "an existing image UUID cannot replace its path, MIME, or byte size",
+      );
+    }
+    const unchangedImage = await database.query(`
+      select storage_path, mime_type, byte_size, deleted_at
+      from public.trading_fill_annotation_images where id = $1
+    `, [firstImage.id]);
+    assert.deepEqual({
+      ...unchangedImage.rows[0],
+      byte_size: Number(unchangedImage.rows[0]?.byte_size),
+    }, {
+      storage_path: firstImage.storage_path,
+      mime_type: firstImage.mime_type,
+      byte_size: firstImage.byte_size,
+      deleted_at: null,
+    });
+    assert.equal((await database.query(`
+      select count(*)::integer as count from storage.objects
+      where bucket_id = 'trade-chart-annotation-images' and name = $1
+    `, [firstImage.storage_path])).rows[0]?.count, 1, "rejected replacement must not orphan the stored object");
     await assert.rejects(
       upsertAnnotation(database, { fillId: ownerOneFillId, annotationId, expectedVersion: 0 }),
       /stale_trade_chart_annotation/u,
@@ -1172,9 +1239,37 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
   try {
     await seedPrivateChartFacts(database);
     await actor(database, ownerOne);
+    const validDrawing = {
+      id: "line-1",
+      tool: "trend-line",
+      points: [{ time: 100, price: 100 }],
+      style: { color: "#2962ff", lineWidth: 2, lineStyle: "solid" },
+      paneIndex: 0,
+      zIndex: 1,
+    };
+    const supportedIndicatorIds = [
+      "sma", "ema", "wma", "hma", "vwap", "bollinger", "rsi", "macd",
+      "stochastic", "adx", "atr", "supertrend", "ichimoku", "donchian",
+      "keltner-channel", "chandelier-exit", "zigzag", "williams-fractals",
+      "pivot-points", "cpr", "obv", "mfi", "chaikin-money-flow",
+    ];
+    const supportedDrawingTools = [
+      "trend-line", "ray", "horizontal-line", "vertical-line", "rectangle", "text",
+      "long-position", "short-position", "fib-retracement", "fib-extension",
+      "fib-time-zone", "fib-fan", "fib-channel", "elliott-impulse",
+      "elliott-correction", "elliott-triangle", "elliott-double-combo", "elliott-triple-combo",
+    ];
     const created = await upsertChartState(database, {
-      indicators: [{ id: "rsi", instance_id: "rsi-1", pane_index: 1, settings: { length: 14 } }],
-      drawings: [{ id: "line-1", tool: "trend-line", points: [{ time: 100, price: "100" }] }],
+      indicators: supportedIndicatorIds.map((indicatorId, index) => ({
+        instanceId: `${indicatorId}-${index}`,
+        indicatorId,
+        ...(indicatorId === "rsi" ? { paneIndex: 1, settings: { length: 14, source: "close" } } : {}),
+      })),
+      drawings: supportedDrawingTools.map((tool, index) => ({
+        ...validDrawing,
+        id: `${tool}-${index}`,
+        tool,
+      })),
     });
     assert.deepEqual({
       owner_id: created.rows[0]?.owner_id,
@@ -1212,8 +1307,27 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
       { timeframe: "13m" },
       { priceType: "mid" },
       { viewport: { from: 2 } },
-      { indicators: Array.from({ length: 33 }, (_, index) => ({ id: "rsi", instance_id: `rsi-${index}` })) },
-      { drawings: Array.from({ length: 201 }, (_, index) => ({ id: `line-${index}`, tool: "trend-line", points: [] })) },
+      { viewport: { from: 1, to: 2, onVisibleRangeChanged: "alert(1)" } },
+      { indicators: Array.from({ length: 33 }, (_, index) => ({ instanceId: `rsi-${index}`, indicatorId: "rsi" })) },
+      { indicators: [{ instanceId: "unknown-1", indicatorId: "remote-script" }] },
+      { indicators: [{ instanceId: "rsi-1", indicatorId: "rsi", execute: "alert(1)" }] },
+      { indicators: [{ instanceId: "rsi-1", indicatorId: "rsi", settings: { length: 14, callback: "<script>alert(1)</script>" } }] },
+      { indicators: [{ instanceId: "rsi-1", indicatorId: "rsi", settings: { length: 14, source: "study:rsi" } }] },
+      { indicators: [{ instanceId: "rsi-1", indicatorId: "rsi", paneIndex: 16 }] },
+      { indicators: [
+        { instanceId: "duplicate", indicatorId: "rsi" },
+        { instanceId: "duplicate", indicatorId: "ema" },
+      ] },
+      { indicators: [{ instanceId: "rsi-1", indicatorId: "rsi", settings: { timeframe: "1h" } }] },
+      { drawings: Array.from({ length: 201 }, (_, index) => ({ ...validDrawing, id: `line-${index}` })) },
+      { drawings: [{ ...validDrawing, id: "unknown", tool: "execute-script" }] },
+      { drawings: [{ ...validDrawing, onClick: "alert(1)" }] },
+      { drawings: [{ ...validDrawing, points: [{ time: 100, price: "100" }] }] },
+      { drawings: [{ ...validDrawing, points: [{ time: 100, price: 100, command: "run" }] }] },
+      { drawings: [{ ...validDrawing, points: [{ time: 10000000000001, price: 100 }] }] },
+      { drawings: [{ ...validDrawing, points: [{ time: 100, price: Number.POSITIVE_INFINITY }] }] },
+      { drawings: [{ ...validDrawing, id: "text-1", tool: "text", text: { value: "<script>alert(1)</script>" } }] },
+      { priceType: "bid" },
     ]) {
       await assert.rejects(
         upsertChartState(database, {
@@ -1225,6 +1339,24 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
         `invalid chart state ${Object.keys(invalid)[0]}`,
       );
     }
+    await database.exec("reset role");
+    await database.query("update public.trading_trade_cycles set provider = 'exness' where id = $1", [cycleOne]);
+    await actor(database, ownerOne);
+    await assert.rejects(
+      upsertChartState(database, {
+        priceType: "trade",
+        expectedVersion: 2,
+        expectedUpdatedAt: updated.rows[0]?.updated_at,
+      }),
+      /invalid_trade_chart_state/u,
+    );
+    const exnessState = await upsertChartState(database, {
+      priceType: "bid",
+      expectedVersion: 2,
+      expectedUpdatedAt: updated.rows[0]?.updated_at,
+    });
+    assert.equal(exnessState.rows[0]?.price_type, "bid");
+    assert.equal(exnessState.rows[0]?.version, 3);
     await assert.rejects(
       database.query("update public.trading_chart_states set timeframe = '1d' where cycle_id = $1", [cycleOne]),
       /permission denied/u,
