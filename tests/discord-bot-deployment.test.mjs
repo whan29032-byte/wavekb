@@ -63,6 +63,7 @@ test('deployment transaction seeds SQLite once and rolls every mutable release s
   assert.match(source, /previous-release/);
   assert.match(source, /discord-bot\.env/);
   assert.match(source, /elliott-wave-discord-bot\.service/);
+  assert.match(source, /sudo \/usr\/bin\/node "\$\{release_dir\}\/scripts\/verify-font-rendering\.js"/);
   assert.match(source, /sudo systemctl enable --now elliott-wave-discord-bot\.service/);
   assert.match(
     source,

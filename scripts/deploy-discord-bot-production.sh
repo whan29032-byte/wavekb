@@ -142,6 +142,8 @@ rollback() {
 }
 trap rollback ERR
 
+sudo /usr/bin/node "${release_dir}/scripts/verify-font-rendering.js"
+
 sudo install -d -m 0755 /etc/elliott-wave
 environment_candidate="/etc/elliott-wave/.discord-bot.env-${release_id}"
 sudo test ! -e "$environment_candidate"

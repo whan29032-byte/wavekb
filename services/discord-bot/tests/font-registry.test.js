@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
@@ -38,4 +39,12 @@ test('bundled font registers idempotently and renders Chinese and Latin glyph pi
   assert.equal(GlobalFonts.has(BUNDLED_FONT_FAMILY), true);
   assert.ok(countInkPixels('') > 500);
   assert.ok(countInkPixels('bold ') > 500);
+});
+
+test('production font verifier exits successfully only after rendering glyph pixels', () => {
+  const scriptPath = path.resolve(__dirname, '../scripts/verify-font-rendering.js');
+  const result = spawnSync(process.execPath, [scriptPath], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Discord font rendering verified/);
 });
