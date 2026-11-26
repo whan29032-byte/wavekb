@@ -7,7 +7,11 @@ const { drawCard: renderCard } = require('./canvas');
 const { drawLeaderboard: renderLeaderboard } = require('./leaderboard-canvas');
 const { getCardData } = require('./profile');
 const { handlePathSelection } = require('./path-selection');
-const { buildMemberWelcome, parsePathButton } = require('./member-onboarding');
+const { parsePathButton } = require('./member-onboarding');
+const {
+  deliverMemberWelcome,
+  catchUpRecentMemberWelcomes
+} = require('./member-welcome-service');
 const { configureProxy, applyRestAgent, fetchImageBuffer } = require('./network');
 const { syncRouteRole: syncConfiguredRouteRole } = require('./route-role-sync');
 const { syncGrowthRole: syncConfiguredGrowthRole } = require('./growth-role-sync');
@@ -87,8 +91,22 @@ function createBot({
     integration: websiteIntegration
   });
 
-  client.once(Events.ClientReady, readyClient => {
+  client.once(Events.ClientReady, async readyClient => {
     logger.log(`${readyClient.user.tag} 已上线`);
+    if (!config.guildId || !config.welcomeChannelId) return;
+
+    try {
+      const guild = await readyClient.guilds.fetch(config.guildId);
+      const result = await catchUpRecentMemberWelcomes({
+        guild,
+        channelId: config.welcomeChannelId,
+        database,
+        logger
+      });
+      if (result.sent > 0) logger.log(`已补发 ${result.sent} 条新人欢迎`);
+    } catch (error) {
+      logger.warn('新人欢迎补发失败', error);
+    }
   });
 
   client.on(Events.Error, error => {
@@ -164,11 +182,11 @@ function createBot({
     if (member.user.bot || !config.welcomeChannelId) return;
 
     try {
-      const channel = await member.guild.channels.fetch(config.welcomeChannelId);
-      if (!channel?.isTextBased() || typeof channel.send !== 'function') {
-        throw new Error('欢迎频道不可发送消息');
-      }
-      await channel.send(buildMemberWelcome(member));
+      await deliverMemberWelcome({
+        member,
+        channelId: config.welcomeChannelId,
+        database
+      });
     } catch (error) {
       logger.warn('新人欢迎发送失败', error);
     }

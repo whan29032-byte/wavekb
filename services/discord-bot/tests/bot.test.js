@@ -112,6 +112,58 @@ test('createBot requests guild-member events without requesting message content'
   assert.equal(client.options.intents.includes(GatewayIntentBits.MessageContent), false);
 });
 
+test('client ready catches up a recent join and the live event does not duplicate it', async t => {
+  const now = Date.now();
+  const sent = [];
+  const { client, database } = createTestBot(t, {
+    config: {
+      guildId: 'guild-1',
+      welcomeChannelId: 'welcome-channel',
+      backgroundPaths: { esper: 'esper.png', magician: 'magician.png' }
+    }
+  });
+  const guild = {
+    id: 'guild-1',
+    channels: {
+      async fetch(channelId) {
+        assert.equal(channelId, 'welcome-channel');
+        return {
+          isTextBased: () => true,
+          async send(payload) {
+            sent.push(payload);
+            return { id: 'welcome-message' };
+          }
+        };
+      }
+    },
+    members: {
+      async fetch() {
+        return new Map([['recent-member', member]]);
+      }
+    }
+  };
+  const member = {
+    id: 'recent-member',
+    joinedTimestamp: now - 1_000,
+    user: { bot: false },
+    guild,
+    toString: () => '<@recent-member>'
+  };
+  client.guilds = {
+    async fetch(guildId) {
+      assert.equal(guildId, 'guild-1');
+      return guild;
+    }
+  };
+
+  await client.handlers.get(Events.ClientReady)(client);
+  await client.handlers.get(Events.GuildMemberAdd)(member);
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].allowedMentions.users[0], 'recent-member');
+  assert.equal(database.hasMemberWelcome('guild-1', 'recent-member', member.joinedTimestamp), true);
+});
+
 test('a human member join sends the themed welcome payload to the configured channel', async t => {
   const sent = [];
   const fetchedChannelIds = [];
@@ -123,6 +175,7 @@ test('a human member join sends the themed welcome payload to the configured cha
   });
   const member = {
     id: 'new-member',
+    joinedTimestamp: 1_700_000_000_000,
     user: { bot: false },
     toString: () => '<@new-member>',
     guild: {
@@ -165,6 +218,7 @@ test('a bot member join does not fetch or send to the welcome channel', async t 
   });
   const member = {
     id: 'bot-member',
+    joinedTimestamp: 1_700_000_000_000,
     user: { bot: true },
     guild: {
       channels: {
@@ -197,6 +251,7 @@ test('welcome send failures are logged without rejecting the member event', asyn
   const failure = new Error('missing permission');
   const member = {
     id: 'new-member',
+    joinedTimestamp: 1_700_000_000_000,
     user: { bot: false },
     guild: {
       channels: {
