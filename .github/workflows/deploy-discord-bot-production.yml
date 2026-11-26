@@ -1,0 +1,165 @@
+name: Deploy WaveKB Discord bot production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type DEPLOY_WAVEKB_DISCORD_BOT to deploy the reviewed bot release"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wavekb-discord-bot-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-discord-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Require main and explicit deployment confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRMATION" = DEPLOY_WAVEKB_DISCORD_BOT
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Check out the reviewed commit
+        uses: actions/checkout@v4
+
+      - name: Require the current main revision
+        run: |
+          set -Eeuo pipefail
+          current_main=$(git ls-remote origin refs/heads/main | cut -f1)
+          test "$current_main" = "$GITHUB_SHA"
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test and package the standalone bot
+        run: |
+          set -Eeuo pipefail
+          npm ci --prefix services/discord-bot
+          npm test --prefix services/discord-bot
+          npm run check --prefix services/discord-bot
+          npm prune --omit=dev --prefix services/discord-bot
+          tar -C services/discord-bot -czf wavekb-discord-bot.tar.gz \
+            --exclude='.env' \
+            --exclude='data' \
+            --exclude='test-output' \
+            --exclude='tests' \
+            --exclude='docs' \
+            --exclude='node_modules/.cache' \
+            .
+          tar -tzf wavekb-discord-bot.tar.gz | grep -F './index.js' >/dev/null
+          if tar -tzf wavekb-discord-bot.tar.gz | grep -Eq '(^|/)(\.env|data|test-output|tests|docs)(/|$)'; then exit 1; fi
+
+      - name: Validate bounded secrets without output
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_BOT_DATABASE_BASE64: ${{ secrets.DISCORD_BOT_DATABASE_BASE64 }}
+          DISCORD_BOT_API_SECRET: ${{ secrets.DISCORD_BOT_API_SECRET }}
+        run: |
+          set -Eeuo pipefail
+          node --input-type=module <<'NODE'
+          import { renderDiscordBotEnvironment } from './scripts/render-discord-bot-env.mjs';
+          renderDiscordBotEnvironment({
+            token: process.env.DISCORD_BOT_TOKEN ?? '',
+            clientId: '1545138494131666964',
+            guildId: '1545731927733047306',
+            themeGuildId: '1545731927733047306',
+            scienceRoleId: '1574830047779487848',
+            magicRoleId: '1574830049889353801',
+            scienceGrowthRoleIds: '1545732410576998431,1545732479200268349,1545732541049208852,1545732587534819338,1545732627221446766,1545732685190930523'.split(','),
+            magicGrowthRoleIds: '1574848662847357129,1574848664919212125,1574848667368816781,1574848673534181486,1574848675434463332,1574848677837668532'.split(','),
+            websiteApiUrl: 'https://wavekb.com',
+            websitePublicUrl: 'https://wavekb.com',
+            websiteApiSecret: process.env.DISCORD_BOT_API_SECRET ?? '',
+            websiteGuildId: '1545731927733047306',
+            databaseBase64: process.env.DISCORD_BOT_DATABASE_BASE64 ?? '',
+          });
+          NODE
+
+      - name: Configure pinned SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST_FINGERPRINT: SHA256:VDPcrNGSByDvXoaFy8GUJaqSNWS9tfyekTMi8zPXeE8
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          test -n "$DEPLOY_SSH_KEY"
+          install -m 700 -d "$HOME/.ssh"
+          for attempt in 1 2 3 4 5; do
+            ssh-keyscan -T 15 -t ed25519 "$DEPLOY_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null && break
+            sleep $((attempt * 2))
+          done
+          test -s "$HOME/.ssh/known_hosts"
+          actual_fingerprint=$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}')
+          test "$actual_fingerprint" = "$DEPLOY_HOST_FINGERPRINT"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/known_hosts" "$HOME/.ssh/deploy_key"
+
+      - name: Upload immutable bot transaction
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          remote_id="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes wavekb-discord-bot.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-discord-bot-${remote_id}.tar.gz"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes deployment/systemd/elliott-wave-discord-bot.service "${DEPLOY_USER}@${DEPLOY_HOST}:elliott-wave-discord-bot-${remote_id}.service"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/render-discord-bot-env.mjs "${DEPLOY_USER}@${DEPLOY_HOST}:render-discord-bot-env-${remote_id}.mjs"
+          scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes scripts/deploy-discord-bot-production.sh "${DEPLOY_USER}@${DEPLOY_HOST}:deploy-discord-bot-production-${remote_id}.sh"
+
+      - name: Activate bot release or roll back
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_BOT_DATABASE_BASE64: ${{ secrets.DISCORD_BOT_DATABASE_BASE64 }}
+          DISCORD_BOT_API_SECRET: ${{ secrets.DISCORD_BOT_API_SECRET }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -Eeuo pipefail
+          remote_id="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          node --input-type=module <<'NODE' | ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "bash ./deploy-discord-bot-production-${remote_id}.sh ./wavekb-discord-bot-${remote_id}.tar.gz ./elliott-wave-discord-bot-${remote_id}.service ./render-discord-bot-env-${remote_id}.mjs ${remote_id}"
+          const payload = {
+            token: process.env.DISCORD_BOT_TOKEN ?? '',
+            clientId: '1545138494131666964',
+            guildId: '1545731927733047306',
+            themeGuildId: '1545731927733047306',
+            scienceRoleId: '1574830047779487848',
+            magicRoleId: '1574830049889353801',
+            scienceGrowthRoleIds: '1545732410576998431,1545732479200268349,1545732541049208852,1545732587534819338,1545732627221446766,1545732685190930523'.split(','),
+            magicGrowthRoleIds: '1574848662847357129,1574848664919212125,1574848667368816781,1574848673534181486,1574848675434463332,1574848677837668532'.split(','),
+            websiteApiUrl: 'https://wavekb.com',
+            websitePublicUrl: 'https://wavekb.com',
+            websiteApiSecret: process.env.DISCORD_BOT_API_SECRET ?? '',
+            websiteGuildId: '1545731927733047306',
+            databaseBase64: process.env.DISCORD_BOT_DATABASE_BASE64 ?? '',
+          };
+          process.stdout.write(JSON.stringify(payload));
+          NODE
+
+      - name: Clean runner and remote transaction material
+        if: always()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          remote_id="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && -f "$HOME/.ssh/deploy_key" ]]; then
+            ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "rm -f -- ./wavekb-discord-bot-${remote_id}.tar.gz ./elliott-wave-discord-bot-${remote_id}.service ./render-discord-bot-env-${remote_id}.mjs ./deploy-discord-bot-production-${remote_id}.sh" || true
+          fi
+          rm -f "$HOME/.ssh/deploy_key" "$HOME/.ssh/known_hosts" wavekb-discord-bot.tar.gz
