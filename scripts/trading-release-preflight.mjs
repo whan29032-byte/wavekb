@@ -38,7 +38,7 @@ function normalizedOrigin(value, provider) {
 
 export function validateTradingRelease(input) {
   invariant(input && typeof input === "object", "release input is required");
-  invariant(input.expectedSchemaVersion === "202611250002", "expected schema marker is invalid");
+  invariant(input.expectedSchemaVersion === "202611260001", "expected schema marker is invalid");
   invariant(input.schemaVersion === input.expectedSchemaVersion, "database schema is not current");
   invariant(/^[0-9a-f]{40}$/.test(input.releaseSha ?? ""), "release SHA is invalid");
   invariant(/^[0-9a-f]{40}$/.test(input.rollbackTarget ?? ""), "rollback target is invalid");
@@ -125,7 +125,7 @@ function runtimeInputFromEnv() {
   const releaseSha = process.env.TRADING_RELEASE_SHA;
   const rollbackTarget = process.env.TRADING_ROLLBACK_SHA;
   return {
-    expectedSchemaVersion: "202611250002",
+    expectedSchemaVersion: "202611260001",
     schemaVersion: process.env.TRADING_SCHEMA_VERSION,
     releaseSha,
     rollbackTarget,

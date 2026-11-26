@@ -34,7 +34,16 @@ function unitAmount(value: unknown): bigint {
   if (units > UINT256_MAX) throw new Error("invoice_invalid");
   return units;
 }
-function decimalAmount(units: bigint): string { return `${units / 1000000n}.${(units % 1000000n).toString().padStart(6, "0")}`; }
+function tokenScale(decimals: number): bigint {
+  if (decimals !== 6 && decimals !== 18) throw new Error("invoice_invalid");
+  return 10n ** BigInt(decimals - 6);
+}
+function decimalAmount(units: bigint, decimals: number): string {
+  const scale = tokenScale(decimals);
+  if (units % scale !== 0n) throw new Error("invoice_invalid");
+  const micros = units / scale;
+  return `${micros / 1000000n}.${(micros % 1000000n).toString().padStart(6, "0")}`;
+}
 function timeOutcome(job: ClaimedWalletVerification, timestampMs: number, now: number): WalletVerificationResult | null {
   if (!Number.isSafeInteger(timestampMs) || timestampMs < 1 || !Number.isFinite(new Date(timestampMs).getTime()) || timestampMs > now + 60000) throw new WalletRpcError("rpc_response_invalid");
   if (timestampMs < Date.parse(job.order.created_at)) return { outcome: "review", reason: "payment_before_invoice" };
@@ -74,11 +83,13 @@ export async function verifyMembershipWalletTransfer(job: ClaimedWalletVerificat
     const order = job.order;
     if (!order || !isWalletRoute(order.route_id)) throw new Error();
     const route = WALLET_ROUTES[order.route_id];
-    if (order.chain !== route.chain || order.asset !== route.asset || order.contract !== route.contract
+    const tokenDecimals = order.token_decimals ?? (route.decimals === 6 ? 6 : undefined);
+    if (order.chain !== route.chain || order.asset !== route.asset || order.contract !== route.contract || tokenDecimals !== route.decimals
       || !Number.isSafeInteger(order.route_revision) || order.route_revision < 1) throw new Error();
     units = unitAmount(order.amount_units);
     const base = unitAmount(order.base_amount_units);
-    if (units <= base || units - base > 9999n || order.amount_decimal !== decimalAmount(units)
+    const scale = tokenScale(route.decimals), tail = units - base;
+    if (tail < scale || tail > 9999n * scale || tail % scale !== 0n || base % scale !== 0n || order.amount_decimal !== decimalAmount(units, route.decimals)
       || !Number.isFinite(Date.parse(order.created_at)) || !Number.isFinite(Date.parse(order.expires_at))
       || Date.parse(order.expires_at) <= Date.parse(order.created_at)) throw new Error();
     recipientHex = route.chain === "tron" ? tronAddressToHex(order.recipient).slice(2) : evmAddress(order.recipient).slice(2);
@@ -99,7 +110,7 @@ export async function verifyMembershipWalletTransfer(job: ClaimedWalletVerificat
 
 async function verifyEvm(job: ClaimedWalletVerification, units: bigint, recipientHex: string, config: WalletVerificationConfig,
   dependencies: { fetch?: typeof fetch; signal?: AbortSignal }, now: () => number): Promise<WalletVerificationResult> {
-  const endpoint = job.order.chain === "ethereum" ? config.ethereumRpcUrl : config.baseRpcUrl;
+  const endpoint = { ethereum: config.ethereumRpcUrl, base: config.baseRpcUrl, bsc: config.bscRpcUrl }[job.order.chain as "ethereum" | "base" | "bsc"];
   if (!endpoint) return { outcome: "waiting", reason: "chain_rpc_unconfigured", retryAfterSeconds: 300 };
   const rpc = new EvmReadRpc(endpoint, { ...dependencies, timeoutMs: config.timeoutMs });
   const chainId = quantity(await rpc.call("eth_chainId", []));

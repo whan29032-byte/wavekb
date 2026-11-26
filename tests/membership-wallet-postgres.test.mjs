@@ -101,6 +101,36 @@ test('wallet defaults closed with exactly four immutable issuer contracts, no re
   await db.exec('reset role');await assert.rejects(db.query("update membership_wallet_routes set contract='fake'"),/membership_wallet_route_immutable/);
   await assert.rejects(db.query("delete from membership_wallet_routes"),/membership_wallet_route_immutable/);
 }));
+test('BSC upgrade is replay-safe, preserves legacy settlement, and allocates exact 18-decimal USDT invoices',()=>fixture(async db=>{
+  const legacy=await setup(db,{route:'ethereum-usdt'}),oldOrder=await prepare(db,legacy);await submit(db,oldOrder);
+  await db.exec('reset role');const migration=await load('202611260001_membership_wallet_bsc_usdt.sql');await db.exec(migration);await db.exec(migration);
+  assert.equal(await value(db,'wavekb_schema_version()'),'202611260001');
+  await actor(db,null,'anon');const catalog=await value(db,'list_membership_wallet_routes()');
+  assert.deepEqual(catalog.routes.map(route=>[route.id,route.chain,route.asset,route.decimals,route.enabled]),[
+    ['base-usdc','base','USDC',6,false],
+    ['bsc-usdt','bsc','USDT',18,false],
+    ['ethereum-usdc','ethereum','USDC',6,false],
+    ['ethereum-usdt','ethereum','USDT',6,false],
+    ['tron-usdt','tron','USDT',6,false],
+  ]);
+  const legacyRevision=catalog.routes.find(route=>route.id==='ethereum-usdt').revision;
+  await db.exec('reset role');await db.exec(migration);await actor(db,null,'anon');
+  assert.equal((await value(db,'list_membership_wallet_routes()')).routes.find(route=>route.id==='ethereum-usdt').revision,legacyRevision);
+  await actor(db,ids.admin);
+  await assert.rejects(value(db,'admin_save_membership_wallet_route(\'ethereum-usdt\',$1,false,$2,\'旧通道只读保留\',$3,auth.uid())',[recipient,legacyRevision,randomUUID()]),/membership_wallet_route_invalid/);
+
+  const oldJob=(await claim(db)).find(job=>job.order_id===oldOrder.id),oldReceipt=await apply(db,oldOrder,oldJob);
+  assert.equal(oldReceipt.applied,true);
+
+  let state=await store(db),bsc=state.routes.find(route=>route.id==='bsc-usdt');
+  const saved=await value(db,'admin_save_membership_wallet_route($1,$2,true,$3,\'测试 BSC USDT 收款地址\',$4,auth.uid())',[bsc.id,recipient,bsc.revision,randomUUID()]);
+  const bscCheckout={...legacy,route:saved,quote:{...legacy.quote,route_revision:saved.revision}};
+  const order=await prepare(db,bscCheckout),scale=1000000000000n,base=52000000n*scale,delta=BigInt(order.amount_units)-base;
+  assert.equal(order.route_id,'bsc-usdt');assert.equal(order.token_decimals,18);assert.equal(order.base_amount_units,base.toString());
+  assert.ok(delta>=scale&&delta<=9999n*scale&&delta%scale===0n);assert.equal(order.amount_decimal,`52.${(delta/scale).toString().padStart(6,'0')}`);
+  await submit(db,order);const bscJob=(await claim(db)).find(job=>job.order_id===order.id),receipt=await apply(db,order,bscJob);
+  assert.equal(receipt.applied,true);
+}));
 test('RLS and RPC grants deny fabrication, private reads, cross-account submit and banned admins',()=>fixture(async db=>{
   const c=await setup(db),o=await prepare(db,c);
   for(const role of ['anon','authenticated','service_role']) { await actor(db,ids.member,role);
@@ -336,17 +366,17 @@ function canonicalNodeFetch(order,hash,addressModule) {
     return Response.json({jsonrpc:'2.0',id:p.id,result});
   };
 }
-test('actual SQL receipts cross all four production Edge, web parser and worker/verifier routes without aliases or mocks of RPC contracts',async()=>{
+test('actual transitional SQL receipts cross all four legacy Edge, web parser and worker/verifier routes without aliases or RPC contract mocks',async()=>{
   const web=await productionModule('../apps/web/src/lib/membership/wallet-types.ts'),contracts=await productionModule('../ai-gateway/src/membership-wallet/contracts.ts');
   const worker=await productionModule('../ai-gateway/src/membership-wallet/worker.ts'),address=await productionModule('../ai-gateway/src/membership-wallet/address.ts');
   for(const route of ['tron-usdt','ethereum-usdt','ethereum-usdc','base-usdc']) await fixture(async db=>{
-    const c=await setup(db,{route});const definition=contracts.WALLET_ROUTES[route];assert.ok(definition);assert.deepEqual(web.walletRouteDefinitions[route],{chain:definition.chain,asset:definition.asset,contract:definition.contract,decimals:6});
+    const c=await setup(db,{route});const definition=contracts.WALLET_ROUTES[route];assert.ok(definition);assert.deepEqual(web.walletRouteDefinitions[route],{chain:definition.chain,asset:definition.asset,contract:definition.contract,decimals:definition.decimals});
     const edge=await checkoutEdge(db),request=randomUUID();const response=await edge(new Request('https://isolated.example.com/functions/v1/membership-wallet-checkout',{method:'POST',headers:{authorization:'Bearer synthetic-user'},body:JSON.stringify({actorId:ids.member,priceId:c.price.id,routeId:route,requestId:request,expectedQuote:c.quote})}));
     assert.equal(response.status,200);const {order}=await response.json();assert.equal(web.parseWalletOrder(order).route_id,route);assert.equal(order.contract,definition.contract);
     assert.equal((await edge(new Request('https://isolated.example.com/functions/v1/membership-wallet-checkout',{method:'POST',headers:{authorization:'Bearer synthetic-user'},body:JSON.stringify({actorId:ids.member,priceId:c.price.id,routeId:route,requestId:request,expectedQuote:c.quote})}))).status,200);
     await submit(db,order);await new Promise(resolve=>setTimeout(resolve,1100));
     const stats=await worker.runMembershipWalletVerificationCycle({database:await sqlWorkerDatabase(db),workerId:'sql-contract-worker',env:{MEMBERSHIP_WALLET_ENABLED:'true',MEMBERSHIP_WALLET_ETHEREUM_RPC_URL:'https://rpc.example.com',MEMBERSHIP_WALLET_BASE_RPC_URL:'https://rpc.example.com',MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS:'rpc.example.com'},fetch:canonicalNodeFetch(order,tx(order.chain),address)});
-    assert.equal(stats.applied,1);assert.equal(stats.claimed,1);assert.equal(stats.review,0);assert.equal(stats.leaseLost,0);
+    assert.equal(stats.applied,1,`${route}: ${JSON.stringify(stats)}`);assert.equal(stats.claimed,1);assert.equal(stats.review,0);assert.equal(stats.leaseLost,0);
     const my=web.parseMyMembershipWallet(await mine(db));assert.equal(my.orders[0].status,'paid');assert.equal(my.effective.has_vip,true);assert.equal(my.purchase_grants.length,1);assert.equal(my.verifications[0].status,'settled');
   });
 });

@@ -21,7 +21,7 @@ and use bounded exponential/provider backoff. Clear mismatches require review.
 Deployment environment:
 
 - `MEMBERSHIP_WALLET_ENABLED`: defaults to false.
-- `MEMBERSHIP_WALLET_ETHEREUM_RPC_URL`, `MEMBERSHIP_WALLET_BASE_RPC_URL`:
+- `MEMBERSHIP_WALLET_ETHEREUM_RPC_URL`, `MEMBERSHIP_WALLET_BASE_RPC_URL`, `MEMBERSHIP_WALLET_BSC_RPC_URL`:
   deployment-only HTTPS URLs, normal port 443, no basic authentication/fragment.
 - `MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS`: comma-separated exact hostnames for
   those URLs; no wildcard/prefix match or local/IP hostnames. Secret URL paths

@@ -3,8 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-export const WALLET_ENDPOINTS = Object.freeze({ ethereum: "https://ethereum-rpc.publicnode.com", base: "https://base-rpc.publicnode.com" });
-export const WALLET_ALLOWED_HOSTS = "ethereum-rpc.publicnode.com,base-rpc.publicnode.com";
+export const WALLET_ENDPOINTS = Object.freeze({ ethereum: "https://ethereum-rpc.publicnode.com", base: "https://base-rpc.publicnode.com",
+  bsc: "https://bsc-dataseed.bnbchain.org" });
+export const WALLET_ALLOWED_HOSTS = "ethereum-rpc.publicnode.com,base-rpc.publicnode.com,bsc-dataseed.bnbchain.org";
 export const WALLET_TIMEOUT_MS = 8000;
 export const WALLET_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 export const WALLET_FINALIZED_MAX_AGE_MS = 30 * 60 * 1000;
@@ -13,10 +14,11 @@ const ENV_MAX_BYTES = 1024 * 1024;
 const UNIT = "elliott-wave-ai-worker.service";
 const CURRENT = "/opt/elliott-wave-gateway/current";
 const fields = Object.freeze({ MEMBERSHIP_WALLET_ENABLED: "true", MEMBERSHIP_WALLET_ETHEREUM_RPC_URL: WALLET_ENDPOINTS.ethereum,
-  MEMBERSHIP_WALLET_BASE_RPC_URL: WALLET_ENDPOINTS.base, MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS: WALLET_ALLOWED_HOSTS });
+  MEMBERSHIP_WALLET_BASE_RPC_URL: WALLET_ENDPOINTS.base, MEMBERSHIP_WALLET_BSC_RPC_URL: WALLET_ENDPOINTS.bsc,
+  MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS: WALLET_ALLOWED_HOSTS });
 const codes = new Set(["invalid_arguments", "unsafe_env_file", "unsafe_backup_file", "unsupported_env_format", "runtime_configuration_busy",
   "wallet_configuration_invalid", "runtime_revision_mismatch", "worker_inactive", "worker_verification_failed", "worker_restart_failed",
-  "ethereum_preflight_failed", "base_preflight_failed", "tron_preflight_failed", "environment_changed", "runtime_write_failed",
+  "ethereum_preflight_failed", "base_preflight_failed", "bsc_preflight_failed", "tron_preflight_failed", "environment_changed", "runtime_write_failed",
   "rollback_conflict", "runtime_rollback_failed"]);
 export class WalletRuntimeError extends Error { constructor(code) { super(code); this.code = code; } }
 function fail(code) { throw new WalletRuntimeError(code); }
@@ -76,12 +78,13 @@ function parseEnvironment(bytes) {
 function candidateEnvironment(parsed) {
   const env = parsed.env;
   if (![undefined, "", "true", "false"].includes(env.MEMBERSHIP_WALLET_ENABLED)) fail("wallet_configuration_invalid");
-  for (const key of ["MEMBERSHIP_WALLET_ETHEREUM_RPC_URL", "MEMBERSHIP_WALLET_BASE_RPC_URL"]) {
+  for (const key of ["MEMBERSHIP_WALLET_ETHEREUM_RPC_URL", "MEMBERSHIP_WALLET_BASE_RPC_URL", "MEMBERSHIP_WALLET_BSC_RPC_URL"]) {
     if (env[key] && env[key] !== fields[key]) fail("wallet_configuration_invalid");
   }
   if (env.MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS) {
-    const hosts = env.MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS.split(",").map(value => value.trim());
-    if (hosts.length !== 2 || new Set(hosts).size !== 2 || !hosts.every(host => WALLET_ALLOWED_HOSTS.split(",").includes(host))) fail("wallet_configuration_invalid");
+    const hosts = env.MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS.split(",").map(value => value.trim()), actual = new Set(hosts);
+    const current = WALLET_ALLOWED_HOSTS.split(","), legacy = current.slice(0, 2);
+    if (actual.size !== hosts.length || ![current, legacy].some(expected => expected.length === hosts.length && expected.every(host => actual.has(host)))) fail("wallet_configuration_invalid");
   }
   const key = env.MEMBERSHIP_WALLET_TRONGRID_API_KEY;
   if (key && (key.length > 512 || /\s/.test(key))) fail("wallet_configuration_invalid");
@@ -205,7 +208,7 @@ function quantity(value) {
 }
 function fresh(timestamp, now, maxAge) { return Number.isSafeInteger(timestamp) && timestamp > 0 && timestamp <= now + 60000 && now - timestamp <= maxAge; }
 async function preflight(env, deps) {
-  for (const [chain, id] of [["ethereum", 1n], ["base", 8453n]]) {
+  for (const [chain, id] of [["ethereum", 1n], ["base", 8453n], ["bsc", 56n]]) {
     try {
       const endpoint = WALLET_ENDPOINTS[chain];
       const chainReply = await jsonRequest(endpoint, { jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }, {}, deps);
@@ -257,7 +260,7 @@ function validateOptions(options) {
     || typeof options.envFile !== "string" || options.operation === "enable" && (typeof options.backupFile !== "string" || options.envFile === options.backupFile)
     || options.operation === "probe" && options.backupFile !== undefined) fail("invalid_arguments");
 }
-/** Only four wallet settings can change; no database, Edge, orders, keys or other integration is touched. */
+/** Only fixed wallet runtime settings can change; no database, Edge, orders, keys or other integration is touched. */
 export async function configureWalletRuntime(options, dependencies = {}) {
   validateOptions(options);
   const deps = { fetch: globalThis.fetch, now: Date.now, setTimer: setTimeout, clearTimer: clearTimeout,
@@ -280,7 +283,7 @@ export async function configureWalletRuntime(options, dependencies = {}) {
       await checkedWorker(services, parsed.env, options.expectedRuntimeSha);
       if (!readOwned(options.envFile).equals(original)) fail("environment_changed");
       return { ok: true, operation: "probe", enabled: parsed.env.MEMBERSHIP_WALLET_ENABLED === "true", workerRunning: true,
-        ethereumReady: true, baseReady: true, tronReady: true, changed: false };
+        ethereumReady: true, baseReady: true, bscReady: true, tronReady: true, changed: false };
     }
     requireNewBackup(options.backupFile); writeNew(options.backupFile, original); syncParent(options.backupFile);
     const changed = !next.equals(original);
@@ -299,7 +302,7 @@ export async function configureWalletRuntime(options, dependencies = {}) {
       if (error instanceof WalletRuntimeError) throw error;
       fail("runtime_write_failed");
     }
-    return { ok: true, operation: "enable", enabled: true, workerRunning: true, ethereumReady: true, baseReady: true, tronReady: true, changed };
+    return { ok: true, operation: "enable", enabled: true, workerRunning: true, ethereumReady: true, baseReady: true, bscReady: true, tronReady: true, changed };
   } catch (error) { if (error instanceof WalletRuntimeError) throw error; fail("runtime_write_failed"); }
   finally {
     if (lockFd !== undefined) {

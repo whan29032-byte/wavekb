@@ -43,11 +43,12 @@ async function bootstrap(db) {
   await db.query(template(wallet,/await db\.exec\(`(grant usage[\s\S]+?)`\);/,{ids}));
   await db.query((await migration('202610100001_admin_payment_hardening.sql')).match(/create or replace function public\.is_admin\(\)[\s\S]+?\$\$;/)[0]);
   for(const name of ['202610100002_membership_foundation.sql','202610100003_membership_commerce.sql','202610100004_membership_benefits.sql','202610100005_membership_wallet_payments.sql']) await db.query(await migration(name));
-  assert.equal(await value(db,'wavekb_schema_version()'),'202610100005');
+  await db.query(await migration('202611260001_membership_wallet_bsc_usdt.sql'));
+  assert.equal(await value(db,'wavekb_schema_version()'),'202611260001');
 }
 async function setup(db) {
   await actor(db,ids.admin);
-  await value(db,"admin_save_membership_wallet_route('ethereum-usdc','0x1111111111111111111111111111111111111111',true,1,'隔离并发配置',$1,auth.uid())",[randomUUID()]);
+  await value(db,"admin_save_membership_wallet_route('bsc-usdt','0x1111111111111111111111111111111111111111',true,1,'隔离并发配置',$1,auth.uid())",[randomUUID()]);
   await value(db,"admin_save_membership_wallet_settings(true,1,'隔离并发配置',$1,auth.uid())",[randomUUID()]);
   const catalog=await value(db,'admin_membership_commerce_store(auth.uid())');
   const plan=catalog.plans[0],price=plan.prices.find(p=>p.term_months===1);
@@ -56,7 +57,7 @@ async function setup(db) {
 }
 async function prepare(db,c,user=ids.member,request=randomUUID()) {
   await actor(db,null,'service_role');
-  return value(db,"prepare_membership_wallet_order($1,$2,'ethereum-usdc',$3,$4::jsonb)",[user,c.price.id,request,JSON.stringify(c.quote)]);
+  return value(db,"prepare_membership_wallet_order($1,$2,'bsc-usdt',$3,$4::jsonb)",[user,c.price.id,request,JSON.stringify(c.quote)]);
 }
 async function leased(db,c,user=ids.member,digit='a') {
   const order=await prepare(db,c,user);
