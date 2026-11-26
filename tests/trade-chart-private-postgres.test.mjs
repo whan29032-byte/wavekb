@@ -1286,6 +1286,9 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
           : tool === "long-position" || tool === "short-position"
             ? { accountSize: 100000, risk: 1 }
             : {},
+        ...(tool === "long-position" || tool === "short-position"
+          ? { properties: { stopTime: 240, stopPrice: 80 } }
+          : {}),
         ...(tool === "text" ? { text: { value: "note" } } : {}),
       })),
     });
@@ -1355,6 +1358,12 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
       { drawings: [{ ...validDrawing, id: "position-3", tool: "long-position", points: validDrawing.points, style: { risk: 100.1 } }] },
       { drawings: [{ ...validDrawing, id: "position-4", tool: "short-position", points: [...validDrawing.points, { time: 300, price: 90 }], style: {} }] },
       { drawings: [{ ...validDrawing, id: "position-5", tool: "long-position", points: validDrawing.points, style: {}, text: { align: "center" } }] },
+      { drawings: [{ ...validDrawing, id: "position-6", tool: "long-position", points: validDrawing.points, style: {}, properties: { stopTime: 240 } }] },
+      { drawings: [{ ...validDrawing, id: "position-7", tool: "short-position", points: validDrawing.points, style: {}, properties: { stopPrice: 80 } }] },
+      { drawings: [{ ...validDrawing, id: "position-8", tool: "long-position", points: validDrawing.points, style: {}, properties: { stopTime: 10000000000001, stopPrice: 80 } }] },
+      { drawings: [{ ...validDrawing, id: "position-9", tool: "short-position", points: validDrawing.points, style: {}, properties: { stopTime: 240, stopPrice: 1100000000000000000 } }] },
+      { drawings: [{ ...validDrawing, id: "position-10", tool: "long-position", points: validDrawing.points, style: {}, properties: { stopTime: 240, stopPrice: 80, controllerPoint: {} } }] },
+      { drawings: [{ ...validDrawing, id: "trend-invalid-stats", tool: "trend-line", style: { showStats: "yes" } }] },
       { priceType: "bid" },
     ]) {
       await assert.rejects(

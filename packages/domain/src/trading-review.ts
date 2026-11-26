@@ -76,13 +76,14 @@ export type TradeChartDrawingTextKey =
   | "value" | "color" | "fontSize" | "fontFamily" | "bold" | "italic" | "align" | "valign";
 export type TradeChartDrawingPropertyKey =
   | "degree" | "labelStyle" | "showHeader" | "showLossSize" | "showTargetLabel"
-  | "showStopLabel" | "showPrices" | "profitColor" | "lossColor";
+  | "showStopLabel" | "showPrices" | "profitColor" | "lossColor" | "stopTime" | "stopPrice";
 
 const BASE_LINE_STYLE = ["color", "lineWidth", "lineStyle"] as const;
 const LABEL_TEXT_STYLE = ["color", "fontSize", "fontFamily", "bold", "italic"] as const;
 const CONTENT_TEXT_STYLE = ["value", ...LABEL_TEXT_STYLE, "align", "valign"] as const;
 const POSITION_PROPERTIES = [
   "showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices", "profitColor", "lossColor",
+  "stopTime", "stopPrice",
 ] as const;
 const ELLIOTT_PROPERTIES = ["degree", "labelStyle"] as const;
 
@@ -177,6 +178,9 @@ export type DrawingPropertiesV1 = {
   showPrices?: boolean;
   profitColor?: string;
   lossColor?: string;
+  /** WaveKB-owned binding for a non-default draggable position stop anchor. */
+  stopTime?: number;
+  stopPrice?: number;
 };
 
 export type DrawingSpecV1 = {

@@ -22,7 +22,12 @@ const MAX_DRAWING_TEXT_LENGTH = 2_000;
 const MAX_LABEL_LENGTH = 128;
 const MAX_COLOR_LENGTH = 64;
 const MAX_POSITION_ACCOUNT_SIZE = 1_000_000_000_000_000;
+const MAX_DRAWING_TIME = 10_000_000_000_000;
+const MAX_DRAWING_PRICE = 1_000_000_000_000_000_000;
 const WAVEKB_DRAWING_TOOLS = new Set<string>(WAVEKB_DRAWING_TOOL_IDS);
+const DRAWING_KEYS = [
+  "id", "tool", "points", "style", "text", "properties", "paneIndex", "locked", "visible", "zIndex",
+] as const;
 
 type OpenAlgoDrawingController = InstanceType<
   typeof import("openalgo-charts/draw")["DrawingController"]
@@ -128,6 +133,8 @@ export interface WaveKbChartDrawingProperties {
   showPrices?: boolean;
   profitColor?: string;
   lossColor?: string;
+  stopTime?: number;
+  stopPrice?: number;
 }
 
 export interface WaveKbChartDrawing {
@@ -223,7 +230,54 @@ function assertAllowedKeys(value: Record<string, unknown>, allowed: readonly str
   }
 }
 
-function safeText(value: string, field: string, maximum: number): string {
+type DrawingNormalizationMode = "application" | "library";
+
+function rejectOrOmit(mode: DrawingNormalizationMode, message: string): undefined {
+  if (mode === "application") throw new Error(message);
+  return undefined;
+}
+
+function boundedNumber(
+  value: unknown,
+  field: string,
+  minimum: number,
+  maximum: number,
+  mode: DrawingNormalizationMode,
+): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < minimum || value > maximum) {
+    return rejectOrOmit(mode, `${field} is out of range`);
+  }
+  return value;
+}
+
+function booleanValue(value: unknown, field: string, mode: DrawingNormalizationMode): boolean | undefined {
+  return typeof value === "boolean" ? value : rejectOrOmit(mode, `${field} must be boolean`);
+}
+
+function enumValue<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  field: string,
+  mode: DrawingNormalizationMode,
+): T | undefined {
+  return typeof value === "string" && allowed.includes(value as T)
+    ? value as T
+    : rejectOrOmit(mode, `${field} is unsupported`);
+}
+
+function normalizedColor(value: unknown, field: string, mode: DrawingNormalizationMode): string | undefined {
+  try {
+    return optionalColor(value, field);
+  } catch (error) {
+    if (mode === "application") throw error;
+    return undefined;
+  }
+}
+
+function safeText(value: string, field: string, maximum: number, mode: DrawingNormalizationMode): string {
+  if (mode === "application" && value.length > maximum) {
+    throw new Error(`${field} cannot exceed ${maximum} characters`);
+  }
   const result = value.slice(0, maximum);
   const compact = result.toLowerCase().replaceAll(" ", "");
   if (result.includes("<") || result.includes(">") || compact.includes("javascript:")
@@ -233,51 +287,77 @@ function safeText(value: string, field: string, maximum: number): string {
   return result;
 }
 
-function normalizeStyle(value: unknown): WaveKbChartDrawingStyle {
-  const source = isRecord(value) ? value : {};
+function allowedSubset(source: Record<string, unknown>, allowed: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(source).filter(([key]) => allowed.includes(key)));
+}
+
+function normalizeStyle(source: Record<string, unknown>, mode: DrawingNormalizationMode): WaveKbChartDrawingStyle {
   const style: WaveKbChartDrawingStyle = {};
-  const color = optionalColor(source.color, "drawing.style.color");
-  const fillColor = optionalColor(source.fillColor, "drawing.style.fillColor");
+  const color = normalizedColor(source.color, "drawing.style.color", mode);
+  const fillColor = normalizedColor(source.fillColor, "drawing.style.fillColor", mode);
 
   if (color !== undefined) style.color = color;
   if (fillColor !== undefined) style.fillColor = fillColor;
-  if (typeof source.lineWidth === "number" && Number.isFinite(source.lineWidth)) {
-    style.lineWidth = Math.min(20, Math.max(0.5, source.lineWidth));
+  if (source.lineWidth !== undefined) {
+    const lineWidth = boundedNumber(source.lineWidth, "drawing.style.lineWidth", 0.5, 20, mode);
+    if (lineWidth !== undefined) style.lineWidth = lineWidth;
   }
-  if (source.lineStyle === "solid" || source.lineStyle === "dashed" || source.lineStyle === "dotted") {
-    style.lineStyle = source.lineStyle;
+  if (source.lineStyle !== undefined) {
+    const lineStyle = enumValue(source.lineStyle, ["solid", "dashed", "dotted"] as const, "drawing.style.lineStyle", mode);
+    if (lineStyle !== undefined) style.lineStyle = lineStyle;
   }
   for (const key of ["fill", "extendLeft", "extendRight", "showLabels", "showStats"] as const) {
-    if (typeof source[key] === "boolean") style[key] = source[key];
+    if (source[key] !== undefined) {
+      const normalized = booleanValue(source[key], `drawing.style.${key}`, mode);
+      if (normalized !== undefined) style[key] = normalized;
+    }
   }
   if (source.accountSize !== undefined) {
-    const accountSize = finiteNumber(source.accountSize, "drawing.style.accountSize");
-    if (accountSize < 0 || accountSize > MAX_POSITION_ACCOUNT_SIZE) {
-      throw new Error("drawing.style.accountSize is out of range");
-    }
-    style.accountSize = accountSize;
+    const accountSize = boundedNumber(source.accountSize, "drawing.style.accountSize", 0, MAX_POSITION_ACCOUNT_SIZE, mode);
+    if (accountSize !== undefined) style.accountSize = accountSize;
   }
   if (source.risk !== undefined) {
-    const risk = finiteNumber(source.risk, "drawing.style.risk");
-    if (risk < 0 || risk > 100) throw new Error("drawing.style.risk is out of range");
-    style.risk = risk;
+    const risk = boundedNumber(source.risk, "drawing.style.risk", 0, 100, mode);
+    if (risk !== undefined) style.risk = risk;
   }
-  if (typeof source.fillOpacity === "number" && Number.isFinite(source.fillOpacity)) {
-    style.fillOpacity = Math.min(1, Math.max(0, source.fillOpacity));
+  if (source.fillOpacity !== undefined) {
+    const fillOpacity = boundedNumber(source.fillOpacity, "drawing.style.fillOpacity", 0, 1, mode);
+    if (fillOpacity !== undefined) style.fillOpacity = fillOpacity;
   }
-  if (Array.isArray(source.levels)) {
+  if (source.levels !== undefined && !Array.isArray(source.levels)) {
+    rejectOrOmit(mode, "drawing.style.levels must be an array");
+  } else if (Array.isArray(source.levels)) {
+    if (mode === "application" && source.levels.length > MAX_FIBONACCI_LEVELS) {
+      throw new Error(`drawing.style.levels cannot exceed ${MAX_FIBONACCI_LEVELS} entries`);
+    }
     style.levels = source.levels.slice(0, MAX_FIBONACCI_LEVELS).flatMap((level, index) => {
-      if (!isRecord(level) || typeof level.ratio !== "number" || !Number.isFinite(level.ratio)) {
+      if (!isRecord(level)) {
+        rejectOrOmit(mode, `drawing.style.levels[${index}] must be an object`);
         return [];
       }
+      if (mode === "application") {
+        assertAllowedKeys(level, ["ratio", "color", "enabled", "label"], `drawing.style.levels[${index}]`);
+      }
+      const levelSource = mode === "library"
+        ? allowedSubset(level, ["ratio", "color", "enabled", "label"])
+        : level;
+      const ratio = boundedNumber(levelSource.ratio, `drawing.style.levels[${index}].ratio`, -1_000_000, 1_000_000, mode);
+      if (ratio === undefined) return [];
       const normalized: NonNullable<WaveKbChartDrawingStyle["levels"]>[number] = {
-        ratio: level.ratio,
+        ratio,
       };
-      const levelColor = optionalColor(level.color, `drawing.style.levels[${index}].color`);
+      const levelColor = normalizedColor(levelSource.color, `drawing.style.levels[${index}].color`, mode);
       if (levelColor !== undefined) normalized.color = levelColor;
-      if (typeof level.enabled === "boolean") normalized.enabled = level.enabled;
-      if (typeof level.label === "string") {
-        normalized.label = level.label.slice(0, MAX_LABEL_LENGTH);
+      if (levelSource.enabled !== undefined) {
+        const enabled = booleanValue(levelSource.enabled, `drawing.style.levels[${index}].enabled`, mode);
+        if (enabled !== undefined) normalized.enabled = enabled;
+      }
+      if (levelSource.label !== undefined) {
+        if (typeof levelSource.label !== "string") {
+          rejectOrOmit(mode, `drawing.style.levels[${index}].label must be text`);
+        } else {
+          normalized.label = safeText(levelSource.label, `drawing.style.levels[${index}].label`, MAX_LABEL_LENGTH, mode);
+        }
       }
       return [normalized];
     });
@@ -286,39 +366,46 @@ function normalizeStyle(value: unknown): WaveKbChartDrawingStyle {
   return style;
 }
 
-function normalizeText(value: unknown): WaveKbChartDrawingText | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
+function normalizeText(value: Record<string, unknown>, mode: DrawingNormalizationMode): WaveKbChartDrawingText | undefined {
   const text: WaveKbChartDrawingText = {};
   if (value.value !== undefined) {
-    if (typeof value.value !== "string") throw new Error("drawing.text.value must be text");
-    text.value = safeText(value.value, "drawing.text.value", MAX_DRAWING_TEXT_LENGTH);
+    if (typeof value.value !== "string") rejectOrOmit(mode, "drawing.text.value must be text");
+    else text.value = safeText(value.value, "drawing.text.value", MAX_DRAWING_TEXT_LENGTH, mode);
   }
-  const color = optionalColor(value.color, "drawing.text.color");
+  const color = normalizedColor(value.color, "drawing.text.color", mode);
   if (color !== undefined) text.color = color;
-  if (typeof value.fontSize === "number" && Number.isFinite(value.fontSize)) {
-    text.fontSize = Math.min(96, Math.max(6, value.fontSize));
+  if (value.fontSize !== undefined) {
+    const fontSize = boundedNumber(value.fontSize, "drawing.text.fontSize", 6, 96, mode);
+    if (fontSize !== undefined) text.fontSize = fontSize;
   }
-  if (typeof value.fontFamily === "string") {
-    text.fontFamily = value.fontFamily.slice(0, MAX_LABEL_LENGTH);
+  if (value.fontFamily !== undefined) {
+    if (typeof value.fontFamily !== "string" || !/^[A-Za-z0-9 _,-]{0,128}$/.test(value.fontFamily)) {
+      rejectOrOmit(mode, "drawing.text.fontFamily is unsupported");
+    } else {
+      text.fontFamily = value.fontFamily;
+    }
   }
   for (const key of ["bold", "italic"] as const) {
-    if (typeof value[key] === "boolean") text[key] = value[key];
+    if (value[key] !== undefined) {
+      const normalized = booleanValue(value[key], `drawing.text.${key}`, mode);
+      if (normalized !== undefined) text[key] = normalized;
+    }
   }
-  if (value.align === "left" || value.align === "center" || value.align === "right") {
-    text.align = value.align;
+  if (value.align !== undefined) {
+    const align = enumValue(value.align, ["left", "center", "right"] as const, "drawing.text.align", mode);
+    if (align !== undefined) text.align = align;
   }
-  if (value.valign === "top" || value.valign === "middle" || value.valign === "bottom") {
-    text.valign = value.valign;
+  if (value.valign !== undefined) {
+    const valign = enumValue(value.valign, ["top", "middle", "bottom"] as const, "drawing.text.valign", mode);
+    if (valign !== undefined) text.valign = valign;
   }
   return text;
 }
 
-function normalizeProperties(value: unknown): WaveKbChartDrawingProperties | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
+function normalizeProperties(
+  value: Record<string, unknown>,
+  mode: DrawingNormalizationMode,
+): WaveKbChartDrawingProperties | undefined {
   const properties: WaveKbChartDrawingProperties = {};
   const degrees = new Set<NonNullable<WaveKbChartDrawingProperties["degree"]>>([
     "grand-supercycle",
@@ -338,11 +425,13 @@ function normalizeProperties(value: unknown): WaveKbChartDrawingProperties | und
     "circled",
   ]);
 
-  if (typeof value.degree === "string" && degrees.has(value.degree as NonNullable<WaveKbChartDrawingProperties["degree"]>)) {
-    properties.degree = value.degree as NonNullable<WaveKbChartDrawingProperties["degree"]>;
+  if (value.degree !== undefined) {
+    const degree = enumValue(value.degree, [...degrees], "drawing.properties.degree", mode);
+    if (degree !== undefined) properties.degree = degree;
   }
-  if (typeof value.labelStyle === "string" && labelStyles.has(value.labelStyle as NonNullable<WaveKbChartDrawingProperties["labelStyle"]>)) {
-    properties.labelStyle = value.labelStyle as NonNullable<WaveKbChartDrawingProperties["labelStyle"]>;
+  if (value.labelStyle !== undefined) {
+    const labelStyle = enumValue(value.labelStyle, [...labelStyles], "drawing.properties.labelStyle", mode);
+    if (labelStyle !== undefined) properties.labelStyle = labelStyle;
   }
   for (const key of [
     "showHeader",
@@ -351,78 +440,150 @@ function normalizeProperties(value: unknown): WaveKbChartDrawingProperties | und
     "showStopLabel",
     "showPrices",
   ] as const) {
-    if (typeof value[key] === "boolean") properties[key] = value[key];
+    if (value[key] !== undefined) {
+      const normalized = booleanValue(value[key], `drawing.properties.${key}`, mode);
+      if (normalized !== undefined) properties[key] = normalized;
+    }
   }
   for (const key of ["profitColor", "lossColor"] as const) {
-    const color = optionalColor(value[key], `drawing.properties.${key}`);
+    const color = normalizedColor(value[key], `drawing.properties.${key}`, mode);
     if (color !== undefined) properties[key] = color;
+  }
+  if (mode === "application") {
+    const hasStopTime = Object.prototype.hasOwnProperty.call(value, "stopTime");
+    const hasStopPrice = Object.prototype.hasOwnProperty.call(value, "stopPrice");
+    if (hasStopTime !== hasStopPrice) throw new Error("drawing.properties stopTime and stopPrice must be provided together");
+    if (hasStopTime) {
+      const stopTime = boundedNumber(value.stopTime, "drawing.properties.stopTime", -MAX_DRAWING_TIME, MAX_DRAWING_TIME, mode);
+      const stopPrice = boundedNumber(value.stopPrice, "drawing.properties.stopPrice", -MAX_DRAWING_PRICE, MAX_DRAWING_PRICE, mode);
+      if (stopTime !== undefined && stopPrice !== undefined) {
+        properties.stopTime = stopTime;
+        properties.stopPrice = stopPrice;
+      }
+    }
   }
 
   return Object.keys(properties).length === 0 ? undefined : properties;
 }
 
-function normalizeDrawing(value: unknown, propertyField: "properties" | "props"): WaveKbChartDrawing {
+function normalizeDrawingPoint(
+  value: unknown,
+  field: string,
+  mode: DrawingNormalizationMode,
+): WaveKbChartDrawingPoint {
+  if (!isRecord(value)) throw new Error(`${field} must be an object`);
+  if (mode === "application") assertAllowedKeys(value, ["time", "price"], field);
+  const time = boundedNumber(value.time, `${field}.time`, -MAX_DRAWING_TIME, MAX_DRAWING_TIME, mode);
+  const price = boundedNumber(value.price, `${field}.price`, -MAX_DRAWING_PRICE, MAX_DRAWING_PRICE, mode);
+  if (time === undefined || price === undefined) throw new Error(`${field} is invalid`);
+  return { time, price };
+}
+
+function defaultPositionStop(points: readonly WaveKbChartDrawingPoint[]): WaveKbChartDrawingPoint {
+  const [entry, target] = points;
+  if (entry === undefined || target === undefined) throw new Error("position drawing requires entry and target anchors");
+  return {
+    time: target.time,
+    price: entry.price - (target.price - entry.price) / 2,
+  };
+}
+
+function normalizeDrawing(value: unknown, mode: DrawingNormalizationMode): WaveKbChartDrawing {
   if (!isRecord(value)) {
     throw new Error("drawing must be an object");
   }
+  if (mode === "application") assertAllowedKeys(value, DRAWING_KEYS, "drawing");
   const id = boundedString(value.id, "drawing.id", MAX_DRAWING_ID_LENGTH);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) throw new Error(`drawing ${id} has an invalid id`);
   if (typeof value.tool !== "string" || !WAVEKB_DRAWING_TOOLS.has(value.tool)) {
     throw new Error(`drawing ${id} uses an unsupported tool`);
   }
   const tool = value.tool as WaveKbChartDrawingToolId;
   const schema = TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool];
   const isPositionTool = tool === "long-position" || tool === "short-position";
-  const hasInternalExpandedPosition = propertyField === "props" && isPositionTool
+  const hasInternalExpandedPosition = mode === "library" && isPositionTool
     && Array.isArray(value.points) && value.points.length === schema.pointCount + 1;
   if (!Array.isArray(value.points) || (value.points.length !== schema.pointCount && !hasInternalExpandedPosition)
     || value.points.length > MAX_DRAWING_POINTS) {
     throw new Error(`drawing ${id} points must contain exactly ${schema.pointCount} anchors`);
   }
-  const points = value.points.slice(0, schema.pointCount).map((point, index) => {
-    if (!isRecord(point)) {
-      throw new Error(`drawing ${id} point ${index} must be an object`);
-    }
-    return {
-      time: finiteNumber(point.time, `drawing ${id} point ${index}.time`),
-      price: finiteNumber(point.price, `drawing ${id} point ${index}.price`),
-    };
-  });
+  const points = value.points.slice(0, schema.pointCount).map((point, index) =>
+    normalizeDrawingPoint(point, `drawing ${id} point ${index}`, mode));
+  const internalStop = hasInternalExpandedPosition
+    ? normalizeDrawingPoint(value.points[schema.pointCount], `drawing ${id} internal stop`, mode)
+    : undefined;
   const paneIndex = finiteNumber(value.paneIndex, `drawing ${id}.paneIndex`);
   const zIndex = finiteNumber(value.zIndex, `drawing ${id}.zIndex`);
   if (!Number.isInteger(paneIndex) || paneIndex < 0 || paneIndex > 15) {
     throw new Error(`drawing ${id}.paneIndex is out of range`);
   }
+  if (mode === "application" && (zIndex < -10_000 || zIndex > 10_000)) {
+    throw new Error(`drawing ${id}.zIndex is out of range`);
+  }
 
-  const styleSource = isRecord(value.style) ? value.style : {};
-  assertAllowedKeys(styleSource, schema.styleKeys, `drawing ${id}.style`);
-  const textSource = value.text;
-  if (schema.textRequired && (!isRecord(textSource) || typeof textSource.value !== "string")) {
+  if (!isRecord(value.style)) throw new Error(`drawing ${id}.style must be an object`);
+  const styleSource = mode === "application" ? value.style : allowedSubset(value.style, schema.styleKeys);
+  if (mode === "application") assertAllowedKeys(styleSource, schema.styleKeys, `drawing ${id}.style`);
+  const rawText = value.text;
+  if (schema.textRequired && (!isRecord(rawText) || typeof rawText.value !== "string")) {
     throw new Error(`drawing ${id}.text is required`);
   }
-  if (textSource !== undefined) {
-    if (!isRecord(textSource) || schema.textKeys.length === 0) throw new Error(`drawing ${id}.text is unsupported`);
-    assertAllowedKeys(textSource, schema.textKeys, `drawing ${id}.text`);
+  let textSource: Record<string, unknown> | undefined;
+  if (rawText !== undefined) {
+    if (!isRecord(rawText)) throw new Error(`drawing ${id}.text must be an object`);
+    if (schema.textKeys.length === 0) {
+      if (mode === "application") throw new Error(`drawing ${id}.text is unsupported`);
+    } else {
+      textSource = mode === "application" ? rawText : allowedSubset(rawText, schema.textKeys);
+      if (mode === "application") assertAllowedKeys(textSource, schema.textKeys, `drawing ${id}.text`);
+    }
   }
-  const propertySource = value[propertyField];
-  if (propertySource !== undefined) {
-    if (!isRecord(propertySource) || schema.propertyKeys.length === 0) throw new Error(`drawing ${id}.properties are unsupported`);
-    assertAllowedKeys(propertySource, schema.propertyKeys, `drawing ${id}.properties`);
+  const rawProperties = value[mode === "application" ? "properties" : "props"];
+  let propertySource: Record<string, unknown> | undefined;
+  if (rawProperties !== undefined) {
+    if (!isRecord(rawProperties)) throw new Error(`drawing ${id}.properties must be an object`);
+    if (schema.propertyKeys.length === 0) {
+      if (mode === "application") throw new Error(`drawing ${id}.properties are unsupported`);
+    } else {
+      propertySource = mode === "application"
+        ? rawProperties
+        : allowedSubset(rawProperties, schema.propertyKeys);
+      if (mode === "application") {
+        assertAllowedKeys(propertySource, schema.propertyKeys, `drawing ${id}.properties`);
+      }
+    }
   }
 
   const drawing: WaveKbChartDrawing = {
     id,
     tool,
     points,
-    style: normalizeStyle(styleSource),
+    style: normalizeStyle(styleSource, mode),
     paneIndex,
     zIndex: Math.min(10_000, Math.max(-10_000, zIndex)),
   };
-  const text = normalizeText(textSource);
-  const properties = normalizeProperties(propertySource);
+  const text = textSource === undefined ? undefined : normalizeText(textSource, mode);
+  let properties = propertySource === undefined ? undefined : normalizeProperties(propertySource, mode);
+  if (internalStop !== undefined) {
+    const defaultStop = defaultPositionStop(points);
+    if (internalStop.time !== defaultStop.time || internalStop.price !== defaultStop.price) {
+      properties = {
+        ...properties,
+        stopTime: internalStop.time,
+        stopPrice: internalStop.price,
+      };
+    }
+  }
   if (text !== undefined) drawing.text = text;
   if (properties !== undefined) drawing.properties = properties;
-  if (typeof value.locked === "boolean") drawing.locked = value.locked;
-  if (typeof value.visible === "boolean") drawing.visible = value.visible;
+  for (const key of ["locked", "visible"] as const) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "boolean") {
+      if (mode === "application") throw new Error(`drawing ${id}.${key} must be boolean`);
+    } else {
+      drawing[key] = value[key];
+    }
+  }
   return drawing;
 }
 
@@ -430,10 +591,11 @@ function normalizeWaveKbDocument(value: unknown): WaveKbChartDrawingDocument {
   if (!isRecord(value) || value.schemaVersion !== WAVEKB_DRAWING_DOCUMENT_SCHEMA) {
     throw new Error(`drawing document must use ${WAVEKB_DRAWING_DOCUMENT_SCHEMA}`);
   }
+  assertAllowedKeys(value, ["schemaVersion", "drawings"], "drawing document");
   if (!Array.isArray(value.drawings) || value.drawings.length > MAX_DRAWINGS) {
     throw new Error(`drawing document cannot contain more than ${MAX_DRAWINGS} drawings`);
   }
-  const drawings = value.drawings.map((drawing) => normalizeDrawing(drawing, "properties"));
+  const drawings = value.drawings.map((drawing) => normalizeDrawing(drawing, "application"));
   const ids = new Set(drawings.map(({ id }) => id));
   if (ids.size !== drawings.length) {
     throw new Error("drawing document contains duplicate ids");
@@ -448,7 +610,7 @@ function normalizeOpenAlgoDocument(value: unknown): WaveKbChartDrawingDocument {
   const drawings: WaveKbChartDrawing[] = [];
   for (const drawing of value.drawings.slice(0, MAX_DRAWINGS)) {
     try {
-      drawings.push(normalizeDrawing(drawing, "props"));
+      drawings.push(normalizeDrawing(drawing, "library"));
     } catch {
       // Never expose unbounded or unsupported engine state through the WaveKB boundary.
     }
@@ -459,18 +621,31 @@ function normalizeOpenAlgoDocument(value: unknown): WaveKbChartDrawingDocument {
 function toOpenAlgoDocument(document: WaveKbChartDrawingDocument) {
   return {
     version: 2 as const,
-    drawings: document.drawings.map(({ properties, ...drawing }) => ({
-      ...drawing,
-      points: drawing.points.map((point) => ({ ...point })),
-      style: {
-        ...drawing.style,
-        ...(drawing.style.levels === undefined
+    drawings: document.drawings.map(({ properties, ...drawing }) => {
+      const isPositionTool = drawing.tool === "long-position" || drawing.tool === "short-position";
+      const stop = isPositionTool
+        ? properties?.stopTime !== undefined && properties.stopPrice !== undefined
+          ? { time: properties.stopTime, price: properties.stopPrice }
+          : defaultPositionStop(drawing.points)
+        : undefined;
+      const engineProperties = properties === undefined
+        ? undefined
+        : Object.fromEntries(Object.entries(properties).filter(([key]) => key !== "stopTime" && key !== "stopPrice"));
+      return {
+        ...drawing,
+        points: [...drawing.points.map((point) => ({ ...point })), ...(stop === undefined ? [] : [stop])],
+        style: {
+          ...drawing.style,
+          ...(drawing.style.levels === undefined
+            ? {}
+            : { levels: drawing.style.levels.map((level) => ({ ...level })) }),
+        },
+        ...(drawing.text === undefined ? {} : { text: { ...drawing.text } }),
+        ...(engineProperties === undefined || Object.keys(engineProperties).length === 0
           ? {}
-          : { levels: drawing.style.levels.map((level) => ({ ...level })) }),
-      },
-      ...(drawing.text === undefined ? {} : { text: { ...drawing.text } }),
-      ...(properties === undefined ? {} : { props: { ...properties } }),
-    })),
+          : { props: engineProperties }),
+      };
+    }),
   };
 }
 

@@ -258,8 +258,15 @@ describe.sequential("WaveKB chart engine boundary", () => {
     expect(changes.at(-1)).toEqual({
       kind: "update",
       drawingIds: ["drawing-1"],
-      document: { schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA, drawings: [] },
+      document: {
+        schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+        drawings: [expect.objectContaining({
+          id: "drawing-1",
+          properties: { degree: "minor", labelStyle: "plain" },
+        })],
+      },
     });
+    expect(changes.at(-1)).not.toHaveProperty("document.drawings.0.properties.executable");
 
     unsubscribe();
     engine.destroy();
@@ -346,7 +353,7 @@ describe.sequential("WaveKB chart engine boundary", () => {
       drawings: [
         expect.objectContaining({
           id: "position-1",
-          points: positionPoints,
+          points: [...positionPoints, { time: 1_700_000_060, price: 95 }],
           style: { accountSize: 100_000, risk: 1, showLabels: true },
         }),
         expect.objectContaining({ id: "ray-1", style: { showStats: true } }),
@@ -357,15 +364,120 @@ describe.sequential("WaveKB chart engine boundary", () => {
       expect.objectContaining({ id: "ray-1", style: { showStats: true } }),
     ]));
 
-    library.state.drawings.drawings[0] = {
-      ...library.state.drawings.drawings[0],
-      points: [...positionPoints, { time: 1_700_000_060, price: 95 }],
-    };
-    expect(engine.getDrawings().drawings[0]).toEqual(expect.objectContaining({
-      id: "position-1",
-      points: positionPoints,
+    expect(engine.getDrawings().drawings[0]).not.toHaveProperty("properties.stopTime");
+    expect(engine.getDrawings().drawings[0]).not.toHaveProperty("properties.stopPrice");
+
+    engine.destroy();
+  });
+
+  it("round-trips a non-default independently dragged position stop without persisting controller state", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const points = [
+      { time: 1_700_000_000, price: 100 },
+      { time: 1_700_000_060, price: 110 },
+    ];
+    const customStop = { time: 1_700_000_090, price: 82 };
+
+    await engine.setDrawings({
+      schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+      drawings: [{
+        id: "custom-stop",
+        tool: "long-position",
+        points,
+        paneIndex: 0,
+        style: {},
+        properties: { showHeader: true, stopTime: customStop.time, stopPrice: customStop.price },
+        zIndex: 0,
+      }],
+    });
+
+    expect(library.state.drawings.drawings[0]).toEqual(expect.objectContaining({
+      points: [...points, customStop],
+      props: { showHeader: true },
+    }));
+    expect(library.state.drawings.drawings[0]?.props).not.toHaveProperty("stopTime");
+    expect(library.state.drawings.drawings[0]?.props).not.toHaveProperty("stopPrice");
+
+    const persisted = engine.getDrawings();
+    expect(persisted.drawings[0]).toEqual(expect.objectContaining({
+      points,
+      properties: { showHeader: true, stopTime: customStop.time, stopPrice: customStop.price },
     }));
 
+    await engine.setDrawings(persisted);
+    expect(library.state.drawings.drawings[0]).toEqual(expect.objectContaining({
+      points: [...points, customStop],
+      props: { showHeader: true },
+    }));
+    engine.destroy();
+  });
+
+  it("strictly rejects illegal WaveKB drawing values while tolerating non-persisted library fields", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const base = {
+      id: "strict-input",
+      tool: "trend-line" as const,
+      points: [
+        { time: 1_700_000_000, price: 100 },
+        { time: 1_700_000_060, price: 110 },
+      ],
+      paneIndex: 0,
+      style: {},
+      zIndex: 0,
+    };
+
+    for (const drawing of [
+      { ...base, style: { showStats: "yes" } },
+      { ...base, style: { lineWidth: 0 } },
+      { ...base, unknownState: true },
+      { ...base, tool: "rectangle" as const, text: { value: "note", align: "diagonal" } },
+      {
+        ...base,
+        tool: "long-position" as const,
+        style: { accountSize: "100000", risk: 1 },
+      },
+      {
+        ...base,
+        tool: "short-position" as const,
+        style: { accountSize: 100_000, risk: "1" },
+      },
+      {
+        ...base,
+        tool: "long-position" as const,
+        style: {},
+        properties: { stopTime: 1_700_000_090 },
+      },
+      {
+        ...base,
+        tool: "short-position" as const,
+        style: {},
+        properties: { controllerPoint: { time: 1, price: 1 } },
+      },
+    ]) {
+      await expect(engine.setDrawings({
+        schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+        drawings: [drawing as never],
+      })).rejects.toThrow(/drawing/i);
+    }
+
+    await engine.setDrawings({ schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA, drawings: [] });
+    library.state.drawings.drawings = [{
+      ...base,
+      tool: "long-position",
+      points: [...base.points, { time: 1_700_000_060, price: 95 }],
+      style: { accountSize: 100_000, risk: 1, libraryOnly: "discard" },
+      text: { color: "#ffffff", libraryOnly: "discard" },
+      props: { showHeader: true, libraryOnly: "discard" },
+      createdAt: 123,
+    }];
+    expect(engine.getDrawings().drawings).toEqual([
+      expect.objectContaining({
+        id: "strict-input",
+        style: { accountSize: 100_000, risk: 1 },
+        text: { color: "#ffffff" },
+        properties: { showHeader: true },
+      }),
+    ]);
     engine.destroy();
   });
 

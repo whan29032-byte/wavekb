@@ -68,6 +68,13 @@ describe("trade chart domain contract", () => {
     expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS.ray.styleKeys).toContain("showStats");
     expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["long-position"].styleKeys).toEqual(expect.arrayContaining(["accountSize", "risk"]));
     expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["short-position"].styleKeys).toEqual(expect.arrayContaining(["accountSize", "risk"]));
+    expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["long-position"].propertyKeys).toEqual([
+      "showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices",
+      "profitColor", "lossColor", "stopTime", "stopPrice",
+    ]);
+    expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["short-position"].propertyKeys).toEqual(
+      TRADE_CHART_DRAWING_TOOL_SCHEMAS["long-position"].propertyKeys,
+    );
     expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["horizontal-line"].textKeys).not.toEqual(expect.arrayContaining(["align", "valign"]));
   });
 });

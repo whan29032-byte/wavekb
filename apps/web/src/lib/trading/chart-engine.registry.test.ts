@@ -34,7 +34,14 @@ describe("installed OpenAlgo drawing registry", () => {
       expect(applicationSchema.pointCount, `${toolId} input anchors`).toBe(getDrawingTool(toolId).points);
       for (const key of applicationSchema.styleKeys) expect(publicPaths, `${toolId} style.${key}`).toContain(`style.${key}`);
       for (const key of applicationSchema.textKeys) expect(publicPaths, `${toolId} text.${key}`).toContain(`text.${key}`);
-      for (const key of applicationSchema.propertyKeys) expect(publicPaths, `${toolId} props.${key}`).toContain(`props.${key}`);
+      for (const key of applicationSchema.propertyKeys) {
+        if (key === "stopTime" || key === "stopPrice") {
+          expect(["long-position", "short-position"]).toContain(toolId);
+          expect(publicPaths, `${toolId} WaveKB-owned props.${key}`).not.toContain(`props.${key}`);
+        } else {
+          expect(publicPaths, `${toolId} props.${key}`).toContain(`props.${key}`);
+        }
+      }
     }
 
     expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["trend-line"].styleKeys).toContain("showStats");
@@ -64,6 +71,16 @@ describe("installed OpenAlgo drawing registry", () => {
         min: 0,
         max: 100,
       });
+
+      const anchors = [{ time: 100, price: 100 }, { time: 200, price: 110 }];
+      const tool = getDrawingTool(toolId);
+      expect(tool.expand?.(anchors, { barSeconds: 60, visibleBars: 100 })).toEqual([
+        anchors[0],
+        anchors[1],
+        { time: 200, price: 95 },
+      ]);
+      const customStop = [...anchors, { time: 240, price: 80 }];
+      expect(tool.constrain?.(customStop, 2)).toEqual(customStop);
     }
   });
 });

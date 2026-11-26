@@ -281,6 +281,13 @@ function validateDrawingProperties(value: unknown, tool: TradeChartDrawingToolId
   }
   if (properties.profitColor !== undefined) color(properties.profitColor, "drawing_properties");
   if (properties.lossColor !== undefined) color(properties.lossColor, "drawing_properties");
+  const hasStopTime = Object.prototype.hasOwnProperty.call(properties, "stopTime");
+  const hasStopPrice = Object.prototype.hasOwnProperty.call(properties, "stopPrice");
+  if (hasStopTime !== hasStopPrice) invalid("drawing_properties");
+  if (hasStopTime) {
+    finiteNumber(properties.stopTime, "drawing_properties", -10_000_000_000_000, 10_000_000_000_000);
+    finiteNumber(properties.stopPrice, "drawing_properties", -1_000_000_000_000_000_000, 1_000_000_000_000_000_000);
+  }
 }
 
 function validateDrawings(value: unknown): DrawingSpecV1[] {

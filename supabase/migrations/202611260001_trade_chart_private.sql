@@ -776,8 +776,8 @@ begin
     when 'vertical-line' then expected_points := 1; allowed_style := array['color','lineWidth','lineStyle']; allowed_text := array[]::text[];
     when 'rectangle' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fill','fillColor','fillOpacity']; allowed_text := array_cat(array['value','align','valign'], allowed_text);
     when 'text' then expected_points := 1; allowed_style := array[]::text[]; allowed_text := array_cat(array['value','align','valign'], allowed_text);
-    when 'long-position' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels','accountSize','risk']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
-    when 'short-position' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels','accountSize','risk']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
+    when 'long-position' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels','accountSize','risk']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor','stopTime','stopPrice'];
+    when 'short-position' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels','accountSize','risk']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor','stopTime','stopPrice'];
     when 'fib-retracement' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels','fill','fillColor','fillOpacity','extendLeft','extendRight'];
     when 'fib-extension' then expected_points := 3; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels','fill','fillColor','fillOpacity','extendLeft','extendRight'];
     when 'fib-time-zone' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels'];
@@ -817,7 +817,7 @@ immutable
 set search_path = ''
 as $$
   select coalesce(jsonb_typeof(p_properties) = 'object'
-    and not exists (select 1 from jsonb_object_keys(p_properties) key where key not in ('degree','labelStyle','showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'))
+    and not exists (select 1 from jsonb_object_keys(p_properties) key where key not in ('degree','labelStyle','showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor','stopTime','stopPrice'))
     and (not (p_properties ? 'degree') or (jsonb_typeof(p_properties->'degree') = 'string' and p_properties->>'degree' in ('grand-supercycle','supercycle','cycle','primary','intermediate','minor','minute','minuette','subminuette')))
     and (not (p_properties ? 'labelStyle') or (jsonb_typeof(p_properties->'labelStyle') = 'string' and p_properties->>'labelStyle' in ('degree','plain','parentheses','circled')))
     and not exists (
@@ -825,7 +825,10 @@ as $$
       where p_properties ? key and jsonb_typeof(p_properties->key) <> 'boolean'
     )
     and (not (p_properties ? 'profitColor') or (jsonb_typeof(p_properties->'profitColor') = 'string' and public.trade_chart_color_valid(p_properties->>'profitColor')))
-    and (not (p_properties ? 'lossColor') or (jsonb_typeof(p_properties->'lossColor') = 'string' and public.trade_chart_color_valid(p_properties->>'lossColor'))), false)
+    and (not (p_properties ? 'lossColor') or (jsonb_typeof(p_properties->'lossColor') = 'string' and public.trade_chart_color_valid(p_properties->>'lossColor')))
+    and ((p_properties ? 'stopTime') = (p_properties ? 'stopPrice'))
+    and (not (p_properties ? 'stopTime') or (jsonb_typeof(p_properties->'stopTime') = 'number' and abs((p_properties->>'stopTime')::numeric) <= 10000000000000))
+    and (not (p_properties ? 'stopPrice') or (jsonb_typeof(p_properties->'stopPrice') = 'number' and abs((p_properties->>'stopPrice')::numeric) <= 1000000000000000000)), false)
 $$;
 
 create or replace function public.trade_chart_drawings_valid(p_drawings jsonb)

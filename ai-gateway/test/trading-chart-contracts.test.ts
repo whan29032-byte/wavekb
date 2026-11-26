@@ -112,6 +112,11 @@ test("accepts public two-anchor position inputs and bounded audited drawing sett
       { time: 1_795_520_340_000, price: 60_100 },
     ],
     style: { accountSize: 100_000, risk: 1, showLabels: true },
+    properties: {
+      showHeader: true,
+      stopTime: 1_795_520_370_000,
+      stopPrice: 59_850,
+    },
     paneIndex: 0,
     zIndex: 0,
   }, {
@@ -142,6 +147,25 @@ test("accepts public two-anchor position inputs and bounded audited drawing sett
   const nonPublicLabelAlignment = structuredClone(state);
   nonPublicLabelAlignment.drawings[0].text = { align: "center" };
   assert.throws(() => assertChartStateV1(nonPublicLabelAlignment), /trade_chart_invalid_drawing_text/);
+
+  for (const properties of [
+    { stopTime: 1_795_520_370_000 },
+    { stopPrice: 59_850 },
+    { stopTime: 10_000_000_000_001, stopPrice: 59_850 },
+    { stopTime: 1_795_520_370_000, stopPrice: 1_100_000_000_000_000_000 },
+  ]) {
+    const invalidStop = structuredClone(state);
+    invalidStop.drawings[0].properties = properties;
+    assert.throws(() => assertChartStateV1(invalidStop), /trade_chart_invalid_drawing_properties/);
+  }
+
+  const invalidShowStats = structuredClone(state);
+  invalidShowStats.drawings[1].style = { showStats: "yes" };
+  assert.throws(() => assertChartStateV1(invalidShowStats), /trade_chart_invalid_drawing_style/);
+
+  const unknownPositionProperty = structuredClone(state);
+  unknownPositionProperty.drawings[0].properties = { stopTime: 1_795_520_370_000, stopPrice: 59_850, controllerPoint: {} };
+  assert.throws(() => assertChartStateV1(unknownPositionProperty), /trade_chart_invalid_drawing_properties/);
 });
 
 test("rejects unknown indicator settings and unsafe or unsupported drawings", () => {
