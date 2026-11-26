@@ -4,6 +4,7 @@ const { buildMemberWelcome } = require('./member-onboarding');
 
 const WELCOME_CATCH_UP_LOOKBACK_MS = 24 * 60 * 60 * 1_000;
 const WELCOME_CATCH_UP_LIMIT = 10;
+const inFlightWelcomeDeliveries = new Map();
 
 async function deliverMemberWelcome({ member, channelId, database, now = Date.now() }) {
   if (member.user?.bot) return { status: 'ignored-bot' };
@@ -16,20 +17,38 @@ async function deliverMemberWelcome({ member, channelId, database, now = Date.no
     return { status: 'already-sent' };
   }
 
-  const channel = await member.guild.channels.fetch(channelId);
-  if (!channel?.isTextBased() || typeof channel.send !== 'function') {
-    throw new Error('欢迎频道不可发送消息');
+  const deliveryKey = `${guildId}:${member.id}:${member.joinedTimestamp}`;
+  const inFlight = inFlightWelcomeDeliveries.get(deliveryKey);
+  if (inFlight) {
+    await inFlight;
+    return { status: 'already-sent' };
   }
 
-  const message = await channel.send(buildMemberWelcome(member));
-  database.recordMemberWelcome(
-    guildId,
-    member.id,
-    member.joinedTimestamp,
-    message.id,
-    now
-  );
-  return { status: 'sent', messageId: message.id };
+  const delivery = Promise.resolve().then(async () => {
+    const channel = await member.guild.channels.fetch(channelId);
+    if (!channel?.isTextBased() || typeof channel.send !== 'function') {
+      throw new Error('欢迎频道不可发送消息');
+    }
+
+    const message = await channel.send(buildMemberWelcome(member));
+    database.recordMemberWelcome(
+      guildId,
+      member.id,
+      member.joinedTimestamp,
+      message.id,
+      now
+    );
+    return { status: 'sent', messageId: message.id };
+  });
+  inFlightWelcomeDeliveries.set(deliveryKey, delivery);
+
+  try {
+    return await delivery;
+  } finally {
+    if (inFlightWelcomeDeliveries.get(deliveryKey) === delivery) {
+      inFlightWelcomeDeliveries.delete(deliveryKey);
+    }
+  }
 }
 
 async function catchUpRecentMemberWelcomes({

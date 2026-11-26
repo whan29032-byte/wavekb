@@ -24,11 +24,12 @@ function temporaryDatabase(t) {
   return database;
 }
 
-function createGuildAndMembers(specifications, { sendFailure = null } = {}) {
+function createGuildAndMembers(specifications, { sendFailure = null, sendGate = null } = {}) {
   const sent = [];
   const channel = {
     isTextBased: () => true,
     async send(payload) {
+      if (sendGate) await sendGate;
       if (sendFailure?.current) throw sendFailure.current;
       const message = { id: `message-${sent.length + 1}` };
       sent.push({ memberId: payload.allowedMentions.users[0], payload, message });
@@ -81,6 +82,31 @@ test('successful member welcome is persisted and suppresses a duplicate delivery
   assert.equal(duplicate.status, 'already-sent');
   assert.equal(sent.length, 1);
   assert.equal(database.hasMemberWelcome('guild-1', 'new-member', joinedAt), true);
+});
+
+test('concurrent deliveries for the same join coalesce into one welcome', async t => {
+  const database = temporaryDatabase(t);
+  const joinedAt = 1_700_000_000_000;
+  let releaseSend;
+  const sendGate = new Promise(resolve => { releaseSend = resolve; });
+  const { members, sent } = createGuildAndMembers(
+    [{ id: 'new-member', joinedTimestamp: joinedAt }],
+    { sendGate }
+  );
+  const options = {
+    member: members[0],
+    channelId: 'welcome-channel',
+    database,
+    now: joinedAt + 1_000
+  };
+
+  const first = deliverMemberWelcome(options);
+  const concurrent = deliverMemberWelcome(options);
+  releaseSend();
+  const results = await Promise.all([first, concurrent]);
+
+  assert.deepEqual(results.map(result => result.status), ['sent', 'already-sent']);
+  assert.equal(sent.length, 1);
 });
 
 test('failed member welcome remains retryable and is recorded only after Discord accepts it', async t => {
