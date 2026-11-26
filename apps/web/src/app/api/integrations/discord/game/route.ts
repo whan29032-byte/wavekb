@@ -39,6 +39,11 @@ export async function POST(request: Request) {
     return json({ error: "invalid_request" }, 400);
   }
   const input = body as Record<string, unknown>;
+  const expectedKeys = ["discordUserId", "guildId", "requestId", "action", "payload"];
+  const inputKeys = Object.keys(input);
+  if (inputKeys.length !== expectedKeys.length || inputKeys.some((key) => !expectedKeys.includes(key))) {
+    return json({ error: "invalid_request" }, 400);
+  }
   try {
     const result = await executeDiscordGameAction({
       discordUserId: input.discordUserId,

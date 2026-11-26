@@ -71,6 +71,21 @@ describe("POST /api/integrations/discord/game", () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
+  it("rejects unexpected top-level fields instead of silently ignoring them", async () => {
+    mocks.authorized = true;
+    const response = await POST(request(JSON.stringify({
+      discordUserId: "111111111111111111",
+      guildId: "1545731927733047306",
+      requestId: "222222222222222222",
+      action: "status",
+      payload: {},
+      privileged: true,
+    })));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it("returns only the stable mapped service error", async () => {
     mocks.authorized = true;
     mocks.execute.mockRejectedValue({
