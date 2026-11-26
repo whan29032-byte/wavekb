@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { rootTestFiles } from "../scripts/lib/root-test-manifest.mjs";
@@ -13,6 +13,10 @@ const windowsOnly = [
   "tests/integration-config-audit.test.mjs",
   "tests/tron-readiness-probe.test.mjs",
 ];
+const discoveredRootTests = readdirSync(testDirectory, { withFileTypes: true })
+  .filter((entry) => entry.isFile() && entry.name.endsWith(".test.mjs"))
+  .map((entry) => path.posix.join(testDirectory, entry.name))
+  .sort();
 
 test("selects portable root suites on Windows and Linux", () => {
   for (const platform of ["win32", "linux"]) {
@@ -40,9 +44,14 @@ test("returns a sorted, complete manifest without stale or duplicate entries", (
     assert.deepEqual(selected, [...selected].sort(), `${platform} selected order`);
     assert.deepEqual(omitted, [...omitted].sort(), `${platform} omitted order`);
     assert.equal(new Set(entries).size, entries.length, `${platform} duplicate entry`);
+    assert.deepEqual([...entries].sort(), discoveredRootTests, `${platform} incomplete manifest`);
     for (const file of entries) {
       assert.match(file, /^tests\/.+\.test\.mjs$/, `${platform} malformed entry: ${file}`);
       assert.ok(existsSync(path.resolve(file)), `${platform} stale entry: ${file}`);
     }
   }
+});
+
+test("Linux omits no root test suites", () => {
+  assert.deepEqual(rootTestFiles({ platform: "linux", testDirectory }).omitted, []);
 });
