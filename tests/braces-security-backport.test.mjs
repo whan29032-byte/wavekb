@@ -52,11 +52,13 @@ test("the tracked patch hash and every resolved consumer use the same security b
   const hash = createHash("sha256").update(patch).digest("hex");
   const workspace = readFileSync(path.join(root, "pnpm-workspace.yaml"), "utf8");
   const lock = readFileSync(path.join(root, "pnpm-lock.yaml"), "utf8");
+  const installedLock = readFileSync(path.join(virtualStore, "lock.yaml"), "utf8");
   assert.match(workspace, /patchedDependencies:\s*\n\s+braces@3\.0\.3: patches\/braces@3\.0\.3\.patch/);
   assert.match(lock, new RegExp(`patchedDependencies:\\s*\\n\\s+braces@3\\.0\\.3: ${hash}`));
+  assert.match(installedLock, new RegExp(`patchedDependencies:\\s*\\n\\s+braces@3\\.0\\.3: ${hash}`));
+  assert.match(installedLock, new RegExp(`micromatch@4\\.0\\.8:\\s*\\n\\s+dependencies:\\s*\\n\\s+braces: 3\\.0\\.3\\(patch_hash=${hash}\\)`));
   assert.equal(entries.length, 1, "No unpatched braces resolution may remain among installed consumers");
   for (const { name, entry } of consumers) {
-    assert.ok(realpathSync(entry).includes(`braces@3.0.3_patch_hash=${hash}`), name);
     assert.equal(require(path.join(entry, "package.json")).version, "3.0.3", "Do not fabricate an upstream fixed version");
     assert.throws(() => require(entry)(nested(3500), options), guarded, name);
   }
