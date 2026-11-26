@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { parseMyMembershipWallet, parseWalletAdminStore, parseWalletOrder, parseWalletPurchaseGrant, parseWalletQuote, parseWalletRoute, parseWalletSettings, parseWalletVerification, walletRouteId, walletTransferHash, walletUuid, type WalletQuote, type WalletRouteId } from "./wallet-types";
+import { parseMyMembershipWallet, parseWalletAdminStore, parseWalletOrder, parseWalletPurchaseGrant, parseWalletQuote, parseWalletRoute, parseWalletSettings, parseWalletVerification, walletRouteId, walletTransferHash, walletUuid, type WalletChain, type WalletQuote, type WalletRouteId } from "./wallet-types";
 
 export class MembershipWalletCheckoutError extends Error {
   constructor(message: string, readonly status: number) { super(message); this.name = "MembershipWalletCheckoutError"; }
@@ -28,7 +28,7 @@ export function membershipWalletRepository(client: SupabaseClient, actorId: stri
       const order = parseWalletOrder(result.data?.order);
       if (order.buyer_id !== actorId || order.request_id !== input.requestId || order.price_id !== input.priceId || order.route_id !== input.routeId || JSON.stringify(parseWalletQuote(order)) !== JSON.stringify(quote)) invalid(); return order;
     },
-    async submitTransfer(input: { orderId: string; txHash: string; chain: "tron" | "ethereum" | "base" }) {
+    async submitTransfer(input: { orderId: string; txHash: string; chain: WalletChain }) {
       if (!walletUuid(input.orderId)) invalid(); const hash = walletTransferHash(input.chain, input.txHash); const result = await rpc("submit_membership_wallet_transfer", { p_order_id: input.orderId, p_tx_hash: hash });
       if (!result || typeof result !== "object" || !(("order" in result) && ("verification" in result))) invalid();
       const receipt = result as { order: unknown; verification: unknown }; const order = parseWalletOrder(receipt.order); const verification = parseWalletVerification(receipt.verification);

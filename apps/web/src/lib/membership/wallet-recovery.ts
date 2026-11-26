@@ -10,7 +10,7 @@ export function readWalletAttempt(ownerId: string): WalletAttempt | null {
   let item: WalletAttempt; try { item = JSON.parse(raw) as WalletAttempt; } catch { throw new Error("membership_wallet_checkpoint_invalid"); }
   if (!item || !walletUuid(item.ownerId) || item.ownerId !== ownerId) throw new Error("membership_wallet_checkpoint_invalid");
   if (item.kind === "checkout" && walletUuid(item.requestId) && walletRouteId(item.routeId)) return { kind: "checkout", ownerId, requestId: item.requestId, routeId: item.routeId, expectedQuote: parseWalletQuote(item.expectedQuote) };
-  if (item.kind === "transfer" && walletUuid(item.orderId) && ["tron", "ethereum", "base"].includes(item.chain)) return { kind: "transfer", ownerId, orderId: item.orderId, chain: item.chain, txHash: walletTransferHash(item.chain, item.txHash) };
+  if (item.kind === "transfer" && walletUuid(item.orderId) && ["tron", "bsc", "ethereum", "base"].includes(item.chain)) return { kind: "transfer", ownerId, orderId: item.orderId, chain: item.chain, txHash: walletTransferHash(item.chain, item.txHash) };
   throw new Error("membership_wallet_checkpoint_invalid");
 }
 export function writeWalletAttempt(item: WalletAttempt) {
