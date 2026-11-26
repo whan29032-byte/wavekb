@@ -32,4 +32,3 @@ New members must receive the existing themed welcome and science/magic selection
 - Bots, joins older than 24 hours, and already delivered joins produce no message.
 - Restarting produces no duplicate.
 - Live joins still receive the themed message and both route buttons.
-

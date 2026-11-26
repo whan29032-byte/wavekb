@@ -74,4 +74,3 @@
 - [ ] **Step 2: Push the reviewed fast-forward commits to `main`.**
 - [ ] **Step 3: Dispatch `deploy-discord-bot-production.yml` and require successful systemd/Discord readiness acceptance.**
 - [ ] **Step 4: Verify recent missed joins are backfilled once and a second restart creates no duplicate.**
-
