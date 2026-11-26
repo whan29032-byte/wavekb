@@ -20,6 +20,54 @@ const discoveredRootTests = readdirSync(testDirectory, { withFileTypes: true })
   .sort();
 const releaseWorkflow = readFileSync(".github/workflows/verify-release.yml", "utf8");
 
+function parseVerifyReleaseJob(workflow) {
+  const lines = workflow.split(/\r?\n/);
+  const verifyIndex = lines.findIndex((line) => line === "  verify:");
+  assert.notEqual(verifyIndex, -1, "release workflow must define the verify job");
+
+  const jobLines = [];
+  for (const line of lines.slice(verifyIndex + 1)) {
+    if (line !== "" && !/^ {4,}/.test(line)) break;
+    jobLines.push(line);
+  }
+  const job = { steps: [] };
+  let currentStep;
+  let readingSteps = false;
+
+  for (const line of jobLines) {
+    const runner = line.match(/^ {4}runs-on:\s*(.+)$/);
+    if (runner) {
+      job.runsOn = runner[1].trim();
+      continue;
+    }
+    if (line === "    steps:") {
+      readingSteps = true;
+      continue;
+    }
+    if (!readingSteps) continue;
+
+    const step = line.match(/^ {6}- name:\s*(.+)$/);
+    if (step) {
+      currentStep = { name: step[1].trim() };
+      job.steps.push(currentStep);
+      continue;
+    }
+    const command = line.match(/^ {8}run:\s*(.+)$/);
+    if (command && currentStep) currentStep.run = command[1].trim();
+  }
+
+  return job;
+}
+
+function assertReleaseWorkflowRunsFullLinuxSuite(workflow) {
+  const verifyJob = parseVerifyReleaseJob(workflow);
+  assert.equal(verifyJob.runsOn, "ubuntu-latest", "verify job must run on Ubuntu");
+  const fullLinuxSuite = verifyJob.steps.find((step) => step.name === "Full Linux test suite");
+
+  assert.ok(fullLinuxSuite, "verify job must include the Full Linux test suite step");
+  assert.equal(fullLinuxSuite.run, "pnpm test", "Full Linux test suite must run pnpm test");
+}
+
 test("selects portable root suites on Windows and Linux", () => {
   for (const platform of ["win32", "linux"]) {
     const { selected } = rootTestFiles({ platform, testDirectory });
@@ -56,10 +104,15 @@ test("selects every POSIX-only suite on Linux without selected and omitted basen
 });
 
 test("release verification runs the full default test command on Ubuntu", () => {
-  assert.match(releaseWorkflow, /verify:\s*\n\s+runs-on: ubuntu-latest/);
-  assert.match(
-    releaseWorkflow,
-    /- name: Full Linux test suite\s*\n\s+run: pnpm test/,
+  assertReleaseWorkflowRunsFullLinuxSuite(releaseWorkflow);
+});
+
+test("release verification rejects a POSIX-only command in the full Linux suite step", () => {
+  const posixOnlyWorkflow = releaseWorkflow.replace("run: pnpm test", "run: pnpm test:posix");
+
+  assert.throws(
+    () => assertReleaseWorkflowRunsFullLinuxSuite(posixOnlyWorkflow),
+    /Full Linux test suite must run pnpm test/,
   );
 });
 
