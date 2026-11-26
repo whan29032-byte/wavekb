@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  CandleRequest,
+  CanonicalCandleBatch,
   CanonicalAccountSnapshot,
   CanonicalCashEvent,
   CanonicalFill,
@@ -33,6 +35,10 @@ const capabilities: ProviderCapabilities = {
   has_position_id: false, has_realized_pnl: true, has_fee_asset: true,
   has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true,
   account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: [],
+  candles: {
+    availability: "unavailable", timeframes: [], maximum_page_size: null,
+    maximum_range_seconds: null, price_bases: [], unavailable_reason: "implementation_pending",
+  },
 };
 
 function fill(id: string, occurredAt: string, action: "open" | "close", side: "buy" | "sell", pnl = "0"): CanonicalFill {
@@ -84,6 +90,13 @@ class Adapter implements TradingProviderAdapter {
     return { payload: next, cursor: next.next_cursor ?? cursor, fetched_at: new Date(now).toISOString() };
   }
   normalizeHistory(page: ProviderHistoryPage) { return page.payload as CanonicalHistoryBatch; }
+  async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
+    return {
+      request, candles: [],
+      coverage: { status: "unavailable", range_start: request.from, range_end: request.to, gaps: [], unavailable_reason: "implementation_pending" },
+      warnings: ["candles_unavailable"],
+    };
+  }
 }
 
 class Store implements TradingSyncStore {

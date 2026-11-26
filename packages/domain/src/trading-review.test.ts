@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { TRADING_PROVIDERS, isTradingProvider } from "./trading-review";
+import {
+  TRADE_CHART_DRAWING_TOOL_IDS,
+  TRADE_CHART_INDICATOR_IDS,
+  TRADE_CHART_PRICE_TYPES,
+  TRADE_CHART_PROJECTION_SCHEMA_VERSION,
+  TRADE_CHART_STATE_SCHEMA_VERSION,
+  TRADE_CHART_TIMEFRAMES,
+  TRADING_PROVIDERS,
+  isTradingProvider,
+} from "./trading-review";
 
 describe("trading provider domain", () => {
   it("round-trips the five supported providers and rejects unknown values", () => {
@@ -7,5 +16,26 @@ describe("trading provider domain", () => {
     for (const provider of TRADING_PROVIDERS) expect(isTradingProvider(provider)).toBe(true);
     expect(isTradingProvider("coinbase")).toBe(false);
     expect(isTradingProvider(null)).toBe(false);
+  });
+});
+
+describe("trade chart domain contract", () => {
+  it("keeps version, timeframe, price, indicator, and drawing allowlists aligned with persistence", () => {
+    expect(TRADE_CHART_STATE_SCHEMA_VERSION).toBe("wavekb-trade-chart-v1");
+    expect(TRADE_CHART_PROJECTION_SCHEMA_VERSION).toBe("wavekb-trade-chart-projection-v1");
+    expect([...TRADE_CHART_TIMEFRAMES]).toEqual([
+      "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M",
+    ]);
+    expect([...TRADE_CHART_PRICE_TYPES]).toEqual(["trade", "mark", "bid", "ask", "both"]);
+    expect([...TRADE_CHART_INDICATOR_IDS]).toEqual([
+      "sma", "ema", "wma", "hma", "vwap", "bollinger", "rsi", "macd", "stochastic", "adx", "atr",
+      "supertrend", "ichimoku", "donchian", "keltner-channel", "chandelier-exit", "zigzag",
+      "williams-fractals", "pivot-points", "cpr", "obv", "mfi", "chaikin-money-flow",
+    ]);
+    expect([...TRADE_CHART_DRAWING_TOOL_IDS]).toEqual([
+      "trend-line", "ray", "horizontal-line", "vertical-line", "rectangle", "text", "long-position", "short-position",
+      "fib-retracement", "fib-extension", "fib-time-zone", "fib-fan", "fib-channel", "elliott-impulse",
+      "elliott-correction", "elliott-triangle", "elliott-double-combo", "elliott-triple-combo",
+    ]);
   });
 });

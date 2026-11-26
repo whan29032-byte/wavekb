@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assertCanonicalCandleBatch,
   assertCanonicalHistoryBatch,
+  type CandleRequest,
+  type CanonicalCandleBatch,
   type CanonicalHistoryBatch,
   type ProviderAccount,
   type ProviderCredentialInput,
@@ -13,6 +16,75 @@ import {
 import { createTradingProviderRegistry } from "../src/trading/providers/registry.ts";
 
 const capturedAt = "2026-11-24T08:00:00.000Z";
+
+const candleRequest: CandleRequest = {
+  product: "usdt_perpetual",
+  native_symbol: "BTCUSDT",
+  normalized_symbol: "BTC/USDT",
+  timeframe: "1m",
+  price_basis: "trade",
+  from: "2026-11-24T07:58:00.000Z",
+  to: "2026-11-24T08:00:00.000Z",
+  limit: 2,
+};
+
+function validCandleBatch(): CanonicalCandleBatch {
+  return {
+    request: candleRequest,
+    candles: [
+      {
+        provider: "binance",
+        product: "usdt_perpetual",
+        native_symbol: "BTCUSDT",
+        normalized_symbol: "BTC/USDT",
+        timeframe: "1m",
+        price_basis: "trade",
+        open_time: "2026-11-24T07:58:00.000Z",
+        close_time: "2026-11-24T07:59:00.000Z",
+        open: "12345678901234567890.123456789012345678",
+        high: "12345678901234567890.223456789012345678",
+        low: "12345678901234567890.023456789012345678",
+        close: "12345678901234567890.173456789012345678",
+        volume: "0.000000000000000001",
+        source: "public_api",
+        source_timestamp: "2026-11-24T07:59:01.000Z",
+        fetched_at: capturedAt,
+        status: "final",
+        gap_before: false,
+        gap_after: true,
+      },
+      {
+        provider: "binance",
+        product: "usdt_perpetual",
+        native_symbol: "BTCUSDT",
+        normalized_symbol: "BTC/USDT",
+        timeframe: "1m",
+        price_basis: "trade",
+        open_time: "2026-11-24T07:59:00.000Z",
+        close_time: "2026-11-24T08:00:00.000Z",
+        open: "12345678901234567890.173456789012345678",
+        high: "12345678901234567890.273456789012345678",
+        low: "12345678901234567890.073456789012345678",
+        close: "12345678901234567890.223456789012345678",
+        volume: null,
+        source: "public_api",
+        source_timestamp: "2026-11-24T08:00:00.000Z",
+        fetched_at: capturedAt,
+        status: "partial",
+        gap_before: true,
+        gap_after: false,
+      },
+    ],
+    coverage: {
+      status: "gapped",
+      range_start: candleRequest.from,
+      range_end: candleRequest.to,
+      gaps: [{ from: "2026-11-24T07:58:30.000Z", to: "2026-11-24T07:59:00.000Z" }],
+      unavailable_reason: null,
+    },
+    warnings: ["historical_gap"],
+  };
+}
 
 function validBatch(): CanonicalHistoryBatch {
   return {
@@ -78,6 +150,14 @@ function adapter(provider: TradingProvider): TradingProviderAdapter {
         account_currency: "USDT",
         settlement_assets: ["USDT"],
         valuation_pairs: ["USDT/USD"],
+        candles: {
+          availability: "unavailable" as const,
+          timeframes: [],
+          maximum_page_size: null,
+          maximum_range_seconds: null,
+          price_bases: [],
+          unavailable_reason: "implementation_pending" as const,
+        },
       };
     },
     async fetchAccountSnapshot(_account: ProviderAccount) {
@@ -105,8 +185,60 @@ function adapter(provider: TradingProvider): TradingProviderAdapter {
       return { payload: {}, cursor, fetched_at: capturedAt };
     },
     normalizeHistory(_page: ProviderHistoryPage) { return validBatch(); },
+    async fetchCandles() { return validCandleBatch(); },
   };
 }
+
+test("canonical candle batches preserve exact decimals and complete source metadata", () => {
+  const batch = validCandleBatch();
+  assert.equal(assertCanonicalCandleBatch(batch), batch);
+  assert.equal(batch.candles[0]?.open, "12345678901234567890.123456789012345678");
+  assert.equal(batch.candles[1]?.volume, null);
+});
+
+test("canonical candle batches reject float prices, non-UTC timestamps, and invalid OHLC order", () => {
+  const floatPrice = structuredClone(validCandleBatch()) as Record<string, any>;
+  floatPrice.candles[0].open = 123.45;
+  assert.throws(() => assertCanonicalCandleBatch(floatPrice), /canonical_candles_invalid_open/);
+
+  const offsetTime = structuredClone(validCandleBatch()) as Record<string, any>;
+  offsetTime.candles[0].open_time = "2026-11-24T15:58:00+08:00";
+  assert.throws(() => assertCanonicalCandleBatch(offsetTime), /canonical_candles_invalid_open_time/);
+
+  const impossibleHigh = structuredClone(validCandleBatch()) as Record<string, any>;
+  impossibleHigh.candles[0].high = "1";
+  assert.throws(() => assertCanonicalCandleBatch(impossibleHigh), /canonical_candles_invalid_ohlc/);
+});
+
+test("canonical candle batches reject unordered candles and inconsistent gap metadata", () => {
+  const unordered = structuredClone(validCandleBatch()) as Record<string, any>;
+  unordered.candles.reverse();
+  assert.throws(() => assertCanonicalCandleBatch(unordered), /canonical_candles_invalid_order/);
+
+  const undeclaredGap = structuredClone(validCandleBatch()) as Record<string, any>;
+  undeclaredGap.coverage.status = "complete";
+  assert.throws(() => assertCanonicalCandleBatch(undeclaredGap), /canonical_candles_invalid_gaps/);
+});
+
+test("canonical candle batches reject mixed providers and source kinds that contradict the provider", () => {
+  const mixedProviders = structuredClone(validCandleBatch()) as Record<string, any>;
+  mixedProviders.candles[1].provider = "okx";
+  assert.throws(() => assertCanonicalCandleBatch(mixedProviders), /canonical_candles_invalid_provider_consistency/);
+
+  const wrongSource = structuredClone(validCandleBatch()) as Record<string, any>;
+  wrongSource.candles[0].source = "account_access_point";
+  assert.throws(() => assertCanonicalCandleBatch(wrongSource), /canonical_candles_invalid_source/);
+});
+
+test("canonical candle contracts reject hidden and symbol-keyed fields", () => {
+  const hiddenField = structuredClone(validCandleBatch()) as unknown as Record<string, any>;
+  Object.defineProperty(hiddenField.request, "api_secret", { value: "must-not-cross-boundary", enumerable: false });
+  assert.throws(() => assertCanonicalCandleBatch(hiddenField), /canonical_candles_invalid_request_keys/);
+
+  const symbolField = structuredClone(validCandleBatch()) as unknown as Record<string, any>;
+  symbolField.candles[0][Symbol("raw_response")] = "must-not-cross-boundary";
+  assert.throws(() => assertCanonicalCandleBatch(symbolField), /canonical_candles_invalid_candle_keys/);
+});
 
 test("canonical history rejects unknown critical fill and cash-event enums", () => {
   const unknownPosition = validBatch() as unknown as Record<string, any>;
@@ -139,5 +271,14 @@ test("registry rejects adapters that expose trading mutation methods", () => {
   assert.throws(
     () => createTradingProviderRegistry([unsafe], ["binance"]),
     /unsafe_trading_adapter_method:placeOrder/,
+  );
+});
+
+test("registry rejects adapters without the mandatory candle reader", () => {
+  const incomplete = adapter("binance") as unknown as Record<string, unknown>;
+  delete incomplete.fetchCandles;
+  assert.throws(
+    () => createTradingProviderRegistry([incomplete as unknown as TradingProviderAdapter], ["binance"]),
+    /invalid_trading_adapter_method:fetchCandles/,
   );
 });

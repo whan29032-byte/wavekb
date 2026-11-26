@@ -1,5 +1,8 @@
 import { createHash, createHmac } from "node:crypto";
+import { unavailableCandleBatch, unavailableCandleCapabilities } from "./contracts.ts";
 import type {
+  CandleRequest,
+  CanonicalCandleBatch,
   CanonicalCashEvent,
   CanonicalFill,
   CanonicalHistoryBatch,
@@ -56,6 +59,7 @@ function capabilities(): ProviderCapabilities {
     pagination: "opaque", position_grouping: "hedge_zero_cycle", has_position_id: false, has_realized_pnl: true,
     has_fee_asset: true, has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true,
     account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: ["USDT/USD"],
+    candles: unavailableCandleCapabilities(),
   };
 }
 
@@ -191,6 +195,10 @@ export class BitgetTradingProviderAdapter implements TradingProviderAdapter {
       cursor: { kind: "opaque", value: JSON.stringify({ fills_before: nextFills, bills_before: nextBills, start, end }) },
       fetched_at: new Date(this.now()).toISOString(),
     };
+  }
+
+  async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
+    return unavailableCandleBatch(request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

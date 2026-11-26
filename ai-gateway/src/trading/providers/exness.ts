@@ -1,5 +1,8 @@
 import { createHash, createPrivateKey, createPublicKey, sign, type KeyObject } from "node:crypto";
+import { unavailableCandleBatch, unavailableCandleCapabilities } from "./contracts.ts";
 import type {
+  CandleRequest,
+  CanonicalCandleBatch,
   CanonicalCashEvent,
   CanonicalFill,
   CanonicalHistoryBatch,
@@ -164,6 +167,7 @@ function capabilities(currency: string, historyAgeDays: number, historyRangeDays
     has_fee_asset: true, has_funding_or_swap: true, has_external_cash_flow: true,
     has_usd_valuation: currency === "USD" || currency === "USDT", account_currency: currency,
     settlement_assets: [currency], valuation_pairs: currency === "USD" ? ["USD"] : currency === "USDT" ? ["USDT/USD"] : [`${currency}/USD`],
+    candles: unavailableCandleCapabilities(),
   };
 }
 
@@ -340,6 +344,10 @@ export class ExnessTradingProviderAdapter implements TradingProviderAdapter {
       },
       cursor: { kind: "opaque", value: next ? JSON.stringify(next) : null }, fetched_at: new Date(this.now()).toISOString(),
     };
+  }
+
+  async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
+    return unavailableCandleBatch(request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

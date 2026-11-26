@@ -1,35 +1,15 @@
-export const BASIC_DRAWING_TOOL_IDS = [
-  "trend-line",
-  "ray",
-  "horizontal-line",
-  "vertical-line",
-  "rectangle",
-  "text",
-  "long-position",
-  "short-position",
-] as const;
+import {
+  TRADE_CHART_BASIC_DRAWING_TOOL_IDS,
+  TRADE_CHART_DRAWING_TOOL_IDS,
+  TRADE_CHART_ELLIOTT_DRAWING_TOOL_IDS,
+  TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS,
+  type TradeChartDrawingToolId,
+} from "@wavekb/domain/trading-review";
 
-export const FIBONACCI_DRAWING_TOOL_IDS = [
-  "fib-retracement",
-  "fib-extension",
-  "fib-time-zone",
-  "fib-fan",
-  "fib-channel",
-] as const;
-
-export const ELLIOTT_DRAWING_TOOL_IDS = [
-  "elliott-impulse",
-  "elliott-correction",
-  "elliott-triangle",
-  "elliott-double-combo",
-  "elliott-triple-combo",
-] as const;
-
-export const WAVEKB_DRAWING_TOOL_IDS = [
-  ...BASIC_DRAWING_TOOL_IDS,
-  ...FIBONACCI_DRAWING_TOOL_IDS,
-  ...ELLIOTT_DRAWING_TOOL_IDS,
-] as const;
+export const BASIC_DRAWING_TOOL_IDS = TRADE_CHART_BASIC_DRAWING_TOOL_IDS;
+export const FIBONACCI_DRAWING_TOOL_IDS = TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS;
+export const ELLIOTT_DRAWING_TOOL_IDS = TRADE_CHART_ELLIOTT_DRAWING_TOOL_IDS;
+export const WAVEKB_DRAWING_TOOL_IDS = TRADE_CHART_DRAWING_TOOL_IDS;
 
 export const WAVEKB_DRAWING_DOCUMENT_SCHEMA = "wavekb-chart-drawings-v1" as const;
 
@@ -47,7 +27,7 @@ type OpenAlgoDrawingController = InstanceType<
 >;
 type OpenAlgoDrawingModule = typeof import("openalgo-charts/draw");
 
-export type WaveKbChartDrawingToolId = (typeof WAVEKB_DRAWING_TOOL_IDS)[number];
+export type WaveKbChartDrawingToolId = TradeChartDrawingToolId;
 
 export interface WaveKbChartCandle {
   time: number;

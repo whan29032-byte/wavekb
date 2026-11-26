@@ -31,6 +31,7 @@ function account(overrides: Partial<ProviderAccount> = {}): ProviderAccount {
       position_grouping: "position_id_cycle", has_position_id: true, has_realized_pnl: true, has_fee_asset: true,
       has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true, account_currency: "USD",
       settlement_assets: ["USD"], valuation_pairs: ["USD"],
+      candles: { availability: "unavailable", timeframes: [], maximum_page_size: null, maximum_range_seconds: null, price_bases: [], unavailable_reason: "implementation_pending" },
     },
     ...overrides,
   };

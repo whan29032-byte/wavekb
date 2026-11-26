@@ -1,5 +1,8 @@
 import { createHmac } from "node:crypto";
+import { unavailableCandleBatch, unavailableCandleCapabilities } from "./contracts.ts";
 import type {
+  CandleRequest,
+  CanonicalCandleBatch,
   CanonicalCashEvent,
   CanonicalFill,
   CanonicalHistoryBatch,
@@ -61,6 +64,7 @@ function capabilities(positionMode: "net_mode" | "long_short_mode" = "long_short
     has_position_id: false, has_realized_pnl: true, has_fee_asset: true, has_funding_or_swap: true,
     has_external_cash_flow: true, has_usd_valuation: true, account_currency: "USDT", settlement_assets: ["USDT"],
     valuation_pairs: ["USDT/USD"],
+    candles: unavailableCandleCapabilities(),
   };
 }
 
@@ -201,6 +205,10 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
       payload: { connection_id: account.connection_id, fills, bills: bills.data, exhausted: swap.data.length < 100 && futures.data.length < 100 && bills.data.length < 100 },
       cursor: { kind: "opaque", value: JSON.stringify(next) }, fetched_at: new Date(this.now()).toISOString(),
     };
+  }
+
+  async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
+    return unavailableCandleBatch(request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

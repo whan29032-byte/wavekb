@@ -8,6 +8,7 @@ import { BitgetTradingProviderAdapter } from "./providers/bitget.ts";
 import { BybitTradingProviderAdapter } from "./providers/bybit.ts";
 import {
   isTradingProvider,
+  unavailableCandleCapabilities,
   type ProviderAccount,
   type ProviderCapabilities,
   type TradingProviderAdapter,
@@ -253,6 +254,7 @@ function defaultCapabilities(account: ValidatedAccount, selectedProvider: Tradin
     account_currency: account.account_currency,
     settlement_assets: [account.account_currency],
     valuation_pairs: [],
+    candles: unavailableCandleCapabilities(),
   };
 }
 

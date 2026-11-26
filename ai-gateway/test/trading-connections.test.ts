@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  CandleRequest,
+  CanonicalCandleBatch,
   ProviderAccount,
   ProviderCapabilities,
   ProviderCredentialInput,
@@ -25,6 +27,10 @@ const capabilities: ProviderCapabilities = {
   has_position_id: false, has_realized_pnl: true, has_fee_asset: true,
   has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true,
   account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: [],
+  candles: {
+    availability: "unavailable", timeframes: [], maximum_page_size: null,
+    maximum_range_seconds: null, price_bases: [], unavailable_reason: "implementation_pending",
+  },
 };
 
 class Adapter implements TradingProviderAdapter {
@@ -48,6 +54,7 @@ class Adapter implements TradingProviderAdapter {
   async fetchAccountSnapshot(): Promise<never> { throw new Error("not_used"); }
   async fetchHistory(): Promise<never> { throw new Error("not_used"); }
   normalizeHistory(): never { throw new Error("not_used"); }
+  async fetchCandles(_account: ProviderAccount, _request: CandleRequest): Promise<CanonicalCandleBatch> { throw new Error("not_used"); }
 }
 
 class Store implements TradingConnectionStore {

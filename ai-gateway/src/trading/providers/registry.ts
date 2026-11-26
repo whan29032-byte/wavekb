@@ -6,6 +6,7 @@ const requiredReadMethods = [
   "fetchAccountSnapshot",
   "fetchHistory",
   "normalizeHistory",
+  "fetchCandles",
 ] as const;
 
 const forbiddenMutationMethods = new Set([
