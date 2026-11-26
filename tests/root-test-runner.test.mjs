@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { rootTestFiles } from "../scripts/lib/root-test-manifest.mjs";
+import { nodeTestArguments } from "../scripts/run-root-tests.mjs";
 
 const testDirectory = "tests";
 const windowsOnly = [
@@ -54,4 +55,34 @@ test("returns a sorted, complete manifest without stale or duplicate entries", (
 
 test("Linux omits no root test suites", () => {
   assert.deepEqual(rootTestFiles({ platform: "linux", testDirectory }).omitted, []);
+});
+
+test("passes every discovered root suite to Node on Linux", () => {
+  assert.deepEqual(
+    nodeTestArguments({ platform: "linux", testDirectory, posixOnly: false }),
+    ["--test", ...discoveredRootTests],
+  );
+});
+
+test("passes only portable root suites to Node on Windows", () => {
+  const portableTests = discoveredRootTests.filter((file) => !windowsOnly.includes(file));
+
+  assert.deepEqual(
+    nodeTestArguments({ platform: "win32", testDirectory, posixOnly: false }),
+    ["--test", ...portableTests],
+  );
+});
+
+test("runs exactly the POSIX root suite when requested", () => {
+  assert.deepEqual(
+    nodeTestArguments({ platform: "linux", testDirectory, posixOnly: true }),
+    ["--test", ...windowsOnly],
+  );
+});
+
+test("rejects --posix-only on Windows with a non-zero exit result", () => {
+  assert.throws(
+    () => nodeTestArguments({ platform: "win32", testDirectory, posixOnly: true }),
+    (error) => error.exitCode === 1 && /--posix-only cannot run on Windows/.test(error.message),
+  );
 });

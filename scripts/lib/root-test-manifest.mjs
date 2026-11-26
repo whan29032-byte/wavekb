@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
 
-const windowsOnlyRootTests = new Set([
+const posixOnlyRootTests = new Set([
   "tests/configure-wallet-runtime.test.mjs",
   "tests/deploy-release.test.mjs",
   "tests/diagnose-knowledge-transport.test.mjs",
@@ -17,7 +17,11 @@ export function rootTestFiles({ platform, testDirectory }) {
     .map((entry) => path.posix.join(portableDirectory, entry.name))
     .sort();
 
-  const omitted = platform === "win32" ? entries.filter((entry) => windowsOnlyRootTests.has(entry)) : [];
+  const omitted = platform === "win32" ? entries.filter((entry) => posixOnlyRootTests.has(entry)) : [];
   const selected = entries.filter((entry) => !omitted.includes(entry));
   return { selected, omitted };
+}
+
+export function posixOnlyRootTestFiles({ testDirectory }) {
+  return rootTestFiles({ platform: "win32", testDirectory }).omitted;
 }
