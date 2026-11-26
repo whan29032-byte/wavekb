@@ -239,9 +239,11 @@ function validateDrawingStyle(value: unknown, tool: TradeChartDrawingToolId): vo
   if (style.lineWidth !== undefined) finiteNumber(style.lineWidth, "drawing_style", 0.5, 20);
   if (style.fillOpacity !== undefined) finiteNumber(style.fillOpacity, "drawing_style", 0, 1);
   if (style.lineStyle !== undefined && !new Set(["solid", "dashed", "dotted"]).has(String(style.lineStyle))) invalid("drawing_style");
-  for (const key of ["fill", "extendLeft", "extendRight", "showLabels"] as const) {
+  for (const key of ["fill", "extendLeft", "extendRight", "showLabels", "showStats"] as const) {
     if (style[key] !== undefined && typeof style[key] !== "boolean") invalid("drawing_style");
   }
+  if (style.accountSize !== undefined) finiteNumber(style.accountSize, "drawing_style", 0, 1_000_000_000_000_000);
+  if (style.risk !== undefined) finiteNumber(style.risk, "drawing_style", 0, 100);
   if (style.levels !== undefined) {
     if (!Array.isArray(style.levels) || style.levels.length > 32) invalid("drawing_style");
     for (const candidate of style.levels) {

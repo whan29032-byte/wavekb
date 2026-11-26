@@ -71,7 +71,7 @@ export type TradeChartDrawingToolId = (typeof TRADE_CHART_DRAWING_TOOL_IDS)[numb
 
 export type TradeChartDrawingFieldKey =
   | "color" | "lineWidth" | "lineStyle" | "fill" | "fillColor" | "fillOpacity"
-  | "extendLeft" | "extendRight" | "showLabels" | "levels";
+  | "extendLeft" | "extendRight" | "showLabels" | "showStats" | "accountSize" | "risk" | "levels";
 export type TradeChartDrawingTextKey =
   | "value" | "color" | "fontSize" | "fontFamily" | "bold" | "italic" | "align" | "valign";
 export type TradeChartDrawingPropertyKey =
@@ -79,8 +79,8 @@ export type TradeChartDrawingPropertyKey =
   | "showStopLabel" | "showPrices" | "profitColor" | "lossColor";
 
 const BASE_LINE_STYLE = ["color", "lineWidth", "lineStyle"] as const;
-const LABEL_TEXT_STYLE = ["color", "fontSize", "fontFamily", "bold", "italic", "align", "valign"] as const;
-const CONTENT_TEXT_STYLE = ["value", ...LABEL_TEXT_STYLE] as const;
+const LABEL_TEXT_STYLE = ["color", "fontSize", "fontFamily", "bold", "italic"] as const;
+const CONTENT_TEXT_STYLE = ["value", ...LABEL_TEXT_STYLE, "align", "valign"] as const;
 const POSITION_PROPERTIES = [
   "showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices", "profitColor", "lossColor",
 ] as const;
@@ -95,14 +95,14 @@ export type TradeChartDrawingToolSchema = {
 };
 
 export const TRADE_CHART_DRAWING_TOOL_SCHEMAS = {
-  "trend-line": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight"], textKeys: [], textRequired: false, propertyKeys: [] },
-  ray: { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight"], textKeys: [], textRequired: false, propertyKeys: [] },
+  "trend-line": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight", "showStats"], textKeys: [], textRequired: false, propertyKeys: [] },
+  ray: { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight", "showStats"], textKeys: [], textRequired: false, propertyKeys: [] },
   "horizontal-line": { pointCount: 1, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
   "vertical-line": { pointCount: 1, styleKeys: BASE_LINE_STYLE, textKeys: [], textRequired: false, propertyKeys: [] },
   rectangle: { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "fill", "fillColor", "fillOpacity"], textKeys: CONTENT_TEXT_STYLE, textRequired: false, propertyKeys: [] },
   text: { pointCount: 1, styleKeys: [], textKeys: CONTENT_TEXT_STYLE, textRequired: true, propertyKeys: [] },
-  "long-position": { pointCount: 3, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
-  "short-position": { pointCount: 3, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
+  "long-position": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels", "accountSize", "risk"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
+  "short-position": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels", "accountSize", "risk"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
   "fib-retracement": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels", "fill", "fillColor", "fillOpacity", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
   "fib-extension": { pointCount: 3, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels", "fill", "fillColor", "fillOpacity", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
   "fib-time-zone": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
@@ -145,6 +145,9 @@ export type DrawingStyleV1 = {
   extendLeft?: boolean;
   extendRight?: boolean;
   showLabels?: boolean;
+  showStats?: boolean;
+  accountSize?: number;
+  risk?: number;
   levels?: Array<{
     ratio: number;
     color?: string;

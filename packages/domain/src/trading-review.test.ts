@@ -51,8 +51,8 @@ describe("trade chart domain contract", () => {
       "vertical-line": 1,
       rectangle: 2,
       text: 1,
-      "long-position": 3,
-      "short-position": 3,
+      "long-position": 2,
+      "short-position": 2,
       "fib-retracement": 2,
       "fib-extension": 3,
       "fib-time-zone": 2,
@@ -64,5 +64,10 @@ describe("trade chart domain contract", () => {
       "elliott-double-combo": 4,
       "elliott-triple-combo": 6,
     });
+    expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["trend-line"].styleKeys).toContain("showStats");
+    expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS.ray.styleKeys).toContain("showStats");
+    expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["long-position"].styleKeys).toEqual(expect.arrayContaining(["accountSize", "risk"]));
+    expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["short-position"].styleKeys).toEqual(expect.arrayContaining(["accountSize", "risk"]));
+    expect(TRADE_CHART_DRAWING_TOOL_SCHEMAS["horizontal-line"].textKeys).not.toEqual(expect.arrayContaining(["align", "valign"]));
   });
 });

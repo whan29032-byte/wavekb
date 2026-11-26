@@ -21,6 +21,7 @@ const MAX_DRAWING_ID_LENGTH = 128;
 const MAX_DRAWING_TEXT_LENGTH = 2_000;
 const MAX_LABEL_LENGTH = 128;
 const MAX_COLOR_LENGTH = 64;
+const MAX_POSITION_ACCOUNT_SIZE = 1_000_000_000_000_000;
 const WAVEKB_DRAWING_TOOLS = new Set<string>(WAVEKB_DRAWING_TOOL_IDS);
 
 type OpenAlgoDrawingController = InstanceType<
@@ -86,6 +87,9 @@ export interface WaveKbChartDrawingStyle {
   extendLeft?: boolean;
   extendRight?: boolean;
   showLabels?: boolean;
+  showStats?: boolean;
+  accountSize?: number;
+  risk?: number;
   levels?: Array<{
     ratio: number;
     color?: string;
@@ -243,8 +247,20 @@ function normalizeStyle(value: unknown): WaveKbChartDrawingStyle {
   if (source.lineStyle === "solid" || source.lineStyle === "dashed" || source.lineStyle === "dotted") {
     style.lineStyle = source.lineStyle;
   }
-  for (const key of ["fill", "extendLeft", "extendRight", "showLabels"] as const) {
+  for (const key of ["fill", "extendLeft", "extendRight", "showLabels", "showStats"] as const) {
     if (typeof source[key] === "boolean") style[key] = source[key];
+  }
+  if (source.accountSize !== undefined) {
+    const accountSize = finiteNumber(source.accountSize, "drawing.style.accountSize");
+    if (accountSize < 0 || accountSize > MAX_POSITION_ACCOUNT_SIZE) {
+      throw new Error("drawing.style.accountSize is out of range");
+    }
+    style.accountSize = accountSize;
+  }
+  if (source.risk !== undefined) {
+    const risk = finiteNumber(source.risk, "drawing.style.risk");
+    if (risk < 0 || risk > 100) throw new Error("drawing.style.risk is out of range");
+    style.risk = risk;
   }
   if (typeof source.fillOpacity === "number" && Number.isFinite(source.fillOpacity)) {
     style.fillOpacity = Math.min(1, Math.max(0, source.fillOpacity));
@@ -355,11 +371,14 @@ function normalizeDrawing(value: unknown, propertyField: "properties" | "props")
   }
   const tool = value.tool as WaveKbChartDrawingToolId;
   const schema = TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool];
-  if (!Array.isArray(value.points) || value.points.length !== schema.pointCount
+  const isPositionTool = tool === "long-position" || tool === "short-position";
+  const hasInternalExpandedPosition = propertyField === "props" && isPositionTool
+    && Array.isArray(value.points) && value.points.length === schema.pointCount + 1;
+  if (!Array.isArray(value.points) || (value.points.length !== schema.pointCount && !hasInternalExpandedPosition)
     || value.points.length > MAX_DRAWING_POINTS) {
     throw new Error(`drawing ${id} points must contain exactly ${schema.pointCount} anchors`);
   }
-  const points = value.points.map((point, index) => {
+  const points = value.points.slice(0, schema.pointCount).map((point, index) => {
     if (!isRecord(point)) {
       throw new Error(`drawing ${id} point ${index} must be an object`);
     }

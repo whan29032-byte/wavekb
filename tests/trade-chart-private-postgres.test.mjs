@@ -1249,7 +1249,7 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
     };
     const drawingPointCounts = {
       "trend-line": 2, ray: 2, "horizontal-line": 1, "vertical-line": 1,
-      rectangle: 2, text: 1, "long-position": 3, "short-position": 3,
+      rectangle: 2, text: 1, "long-position": 2, "short-position": 2,
       "fib-retracement": 2, "fib-extension": 3, "fib-time-zone": 2,
       "fib-fan": 2, "fib-channel": 3, "elliott-impulse": 6,
       "elliott-correction": 4, "elliott-triangle": 6,
@@ -1281,7 +1281,11 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
           time: 100 + pointIndex,
           price: 100 + pointIndex,
         })),
-        style: {},
+        style: tool === "trend-line" || tool === "ray"
+          ? { showStats: true }
+          : tool === "long-position" || tool === "short-position"
+            ? { accountSize: 100000, risk: 1 }
+            : {},
         ...(tool === "text" ? { text: { value: "note" } } : {}),
       })),
     });
@@ -1346,6 +1350,11 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
       { drawings: [{ ...validDrawing, id: "elliott-1", tool: "elliott-impulse", points: Array.from({ length: 6 }, (_, index) => ({ time: 100 + index, price: 100 + index })), properties: { showHeader: true } }] },
       { drawings: [{ ...validDrawing, id: "text-1", tool: "text", points: [validDrawing.points[0]], style: {}, text: { value: "<script>alert(1)</script>" } }] },
       { drawings: [{ ...validDrawing, id: "text-2", tool: "text", points: [validDrawing.points[0]], style: {} }] },
+      { drawings: [{ ...validDrawing, id: "position-1", tool: "long-position", points: validDrawing.points, style: { accountSize: -1 } }] },
+      { drawings: [{ ...validDrawing, id: "position-2", tool: "short-position", points: validDrawing.points, style: { accountSize: 1000000000000001 } }] },
+      { drawings: [{ ...validDrawing, id: "position-3", tool: "long-position", points: validDrawing.points, style: { risk: 100.1 } }] },
+      { drawings: [{ ...validDrawing, id: "position-4", tool: "short-position", points: [...validDrawing.points, { time: 300, price: 90 }], style: {} }] },
+      { drawings: [{ ...validDrawing, id: "position-5", tool: "long-position", points: validDrawing.points, style: {}, text: { align: "center" } }] },
       { priceType: "bid" },
     ]) {
       await assert.rejects(

@@ -688,7 +688,7 @@ declare
   numeric_value numeric;
 begin
   if jsonb_typeof(p_style) <> 'object'
-     or exists (select 1 from jsonb_object_keys(p_style) key where key not in ('color','lineWidth','lineStyle','fill','fillColor','fillOpacity','extendLeft','extendRight','showLabels','levels')) then
+     or exists (select 1 from jsonb_object_keys(p_style) key where key not in ('color','lineWidth','lineStyle','fill','fillColor','fillOpacity','extendLeft','extendRight','showLabels','showStats','accountSize','risk','levels')) then
     return false;
   end if;
   if p_style ? 'color' and (jsonb_typeof(p_style->'color') <> 'string' or not public.trade_chart_color_valid(p_style->>'color')) then return false; end if;
@@ -703,9 +703,19 @@ begin
     numeric_value := (p_style->>'fillOpacity')::numeric;
     if numeric_value not between 0 and 1 then return false; end if;
   end if;
+  if p_style ? 'accountSize' then
+    if jsonb_typeof(p_style->'accountSize') <> 'number' then return false; end if;
+    numeric_value := (p_style->>'accountSize')::numeric;
+    if numeric_value not between 0 and 1000000000000000 then return false; end if;
+  end if;
+  if p_style ? 'risk' then
+    if jsonb_typeof(p_style->'risk') <> 'number' then return false; end if;
+    numeric_value := (p_style->>'risk')::numeric;
+    if numeric_value not between 0 and 100 then return false; end if;
+  end if;
   if p_style ? 'lineStyle' and (jsonb_typeof(p_style->'lineStyle') <> 'string' or p_style->>'lineStyle' not in ('solid','dashed','dotted')) then return false; end if;
   if exists (
-    select 1 from unnest(array['fill','extendLeft','extendRight','showLabels']) key
+    select 1 from unnest(array['fill','extendLeft','extendRight','showLabels','showStats']) key
     where p_style ? key and jsonb_typeof(p_style->key) <> 'boolean'
   ) then return false; end if;
   if p_style ? 'levels' then
@@ -756,18 +766,18 @@ declare
   tool text := p_drawing->>'tool';
   expected_points integer;
   allowed_style text[];
-  allowed_text text[] := array['color','fontSize','fontFamily','bold','italic','align','valign'];
+  allowed_text text[] := array['color','fontSize','fontFamily','bold','italic'];
   allowed_properties text[] := array[]::text[];
 begin
   case tool
-    when 'trend-line' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','extendLeft','extendRight']; allowed_text := array[]::text[];
-    when 'ray' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','extendLeft','extendRight']; allowed_text := array[]::text[];
+    when 'trend-line' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','extendLeft','extendRight','showStats']; allowed_text := array[]::text[];
+    when 'ray' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','extendLeft','extendRight','showStats']; allowed_text := array[]::text[];
     when 'horizontal-line' then expected_points := 1; allowed_style := array['color','lineWidth','lineStyle','showLabels'];
     when 'vertical-line' then expected_points := 1; allowed_style := array['color','lineWidth','lineStyle']; allowed_text := array[]::text[];
-    when 'rectangle' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fill','fillColor','fillOpacity']; allowed_text := array_prepend('value', allowed_text);
-    when 'text' then expected_points := 1; allowed_style := array[]::text[]; allowed_text := array_prepend('value', allowed_text);
-    when 'long-position' then expected_points := 3; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
-    when 'short-position' then expected_points := 3; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
+    when 'rectangle' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fill','fillColor','fillOpacity']; allowed_text := array_cat(array['value','align','valign'], allowed_text);
+    when 'text' then expected_points := 1; allowed_style := array[]::text[]; allowed_text := array_cat(array['value','align','valign'], allowed_text);
+    when 'long-position' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels','accountSize','risk']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
+    when 'short-position' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels','accountSize','risk']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
     when 'fib-retracement' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels','fill','fillColor','fillOpacity','extendLeft','extendRight'];
     when 'fib-extension' then expected_points := 3; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels','fill','fillColor','fillOpacity','extendLeft','extendRight'];
     when 'fib-time-zone' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels'];

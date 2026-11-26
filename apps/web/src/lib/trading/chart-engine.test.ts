@@ -315,6 +315,88 @@ describe.sequential("WaveKB chart engine boundary", () => {
     engine.destroy();
   });
 
+  it("round-trips public two-anchor position tools and bounded audited settings", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const positionPoints = [
+      { time: 1_700_000_000, price: 100 },
+      { time: 1_700_000_060, price: 110 },
+    ];
+
+    await engine.setDrawings({
+      schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+      drawings: [{
+        id: "position-1",
+        tool: "long-position",
+        points: positionPoints,
+        paneIndex: 0,
+        style: { accountSize: 100_000, risk: 1, showLabels: true },
+        zIndex: 0,
+      }, {
+        id: "ray-1",
+        tool: "ray",
+        points: positionPoints,
+        paneIndex: 0,
+        style: { showStats: true },
+        zIndex: 1,
+      }],
+    });
+
+    expect(library.state.drawings).toEqual({
+      version: 2,
+      drawings: [
+        expect.objectContaining({
+          id: "position-1",
+          points: positionPoints,
+          style: { accountSize: 100_000, risk: 1, showLabels: true },
+        }),
+        expect.objectContaining({ id: "ray-1", style: { showStats: true } }),
+      ],
+    });
+    expect(engine.getDrawings().drawings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "position-1", points: positionPoints, style: { accountSize: 100_000, risk: 1, showLabels: true } }),
+      expect.objectContaining({ id: "ray-1", style: { showStats: true } }),
+    ]));
+
+    library.state.drawings.drawings[0] = {
+      ...library.state.drawings.drawings[0],
+      points: [...positionPoints, { time: 1_700_000_060, price: 95 }],
+    };
+    expect(engine.getDrawings().drawings[0]).toEqual(expect.objectContaining({
+      id: "position-1",
+      points: positionPoints,
+    }));
+
+    engine.destroy();
+  });
+
+  it("rejects unsafe public position setting bounds", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const base = {
+      id: "position-invalid",
+      tool: "short-position" as const,
+      points: [
+        { time: 1_700_000_000, price: 100 },
+        { time: 1_700_000_060, price: 90 },
+      ],
+      paneIndex: 0,
+      zIndex: 0,
+    };
+
+    for (const style of [
+      { accountSize: -1 },
+      { accountSize: 1_000_000_000_000_001 },
+      { risk: -0.1 },
+      { risk: 100.1 },
+    ]) {
+      await expect(engine.setDrawings({
+        schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+        drawings: [{ ...base, style }],
+      })).rejects.toThrow(/style/i);
+    }
+
+    engine.destroy();
+  });
+
   it("does not restore drawings when destroy wins the setDrawings continuation", async () => {
     const engine = await createWaveKbChartEngine(document.createElement("div"));
     await engine.setDrawings({

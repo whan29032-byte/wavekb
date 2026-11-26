@@ -102,6 +102,48 @@ test("validates a versioned chart state and projection without rounding decimals
   assert.equal(projection.candles[0]?.open, "60000.000000000000000001");
 });
 
+test("accepts public two-anchor position inputs and bounded audited drawing settings", () => {
+  const state = structuredClone(validProjection().chart_state) as Record<string, any>;
+  state.drawings = [{
+    id: "position-1",
+    tool: "long-position",
+    points: [
+      { time: 1_795_520_280_000, price: 60_000 },
+      { time: 1_795_520_340_000, price: 60_100 },
+    ],
+    style: { accountSize: 100_000, risk: 1, showLabels: true },
+    paneIndex: 0,
+    zIndex: 0,
+  }, {
+    id: "trend-1",
+    tool: "trend-line",
+    points: validDrawing.points,
+    style: { showStats: true },
+    paneIndex: 0,
+    zIndex: 1,
+  }];
+  assert.equal(assertChartStateV1(state), state);
+
+  for (const style of [
+    { accountSize: -1 },
+    { accountSize: 1_000_000_000_000_001 },
+    { risk: -0.1 },
+    { risk: 100.1 },
+  ]) {
+    const invalid = structuredClone(state);
+    invalid.drawings[0].style = style;
+    assert.throws(() => assertChartStateV1(invalid), /trade_chart_invalid_drawing_style/);
+  }
+
+  const internalExpandedShape = structuredClone(state);
+  internalExpandedShape.drawings[0].points.push({ time: 1_795_520_400_000, price: 59_900 });
+  assert.throws(() => assertChartStateV1(internalExpandedShape), /trade_chart_invalid_drawing_points/);
+
+  const nonPublicLabelAlignment = structuredClone(state);
+  nonPublicLabelAlignment.drawings[0].text = { align: "center" };
+  assert.throws(() => assertChartStateV1(nonPublicLabelAlignment), /trade_chart_invalid_drawing_text/);
+});
+
 test("rejects unknown indicator settings and unsafe or unsupported drawings", () => {
   const unknownSetting = structuredClone(validProjection().chart_state) as Record<string, any>;
   unknownSetting.indicators[0].settings.callback = "alert(1)";
