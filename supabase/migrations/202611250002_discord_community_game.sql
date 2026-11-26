@@ -113,41 +113,6 @@ create table if not exists public.discord_market_bets (
 create index if not exists discord_market_bets_pending
 on public.discord_market_bets(market_date, settled_at) where settled_at is null;
 
-create table if not exists public.discord_game_marriage_proposals (
-  id uuid primary key default gen_random_uuid(),
-  proposer_id uuid not null references public.profiles(id) on delete cascade,
-  target_id uuid not null references public.profiles(id) on delete cascade,
-  status text not null default 'pending' check (status in ('pending', 'accepted', 'rejected', 'expired')),
-  created_at timestamptz not null default now(),
-  expires_at timestamptz not null,
-  responded_at timestamptz,
-  check (proposer_id <> target_id)
-);
-
-create unique index if not exists discord_game_marriage_pending_pair
-on public.discord_game_marriage_proposals(
-  least(proposer_id, target_id), greatest(proposer_id, target_id)
-) where status = 'pending';
-
-create table if not exists public.discord_game_marriages (
-  id uuid primary key default gen_random_uuid(),
-  started_at timestamptz not null,
-  ended_at timestamptz,
-  ended_by uuid references public.profiles(id),
-  check ((ended_at is null) = (ended_by is null))
-);
-
-create table if not exists public.discord_game_marriage_members (
-  marriage_id uuid not null references public.discord_game_marriages(id) on delete cascade,
-  user_id uuid not null references public.profiles(id) on delete cascade,
-  active boolean not null default true,
-  joined_at timestamptz not null,
-  primary key (marriage_id, user_id)
-);
-
-create unique index if not exists discord_game_one_active_marriage
-on public.discord_game_marriage_members(user_id) where active;
-
 insert into public.discord_game_skill_catalog(path, skill_key, skill_name, rarity) values
   ('esper','pyrokinesis','发火能力','common'),
   ('esper','telekinesis','念动力','common'),
@@ -203,8 +168,7 @@ begin
     'discord_game_requests','discord_game_profiles','discord_game_skill_catalog',
     'discord_game_skill_pity','discord_game_skills','discord_game_pet_catalog',
     'discord_game_eggs','discord_game_pets','discord_game_pet_adoptions',
-    'discord_market_rounds','discord_market_bets','discord_game_marriage_proposals',
-    'discord_game_marriages','discord_game_marriage_members'
+    'discord_market_rounds','discord_market_bets'
   ] loop
     execute format('alter table public.%I enable row level security', v_table);
     execute format('revoke all on table public.%I from public, anon, authenticated', v_table);
@@ -393,12 +357,7 @@ declare
   v_direction text;
   v_stake integer;
   v_daily_stake integer;
-  v_target public.profiles%rowtype;
-  v_proposal public.discord_game_marriage_proposals%rowtype;
-  v_marriage uuid;
-  v_partner uuid;
-  v_started_at timestamptz;
-  v_accept boolean;
+  v_entity_id uuid;
   v_name text;
 begin
   if p_discord_user_id is null or p_discord_user_id !~ '^[0-9]{17,20}$' then
@@ -413,7 +372,7 @@ begin
   if p_action not in (
     'status','daily_checkin','work','skill_draw','skill_collection','pet_shop',
     'pet_buy_egg','pet_hatch','pet_adopt','pet_list','pet_rename','pet_activate',
-    'market_view','market_bet','marriage_propose','marriage_respond','marriage_status','marriage_divorce'
+    'market_view','market_bet'
   ) then raise exception 'game_action_invalid'; end if;
 
   select * into v_profile from public.profiles where discord_user_id=p_discord_user_id;
@@ -437,7 +396,6 @@ begin
     v_response:=pg_catalog.jsonb_build_object(
       'action','status','balance',v_balance,
       'checkedToday',exists(select 1 from public.reward_daily_checkins where user_id=v_profile.id and checkin_date=v_day),
-      'married',exists(select 1 from public.discord_game_marriage_members where user_id=v_profile.id and active),
       'petCount',(select count(*) from public.discord_game_pets where user_id=v_profile.id)
     );
 
@@ -630,17 +588,17 @@ begin
       raise exception 'pet_name_invalid';
     end if;
     update public.discord_game_pets set nickname=v_name
-    where id=(p_payload->>'petId')::uuid and user_id=v_profile.id returning id into v_marriage;
-    if v_marriage is null then raise exception 'pet_not_found'; end if;
-    v_response:=pg_catalog.jsonb_build_object('action','pet_rename','petId',v_marriage,'name',v_name);
+    where id=(p_payload->>'petId')::uuid and user_id=v_profile.id returning id into v_entity_id;
+    if v_entity_id is null then raise exception 'pet_not_found'; end if;
+    v_response:=pg_catalog.jsonb_build_object('action','pet_rename','petId',v_entity_id,'name',v_name);
 
   elsif p_action='pet_activate' then
-    select id into v_marriage from public.discord_game_pets
+    select id into v_entity_id from public.discord_game_pets
     where id=(p_payload->>'petId')::uuid and user_id=v_profile.id for update;
-    if v_marriage is null then raise exception 'pet_not_found'; end if;
+    if v_entity_id is null then raise exception 'pet_not_found'; end if;
     update public.discord_game_pets set active=false where user_id=v_profile.id and active;
-    update public.discord_game_pets set active=true where id=v_marriage;
-    v_response:=pg_catalog.jsonb_build_object('action','pet_activate','petId',v_marriage,'active',true);
+    update public.discord_game_pets set active=true where id=v_entity_id;
+    v_response:=pg_catalog.jsonb_build_object('action','pet_activate','petId',v_entity_id,'active',true);
 
   elsif p_action='market_view' then
     perform public.discord_game_ensure_market(v_day,p_now);
@@ -674,82 +632,6 @@ begin
       'stake',v_stake,'dailyStake',v_daily_stake+v_stake,'balance',v_balance
     );
 
-  elsif p_action='marriage_propose' then
-    select * into v_target from public.profiles where discord_user_id=p_payload->>'targetDiscordUserId';
-    if not found then raise exception 'target_not_linked'; end if;
-    if v_target.account_status<>'active' then raise exception 'target_account_restricted'; end if;
-    if v_target.id=v_profile.id then raise exception 'marriage_self_forbidden'; end if;
-    if exists(select 1 from public.discord_game_marriage_members where user_id in (v_profile.id,v_target.id) and active) then
-      raise exception 'already_married';
-    end if;
-    update public.discord_game_marriage_proposals set status='expired',responded_at=p_now
-    where status='pending' and expires_at<=p_now;
-    begin
-      insert into public.discord_game_marriage_proposals(proposer_id,target_id,created_at,expires_at)
-      values(v_profile.id,v_target.id,p_now,p_now+interval '7 days') returning * into v_proposal;
-    exception when unique_violation then raise exception 'marriage_proposal_exists'; end;
-    v_response:=pg_catalog.jsonb_build_object(
-      'action','marriage_propose','proposalId',v_proposal.id,'expiresAt',v_proposal.expires_at,
-      'proposer',public.discord_game_member_json(v_profile.id),'target',public.discord_game_member_json(v_target.id)
-    );
-
-  elsif p_action='marriage_respond' then
-    begin v_accept:=(p_payload->>'accept')::boolean; exception when others then raise exception 'marriage_response_invalid'; end;
-    select * into v_proposal from public.discord_game_marriage_proposals
-    where id=(p_payload->>'proposalId')::uuid for update;
-    if not found then raise exception 'marriage_proposal_not_found'; end if;
-    if v_proposal.target_id<>v_profile.id then raise exception 'marriage_proposal_forbidden'; end if;
-    if v_proposal.status<>'pending' then raise exception 'marriage_proposal_resolved'; end if;
-    if v_proposal.expires_at<=p_now then
-      update public.discord_game_marriage_proposals set status='expired',responded_at=p_now where id=v_proposal.id;
-      raise exception 'marriage_proposal_expired';
-    end if;
-    if not v_accept then
-      update public.discord_game_marriage_proposals set status='rejected',responded_at=p_now where id=v_proposal.id;
-      v_response:=pg_catalog.jsonb_build_object('action','marriage_respond','accepted',false,'proposalId',v_proposal.id);
-    else
-      if v_proposal.proposer_id<v_proposal.target_id then
-        perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_proposal.proposer_id::text,0));
-        perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_proposal.target_id::text,0));
-      else
-        perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_proposal.target_id::text,0));
-        perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(v_proposal.proposer_id::text,0));
-      end if;
-      if exists(select 1 from public.discord_game_marriage_members where user_id in (v_proposal.proposer_id,v_proposal.target_id) and active) then
-        raise exception 'already_married';
-      end if;
-      insert into public.discord_game_marriages(started_at) values(p_now) returning id into v_marriage;
-      begin
-        insert into public.discord_game_marriage_members(marriage_id,user_id,joined_at) values
-          (v_marriage,v_proposal.proposer_id,p_now),(v_marriage,v_proposal.target_id,p_now);
-      exception when unique_violation then raise exception 'already_married'; end;
-      update public.discord_game_marriage_proposals set status='accepted',responded_at=p_now where id=v_proposal.id;
-      v_response:=pg_catalog.jsonb_build_object(
-        'action','marriage_respond','accepted',true,'proposalId',v_proposal.id,
-        'marriageId',v_marriage,'startedAt',p_now,
-        'partner',public.discord_game_member_json(v_proposal.proposer_id)
-      );
-    end if;
-
-  elsif p_action='marriage_status' then
-    select m.id,m.started_at,other.user_id into v_marriage,v_started_at,v_partner
-    from public.discord_game_marriage_members mine
-    join public.discord_game_marriages m on m.id=mine.marriage_id and m.ended_at is null
-    join public.discord_game_marriage_members other on other.marriage_id=m.id and other.user_id<>v_profile.id and other.active
-    where mine.user_id=v_profile.id and mine.active;
-    if v_marriage is null then v_response:=pg_catalog.jsonb_build_object('action','marriage_status','active',false);
-    else v_response:=pg_catalog.jsonb_build_object(
-      'action','marriage_status','active',true,'marriageId',v_marriage,
-      'startedAt',v_started_at,'partner',public.discord_game_member_json(v_partner)
-    ); end if;
-
-  elsif p_action='marriage_divorce' then
-    select marriage_id into v_marriage from public.discord_game_marriage_members
-    where user_id=v_profile.id and active for update;
-    if v_marriage is null then raise exception 'marriage_not_found'; end if;
-    update public.discord_game_marriages set ended_at=p_now,ended_by=v_profile.id where id=v_marriage and ended_at is null;
-    update public.discord_game_marriage_members set active=false where marriage_id=v_marriage;
-    v_response:=pg_catalog.jsonb_build_object('action','marriage_divorce','divorced',true,'marriageId',v_marriage);
   end if;
 
   if v_response is null then raise exception 'game_action_unhandled'; end if;
