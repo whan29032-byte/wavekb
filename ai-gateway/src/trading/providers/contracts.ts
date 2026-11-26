@@ -1,8 +1,10 @@
 import type {
-  TradeChartCandlePriceBasis,
+  TradeChartCandleSeriesBasis,
   TradeChartCandleSource,
   TradeChartCoverageStatus,
+  TradeChartPriceType,
   TradeChartTimeframe,
+  TradeChartWarningCode,
   TradingProduct,
   TradingProvider,
   TradingValuationStatus,
@@ -49,6 +51,7 @@ export type ProviderCapabilities = {
   settlement_assets: string[];
   valuation_pairs: string[];
   candles: ProviderCandleCapabilities;
+  read_only_status?: "verified" | "user_attested";
 };
 
 export const CANDLE_UNAVAILABLE_REASONS = [
@@ -57,18 +60,28 @@ export const CANDLE_UNAVAILABLE_REASONS = [
   "account_scope_unavailable",
   "upstream_unavailable",
   "rate_limited",
+  "legacy_capability_missing",
 ] as const;
 
 export type CandleUnavailableReason = (typeof CANDLE_UNAVAILABLE_REASONS)[number];
 
-export type ProviderCandleCapabilities = {
-  availability: "available" | "unavailable";
-  timeframes: TradeChartTimeframe[];
-  maximum_page_size: number | null;
-  maximum_range_seconds: number | null;
-  price_bases: TradeChartCandlePriceBasis[];
-  unavailable_reason: CandleUnavailableReason | null;
-};
+export type ProviderCandleCapabilities =
+  | {
+    availability: "available";
+    timeframes: TradeChartTimeframe[];
+    maximum_page_size: number;
+    maximum_range_seconds: number;
+    price_modes: TradeChartPriceType[];
+    unavailable_reason: null;
+  }
+  | {
+    availability: "unavailable";
+    timeframes: [];
+    maximum_page_size: null;
+    maximum_range_seconds: null;
+    price_modes: [];
+    unavailable_reason: CandleUnavailableReason;
+  };
 
 export function unavailableCandleCapabilities(
   reason: CandleUnavailableReason = "implementation_pending",
@@ -78,7 +91,7 @@ export function unavailableCandleCapabilities(
     timeframes: [],
     maximum_page_size: null,
     maximum_range_seconds: null,
-    price_bases: [],
+    price_modes: [],
     unavailable_reason: reason,
   };
 }
@@ -195,7 +208,7 @@ export type CandleRequest = {
   native_symbol: string;
   normalized_symbol: string;
   timeframe: TradeChartTimeframe;
-  price_basis: TradeChartCandlePriceBasis;
+  price_mode: TradeChartPriceType;
   from: string;
   to: string;
   limit: number;
@@ -207,7 +220,7 @@ export type CanonicalCandle = {
   native_symbol: string;
   normalized_symbol: string;
   timeframe: TradeChartTimeframe;
-  price_basis: TradeChartCandlePriceBasis;
+  series_basis: TradeChartCandleSeriesBasis;
   open_time: string;
   close_time: string;
   open: string;
@@ -224,16 +237,19 @@ export type CanonicalCandle = {
 };
 
 export type CanonicalCandleBatch = {
+  provider: TradingProvider;
   request: CandleRequest;
   candles: CanonicalCandle[];
   coverage: {
     status: TradeChartCoverageStatus;
     range_start: string;
     range_end: string;
-    gaps: Array<{ from: string; to: string }>;
+    source: TradeChartCandleSource | null;
+    fetched_at: string | null;
+    gaps: Array<{ series_basis: TradeChartCandleSeriesBasis; from: string; to: string }>;
     unavailable_reason: CandleUnavailableReason | null;
   };
-  warnings: string[];
+  warnings: TradeChartWarningCode[];
 };
 
 export interface TradingProviderAdapter {
@@ -256,10 +272,14 @@ const tradingProducts = new Set<string>(TRADING_PRODUCTS);
 const candleTimeframes = new Set<string>([
   "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M",
 ]);
-const candlePriceBases = new Set<string>(["trade", "bid", "ask", "both"]);
-const candleSources = new Set<string>(["public_api", "account_access_point"]);
+const candlePriceModes = new Set<string>(["trade", "mark", "bid", "ask", "both"]);
+const candleSeriesBases = new Set<string>(["trade", "mark", "bid", "ask"]);
+const candleSources = new Set<string>(["public_api", "signed_account"]);
 const candleStatuses = new Set<string>(["final", "partial"]);
-const candleCoverageStatuses = new Set<string>(["complete", "partial", "gapped", "stale", "unavailable"]);
+const candleCoverageStatuses = new Set<string>(["complete", "partial", "gapped", "stale", "empty", "unavailable"]);
+const candleWarningCodes = new Set<string>([
+  "historical_gap", "candles_unavailable", "empty_range", "partial_coverage", "stale_cache", "rate_limited", "provider_limit_reached",
+]);
 const candleUnavailableReasons = new Set<string>(CANDLE_UNAVAILABLE_REASONS);
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/;
 const utcTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -271,6 +291,95 @@ function invalid(field: string): never {
 
 function invalidCandles(field: string): never {
   throw Object.assign(new Error(`canonical_candles_invalid_${field}`), { statusCode: 502 });
+}
+
+function invalidCapabilities(field: string): never {
+  throw Object.assign(new Error(`provider_capabilities_invalid_${field}`), { statusCode: 502 });
+}
+
+function capabilityRecord(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) invalidCapabilities(field);
+  return value as Record<string, unknown>;
+}
+
+function exactCapabilityKeys(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
+  if (Reflect.ownKeys(value).some((key) => typeof key !== "string" || !allowed.includes(key))) invalidCapabilities(field);
+}
+
+function capabilityStringArray(value: unknown, field: string, allowed?: ReadonlySet<string>, requireNonEmpty = false): string[] {
+  if (!Array.isArray(value) || (requireNonEmpty && value.length === 0) || value.length > 100) invalidCapabilities(field);
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.length < 1 || item.length > 100 || (allowed && !allowed.has(item)) || result.includes(item)) {
+      invalidCapabilities(field);
+    }
+    result.push(item);
+  }
+  return result;
+}
+
+export function assertProviderCapabilities(value: unknown): ProviderCapabilities {
+  const capabilities = capabilityRecord(value, "record");
+  exactCapabilityKeys(capabilities, [
+    "products", "history_age_days", "history_range_days", "page_size", "pagination", "position_grouping",
+    "has_position_id", "has_realized_pnl", "has_fee_asset", "has_funding_or_swap", "has_external_cash_flow",
+    "has_usd_valuation", "account_currency", "settlement_assets", "valuation_pairs", "candles", "read_only_status",
+  ], "keys");
+  capabilityStringArray(capabilities.products, "products", tradingProducts, true);
+  for (const key of ["history_age_days", "history_range_days", "page_size"] as const) {
+    const minimum = key === "history_age_days" ? 0 : 1;
+    if (!Number.isInteger(capabilities[key]) || (capabilities[key] as number) < minimum) invalidCapabilities(key);
+  }
+  if (!new Set(["time", "page", "opaque"]).has(String(capabilities.pagination))) invalidCapabilities("pagination");
+  if (!new Set(["net_zero_cycle", "hedge_zero_cycle", "position_id_cycle"]).has(String(capabilities.position_grouping))) {
+    invalidCapabilities("position_grouping");
+  }
+  for (const key of [
+    "has_position_id", "has_realized_pnl", "has_fee_asset", "has_funding_or_swap", "has_external_cash_flow", "has_usd_valuation",
+  ] as const) if (typeof capabilities[key] !== "boolean") invalidCapabilities(key);
+  if (typeof capabilities.account_currency !== "string" || !/^[A-Z0-9]{2,12}$/.test(capabilities.account_currency)) {
+    invalidCapabilities("account_currency");
+  }
+  capabilityStringArray(capabilities.settlement_assets, "settlement_assets");
+  capabilityStringArray(capabilities.valuation_pairs, "valuation_pairs");
+  if (capabilities.read_only_status !== undefined
+    && capabilities.read_only_status !== "verified" && capabilities.read_only_status !== "user_attested") {
+    invalidCapabilities("read_only_status");
+  }
+
+  const candles = capabilityRecord(capabilities.candles, "candles");
+  exactCapabilityKeys(candles, [
+    "availability", "timeframes", "maximum_page_size", "maximum_range_seconds", "price_modes", "unavailable_reason",
+  ], "candles");
+  if (candles.availability === "available") {
+    capabilityStringArray(candles.timeframes, "candles", candleTimeframes, true);
+    capabilityStringArray(candles.price_modes, "candles", candlePriceModes, true);
+    if (!Number.isInteger(candles.maximum_page_size) || (candles.maximum_page_size as number) < 1
+      || !Number.isInteger(candles.maximum_range_seconds) || (candles.maximum_range_seconds as number) < 1
+      || candles.unavailable_reason !== null) invalidCapabilities("candles");
+  } else if (candles.availability === "unavailable") {
+    if (!Array.isArray(candles.timeframes) || candles.timeframes.length > 0
+      || !Array.isArray(candles.price_modes) || candles.price_modes.length > 0
+      || candles.maximum_page_size !== null || candles.maximum_range_seconds !== null
+      || typeof candles.unavailable_reason !== "string" || !candleUnavailableReasons.has(candles.unavailable_reason)) {
+      invalidCapabilities("candles");
+    }
+  } else {
+    invalidCapabilities("candles");
+  }
+  return value as ProviderCapabilities;
+}
+
+export function normalizeProviderCapabilities(
+  value: unknown,
+  options: { allowLegacyMissingCandles?: boolean } = {},
+): ProviderCapabilities {
+  const source = capabilityRecord(value, "record");
+  const normalized: Record<string, unknown> = { ...source };
+  if (!("candles" in normalized) && options.allowLegacyMissingCandles) {
+    normalized.candles = unavailableCandleCapabilities("legacy_capability_missing");
+  }
+  return assertProviderCapabilities(normalized);
 }
 
 function exactKeys(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
@@ -299,7 +408,7 @@ function canonicalUnsignedDecimal(value: unknown, field: string, positive: boole
   const result = candleString(value, field, 60);
   if (!canonicalUnsignedDecimalPattern.test(result)) invalidCandles(field);
   const [whole = "", fraction = ""] = result.split(".");
-  if (whole.length + fraction.length > 38 || fraction.length > 18 || (positive && result === "0")) invalidCandles(field);
+  if (whole.length > 20 || fraction.length > 18 || (positive && result === "0")) invalidCandles(field);
   return result;
 }
 
@@ -314,13 +423,14 @@ function compareCanonicalUnsignedDecimals(left: string, right: string): number {
 
 function validateCandleRequest(value: unknown): CandleRequest {
   const request = candleRecord(value, "request");
-  exactKeys(request, ["product", "native_symbol", "normalized_symbol", "timeframe", "price_basis", "from", "to", "limit"], "request_keys");
+  exactKeys(request, ["product", "native_symbol", "normalized_symbol", "timeframe", "price_mode", "from", "to", "limit"], "request_keys");
   if (!tradingProducts.has(String(request.product))) invalidCandles("request_product");
   const nativeSymbol = candleString(request.native_symbol, "request_native_symbol", 100);
   if (!safeSymbolPattern.test(nativeSymbol)) invalidCandles("request_native_symbol");
-  candleString(request.normalized_symbol, "request_normalized_symbol", 100);
+  const normalizedSymbol = candleString(request.normalized_symbol, "request_normalized_symbol", 100);
+  if (!safeSymbolPattern.test(normalizedSymbol)) invalidCandles("request_normalized_symbol");
   if (!candleTimeframes.has(String(request.timeframe))) invalidCandles("request_timeframe");
-  if (!candlePriceBases.has(String(request.price_basis))) invalidCandles("request_price_basis");
+  if (!candlePriceModes.has(String(request.price_mode))) invalidCandles("request_price_mode");
   const from = candleTimestamp(request.from, "request_from");
   const to = candleTimestamp(request.to, "request_to");
   if (Date.parse(from) >= Date.parse(to)) invalidCandles("request_range");
@@ -328,18 +438,21 @@ function validateCandleRequest(value: unknown): CandleRequest {
   return value as CandleRequest;
 }
 
-function validateCanonicalCandle(value: unknown, request: CandleRequest): CanonicalCandle {
+function validateCanonicalCandle(value: unknown, request: CandleRequest, provider: TradingProvider): CanonicalCandle {
   const item = candleRecord(value, "candle");
   exactKeys(item, [
-    "provider", "product", "native_symbol", "normalized_symbol", "timeframe", "price_basis", "open_time", "close_time",
+    "provider", "product", "native_symbol", "normalized_symbol", "timeframe", "series_basis", "open_time", "close_time",
     "open", "high", "low", "close", "volume", "source", "source_timestamp", "fetched_at", "status", "gap_before", "gap_after",
   ], "candle_keys");
-  if (!isTradingProvider(item.provider)) invalidCandles("provider");
+  if (item.provider !== provider) invalidCandles("provider_consistency");
   if (item.product !== request.product) invalidCandles("product");
   if (item.native_symbol !== request.native_symbol) invalidCandles("native_symbol");
   if (item.normalized_symbol !== request.normalized_symbol) invalidCandles("normalized_symbol");
   if (item.timeframe !== request.timeframe) invalidCandles("timeframe");
-  if (item.price_basis !== request.price_basis) invalidCandles("price_basis");
+  if (!candleSeriesBases.has(String(item.series_basis))) invalidCandles("series_basis");
+  if (request.price_mode === "both") {
+    if (item.series_basis !== "bid" && item.series_basis !== "ask") invalidCandles("series_basis");
+  } else if (item.series_basis !== request.price_mode) invalidCandles("series_basis");
   const openTime = candleTimestamp(item.open_time, "open_time");
   const closeTime = candleTimestamp(item.close_time, "close_time");
   if (Date.parse(openTime) >= Date.parse(closeTime)) invalidCandles("time");
@@ -354,11 +467,14 @@ function validateCanonicalCandle(value: unknown, request: CandleRequest): Canoni
     || compareCanonicalUnsignedDecimals(low, close) > 0) invalidCandles("ohlc");
   if (item.volume !== null) canonicalUnsignedDecimal(item.volume, "volume", false);
   if (!candleSources.has(String(item.source))) invalidCandles("source");
-  if ((item.provider === "exness"
-    && (item.product !== "cfd" || item.source !== "account_access_point"
-      || !new Set(["bid", "ask", "both"]).has(String(item.price_basis))))
-    || (item.provider !== "exness"
-      && (item.product === "cfd" || item.source !== "public_api" || item.price_basis !== "trade"))) {
+  if ((provider === "exness"
+    && (item.product !== "cfd" || item.source !== "signed_account"
+      || !new Set(["bid", "ask"]).has(String(item.series_basis))
+      || !new Set(["bid", "ask", "both"]).has(request.price_mode)))
+    || (provider !== "exness"
+      && (item.product === "cfd" || item.source !== "public_api"
+        || !new Set(["trade", "mark"]).has(String(item.series_basis))
+        || !new Set(["trade", "mark"]).has(request.price_mode)))) {
     invalidCandles("source");
   }
   const sourceTimestamp = candleTimestamp(item.source_timestamp, "source_timestamp");
@@ -370,68 +486,137 @@ function validateCanonicalCandle(value: unknown, request: CandleRequest): Canoni
 }
 
 export function unavailableCandleBatch(
+  provider: TradingProvider,
   request: CandleRequest,
   reason: CandleUnavailableReason = "implementation_pending",
 ): CanonicalCandleBatch {
   validateCandleRequest(request);
-  return {
+  return assertCanonicalCandleBatch({
+    provider,
     request,
     candles: [],
     coverage: {
       status: "unavailable",
       range_start: request.from,
       range_end: request.to,
+      source: null,
+      fetched_at: null,
       gaps: [],
       unavailable_reason: reason,
     },
     warnings: ["candles_unavailable"],
-  };
+  });
 }
 
 export function assertCanonicalCandleBatch(value: unknown): CanonicalCandleBatch {
   const batch = candleRecord(value, "batch");
-  exactKeys(batch, ["request", "candles", "coverage", "warnings"], "batch_keys");
+  exactKeys(batch, ["provider", "request", "candles", "coverage", "warnings"], "batch_keys");
+  if (!isTradingProvider(batch.provider)) invalidCandles("provider");
+  const provider = batch.provider;
   const request = validateCandleRequest(batch.request);
+  if ((provider === "exness" && (request.product !== "cfd" || !new Set(["bid", "ask", "both"]).has(request.price_mode)))
+    || (provider !== "exness" && (request.product === "cfd" || !new Set(["trade", "mark"]).has(request.price_mode)))) {
+    invalidCandles("request_price_mode");
+  }
   if (!Array.isArray(batch.candles) || batch.candles.length > request.limit || batch.candles.length > 3_000) invalidCandles("candles");
-  const candles = batch.candles.map((item) => validateCanonicalCandle(item, request));
-  const batchProvider = candles[0]?.provider;
+  const candles = batch.candles.map((item) => validateCanonicalCandle(item, request, provider));
+  const basisOrder = new Map<string, number>([["trade", 0], ["mark", 1], ["bid", 2], ["ask", 3]]);
   for (let index = 0; index < candles.length; index += 1) {
     const candle = candles[index]!;
-    if (candle.provider !== batchProvider) invalidCandles("provider_consistency");
     if (Date.parse(candle.open_time) < Date.parse(request.from) || Date.parse(candle.close_time) > Date.parse(request.to)) {
       invalidCandles("range");
     }
-    if (index > 0 && Date.parse(candles[index - 1]!.open_time) >= Date.parse(candle.open_time)) invalidCandles("order");
+    if (index > 0) {
+      const previous = candles[index - 1]!;
+      const timeDifference = Date.parse(candle.open_time) - Date.parse(previous.open_time);
+      if (timeDifference < 0 || (timeDifference === 0
+        && (basisOrder.get(candle.series_basis) ?? 99) <= (basisOrder.get(previous.series_basis) ?? 99))) invalidCandles("order");
+    }
   }
 
   const coverage = candleRecord(batch.coverage, "coverage");
-  exactKeys(coverage, ["status", "range_start", "range_end", "gaps", "unavailable_reason"], "coverage_keys");
+  exactKeys(coverage, ["status", "range_start", "range_end", "source", "fetched_at", "gaps", "unavailable_reason"], "coverage_keys");
   if (!candleCoverageStatuses.has(String(coverage.status))) invalidCandles("coverage_status");
   const rangeStart = candleTimestamp(coverage.range_start, "coverage_range_start");
   const rangeEnd = candleTimestamp(coverage.range_end, "coverage_range_end");
   if (rangeStart !== request.from || rangeEnd !== request.to) invalidCandles("coverage_range");
+  if (coverage.source !== null && !candleSources.has(String(coverage.source))) invalidCandles("coverage_source");
+  const coverageFetchedAt = coverage.fetched_at === null ? null : candleTimestamp(coverage.fetched_at, "coverage_fetched_at");
   if (!Array.isArray(coverage.gaps) || coverage.gaps.length > 1_000) invalidCandles("gaps");
-  let previousGapEnd = 0;
+  const declaredGaps: Array<{ series_basis: TradeChartCandleSeriesBasis; from: string; to: string }> = [];
+  const previousGapEnd = new Map<string, number>();
   for (const value of coverage.gaps) {
     const gap = candleRecord(value, "gap");
-    exactKeys(gap, ["from", "to"], "gap_keys");
+    exactKeys(gap, ["series_basis", "from", "to"], "gap_keys");
+    if (!candleSeriesBases.has(String(gap.series_basis))) invalidCandles("gaps");
+    if (request.price_mode === "both" ? gap.series_basis !== "bid" && gap.series_basis !== "ask" : gap.series_basis !== request.price_mode) {
+      invalidCandles("gaps");
+    }
     const from = candleTimestamp(gap.from, "gap_from");
     const to = candleTimestamp(gap.to, "gap_to");
     if (Date.parse(from) >= Date.parse(to) || Date.parse(from) < Date.parse(request.from)
-      || Date.parse(to) > Date.parse(request.to) || Date.parse(from) < previousGapEnd) invalidCandles("gaps");
-    previousGapEnd = Date.parse(to);
+      || Date.parse(to) > Date.parse(request.to)
+      || Date.parse(from) < (previousGapEnd.get(String(gap.series_basis)) ?? 0)) invalidCandles("gaps");
+    previousGapEnd.set(String(gap.series_basis), Date.parse(to));
+    declaredGaps.push({ series_basis: gap.series_basis as TradeChartCandleSeriesBasis, from, to });
   }
-  const hasGapFlags = candles.some((item) => item.gap_before || item.gap_after);
-  if (coverage.status === "gapped") {
-    if (coverage.gaps.length === 0 || !hasGapFlags || coverage.unavailable_reason !== null) invalidCandles("gaps");
-  } else if (coverage.status === "unavailable") {
-    if (candles.length > 0 || coverage.gaps.length > 0 || typeof coverage.unavailable_reason !== "string"
-      || !candleUnavailableReasons.has(coverage.unavailable_reason)) invalidCandles("unavailable");
-  } else if (coverage.gaps.length > 0 || hasGapFlags || coverage.unavailable_reason !== null) {
-    invalidCandles("gaps");
+
+  const expectedBases: TradeChartCandleSeriesBasis[] = request.price_mode === "both"
+    ? ["bid", "ask"] : [request.price_mode as TradeChartCandleSeriesBasis];
+  const actualGaps: Array<{ series_basis: TradeChartCandleSeriesBasis; from: string; to: string }> = [];
+  for (const seriesBasis of expectedBases) {
+    const series = candles.filter((candle) => candle.series_basis === seriesBasis);
+    for (let index = 1; index < series.length; index += 1) {
+      if (Date.parse(series[index]!.open_time) < Date.parse(series[index - 1]!.close_time)) invalidCandles("overlap");
+    }
+    let cursor = request.from;
+    for (let index = 0; index < series.length; index += 1) {
+      const candle = series[index]!;
+      if (Date.parse(candle.open_time) < Date.parse(cursor)) invalidCandles("overlap");
+      const hasGapBefore = Date.parse(candle.open_time) > Date.parse(cursor);
+      if (hasGapBefore) actualGaps.push({ series_basis: seriesBasis, from: cursor, to: candle.open_time });
+      const next = series[index + 1];
+      const hasGapAfter = next ? Date.parse(next.open_time) > Date.parse(candle.close_time)
+        : Date.parse(request.to) > Date.parse(candle.close_time);
+      if (candle.gap_before !== hasGapBefore || candle.gap_after !== hasGapAfter) invalidCandles("gap_flags");
+      cursor = candle.close_time;
+    }
+    if (series.length === 0) {
+      if (candles.length > 0) actualGaps.push({ series_basis: seriesBasis, from: request.from, to: request.to });
+    } else if (Date.parse(cursor) < Date.parse(request.to)) {
+      actualGaps.push({ series_basis: seriesBasis, from: cursor, to: request.to });
+    }
+  }
+
+  if (JSON.stringify(declaredGaps) !== JSON.stringify(actualGaps)) invalidCandles("gaps");
+  if (candles.length === 0) {
+    if (coverage.status === "unavailable") {
+      if (coverage.source !== null || coverageFetchedAt !== null || declaredGaps.length > 0
+        || typeof coverage.unavailable_reason !== "string" || !candleUnavailableReasons.has(coverage.unavailable_reason)) invalidCandles("unavailable");
+    } else if (coverage.status === "empty") {
+      const expectedSource = provider === "exness" ? "signed_account" : "public_api";
+      if (coverage.source !== expectedSource || coverageFetchedAt === null || declaredGaps.length > 0
+        || coverage.unavailable_reason !== null) invalidCandles("empty");
+    } else invalidCandles("empty");
+  } else {
+    const expectedSource = provider === "exness" ? "signed_account" : "public_api";
+    if (coverage.source !== expectedSource) invalidCandles("coverage_source");
+    if (coverageFetchedAt === null) invalidCandles("coverage_fetched_at");
+    if (candles.some((candle) => candle.source !== coverage.source)) invalidCandles("coverage_source");
+    if (candles.some((candle) => candle.fetched_at !== coverageFetchedAt)) invalidCandles("coverage_fetched_at");
+    if (coverage.unavailable_reason !== null) invalidCandles("coverage_available");
+    if (actualGaps.length > 0 ? coverage.status !== "gapped" : coverage.status === "gapped" || coverage.status === "empty" || coverage.status === "unavailable") {
+      invalidCandles("gaps");
+    }
   }
   if (!Array.isArray(batch.warnings) || batch.warnings.length > 50
-    || batch.warnings.some((item) => typeof item !== "string" || item.length > 200)) invalidCandles("warnings");
+    || batch.warnings.some((item) => typeof item !== "string" || !candleWarningCodes.has(item))) invalidCandles("warnings");
+  const requiredWarning = coverage.status === "gapped" ? "historical_gap"
+    : coverage.status === "empty" ? "empty_range"
+      : coverage.status === "unavailable" ? "candles_unavailable"
+        : coverage.status === "partial" ? "partial_coverage"
+          : coverage.status === "stale" ? "stale_cache" : null;
+  if (requiredWarning !== null && !batch.warnings.includes(requiredWarning)) invalidCandles("warnings");
   return value as CanonicalCandleBatch;
 }
 

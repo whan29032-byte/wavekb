@@ -283,10 +283,10 @@ export class ExnessTradingProviderAdapter implements TradingProviderAdapter {
       const returnedId = text(details.account_id, "account_id");
       if (returnedId !== accountId) throw Object.assign(new Error("exness_account_id_mismatch"), { statusCode: 502 });
       const currency = text(settings.currency, "account_currency").toUpperCase();
-      const suffix = accountId.slice(-4);
+      const suffix = accountId.slice(-4).padStart(4, "0");
       return {
         external_account_id: accountId, account_label: `${text(details.account_name ?? "Exness", "account_name")} · ${suffix}`,
-        account_identifier_mask: `••••${suffix}`, account_currency: currency, products: ["cfd" as const], read_only_status: "verified" as const,
+        account_identifier_mask: `\u2022\u2022\u2022\u2022${suffix}`, account_currency: currency, products: ["cfd" as const], read_only_status: "verified" as const,
       };
     }));
   }
@@ -347,7 +347,7 @@ export class ExnessTradingProviderAdapter implements TradingProviderAdapter {
   }
 
   async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
-    return unavailableCandleBatch(request);
+    return unavailableCandleBatch(this.provider, request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

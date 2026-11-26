@@ -202,7 +202,10 @@ describe.sequential("WaveKB chart engine boundary", () => {
       drawings: [{
         id: "drawing-1",
         tool: "elliott-impulse",
-        points: [{ time: 1_700_000_000, price: 100 }],
+        points: Array.from({ length: 6 }, (_, index) => ({
+          time: 1_700_000_000 + index * 60,
+          price: 100 + index,
+        })),
         paneIndex: 0,
         style: {},
         properties: { degree: "minor", labelStyle: "plain" },
@@ -228,7 +231,6 @@ describe.sequential("WaveKB chart engine boundary", () => {
       ...library.state.drawings.drawings[0],
       createdAt: 123,
       intervals: { from: "1m" },
-      props: { degree: "minor", labelStyle: "plain", executable: "drop-me" },
     };
     library.emit("drawing:change", { ids: ["drawing-1"], kind: "update" });
 
@@ -248,6 +250,17 @@ describe.sequential("WaveKB chart engine boundary", () => {
     expect(changes.at(-1)).not.toHaveProperty("document.drawings.0.createdAt");
     expect(changes.at(-1)).not.toHaveProperty("document.drawings.0.intervals");
 
+    library.state.drawings.drawings[0] = {
+      ...library.state.drawings.drawings[0],
+      props: { degree: "minor", labelStyle: "plain", executable: "drop-me" },
+    };
+    library.emit("drawing:change", { ids: ["drawing-1"], kind: "update" });
+    expect(changes.at(-1)).toEqual({
+      kind: "update",
+      drawingIds: ["drawing-1"],
+      document: { schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA, drawings: [] },
+    });
+
     unsubscribe();
     engine.destroy();
   });
@@ -264,6 +277,42 @@ describe.sequential("WaveKB chart engine boundary", () => {
 
     expect(library.state.drawingDestroyCount).toBe(1);
     expect(library.state.chartDestroyCount).toBe(1);
+  });
+
+  it("rejects application drawings that contradict the audited tool schema", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const base = {
+      id: "invalid-tool-shape",
+      tool: "trend-line" as const,
+      points: [{ time: 1_700_000_000, price: 100 }],
+      paneIndex: 0,
+      style: {},
+      zIndex: 0,
+    };
+
+    await expect(engine.setDrawings({
+      schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+      drawings: [base],
+    })).rejects.toThrow(/points/i);
+    await expect(engine.setDrawings({
+      schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+      drawings: [{
+        ...base,
+        points: [...base.points, { time: 1_700_000_060, price: 101 }],
+        style: { levels: [{ ratio: 0.618 }] },
+      }],
+    })).rejects.toThrow(/style/i);
+    await expect(engine.setDrawings({
+      schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+      drawings: [{
+        ...base,
+        tool: "text",
+        style: {},
+        text: { color: "#fff" },
+      }],
+    })).rejects.toThrow(/text/i);
+
+    engine.destroy();
   });
 
   it("does not restore drawings when destroy wins the setDrawings continuation", async () => {

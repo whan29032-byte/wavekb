@@ -2,6 +2,7 @@ import {
   TRADE_CHART_CANDLE_SOURCES,
   TRADE_CHART_COVERAGE_STATUSES,
   TRADE_CHART_DRAWING_TOOL_IDS,
+  TRADE_CHART_DRAWING_TOOL_SCHEMAS,
   TRADE_CHART_INDICATOR_IDS,
   TRADE_CHART_MAX_CANDLES,
   TRADE_CHART_MAX_DRAWING_POINTS,
@@ -12,12 +13,14 @@ import {
   TRADE_CHART_PROJECTION_SCHEMA_VERSION,
   TRADE_CHART_STATE_SCHEMA_VERSION,
   TRADE_CHART_TIMEFRAMES,
+  TRADE_CHART_WARNING_CODES,
   TRADING_PRODUCTS,
   isTradingProvider,
   type ChartStateV1,
   type DrawingSpecV1,
   type IndicatorSpecV1,
   type TradeChartProjection,
+  type TradeChartDrawingToolId,
   type TradeChartTimeframe,
 } from "@wavekb/domain/trading-review";
 import {
@@ -36,9 +39,6 @@ const projectionKeys = [
 ] as const;
 const indicatorKeys = ["instanceId", "indicatorId", "settings", "paneIndex"] as const;
 const drawingKeys = ["id", "tool", "points", "style", "text", "properties", "paneIndex", "locked", "visible", "zIndex"] as const;
-const drawingStyleKeys = ["color", "lineWidth", "lineStyle", "fill", "fillColor", "fillOpacity", "extendLeft", "extendRight", "showLabels", "levels"] as const;
-const drawingTextKeys = ["value", "color", "fontSize", "fontFamily", "bold", "italic", "align", "valign"] as const;
-const drawingPropertyKeys = ["degree", "labelStyle", "showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices", "profitColor", "lossColor"] as const;
 const markerKeys = [
   "marker_key", "fill_id", "occurred_at", "price", "allocated_quantity", "allocation_role", "sort_order", "side",
   "position_side", "liquidity", "provider_fill_id_mask", "annotation",
@@ -50,6 +50,7 @@ const timeframes = new Set<string>(TRADE_CHART_TIMEFRAMES);
 const priceTypes = new Set<string>(TRADE_CHART_PRICE_TYPES);
 const indicatorIds = new Set<string>(TRADE_CHART_INDICATOR_IDS);
 const drawingTools = new Set<string>(TRADE_CHART_DRAWING_TOOL_IDS);
+const warningCodes = new Set<string>(TRADE_CHART_WARNING_CODES);
 const candleSources = new Set<string>(TRADE_CHART_CANDLE_SOURCES);
 const coverageStatuses = new Set<string>(TRADE_CHART_COVERAGE_STATUSES);
 const unavailableReasons = new Set<string>(CANDLE_UNAVAILABLE_REASONS);
@@ -139,7 +140,7 @@ function canonicalUnsignedDecimal(value: unknown, field: string, positive: boole
   const result = boundedString(value, field, 60);
   if (!canonicalUnsignedDecimalPattern.test(result)) invalid(field);
   const [whole = "", fraction = ""] = result.split(".");
-  if (whole.length + fraction.length > 38 || fraction.length > 18 || (positive && result === "0")) invalid(field);
+  if (whole.length > 20 || fraction.length > 18 || (positive && result === "0")) invalid(field);
   return result;
 }
 
@@ -230,9 +231,9 @@ function validateIndicators(value: unknown, timeframe: TradeChartTimeframe): Ind
   return value as IndicatorSpecV1[];
 }
 
-function validateDrawingStyle(value: unknown): void {
+function validateDrawingStyle(value: unknown, tool: TradeChartDrawingToolId): void {
   const style = record(value, "drawing_style");
-  exactKeys(style, drawingStyleKeys, "drawing_style");
+  exactKeys(style, TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool].styleKeys, "drawing_style");
   if (style.color !== undefined) color(style.color, "drawing_style");
   if (style.fillColor !== undefined) color(style.fillColor, "drawing_style");
   if (style.lineWidth !== undefined) finiteNumber(style.lineWidth, "drawing_style", 0.5, 20);
@@ -254,10 +255,12 @@ function validateDrawingStyle(value: unknown): void {
   }
 }
 
-function validateDrawingText(value: unknown): void {
+function validateDrawingText(value: unknown, tool: TradeChartDrawingToolId): void {
   const text = record(value, "drawing_text");
-  exactKeys(text, drawingTextKeys, "drawing_text");
-  plainText(text.value, "drawing_text", 2_000);
+  const schema = TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool];
+  exactKeys(text, schema.textKeys, "drawing_text");
+  if (schema.textRequired && text.value === undefined) invalid("drawing_text");
+  if (text.value !== undefined) plainText(text.value, "drawing_text", 2_000);
   if (text.color !== undefined) color(text.color, "drawing_text");
   if (text.fontSize !== undefined) finiteNumber(text.fontSize, "drawing_text", 6, 96);
   if (text.fontFamily !== undefined && (typeof text.fontFamily !== "string" || !/^[A-Za-z0-9 _,-]{0,128}$/.test(text.fontFamily))) invalid("drawing_text");
@@ -266,9 +269,9 @@ function validateDrawingText(value: unknown): void {
   if (text.valign !== undefined && !new Set(["top", "middle", "bottom"]).has(String(text.valign))) invalid("drawing_text");
 }
 
-function validateDrawingProperties(value: unknown): void {
+function validateDrawingProperties(value: unknown, tool: TradeChartDrawingToolId): void {
   const properties = record(value, "drawing_properties");
-  exactKeys(properties, drawingPropertyKeys, "drawing_properties");
+  exactKeys(properties, TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool].propertyKeys, "drawing_properties");
   if (properties.degree !== undefined && !new Set(["grand-supercycle", "supercycle", "cycle", "primary", "intermediate", "minor", "minute", "minuette", "subminuette"]).has(String(properties.degree))) invalid("drawing_properties");
   if (properties.labelStyle !== undefined && !new Set(["degree", "plain", "parentheses", "circled"]).has(String(properties.labelStyle))) invalid("drawing_properties");
   for (const key of ["showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices"] as const) {
@@ -288,16 +291,26 @@ function validateDrawings(value: unknown): DrawingSpecV1[] {
     if (!idPattern.test(id) || seen.has(id)) invalid("drawing_ids");
     seen.add(id);
     if (typeof drawing.tool !== "string" || !drawingTools.has(drawing.tool)) invalid("drawing_tool");
-    if (!Array.isArray(drawing.points) || drawing.points.length > TRADE_CHART_MAX_DRAWING_POINTS) invalid("drawing_points");
+    const tool = drawing.tool as TradeChartDrawingToolId;
+    const toolSchema = TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool];
+    if (!Array.isArray(drawing.points) || drawing.points.length !== toolSchema.pointCount
+      || drawing.points.length > TRADE_CHART_MAX_DRAWING_POINTS) invalid("drawing_points");
     for (const candidatePoint of drawing.points) {
       const point = record(candidatePoint, "drawing_point");
       exactKeys(point, ["time", "price"], "drawing_point");
       finiteNumber(point.time, "drawing_point", -10_000_000_000_000, 10_000_000_000_000);
       finiteNumber(point.price, "drawing_point", -1_000_000_000_000_000_000, 1_000_000_000_000_000_000);
     }
-    validateDrawingStyle(drawing.style);
-    if (drawing.text !== undefined) validateDrawingText(drawing.text);
-    if (drawing.properties !== undefined) validateDrawingProperties(drawing.properties);
+    validateDrawingStyle(drawing.style, tool);
+    if (toolSchema.textRequired && drawing.text === undefined) invalid("drawing_text");
+    if (drawing.text !== undefined) {
+      if (toolSchema.textKeys.length === 0) invalid("drawing_text");
+      validateDrawingText(drawing.text, tool);
+    }
+    if (drawing.properties !== undefined) {
+      if (toolSchema.propertyKeys.length === 0) invalid("drawing_properties");
+      validateDrawingProperties(drawing.properties, tool);
+    }
     if (!Number.isInteger(drawing.paneIndex) || (drawing.paneIndex as number) < 0 || (drawing.paneIndex as number) > 15) invalid("drawing_pane");
     finiteNumber(drawing.zIndex, "drawing_z_index", -10_000, 10_000);
     if (drawing.locked !== undefined && typeof drawing.locked !== "boolean") invalid("drawing_locked");
@@ -340,8 +353,8 @@ function validateMarker(value: unknown): void {
   if (!new Set(["buy", "sell"]).has(String(marker.side))) invalid("marker_side");
   if (!new Set(["both", "long", "short"]).has(String(marker.position_side))) invalid("marker_position_side");
   if (!new Set(["maker", "taker", "unknown"]).has(String(marker.liquidity))) invalid("marker_liquidity");
-  const mask = boundedString(marker.provider_fill_id_mask, "marker_mask", 80);
-  if (!/^(?:•{2,}|\*{2,})/u.test(mask)) invalid("marker_mask");
+  const providerMask = boundedString(marker.provider_fill_id_mask, "marker_mask", 80);
+  if (!/^(?:\u2022{4}|\*{4})[A-Za-z0-9]{4}$/u.test(providerMask)) invalid("marker_mask");
   if (marker.annotation !== null) {
     const annotation = record(marker.annotation, "annotation");
     exactKeys(annotation, annotationKeys, "annotation_keys");
@@ -367,20 +380,30 @@ function validateProjectionCoverage(value: unknown, projection: Record<string, u
   if (coverage.fetched_at !== null) utcTimestamp(coverage.fetched_at, "coverage_fetched_at");
   if (!Array.isArray(coverage.gaps) || coverage.gaps.length > 1_000) invalid("coverage_gaps");
   const range = record(projection.range, "range");
-  let previousEnd = 0;
+  const previousEnd = new Map<string, number>();
   for (const candidate of coverage.gaps) {
     const gap = record(candidate, "coverage_gap");
-    exactKeys(gap, ["from", "to"], "coverage_gap");
+    exactKeys(gap, ["series_basis", "from", "to"], "coverage_gap");
+    const seriesBasis = String(gap.series_basis);
+    if (!new Set(["trade", "mark", "bid", "ask"]).has(seriesBasis)
+      || (projection.price_type === "both" ? seriesBasis !== "bid" && seriesBasis !== "ask" : seriesBasis !== projection.price_type)) {
+      invalid("coverage_gap");
+    }
     const from = utcTimestamp(gap.from, "coverage_gap");
     const to = utcTimestamp(gap.to, "coverage_gap");
     if (Date.parse(from) >= Date.parse(to) || Date.parse(from) < Date.parse(String(range.from))
-      || Date.parse(to) > Date.parse(String(range.to)) || Date.parse(from) < previousEnd) invalid("coverage_gaps");
-    previousEnd = Date.parse(to);
+      || Date.parse(to) > Date.parse(String(range.to))
+      || Date.parse(from) < (previousEnd.get(seriesBasis) ?? 0)) invalid("coverage_gaps");
+    previousEnd.set(seriesBasis, Date.parse(to));
   }
   if (coverage.status === "unavailable") {
     if (projection.candles instanceof Array && projection.candles.length > 0) invalid("coverage_unavailable");
     if (coverage.source !== null || coverage.fetched_at !== null || coverage.gaps.length > 0
       || typeof coverage.unavailable_reason !== "string" || !unavailableReasons.has(coverage.unavailable_reason)) invalid("coverage_unavailable");
+  } else if (coverage.status === "empty") {
+    if (!(projection.candles instanceof Array) || projection.candles.length !== 0
+      || coverage.source === null || coverage.fetched_at === null || coverage.gaps.length > 0
+      || coverage.unavailable_reason !== null) invalid("coverage_empty");
   } else {
     if (coverage.source === null || coverage.fetched_at === null || coverage.unavailable_reason !== null) invalid("coverage_available");
     if (coverage.status === "gapped" ? coverage.gaps.length === 0 : coverage.gaps.length > 0) invalid("coverage_gaps");
@@ -397,7 +420,8 @@ export function assertTradeChartProjection(value: unknown): TradeChartProjection
   if (typeof projection.product !== "string" || !products.has(projection.product)) invalid("projection_product");
   if ((projection.provider === "exness" && projection.product !== "cfd")
     || (projection.provider !== "exness" && projection.product === "cfd")) invalid("projection_product");
-  boundedString(projection.symbol, "projection_symbol", 100);
+  const symbol = boundedString(projection.symbol, "projection_symbol", 100);
+  if (!safeSymbolPattern.test(symbol)) invalid("projection_symbol");
   const nativeSymbol = boundedString(projection.native_symbol, "projection_native_symbol", 100);
   if (!safeSymbolPattern.test(nativeSymbol)) invalid("projection_native_symbol");
   if (projection.direction !== "long" && projection.direction !== "short") invalid("projection_direction");
@@ -415,47 +439,47 @@ export function assertTradeChartProjection(value: unknown): TradeChartProjection
   if (Date.parse(rangeFrom) >= Date.parse(rangeTo) || Date.parse(openedAt) < Date.parse(rangeFrom)
     || (closedAt !== null && Date.parse(closedAt) > Date.parse(rangeTo))) invalid("range");
   if (!Array.isArray(projection.candles) || projection.candles.length > TRADE_CHART_MAX_CANDLES) invalid("candles");
-  if (projection.candles.length > 0) {
-    if (projection.price_type === "mark") invalid("projection_candle_basis");
-    const candleRequest: CandleRequest = {
-      product: projection.product as CandleRequest["product"],
-      native_symbol: nativeSymbol,
-      normalized_symbol: projection.symbol as string,
-      timeframe: projection.timeframe as CandleRequest["timeframe"],
-      price_basis: projection.price_type as CandleRequest["price_basis"],
-      from: rangeFrom,
-      to: rangeTo,
-      limit: Math.max(1, projection.candles.length),
-    };
-    const coverage = record(projection.coverage, "coverage");
-    assertCanonicalCandleBatch({
-      request: candleRequest,
-      candles: projection.candles,
-      coverage: {
-        status: coverage.status,
-        range_start: rangeFrom,
-        range_end: rangeTo,
-        gaps: coverage.gaps,
-        unavailable_reason: coverage.unavailable_reason,
-      },
-      warnings: projection.warnings,
-    });
-    for (const candidate of projection.candles) {
-      const candle = record(candidate, "candle");
-      if (candle.provider !== projection.provider) invalid("projection_candle_provider");
-    }
-  }
+  const candleRequest: CandleRequest = {
+    product: projection.product as CandleRequest["product"],
+    native_symbol: nativeSymbol,
+    normalized_symbol: symbol,
+    timeframe: projection.timeframe as CandleRequest["timeframe"],
+    price_mode: projection.price_type as CandleRequest["price_mode"],
+    from: rangeFrom,
+    to: rangeTo,
+    limit: Math.max(1, projection.candles.length),
+  };
+  const coverage = record(projection.coverage, "coverage");
+  assertCanonicalCandleBatch({
+    provider: projection.provider,
+    request: candleRequest,
+    candles: projection.candles,
+    coverage: {
+      status: coverage.status,
+      range_start: rangeFrom,
+      range_end: rangeTo,
+      source: coverage.source,
+      fetched_at: coverage.fetched_at,
+      gaps: coverage.gaps,
+      unavailable_reason: coverage.unavailable_reason,
+    },
+    warnings: projection.warnings,
+  });
   if (!Array.isArray(projection.markers) || projection.markers.length > TRADE_CHART_MAX_MARKERS) invalid("markers");
   const markerKeysSeen = new Set<string>();
   const fillIds = new Set<string>();
   let previousMarker: Record<string, unknown> | null = null;
-  for (const candidate of projection.markers) {
+  for (let markerIndex = 0; markerIndex < projection.markers.length; markerIndex += 1) {
+    const candidate = projection.markers[markerIndex];
     validateMarker(candidate);
     const marker = candidate as Record<string, unknown>;
     if (markerKeysSeen.has(marker.marker_key as string) || fillIds.has(marker.fill_id as string)) invalid("marker_ids");
     markerKeysSeen.add(marker.marker_key as string);
     fillIds.add(marker.fill_id as string);
-    if (Date.parse(marker.occurred_at as string) < Date.parse(rangeFrom) || Date.parse(marker.occurred_at as string) > Date.parse(rangeTo)) invalid("marker_range");
+    if (marker.sort_order !== markerIndex) invalid("marker_sort_order");
+    const markerTime = Date.parse(marker.occurred_at as string);
+    if (markerTime < Date.parse(rangeFrom) || markerTime > Date.parse(rangeTo)) invalid("marker_range");
+    if (markerTime < Date.parse(openedAt) || markerTime > Date.parse(closedAt ?? rangeTo)) invalid("marker_lifetime");
     if (previousMarker !== null) {
       const timeDifference = Date.parse(marker.occurred_at as string) - Date.parse(previousMarker.occurred_at as string);
       if (timeDifference < 0
@@ -472,6 +496,6 @@ export function assertTradeChartProjection(value: unknown): TradeChartProjection
   }
   validateProjectionCoverage(projection.coverage, projection);
   if (!Array.isArray(projection.warnings) || projection.warnings.length > 50
-    || projection.warnings.some((warning) => typeof warning !== "string" || warning.length > 200)) invalid("warnings");
+    || projection.warnings.some((warning) => typeof warning !== "string" || !warningCodes.has(warning))) invalid("warnings");
   return value as TradeChartProjection;
 }

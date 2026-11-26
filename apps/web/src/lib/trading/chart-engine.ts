@@ -1,6 +1,7 @@
 import {
   TRADE_CHART_BASIC_DRAWING_TOOL_IDS,
   TRADE_CHART_DRAWING_TOOL_IDS,
+  TRADE_CHART_DRAWING_TOOL_SCHEMAS,
   TRADE_CHART_ELLIOTT_DRAWING_TOOL_IDS,
   TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS,
   type TradeChartDrawingToolId,
@@ -94,7 +95,7 @@ export interface WaveKbChartDrawingStyle {
 }
 
 export interface WaveKbChartDrawingText {
-  value: string;
+  value?: string;
   color?: string;
   fontSize?: number;
   fontFamily?: string;
@@ -205,7 +206,27 @@ function optionalColor(value: unknown, field: string): string | undefined {
   if (value === undefined) {
     return undefined;
   }
-  return boundedString(value, field, MAX_COLOR_LENGTH);
+  const color = boundedString(value, field, MAX_COLOR_LENGTH);
+  if (!/^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(color)) {
+    throw new Error(`${field} must be a bounded hexadecimal color`);
+  }
+  return color;
+}
+
+function assertAllowedKeys(value: Record<string, unknown>, allowed: readonly string[], field: string): void {
+  if (Reflect.ownKeys(value).some((key) => typeof key !== "string" || !allowed.includes(key))) {
+    throw new Error(`${field} contains unsupported fields`);
+  }
+}
+
+function safeText(value: string, field: string, maximum: number): string {
+  const result = value.slice(0, maximum);
+  const compact = result.toLowerCase().replaceAll(" ", "");
+  if (result.includes("<") || result.includes(">") || compact.includes("javascript:")
+    || compact.includes("data:text/html") || compact.includes("expression(") || compact.includes("url(")) {
+    throw new Error(`${field} contains unsafe text`);
+  }
+  return result;
 }
 
 function normalizeStyle(value: unknown): WaveKbChartDrawingStyle {
@@ -250,12 +271,14 @@ function normalizeStyle(value: unknown): WaveKbChartDrawingStyle {
 }
 
 function normalizeText(value: unknown): WaveKbChartDrawingText | undefined {
-  if (!isRecord(value) || typeof value.value !== "string") {
+  if (!isRecord(value)) {
     return undefined;
   }
-  const text: WaveKbChartDrawingText = {
-    value: value.value.slice(0, MAX_DRAWING_TEXT_LENGTH),
-  };
+  const text: WaveKbChartDrawingText = {};
+  if (value.value !== undefined) {
+    if (typeof value.value !== "string") throw new Error("drawing.text.value must be text");
+    text.value = safeText(value.value, "drawing.text.value", MAX_DRAWING_TEXT_LENGTH);
+  }
   const color = optionalColor(value.color, "drawing.text.color");
   if (color !== undefined) text.color = color;
   if (typeof value.fontSize === "number" && Number.isFinite(value.fontSize)) {
@@ -330,8 +353,11 @@ function normalizeDrawing(value: unknown, propertyField: "properties" | "props")
   if (typeof value.tool !== "string" || !WAVEKB_DRAWING_TOOLS.has(value.tool)) {
     throw new Error(`drawing ${id} uses an unsupported tool`);
   }
-  if (!Array.isArray(value.points) || value.points.length > MAX_DRAWING_POINTS) {
-    throw new Error(`drawing ${id} has too many points`);
+  const tool = value.tool as WaveKbChartDrawingToolId;
+  const schema = TRADE_CHART_DRAWING_TOOL_SCHEMAS[tool];
+  if (!Array.isArray(value.points) || value.points.length !== schema.pointCount
+    || value.points.length > MAX_DRAWING_POINTS) {
+    throw new Error(`drawing ${id} points must contain exactly ${schema.pointCount} anchors`);
   }
   const points = value.points.map((point, index) => {
     if (!isRecord(point)) {
@@ -348,16 +374,32 @@ function normalizeDrawing(value: unknown, propertyField: "properties" | "props")
     throw new Error(`drawing ${id}.paneIndex is out of range`);
   }
 
+  const styleSource = isRecord(value.style) ? value.style : {};
+  assertAllowedKeys(styleSource, schema.styleKeys, `drawing ${id}.style`);
+  const textSource = value.text;
+  if (schema.textRequired && (!isRecord(textSource) || typeof textSource.value !== "string")) {
+    throw new Error(`drawing ${id}.text is required`);
+  }
+  if (textSource !== undefined) {
+    if (!isRecord(textSource) || schema.textKeys.length === 0) throw new Error(`drawing ${id}.text is unsupported`);
+    assertAllowedKeys(textSource, schema.textKeys, `drawing ${id}.text`);
+  }
+  const propertySource = value[propertyField];
+  if (propertySource !== undefined) {
+    if (!isRecord(propertySource) || schema.propertyKeys.length === 0) throw new Error(`drawing ${id}.properties are unsupported`);
+    assertAllowedKeys(propertySource, schema.propertyKeys, `drawing ${id}.properties`);
+  }
+
   const drawing: WaveKbChartDrawing = {
     id,
-    tool: value.tool as WaveKbChartDrawingToolId,
+    tool,
     points,
-    style: normalizeStyle(value.style),
+    style: normalizeStyle(styleSource),
     paneIndex,
     zIndex: Math.min(10_000, Math.max(-10_000, zIndex)),
   };
-  const text = normalizeText(value.text);
-  const properties = normalizeProperties(value[propertyField]);
+  const text = normalizeText(textSource);
+  const properties = normalizeProperties(propertySource);
   if (text !== undefined) drawing.text = text;
   if (properties !== undefined) drawing.properties = properties;
   if (typeof value.locked === "boolean") drawing.locked = value.locked;

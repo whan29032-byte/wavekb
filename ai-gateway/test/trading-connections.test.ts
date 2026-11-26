@@ -11,6 +11,7 @@ import type {
 } from "../src/trading/providers/contracts.ts";
 import {
   ExchangeConnectionService,
+  SupabaseTradingConnectionStore,
   createExchangeConnectionService,
   type ConnectionRecord,
   type TradingConnectionStore,
@@ -29,7 +30,7 @@ const capabilities: ProviderCapabilities = {
   account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: [],
   candles: {
     availability: "unavailable", timeframes: [], maximum_page_size: null,
-    maximum_range_seconds: null, price_bases: [], unavailable_reason: "implementation_pending",
+    maximum_range_seconds: null, price_modes: [], unavailable_reason: "implementation_pending",
   },
 };
 
@@ -140,6 +141,39 @@ test("requires a read-only acknowledgement and returns only masked discovered ac
   });
   assert.equal(JSON.stringify(result).includes("secret-api"), false);
   assert.equal(JSON.stringify(result).includes("binance-1001"), false);
+});
+
+test("database capability boundaries normalize legacy rows to explicit candle unavailability", async () => {
+  const legacyCapabilities = { ...capabilities } as Record<string, unknown>;
+  delete legacyCapabilities.candles;
+  const row = {
+    id: "connection-legacy",
+    owner_id: owner,
+    provider: "binance",
+    credential_set_id: "credential-legacy",
+    external_account_id_hash: "hash",
+    account_label: "Legacy",
+    account_identifier_mask: "\u2022\u2022\u2022\u20221001",
+    account_currency: "USDT",
+    capabilities: legacyCapabilities,
+    history_coverage_started_at: null,
+    equity_tracking_started_at: null,
+    status: "active",
+    public_enabled: false,
+    last_synced_at: null,
+    last_error_code: "",
+  };
+  const store = new SupabaseTradingConnectionStore({ async request() { return [structuredClone(row)]; } });
+
+  const [normalized] = await store.list(owner);
+  assert.deepEqual(normalized?.capabilities.candles, {
+    availability: "unavailable",
+    timeframes: [],
+    maximum_page_size: null,
+    maximum_range_seconds: null,
+    price_modes: [],
+    unavailable_reason: "legacy_capability_missing",
+  });
 });
 
 test("factory rejects disabled providers before credential validation", async () => {

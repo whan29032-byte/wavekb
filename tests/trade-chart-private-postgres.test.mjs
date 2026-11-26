@@ -1242,10 +1242,18 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
     const validDrawing = {
       id: "line-1",
       tool: "trend-line",
-      points: [{ time: 100, price: 100 }],
+      points: [{ time: 100, price: 100 }, { time: 200, price: 110 }],
       style: { color: "#2962ff", lineWidth: 2, lineStyle: "solid" },
       paneIndex: 0,
       zIndex: 1,
+    };
+    const drawingPointCounts = {
+      "trend-line": 2, ray: 2, "horizontal-line": 1, "vertical-line": 1,
+      rectangle: 2, text: 1, "long-position": 3, "short-position": 3,
+      "fib-retracement": 2, "fib-extension": 3, "fib-time-zone": 2,
+      "fib-fan": 2, "fib-channel": 3, "elliott-impulse": 6,
+      "elliott-correction": 4, "elliott-triangle": 6,
+      "elliott-double-combo": 4, "elliott-triple-combo": 6,
     };
     const supportedIndicatorIds = [
       "sma", "ema", "wma", "hma", "vwap", "bollinger", "rsi", "macd",
@@ -1269,6 +1277,12 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
         ...validDrawing,
         id: `${tool}-${index}`,
         tool,
+        points: Array.from({ length: drawingPointCounts[tool] }, (_, pointIndex) => ({
+          time: 100 + pointIndex,
+          price: 100 + pointIndex,
+        })),
+        style: {},
+        ...(tool === "text" ? { text: { value: "note" } } : {}),
       })),
     });
     assert.deepEqual({
@@ -1326,7 +1340,12 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
       { drawings: [{ ...validDrawing, points: [{ time: 100, price: 100, command: "run" }] }] },
       { drawings: [{ ...validDrawing, points: [{ time: 10000000000001, price: 100 }] }] },
       { drawings: [{ ...validDrawing, points: [{ time: 100, price: Number.POSITIVE_INFINITY }] }] },
-      { drawings: [{ ...validDrawing, id: "text-1", tool: "text", text: { value: "<script>alert(1)</script>" } }] },
+      { drawings: [{ ...validDrawing, points: [validDrawing.points[0]] }] },
+      { drawings: [{ ...validDrawing, style: { levels: [{ ratio: 0.618 }] } }] },
+      { drawings: [{ ...validDrawing, id: "vertical-1", tool: "vertical-line", points: [validDrawing.points[0]], text: { color: "#fff" } }] },
+      { drawings: [{ ...validDrawing, id: "elliott-1", tool: "elliott-impulse", points: Array.from({ length: 6 }, (_, index) => ({ time: 100 + index, price: 100 + index })), properties: { showHeader: true } }] },
+      { drawings: [{ ...validDrawing, id: "text-1", tool: "text", points: [validDrawing.points[0]], style: {}, text: { value: "<script>alert(1)</script>" } }] },
+      { drawings: [{ ...validDrawing, id: "text-2", tool: "text", points: [validDrawing.points[0]], style: {} }] },
       { priceType: "bid" },
     ]) {
       await assert.rejects(
@@ -1357,6 +1376,13 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
     });
     assert.equal(exnessState.rows[0]?.price_type, "bid");
     assert.equal(exnessState.rows[0]?.version, 3);
+    const exnessBothState = await upsertChartState(database, {
+      priceType: "both",
+      expectedVersion: 3,
+      expectedUpdatedAt: exnessState.rows[0]?.updated_at,
+    });
+    assert.equal(exnessBothState.rows[0]?.price_type, "both");
+    assert.equal(exnessBothState.rows[0]?.version, 4);
     await assert.rejects(
       database.query("update public.trading_chart_states set timeframe = '1d' where cycle_id = $1", [cycleOne]),
       /permission denied/u,
@@ -1390,7 +1416,7 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
     await assert.rejects(insertCandle(), /duplicate key/u);
     for (const [index, value] of [
       [0, "kraken"], [3, "13m"], [4, "private_account"], [6, "bid"],
-      [15, "account_access_point"], [17, "invented"],
+      [15, "signed_account"], [17, "invented"],
     ]) {
       const invalid = [...validCandle];
       invalid[index] = value;
@@ -1398,6 +1424,21 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
       invalid[8] = new Date(new Date(invalid[7]).getTime() + 900_000).toISOString();
       await assert.rejects(insertCandle(invalid), /check constraint/u);
     }
+
+    const exnessBid = [
+      "exness", "cfd", "XAUUSD", "15m", "private_account",
+      `hmac-sha256-v1:${"a".repeat(64)}`, "bid",
+      "2026-11-24T07:00:00.000Z", "2026-11-24T07:15:00.000Z",
+      "2000", "2010", "1990", "2005", null, true, "signed_account",
+      "2026-11-24T07:15:01.000Z", "complete", false, false,
+      "2026-11-24T07:15:02.000Z", "2026-11-24T07:20:02.000Z",
+    ];
+    await insertCandle(exnessBid);
+    const exnessBoth = [...exnessBid];
+    exnessBoth[6] = "both";
+    exnessBoth[7] = "2026-11-25T07:00:00.000Z";
+    exnessBoth[8] = "2026-11-25T07:15:00.000Z";
+    await assert.rejects(insertCandle(exnessBoth), /check constraint/u);
 
     await actor(database, ownerOne);
     await assert.rejects(insertCandle([

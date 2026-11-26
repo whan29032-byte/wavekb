@@ -151,9 +151,9 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
       throw Object.assign(new Error("okx_non_usdt_product_not_supported"), { statusCode: 400 });
     }
     const uid = text(config.uid, "uid");
-    const suffix = uid.slice(-4);
+    const suffix = uid.slice(-4).padStart(4, "0");
     return [{
-      external_account_id: uid, account_label: `OKX · ${suffix}`, account_identifier_mask: `••••${suffix}`,
+      external_account_id: uid, account_label: `OKX · ${suffix}`, account_identifier_mask: `\u2022\u2022\u2022\u2022${suffix}`,
       account_currency: "USDT", products: capabilities(positionMode).products,
       read_only_status: permission.includes("read_only") ? "verified" : "user_attested",
     }];
@@ -208,7 +208,7 @@ export class OkxTradingProviderAdapter implements TradingProviderAdapter {
   }
 
   async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
-    return unavailableCandleBatch(request);
+    return unavailableCandleBatch(this.provider, request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

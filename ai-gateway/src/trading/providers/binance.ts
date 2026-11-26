@@ -123,11 +123,11 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
     const externalId = typeof account.accountAlias === "string" && account.accountAlias.length > 0
       ? account.accountAlias
       : `key-${createHash("sha256").update(resolved.apiKey).digest("hex").slice(0, 16)}`;
-    const suffix = externalId.slice(-4);
+    const suffix = externalId.slice(-4).padStart(4, "0");
     return [{
       external_account_id: externalId,
       account_label: `Binance USD-M · ${suffix}`,
-      account_identifier_mask: `••••${suffix}`,
+      account_identifier_mask: `\u2022\u2022\u2022\u2022${suffix}`,
       account_currency: "USDT",
       products: ["usdt_perpetual"],
       read_only_status: account.canTrade === false ? "verified" : "user_attested",
@@ -169,7 +169,7 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
   }
 
   async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
-    return unavailableCandleBatch(request);
+    return unavailableCandleBatch(this.provider, request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

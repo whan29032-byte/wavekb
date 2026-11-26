@@ -735,10 +735,8 @@ immutable
 set search_path = ''
 as $$
   select coalesce(jsonb_typeof(p_text) = 'object'
-    and p_text ? 'value'
     and not exists (select 1 from jsonb_object_keys(p_text) key where key not in ('value','color','fontSize','fontFamily','bold','italic','align','valign'))
-    and jsonb_typeof(p_text->'value') = 'string'
-    and public.trade_chart_plain_text_valid(p_text->>'value', 2000)
+    and (not (p_text ? 'value') or (jsonb_typeof(p_text->'value') = 'string' and public.trade_chart_plain_text_valid(p_text->>'value', 2000)))
     and (not (p_text ? 'color') or (jsonb_typeof(p_text->'color') = 'string' and public.trade_chart_color_valid(p_text->>'color')))
     and (not (p_text ? 'fontSize') or (jsonb_typeof(p_text->'fontSize') = 'number' and (p_text->>'fontSize')::numeric between 6 and 96))
     and (not (p_text ? 'fontFamily') or (jsonb_typeof(p_text->'fontFamily') = 'string' and p_text->>'fontFamily' ~ '^[A-Za-z0-9 _,-]{0,128}$'))
@@ -746,6 +744,60 @@ as $$
     and (not (p_text ? 'italic') or jsonb_typeof(p_text->'italic') = 'boolean')
     and (not (p_text ? 'align') or (jsonb_typeof(p_text->'align') = 'string' and p_text->>'align' in ('left','center','right')))
     and (not (p_text ? 'valign') or (jsonb_typeof(p_text->'valign') = 'string' and p_text->>'valign' in ('top','middle','bottom'))), false)
+$$;
+
+create or replace function public.trade_chart_drawing_tool_shape_valid(p_drawing jsonb)
+returns boolean
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  tool text := p_drawing->>'tool';
+  expected_points integer;
+  allowed_style text[];
+  allowed_text text[] := array['color','fontSize','fontFamily','bold','italic','align','valign'];
+  allowed_properties text[] := array[]::text[];
+begin
+  case tool
+    when 'trend-line' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','extendLeft','extendRight']; allowed_text := array[]::text[];
+    when 'ray' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','extendLeft','extendRight']; allowed_text := array[]::text[];
+    when 'horizontal-line' then expected_points := 1; allowed_style := array['color','lineWidth','lineStyle','showLabels'];
+    when 'vertical-line' then expected_points := 1; allowed_style := array['color','lineWidth','lineStyle']; allowed_text := array[]::text[];
+    when 'rectangle' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','fill','fillColor','fillOpacity']; allowed_text := array_prepend('value', allowed_text);
+    when 'text' then expected_points := 1; allowed_style := array[]::text[]; allowed_text := array_prepend('value', allowed_text);
+    when 'long-position' then expected_points := 3; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
+    when 'short-position' then expected_points := 3; allowed_style := array['color','lineWidth','lineStyle','fillOpacity','showLabels']; allowed_properties := array['showHeader','showLossSize','showTargetLabel','showStopLabel','showPrices','profitColor','lossColor'];
+    when 'fib-retracement' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels','fill','fillColor','fillOpacity','extendLeft','extendRight'];
+    when 'fib-extension' then expected_points := 3; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels','fill','fillColor','fillOpacity','extendLeft','extendRight'];
+    when 'fib-time-zone' then expected_points := 2; allowed_style := array['color','lineWidth','lineStyle','levels','showLabels'];
+    when 'fib-fan' then expected_points := 2; allowed_style := array['lineWidth','lineStyle','levels','showLabels'];
+    when 'fib-channel' then expected_points := 3; allowed_style := array['lineWidth','lineStyle','levels','showLabels','extendLeft','extendRight'];
+    when 'elliott-impulse' then expected_points := 6; allowed_style := array['color','lineWidth','lineStyle','showLabels']; allowed_properties := array['degree','labelStyle'];
+    when 'elliott-correction' then expected_points := 4; allowed_style := array['color','lineWidth','lineStyle','showLabels']; allowed_properties := array['degree','labelStyle'];
+    when 'elliott-triangle' then expected_points := 6; allowed_style := array['color','lineWidth','lineStyle','showLabels']; allowed_properties := array['degree','labelStyle'];
+    when 'elliott-double-combo' then expected_points := 4; allowed_style := array['color','lineWidth','lineStyle','showLabels']; allowed_properties := array['degree','labelStyle'];
+    when 'elliott-triple-combo' then expected_points := 6; allowed_style := array['color','lineWidth','lineStyle','showLabels']; allowed_properties := array['degree','labelStyle'];
+    else return false;
+  end case;
+
+  if jsonb_array_length(p_drawing->'points') <> expected_points
+     or exists (select 1 from jsonb_object_keys(p_drawing->'style') key where not (key = any(allowed_style))) then
+    return false;
+  end if;
+  if tool = 'text' and (not (p_drawing ? 'text') or not (p_drawing->'text' ? 'value')) then return false; end if;
+  if p_drawing ? 'text' then
+    if cardinality(allowed_text) = 0
+       or exists (select 1 from jsonb_object_keys(p_drawing->'text') key where not (key = any(allowed_text))) then return false; end if;
+  end if;
+  if p_drawing ? 'properties' then
+    if cardinality(allowed_properties) = 0
+       or exists (select 1 from jsonb_object_keys(p_drawing->'properties') key where not (key = any(allowed_properties))) then return false; end if;
+  end if;
+  return true;
+exception when others then
+  return false;
+end;
 $$;
 
 create or replace function public.trade_chart_drawing_properties_valid(p_properties jsonb)
@@ -797,7 +849,8 @@ begin
        )
        or jsonb_typeof(drawing->'points') <> 'array'
        or jsonb_array_length(drawing->'points') > 32
-       or not public.trade_chart_drawing_style_valid(drawing->'style') then return false; end if;
+       or not public.trade_chart_drawing_style_valid(drawing->'style')
+       or not public.trade_chart_drawing_tool_shape_valid(drawing) then return false; end if;
     for point in select value from jsonb_array_elements(drawing->'points')
     loop
       if jsonb_typeof(point) <> 'object'
@@ -966,7 +1019,7 @@ create table public.trading_candle_cache (
       and scope_hash ~ '^hmac-sha256-v1:[0-9a-f]{64}$'
     )
   ),
-  price_type text not null check (price_type in ('trade', 'mark', 'bid', 'ask', 'both')),
+  price_type text not null check (price_type in ('trade', 'mark', 'bid', 'ask')),
   open_time timestamptz not null,
   close_time timestamptz not null,
   open_price numeric(38, 18) not null check (open_price > 0),
@@ -975,7 +1028,7 @@ create table public.trading_candle_cache (
   close_price numeric(38, 18) not null check (close_price > 0),
   volume numeric(38, 18) check (volume is null or volume >= 0),
   is_final boolean not null,
-  source_host_kind text not null check (source_host_kind in ('public_api', 'account_access_point')),
+  source_host_kind text not null check (source_host_kind in ('public_api', 'signed_account')),
   source_timestamp timestamptz not null,
   coverage_status text not null check (coverage_status in ('complete', 'partial', 'gapped', 'stale')),
   gap_before boolean not null default false,
@@ -999,8 +1052,8 @@ create table public.trading_candle_cache (
       provider = 'exness'
       and product = 'cfd'
       and scope_kind = 'private_account'
-      and price_type in ('bid', 'ask', 'both')
-      and source_host_kind = 'account_access_point'
+      and price_type in ('bid', 'ask')
+      and source_host_kind = 'signed_account'
     )
     or (
       provider in ('binance', 'okx', 'bybit', 'bitget')

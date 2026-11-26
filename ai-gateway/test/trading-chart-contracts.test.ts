@@ -9,7 +9,10 @@ import {
 const validDrawing = {
   id: "line-1",
   tool: "trend-line" as const,
-  points: [{ time: 1_795_520_280_000, price: 60000 }],
+  points: [
+    { time: 1_795_520_280_000, price: 60000 },
+    { time: 1_795_520_340_000, price: 60100 },
+  ],
   style: { color: "#2962ff", lineWidth: 2, lineStyle: "solid" as const },
   paneIndex: 0,
   zIndex: 1,
@@ -39,7 +42,7 @@ function validProjection(): TradeChartProjection {
       native_symbol: "BTCUSDT",
       normalized_symbol: "BTC/USDT",
       timeframe: "1m",
-      price_basis: "trade",
+      series_basis: "trade",
       open_time: "2026-11-24T07:58:00.000Z",
       close_time: "2026-11-24T07:59:00.000Z",
       open: "60000.000000000000000001",
@@ -52,7 +55,7 @@ function validProjection(): TradeChartProjection {
       fetched_at: "2026-11-24T08:00:00.000Z",
       status: "final",
       gap_before: false,
-      gap_after: false,
+      gap_after: true,
     }],
     markers: [{
       marker_key: "fill-1",
@@ -65,7 +68,7 @@ function validProjection(): TradeChartProjection {
       side: "buy",
       position_side: "long",
       liquidity: "taker",
-      provider_fill_id_mask: "••••a1b2",
+      provider_fill_id_mask: "\u2022\u2022\u2022\u2022a1b2",
       annotation: null,
     }],
     chart_state: {
@@ -81,13 +84,13 @@ function validProjection(): TradeChartProjection {
       updated_at: "2026-11-24T08:00:00.000Z",
     },
     coverage: {
-      status: "complete",
+      status: "gapped",
       source: "public_api",
       fetched_at: "2026-11-24T08:00:00.000Z",
-      gaps: [],
+      gaps: [{ series_basis: "trade", from: "2026-11-24T07:59:00.000Z", to: "2026-11-24T08:00:00.000Z" }],
       unavailable_reason: null,
     },
-    warnings: [],
+    warnings: ["historical_gap"],
   };
 }
 
@@ -109,8 +112,28 @@ test("rejects unknown indicator settings and unsafe or unsupported drawings", ()
   assert.throws(() => assertChartStateV1(unknownTool), /trade_chart_invalid_drawing_tool/);
 
   const unsafeText = structuredClone(validProjection().chart_state) as Record<string, any>;
-  unsafeText.drawings[0] = { ...validDrawing, id: "text-1", tool: "text", text: { value: "<script>alert(1)</script>" } };
+  unsafeText.drawings[0] = { ...validDrawing, id: "text-1", tool: "text", points: [validDrawing.points[0]], style: {}, text: { value: "<script>alert(1)</script>" } };
   assert.throws(() => assertChartStateV1(unsafeText), /trade_chart_invalid_drawing_text/);
+
+  const wrongPointCount = structuredClone(validProjection().chart_state) as Record<string, any>;
+  wrongPointCount.drawings[0].points = [wrongPointCount.drawings[0].points[0]];
+  assert.throws(() => assertChartStateV1(wrongPointCount), /trade_chart_invalid_drawing_points/);
+
+  const fibOnlyStyle = structuredClone(validProjection().chart_state) as Record<string, any>;
+  fibOnlyStyle.drawings[0].style.levels = [{ ratio: 0.618 }];
+  assert.throws(() => assertChartStateV1(fibOnlyStyle), /trade_chart_invalid_drawing_style/);
+
+  const elliottOnlyProperties = structuredClone(validProjection().chart_state) as Record<string, any>;
+  elliottOnlyProperties.drawings[0].properties = { degree: "primary" };
+  assert.throws(() => assertChartStateV1(elliottOnlyProperties), /trade_chart_invalid_drawing_properties/);
+
+  const textOnVertical = structuredClone(validProjection().chart_state) as Record<string, any>;
+  textOnVertical.drawings[0] = { ...validDrawing, tool: "vertical-line", points: [validDrawing.points[0]], text: { color: "#fff" } };
+  assert.throws(() => assertChartStateV1(textOnVertical), /trade_chart_invalid_drawing_text/);
+
+  const missingTextValue = structuredClone(validProjection().chart_state) as Record<string, any>;
+  missingTextValue.drawings[0] = { ...validDrawing, tool: "text", points: [validDrawing.points[0]], style: {}, text: { color: "#fff" } };
+  assert.throws(() => assertChartStateV1(missingTextValue), /trade_chart_invalid_drawing_text/);
 });
 
 test("rejects duplicate IDs, oversized state, and non-finite coordinates", () => {
@@ -136,18 +159,63 @@ test("rejects projection leaks, float marker values, and non-UTC or unordered fa
   floatQuantity.markers[0].allocated_quantity = 0.1;
   assert.throws(() => assertTradeChartProjection(floatQuantity), /trade_chart_invalid_marker_quantity/);
 
+  const tooManyIntegerDigits = structuredClone(validProjection()) as Record<string, any>;
+  tooManyIntegerDigits.markers[0].allocated_quantity = "123456789012345678901";
+  assert.throws(() => assertTradeChartProjection(tooManyIntegerDigits), /trade_chart_invalid_marker_quantity/);
+
   const offsetTime = structuredClone(validProjection()) as Record<string, any>;
   offsetTime.markers[0].occurred_at = "2026-11-24T15:58:30+08:00";
   assert.throws(() => assertTradeChartProjection(offsetTime), /trade_chart_invalid_marker_time/);
 
   const unordered = structuredClone(validProjection()) as Record<string, any>;
+  unordered.opened_at = "2026-11-24T07:58:00.000Z";
   unordered.markers.push({
     ...unordered.markers[0],
     marker_key: "fill-0",
     fill_id: "900719925474099312346",
     occurred_at: "2026-11-24T07:58:20.000Z",
+    sort_order: 1,
   });
   assert.throws(() => assertTradeChartProjection(unordered), /trade_chart_invalid_marker_order/);
+
+  const skippedSortOrder = structuredClone(validProjection()) as Record<string, any>;
+  skippedSortOrder.markers[0].sort_order = 1;
+  assert.throws(() => assertTradeChartProjection(skippedSortOrder), /trade_chart_invalid_marker_sort_order/);
+
+  const beforeCycle = structuredClone(validProjection()) as Record<string, any>;
+  beforeCycle.markers[0].occurred_at = "2026-11-24T07:58:20.000Z";
+  assert.throws(() => assertTradeChartProjection(beforeCycle), /trade_chart_invalid_marker_lifetime/);
+
+  const unsafeMask = structuredClone(validProjection()) as Record<string, any>;
+  unsafeMask.markers[0].provider_fill_id_mask = "\u2022\u2022\u2022\u202212345678901234567890";
+  assert.throws(() => assertTradeChartProjection(unsafeMask), /trade_chart_invalid_marker_mask/);
+
+  const unsafeSymbol = structuredClone(validProjection()) as Record<string, any>;
+  unsafeSymbol.symbol = "BTC/USDT api_key=secret";
+  unsafeSymbol.candles[0].normalized_symbol = unsafeSymbol.symbol;
+  assert.throws(() => assertTradeChartProjection(unsafeSymbol), /trade_chart_invalid_projection_symbol/);
+
+  const rawWarning = structuredClone(validProjection()) as Record<string, any>;
+  rawWarning.warnings = ["upstream said api_key=secret"];
+  assert.throws(() => assertTradeChartProjection(rawWarning), /warnings/);
+});
+
+test("rejects false candle coverage evidence and accepts explicit empty coverage", () => {
+  const wrongSource = structuredClone(validProjection()) as Record<string, any>;
+  wrongSource.coverage.source = "signed_account";
+  assert.throws(() => assertTradeChartProjection(wrongSource), /canonical_candles_invalid_coverage_source/);
+
+  const falseComplete = structuredClone(validProjection()) as Record<string, any>;
+  falseComplete.candles = [];
+  falseComplete.coverage.status = "complete";
+  falseComplete.coverage.gaps = [];
+  falseComplete.warnings = [];
+  assert.throws(() => assertTradeChartProjection(falseComplete), /canonical_candles_invalid_empty/);
+
+  const empty = structuredClone(falseComplete) as Record<string, any>;
+  empty.coverage.status = "empty";
+  empty.warnings = ["empty_range"];
+  assert.equal(assertTradeChartProjection(empty), empty);
 });
 
 test("rejects hidden and symbol-keyed chart fields", () => {

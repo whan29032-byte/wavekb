@@ -135,9 +135,9 @@ export class BitgetTradingProviderAdapter implements TradingProviderAdapter {
     const mode = text(usdt.posMode ?? "hedge_mode", "position_mode");
     if (mode !== "hedge_mode" && mode !== "one_way_mode") throw Object.assign(new Error("bitget_unknown_position_mode"), { statusCode: 400 });
     const id = `key-${createHash("sha256").update(credentials.apiKey).digest("hex").slice(0, 16)}`;
-    const suffix = id.slice(-4);
+    const suffix = id.slice(-4).padStart(4, "0");
     return [{
-      external_account_id: id, account_label: `Bitget · ${suffix}`, account_identifier_mask: `••••${suffix}`,
+      external_account_id: id, account_label: `Bitget · ${suffix}`, account_identifier_mask: `\u2022\u2022\u2022\u2022${suffix}`,
       account_currency: "USDT", products: ["usdt_perpetual"], read_only_status: "user_attested",
     }];
   }
@@ -198,7 +198,7 @@ export class BitgetTradingProviderAdapter implements TradingProviderAdapter {
   }
 
   async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
-    return unavailableCandleBatch(request);
+    return unavailableCandleBatch(this.provider, request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

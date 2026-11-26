@@ -16,7 +16,7 @@ function account(): ProviderAccount {
       position_grouping: "hedge_zero_cycle", has_position_id: false, has_realized_pnl: true, has_fee_asset: true,
       has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true, account_currency: "USDT",
       settlement_assets: ["USDT"], valuation_pairs: ["USDT/USD"],
-      candles: { availability: "unavailable", timeframes: [], maximum_page_size: null, maximum_range_seconds: null, price_bases: [], unavailable_reason: "implementation_pending" },
+      candles: { availability: "unavailable", timeframes: [], maximum_page_size: null, maximum_range_seconds: null, price_modes: [], unavailable_reason: "implementation_pending" },
     },
   };
 }

@@ -37,7 +37,7 @@ const capabilities: ProviderCapabilities = {
   account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: [],
   candles: {
     availability: "unavailable", timeframes: [], maximum_page_size: null,
-    maximum_range_seconds: null, price_bases: [], unavailable_reason: "implementation_pending",
+    maximum_range_seconds: null, price_modes: [], unavailable_reason: "implementation_pending",
   },
 };
 
@@ -92,8 +92,11 @@ class Adapter implements TradingProviderAdapter {
   normalizeHistory(page: ProviderHistoryPage) { return page.payload as CanonicalHistoryBatch; }
   async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
     return {
-      request, candles: [],
-      coverage: { status: "unavailable", range_start: request.from, range_end: request.to, gaps: [], unavailable_reason: "implementation_pending" },
+      provider: this.provider, request, candles: [],
+      coverage: {
+        status: "unavailable", range_start: request.from, range_end: request.to,
+        source: null, fetched_at: null, gaps: [], unavailable_reason: "implementation_pending",
+      },
       warnings: ["candles_unavailable"],
     };
   }

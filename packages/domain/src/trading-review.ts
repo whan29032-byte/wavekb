@@ -22,14 +22,29 @@ export type TradeChartTimeframe = (typeof TRADE_CHART_TIMEFRAMES)[number];
 export const TRADE_CHART_PRICE_TYPES = ["trade", "mark", "bid", "ask", "both"] as const;
 export type TradeChartPriceType = (typeof TRADE_CHART_PRICE_TYPES)[number];
 
-export const TRADE_CHART_CANDLE_PRICE_BASES = ["trade", "bid", "ask", "both"] as const;
-export type TradeChartCandlePriceBasis = (typeof TRADE_CHART_CANDLE_PRICE_BASES)[number];
+export const TRADE_CHART_CANDLE_SERIES_BASES = ["trade", "mark", "bid", "ask"] as const;
+export type TradeChartCandleSeriesBasis = (typeof TRADE_CHART_CANDLE_SERIES_BASES)[number];
+/** @deprecated Use TRADE_CHART_CANDLE_SERIES_BASES. */
+export const TRADE_CHART_CANDLE_PRICE_BASES = TRADE_CHART_CANDLE_SERIES_BASES;
+/** @deprecated Use TradeChartCandleSeriesBasis. */
+export type TradeChartCandlePriceBasis = TradeChartCandleSeriesBasis;
 
-export const TRADE_CHART_CANDLE_SOURCES = ["public_api", "account_access_point"] as const;
+export const TRADE_CHART_CANDLE_SOURCES = ["public_api", "signed_account"] as const;
 export type TradeChartCandleSource = (typeof TRADE_CHART_CANDLE_SOURCES)[number];
 
-export const TRADE_CHART_COVERAGE_STATUSES = ["complete", "partial", "gapped", "stale", "unavailable"] as const;
+export const TRADE_CHART_COVERAGE_STATUSES = ["complete", "partial", "gapped", "stale", "empty", "unavailable"] as const;
 export type TradeChartCoverageStatus = (typeof TRADE_CHART_COVERAGE_STATUSES)[number];
+
+export const TRADE_CHART_WARNING_CODES = [
+  "historical_gap",
+  "candles_unavailable",
+  "empty_range",
+  "partial_coverage",
+  "stale_cache",
+  "rate_limited",
+  "provider_limit_reached",
+] as const;
+export type TradeChartWarningCode = (typeof TRADE_CHART_WARNING_CODES)[number];
 
 export const TRADE_CHART_INDICATOR_IDS = [
   "sma", "ema", "wma", "hma", "vwap", "bollinger", "rsi", "macd", "stochastic", "adx", "atr",
@@ -53,6 +68,52 @@ export const TRADE_CHART_DRAWING_TOOL_IDS = [
   ...TRADE_CHART_ELLIOTT_DRAWING_TOOL_IDS,
 ] as const;
 export type TradeChartDrawingToolId = (typeof TRADE_CHART_DRAWING_TOOL_IDS)[number];
+
+export type TradeChartDrawingFieldKey =
+  | "color" | "lineWidth" | "lineStyle" | "fill" | "fillColor" | "fillOpacity"
+  | "extendLeft" | "extendRight" | "showLabels" | "levels";
+export type TradeChartDrawingTextKey =
+  | "value" | "color" | "fontSize" | "fontFamily" | "bold" | "italic" | "align" | "valign";
+export type TradeChartDrawingPropertyKey =
+  | "degree" | "labelStyle" | "showHeader" | "showLossSize" | "showTargetLabel"
+  | "showStopLabel" | "showPrices" | "profitColor" | "lossColor";
+
+const BASE_LINE_STYLE = ["color", "lineWidth", "lineStyle"] as const;
+const LABEL_TEXT_STYLE = ["color", "fontSize", "fontFamily", "bold", "italic", "align", "valign"] as const;
+const CONTENT_TEXT_STYLE = ["value", ...LABEL_TEXT_STYLE] as const;
+const POSITION_PROPERTIES = [
+  "showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices", "profitColor", "lossColor",
+] as const;
+const ELLIOTT_PROPERTIES = ["degree", "labelStyle"] as const;
+
+export type TradeChartDrawingToolSchema = {
+  pointCount: number;
+  styleKeys: readonly TradeChartDrawingFieldKey[];
+  textKeys: readonly TradeChartDrawingTextKey[];
+  textRequired: boolean;
+  propertyKeys: readonly TradeChartDrawingPropertyKey[];
+};
+
+export const TRADE_CHART_DRAWING_TOOL_SCHEMAS = {
+  "trend-line": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight"], textKeys: [], textRequired: false, propertyKeys: [] },
+  ray: { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight"], textKeys: [], textRequired: false, propertyKeys: [] },
+  "horizontal-line": { pointCount: 1, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "vertical-line": { pointCount: 1, styleKeys: BASE_LINE_STYLE, textKeys: [], textRequired: false, propertyKeys: [] },
+  rectangle: { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "fill", "fillColor", "fillOpacity"], textKeys: CONTENT_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  text: { pointCount: 1, styleKeys: [], textKeys: CONTENT_TEXT_STYLE, textRequired: true, propertyKeys: [] },
+  "long-position": { pointCount: 3, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
+  "short-position": { pointCount: 3, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
+  "fib-retracement": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels", "fill", "fillColor", "fillOpacity", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-extension": { pointCount: 3, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels", "fill", "fillColor", "fillOpacity", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-time-zone": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-fan": { pointCount: 2, styleKeys: ["lineWidth", "lineStyle", "levels", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-channel": { pointCount: 3, styleKeys: ["lineWidth", "lineStyle", "levels", "showLabels", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "elliott-impulse": { pointCount: 6, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-correction": { pointCount: 4, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-triangle": { pointCount: 6, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-double-combo": { pointCount: 4, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-triple-combo": { pointCount: 6, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+} as const satisfies Record<TradeChartDrawingToolId, TradeChartDrawingToolSchema>;
 
 export const TRADE_CHART_MAX_CANDLES = 3_000;
 export const TRADE_CHART_MAX_MARKERS = 10_000;
@@ -93,7 +154,7 @@ export type DrawingStyleV1 = {
 };
 
 export type DrawingTextV1 = {
-  value: string;
+  value?: string;
   color?: string;
   fontSize?: number;
   fontFamily?: string;
@@ -147,7 +208,7 @@ export type TradeChartCandleV1 = {
   native_symbol: string;
   normalized_symbol: string;
   timeframe: TradeChartTimeframe;
-  price_basis: TradeChartCandlePriceBasis;
+  series_basis: TradeChartCandleSeriesBasis;
   open_time: string;
   close_time: string;
   open: string;
@@ -187,7 +248,7 @@ export type FillMarker = {
   annotation: FillMarkerAnnotationV1 | null;
 };
 
-export type TradeChartGapV1 = { from: string; to: string };
+export type TradeChartGapV1 = { series_basis: TradeChartCandleSeriesBasis; from: string; to: string };
 
 export type TradeChartProjection = {
   schema_version: typeof TRADE_CHART_PROJECTION_SCHEMA_VERSION;
@@ -213,7 +274,7 @@ export type TradeChartProjection = {
     gaps: TradeChartGapV1[];
     unavailable_reason: string | null;
   };
-  warnings: string[];
+  warnings: TradeChartWarningCode[];
 };
 
 export function isTradingProvider(value: unknown): value is TradingProvider {

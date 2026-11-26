@@ -145,9 +145,9 @@ export class BybitTradingProviderAdapter implements TradingProviderAdapter {
       throw Object.assign(new Error("bybit_non_usdt_product_not_supported"), { statusCode: 400 });
     }
     const id = text(keyInfo.result.id, "account_id");
-    const suffix = id.slice(-4);
+    const suffix = id.slice(-4).padStart(4, "0");
     return [{
-      external_account_id: id, account_label: `Bybit · ${suffix}`, account_identifier_mask: `••••${suffix}`,
+      external_account_id: id, account_label: `Bybit · ${suffix}`, account_identifier_mask: `\u2022\u2022\u2022\u2022${suffix}`,
       account_currency: "USDT", products: ["usdt_perpetual"], read_only_status: "verified",
     }];
   }
@@ -205,7 +205,7 @@ export class BybitTradingProviderAdapter implements TradingProviderAdapter {
   }
 
   async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
-    return unavailableCandleBatch(request);
+    return unavailableCandleBatch(this.provider, request);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {
