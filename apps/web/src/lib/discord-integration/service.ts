@@ -184,8 +184,14 @@ function isUuid(value: unknown): value is string {
 
 function validGamePayload(action: DiscordGameAction, payload: DiscordGamePayload) {
   if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > 4096) return false;
-  if (["status", "daily_checkin", "pet_shop", "pet_list", "market_view"].includes(action)) {
+  if (["status", "daily_checkin", "pet_shop", "market_view"].includes(action)) {
     return exactKeys(payload, []);
+  }
+  if (action === "pet_list") {
+    return exactKeys(payload, ["page"])
+      && Number.isInteger(payload.page)
+      && Number(payload.page) >= 1
+      && Number(payload.page) <= 10000;
   }
   if (["work", "skill_collection", "pet_adopt"].includes(action)) {
     return exactKeys(payload, ["path"]) && isPath(payload.path);

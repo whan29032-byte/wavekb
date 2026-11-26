@@ -276,7 +276,25 @@ describe("executeDiscordGameAction", () => {
       action: "market_bet",
       payload: { symbol: "academy", direction: "up", stake: 9, admin: true },
     }, { config, store: database.value })).rejects.toMatchObject({ code: "invalid_game_payload", status: 400 });
-    expect(database.calls).toEqual([]);
+    await expect(executeDiscordGameAction({
+      ...base,
+      action: "pet_list",
+      payload: { page: 2 },
+    }, { config, store: database.value })).resolves.toEqual({ action: "pet_list" });
+    await expect(executeDiscordGameAction({
+      ...base,
+      action: "pet_list",
+      payload: { page: 0 },
+    }, { config, store: database.value })).rejects.toMatchObject({ code: "invalid_game_payload", status: 400 });
+    expect(database.calls).toEqual([{
+      operation: "game",
+      value: {
+        discordUserId: "111111111111111111",
+        requestId: "222222222222222222",
+        action: "pet_list",
+        payload: { page: 2 },
+      },
+    }]);
   });
 
   it("maps known game conflicts without leaking unknown database details", async () => {

@@ -188,6 +188,22 @@ test("web release follows the Gateway-owned cutover and requires authenticated t
   assert.equal(production.env.E2E_POSTING_IDENTIFIER, "${{ secrets.E2E_POSTING_IDENTIFIER }}");
 });
 
+test("backend release installs and verifies the daily Discord market settlement timer", () => {
+  const upload = backendSteps.find((step) => /Upload gateway archive and systemd units/.test(step.name));
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  for (const unit of ["elliott-wave-discord-game-settlement.service", "elliott-wave-discord-game-settlement.timer"]) {
+    assert.match(upload.run, new RegExp(unit.replaceAll(".", "\\.")));
+    assert.match(activation.run, new RegExp(unit.replaceAll(".", "\\.")));
+  }
+  assert.match(activation.run, /systemctl enable --now elliott-wave-discord-game-settlement\.timer/);
+  assert.match(activation.run, /systemctl start elliott-wave-discord-game-settlement\.service/);
+  assert.match(activation.run, /is-active elliott-wave-discord-game-settlement\.timer/);
+
+  const timer = fs.readFileSync(new URL("../deployment/systemd/elliott-wave-discord-game-settlement.timer", import.meta.url), "utf8");
+  assert.match(timer, /OnCalendar=\*-\*-\* 14:00:00 UTC/);
+  assert.match(timer, /Persistent=true/);
+});
+
 test("trading rollback restores enabled and active state instead of unconditionally starting units", () => {
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
   const start = activation.run.indexOf('for trading_unit in elliott-wave-trading-sync.service elliott-wave-trading-sync.timer; do', activation.run.indexOf("sudo systemctl daemon-reload"));
@@ -377,7 +393,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
 });
 
-test("every known backend marker selects only its unapplied migration suffix and unknown markers stop", () => {
+test("every known backend marker selects its suffix, replays Discord hardening, and unknown markers stop", () => {
   const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
   const suffixStart = migrationStep.run.indexOf("# Apply only the unapplied marker suffix after baseline verification.");
   assert.ok(suffixStart > 0);
@@ -427,7 +443,10 @@ ${selection}`;
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
     const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
-    assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
+    const expected = offset === migrations.length
+      ? [migrations.at(-1)]
+      : migrations.slice(offset);
+    assert.deepEqual(selected, expected.map((name) => `supabase/migrations/${name}`), marker);
   }
   for (const marker of ["", "202609090001", "202610100006", "invalid"]) {
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });

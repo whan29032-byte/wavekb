@@ -1,5 +1,12 @@
 begin;
 
+-- The relationship game was removed before release. These drops also clean up
+-- any environment that briefly applied an earlier draft of this migration.
+drop table if exists public.discord_game_marriage_members cascade;
+drop table if exists public.discord_game_marriage_proposals cascade;
+drop table if exists public.discord_game_marriages cascade;
+drop function if exists public.discord_game_member_json(uuid);
+
 create table if not exists public.discord_game_requests (
   request_id text primary key check (request_id ~ '^[0-9]{17,20}$'),
   user_id uuid not null references public.profiles(id) on delete cascade,
@@ -176,17 +183,6 @@ begin
 end;
 $$;
 
-create or replace function public.discord_game_member_json(p_user uuid)
-returns jsonb language sql stable security definer set search_path='' as $$
-  select pg_catalog.jsonb_build_object(
-    'uid', p.public_uid,
-    'displayName', p.display_name,
-    'avatarUrl', p.avatar_url,
-    'discordUserId', p.discord_user_id
-  )
-  from public.profiles p where p.id=p_user
-$$;
-
 create or replace function public.discord_game_debit(
   p_user uuid, p_action text, p_reference text, p_points integer, p_note text, p_now timestamptz
 ) returns integer language plpgsql security definer set search_path='' as $$
@@ -296,6 +292,11 @@ begin
 end;
 $$;
 
+create or replace function public.discord_game_settle_markets()
+returns void language sql security definer set search_path='' as $$
+  select public.discord_game_settle_markets(pg_catalog.clock_timestamp())
+$$;
+
 create or replace function public.discord_game_new_pet(
   p_user uuid,p_path text,p_rarity text,p_source text,p_pool text,p_now timestamptz
 ) returns jsonb language plpgsql security definer set search_path='' as $$
@@ -359,6 +360,8 @@ declare
   v_daily_stake integer;
   v_entity_id uuid;
   v_name text;
+  v_page integer;
+  v_total integer;
 begin
   if p_discord_user_id is null or p_discord_user_id !~ '^[0-9]{17,20}$' then
     raise exception 'invalid_discord_user';
@@ -388,7 +391,6 @@ begin
     return v_existing.response;
   end if;
 
-  perform public.discord_game_settle_markets(p_now);
   perform public.ensure_reward_wallet(v_profile.id);
 
   if p_action='status' then
@@ -573,14 +575,23 @@ begin
     v_response:=pg_catalog.jsonb_build_object('action','pet_adopt','pet',v_pet);
 
   elsif p_action='pet_list' then
+    v_page:=coalesce((p_payload->>'page')::integer,0);
+    if v_page<1 or v_page>10000 then raise exception 'pet_page_invalid'; end if;
+    select count(*)::integer into v_total from public.discord_game_pets where user_id=v_profile.id;
     select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(
       'id',id,'name',species_name,'nickname',nickname,'rarity',rarity,'route',route,
       'emoji',emoji,'source',source,'active',active
     ) order by created_at desc),'[]'::jsonb) into v_pets
-    from public.discord_game_pets where user_id=v_profile.id;
+    from (
+      select * from public.discord_game_pets where user_id=v_profile.id
+      order by created_at desc,id desc limit 25 offset (v_page-1)*25
+    ) page;
     select coalesce(pg_catalog.jsonb_object_agg(egg_key,quantity),'{}'::jsonb) into v_draws
     from public.discord_game_eggs where user_id=v_profile.id and quantity>0;
-    v_response:=pg_catalog.jsonb_build_object('action','pet_list','pets',v_pets,'eggs',v_draws);
+    v_response:=pg_catalog.jsonb_build_object(
+      'action','pet_list','pets',v_pets,'eggs',v_draws,'page',v_page,'pageSize',25,
+      'total',v_total,'totalPages',greatest(1,ceil(v_total/25.0)::integer)
+    );
 
   elsif p_action='pet_rename' then
     v_name:=pg_catalog.btrim(p_payload->>'name');
@@ -621,6 +632,9 @@ begin
     if v_direction not in ('up','down') then raise exception 'market_direction_invalid'; end if;
     if v_stake<10 or v_stake>500 then raise exception 'market_stake_invalid'; end if;
     perform public.discord_game_ensure_market(v_day,p_now);
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('discord_market_bet:'||v_profile.id::text||':'||v_day::text,0)
+    );
     select coalesce(sum(stake),0) into v_daily_stake from public.discord_market_bets
     where user_id=v_profile.id and market_date=v_day;
     if v_daily_stake+v_stake>500 then raise exception 'market_daily_limit'; end if;
@@ -649,15 +663,16 @@ create or replace function public.discord_game_action(
   )
 $$;
 
-revoke all on function public.discord_game_member_json(uuid) from public,anon,authenticated,service_role;
 revoke all on function public.discord_game_debit(uuid,text,text,integer,text,timestamptz) from public,anon,authenticated,service_role;
 revoke all on function public.discord_game_daily_checkin_for_user(uuid,timestamptz) from public,anon,authenticated,service_role;
 revoke all on function public.discord_game_ensure_market(date,timestamptz) from public,anon,authenticated,service_role;
 revoke all on function public.discord_game_settle_markets(timestamptz) from public,anon,authenticated,service_role;
+revoke all on function public.discord_game_settle_markets() from public,anon,authenticated,service_role;
 revoke all on function public.discord_game_new_pet(uuid,text,text,text,text,timestamptz) from public,anon,authenticated,service_role;
 revoke all on function public.discord_game_action_at(text,text,text,jsonb,timestamptz) from public,anon,authenticated,service_role;
 revoke all on function public.discord_game_action(text,text,text,jsonb) from public,anon,authenticated,service_role;
 grant execute on function public.discord_game_action(text,text,text,jsonb) to service_role;
+grant execute on function public.discord_game_settle_markets() to service_role;
 
 revoke all on function public.reward_daily_checkin() from public,anon,service_role;
 grant execute on function public.reward_daily_checkin() to authenticated;

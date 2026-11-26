@@ -1,0 +1,11 @@
+[Unit]
+Description=Settle WaveKB Discord virtual market daily at 22:00 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 14:00:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=elliott-wave-discord-game-settlement.service
+
+[Install]
+WantedBy=timers.target

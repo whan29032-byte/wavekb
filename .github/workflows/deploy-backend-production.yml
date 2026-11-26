@@ -324,9 +324,9 @@ jobs:
           if test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250001_discord_account_link.sql
           fi
-          if test "$schema_before" != 202611250002; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250002_discord_community_game.sql
-          fi
+          # This migration is intentionally idempotent and is always replayed:
+          # it upgrades early draft environments and removes the retired relationship tables.
+          psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250002_discord_community_game.sql
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
           test "$schema_after" = 202611250002
           discord_link_rls=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select c.relrowsecurity and not has_table_privilege('anon','public.discord_link_tokens','SELECT') and not has_table_privilege('authenticated','public.discord_link_tokens','SELECT') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='discord_link_tokens';" | tr -d '[:space:]')
@@ -335,6 +335,8 @@ jobs:
           test "$discord_link_rpc_closed" = t
           discord_game_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('service_role','public.discord_game_action(text,text,text,jsonb)','EXECUTE') and not has_function_privilege('anon','public.discord_game_action(text,text,text,jsonb)','EXECUTE') and not has_function_privilege('authenticated','public.discord_game_action(text,text,text,jsonb)','EXECUTE');" | tr -d '[:space:]')
           test "$discord_game_rpc_closed" = t
+          discord_game_settlement_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('service_role','public.discord_game_settle_markets()','EXECUTE') and not has_function_privilege('anon','public.discord_game_settle_markets()','EXECUTE') and not has_function_privilege('authenticated','public.discord_game_settle_markets()','EXECUTE') and not has_function_privilege('service_role','public.discord_game_settle_markets(timestamptz)','EXECUTE');" | tr -d '[:space:]')
+          test "$discord_game_settlement_rpc_closed" = t
           mentor_publish_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE') and not has_function_privilege('anon','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE');" | tr -d '[:space:]')
           test "$mentor_publish_rpc_closed" = t
           mentor_service_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.request_mentor_service_completion(uuid,text)','EXECUTE') and has_function_privilege('authenticated','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and has_function_privilege('authenticated','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE') and not has_function_privilege('anon','public.request_mentor_service_completion(uuid,text)','EXECUTE') and not has_function_privilege('anon','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and not has_function_privilege('anon','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE');" | tr -d '[:space:]')
@@ -394,7 +396,7 @@ jobs:
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
             wavekb-gateway.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-gateway-${release_id}.tar.gz"
-          for unit in elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer; do
+          for unit in elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer elliott-wave-discord-game-settlement.service elliott-wave-discord-game-settlement.timer; do
             scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
               "deployment/systemd/${unit}" "${DEPLOY_USER}@${DEPLOY_HOST}:${unit}-${release_id}"
           done
@@ -430,7 +432,7 @@ jobs:
           backup_root="/var/backups/elliott-wave-gateway/${release_id}"
           archive="$HOME/wavekb-gateway-${release_id}.tar.gz"
           current_link="${release_root}/current"
-          units=(elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer)
+          units=(elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer elliott-wave-discord-game-settlement.service elliott-wave-discord-game-settlement.timer)
           worker_was_active=0
           if sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then worker_was_active=1; fi
 
@@ -588,6 +590,8 @@ jobs:
           sudo systemctl enable --now elliott-wave-trading-sync.timer
           trading_worker_started_at=$(date --iso-8601=seconds)
           sudo systemctl start elliott-wave-trading-sync.service
+          sudo systemctl enable --now elliott-wave-discord-game-settlement.timer
+          sudo systemctl start elliott-wave-discord-game-settlement.service
 
           trading_metric=$(sudo journalctl -u elliott-wave-trading-sync.service --since "$trading_worker_started_at" --no-pager -o cat | /usr/bin/node -e '
             let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => {
@@ -653,6 +657,7 @@ jobs:
           test "$(sudo systemctl is-active elliott-wave-gateway.service)" = active
           if test "$MANAGED_AI" = enable; then test "$(sudo systemctl is-active elliott-wave-ai-worker.service)" = active; fi
           test "$(sudo systemctl is-active elliott-wave-trading-sync.timer)" = active
+          test "$(sudo systemctl is-active elliott-wave-discord-game-settlement.timer)" = active
           test "$(sudo systemctl is-active elliott-wave-mentor-notifications.service)" = active
           test "$(sudo systemctl is-active elliott-wave-youtube-sync.service)" = active
           trap - ERR

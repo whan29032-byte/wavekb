@@ -8,6 +8,51 @@ const migrationUrl = new URL(
   import.meta.url,
 );
 
+test("market betting serializes the per-user daily limit before reading the aggregate", async () => {
+  const migration = await readFile(migrationUrl, "utf8");
+  const marketBet = migration.match(
+    /elsif p_action='market_bet' then([\s\S]+?)v_response:=pg_catalog\.jsonb_build_object\(/,
+  )?.[1];
+
+  assert.ok(marketBet, "market_bet branch must exist");
+  const lockAt = marketBet.search(
+    /pg_advisory_xact_lock\s*\(\s*pg_catalog\.hashtextextended\('discord_market_bet:'\|\|v_profile\.id::text\|\|':'\|\|v_day::text,0\)\s*\)/,
+  );
+  const aggregateAt = marketBet.indexOf("select coalesce(sum(stake),0) into v_daily_stake");
+  assert.ok(lockAt >= 0, "market_bet must lock the user/day quota");
+  assert.ok(aggregateAt >= 0, "market_bet must read the current daily stake");
+  assert.ok(lockAt < aggregateAt, "the user/day quota lock must be acquired before the aggregate read");
+});
+
+test("market settlement is removed from user actions and exposed through a restricted scheduler RPC", async () => {
+  const migration = await readFile(migrationUrl, "utf8");
+  const actionBody = migration.match(
+    /create or replace function public\.discord_game_action_at[\s\S]+?\n\$\$;/,
+  )?.[0] ?? "";
+  assert.doesNotMatch(actionBody, /perform public\.discord_game_settle_markets/);
+  assert.match(migration, /create or replace function public\.discord_game_settle_markets\(\)/);
+  assert.match(
+    migration,
+    /grant execute on function public\.discord_game_settle_markets\(\) to service_role/,
+  );
+});
+
+test("the removed relationship game leaves no member projection helper behind", async () => {
+  const migration = await readFile(migrationUrl, "utf8");
+  assert.match(
+    migration,
+    /drop function if exists public\.discord_game_member_json\(uuid\)/,
+  );
+  assert.doesNotMatch(
+    migration,
+    /create or replace function public\.discord_game_member_json/,
+  );
+  assert.doesNotMatch(
+    migration,
+    /revoke all on function public\.discord_game_member_json/,
+  );
+});
+
 const users = {
   one: { id: "11111111-1111-4111-8111-111111111111", discord: "111111111111111111", name: "One" },
   two: { id: "22222222-2222-4222-8222-222222222222", discord: "222222222222222222", name: "Two" },
@@ -245,6 +290,32 @@ test("egg purchase and hatch are atomic while free adoption is daily", async () 
   }
 });
 
+test("pet list is bounded and page-addressable so every pet remains manageable", async () => {
+  const database = await createDatabase();
+  try {
+    await database.query(`
+      insert into public.discord_game_pets(
+        user_id,species_key,species_name,rarity,route,emoji,source,created_at
+      )
+      select $1,'electric_sprite','电磁精灵','common','esper','⚡','basic_egg',
+        '2026-11-25T00:00:00Z'::timestamptz + (n || ' seconds')::interval
+      from generate_series(1,51) n
+    `, [users.one.id]);
+    const page = await action(database, users.one, "pet_list", { page: 2 }, "2026-11-25T12:00:00+08:00");
+    assert.equal(page.page, 2);
+    assert.equal(page.pageSize, 25);
+    assert.equal(page.total, 51);
+    assert.equal(page.totalPages, 3);
+    assert.equal(page.pets.length, 25);
+    await assert.rejects(
+      action(database, users.one, "pet_list", { page: 0 }, "2026-11-25T12:00:00+08:00"),
+      /pet_page_invalid/,
+    );
+  } finally {
+    await database.close();
+  }
+});
+
 test("market closes at 21:00, settles at 22:00, and pays only the correct direction once", async () => {
   const database = await createDatabase();
   try {
@@ -270,6 +341,10 @@ test("market closes at 21:00, settles at 22:00, and pays only the correct direct
       /market_closed/,
     );
 
+    await database.query(
+      "select public.discord_game_settle_markets($1::timestamptz)",
+      ["2026-11-25T22:00:00+08:00"],
+    );
     const settled = await action(database, users.one, "market_view", {}, "2026-11-25T22:00:00+08:00");
     assert.equal(settled.phase, "settled");
     assert.notEqual(settled.symbols[0].changeBps, null);

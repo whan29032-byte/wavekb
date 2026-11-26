@@ -14,6 +14,7 @@
     "worker": "node src/worker-main.ts",
     "membership:verify": "node src/membership-wallet-worker.ts",
     "trading:sync": "node src/trading-worker.ts",
+    "discord-game:settle": "node src/discord-game-settlement-worker.ts",
     "mentor:notify": "node src/mentor-notification-worker.ts",
     "youtube:sync": "node src/youtube-sync-worker.ts"
   },
