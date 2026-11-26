@@ -4,6 +4,7 @@ import {
   DiscordIntegrationError,
   createDiscordLink,
   createSupabaseDiscordStore,
+  executeDiscordGameAction,
   getDiscordMember,
   type DiscordIntegrationStore,
 } from "./service";
@@ -25,6 +26,10 @@ function store(overrides: Partial<DiscordIntegrationStore> = {}) {
     async findMemberByDiscordId(discordUserId) {
       calls.push({ operation: "find", value: discordUserId });
       return null;
+    },
+    async executeGameAction(input) {
+      calls.push({ operation: "game", value: input });
+      return { action: input.action };
     },
     ...overrides,
   };
@@ -180,5 +185,120 @@ describe("getDiscordMember", () => {
       store: database.value,
     });
     expect(result.points).toEqual({ balance: 0, lifetimeEarned: 0 });
+  });
+});
+
+describe("executeDiscordGameAction", () => {
+  it("validates and forwards one allowlisted action to the atomic store operation", async () => {
+    const database = store({
+      async executeGameAction(input) {
+        return { action: input.action, balance: 875, stake: 125 };
+      },
+    });
+    await expect(executeDiscordGameAction({
+      discordUserId: "111111111111111111",
+      guildId: config.guildId,
+      requestId: "222222222222222222",
+      action: "market_bet",
+      payload: { symbol: "academy", direction: "up", stake: 125 },
+    }, { config, store: database.value })).resolves.toEqual({
+      action: "market_bet",
+      balance: 875,
+      stake: 125,
+    });
+  });
+
+  it("maps a game action to exactly one restricted database RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { action: "skill_draw", cost: 100 },
+      error: null,
+    });
+    const client = {
+      rpc,
+      from: vi.fn(() => { throw new Error("direct game table access is forbidden"); }),
+    } as unknown as SupabaseClient;
+    const database = createSupabaseDiscordStore(client);
+    await expect(database.executeGameAction({
+      discordUserId: "111111111111111111",
+      requestId: "222222222222222222",
+      action: "skill_draw",
+      payload: { path: "esper", count: 1 },
+    })).resolves.toEqual({ action: "skill_draw", cost: 100 });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("discord_game_action", {
+      p_discord_user_id: "111111111111111111",
+      p_request_id: "222222222222222222",
+      p_action: "skill_draw",
+      p_payload: { path: "esper", count: 1 },
+    });
+  });
+
+  it("rejects wrong guilds, invalid request IDs and unrecognized actions before storage", async () => {
+    const database = store();
+    await expect(executeDiscordGameAction({
+      discordUserId: "111111111111111111",
+      guildId: "999999999999999999",
+      requestId: "222222222222222222",
+      action: "status",
+      payload: {},
+    }, { config, store: database.value })).rejects.toMatchObject({ code: "guild_not_allowed", status: 403 });
+    await expect(executeDiscordGameAction({
+      discordUserId: "111111111111111111",
+      guildId: config.guildId,
+      requestId: "not-an-interaction",
+      action: "status",
+      payload: {},
+    }, { config, store: database.value })).rejects.toMatchObject({ code: "invalid_request_id", status: 400 });
+    await expect(executeDiscordGameAction({
+      discordUserId: "111111111111111111",
+      guildId: config.guildId,
+      requestId: "222222222222222222",
+      action: "transfer_points",
+      payload: {},
+    }, { config, store: database.value })).rejects.toMatchObject({ code: "invalid_game_action", status: 400 });
+    expect(database.calls).toEqual([]);
+  });
+
+  it("strictly rejects unexpected or out-of-range payload fields", async () => {
+    const database = store();
+    const base = {
+      discordUserId: "111111111111111111",
+      guildId: config.guildId,
+      requestId: "222222222222222222",
+    };
+    await expect(executeDiscordGameAction({
+      ...base,
+      action: "skill_draw",
+      payload: { path: "esper", count: 2 },
+    }, { config, store: database.value })).rejects.toMatchObject({ code: "invalid_game_payload", status: 400 });
+    await expect(executeDiscordGameAction({
+      ...base,
+      action: "market_bet",
+      payload: { symbol: "academy", direction: "up", stake: 9, admin: true },
+    }, { config, store: database.value })).rejects.toMatchObject({ code: "invalid_game_payload", status: 400 });
+    expect(database.calls).toEqual([]);
+  });
+
+  it("maps known game conflicts without leaking unknown database details", async () => {
+    const cooldownRpc = vi.fn().mockResolvedValue({ data: null, error: { message: "work_cooldown" } });
+    const cooldownStore = createSupabaseDiscordStore({ rpc: cooldownRpc } as unknown as SupabaseClient);
+    await expect(cooldownStore.executeGameAction({
+      discordUserId: "111111111111111111",
+      requestId: "222222222222222222",
+      action: "work",
+      payload: { path: "esper" },
+    })).rejects.toMatchObject({ code: "work_cooldown", status: 429 });
+
+    const unknownRpc = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: "password=secret; internal SQL failed" },
+    });
+    const unknownStore = createSupabaseDiscordStore({ rpc: unknownRpc } as unknown as SupabaseClient);
+    await expect(unknownStore.executeGameAction({
+      discordUserId: "111111111111111111",
+      requestId: "222222222222222222",
+      action: "status",
+      payload: {},
+    })).rejects.toEqual(new DiscordIntegrationError("integration_unavailable", 503));
   });
 });
