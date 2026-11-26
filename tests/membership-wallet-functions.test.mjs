@@ -18,7 +18,7 @@ const routes = {
 };
 const quote = { price_id: priceId, plan_key: "vip", price_revision: 1, plan_revision: 2, amount_minor: 5200, currency: "USD", term_months: 1, route_revision: 3 };
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status });
-test("SQL, browser, Edge and worker share the same exact four mainnet route identities", async () => {
+test("transitional browser accepts BSC while SQL, Edge and worker retain the exact four live route identities", async () => {
   const sql = await readFile(new URL("../supabase/migrations/202610100005_membership_wallet_payments.sql", import.meta.url), "utf8");
   const browser = await readFile(new URL("../apps/web/src/lib/membership/wallet-types.ts", import.meta.url), "utf8");
   const edge = await readFile(new URL("../supabase/functions/membership-wallet-checkout/index.ts", import.meta.url), "utf8");
@@ -26,7 +26,8 @@ test("SQL, browser, Edge and worker share the same exact four mainnet route iden
   const seeds = Object.fromEntries(Array.from(sql.matchAll(/\('([a-z]+-(?:usdt|usdc))','([a-z]+)','(USDT|USDC)','([^']+)'\)/g), match => [match[1], { chain: match[2], asset: match[3], contract: match[4] }]));
   const worker = Object.fromEntries(Object.entries(WALLET_ROUTES).map(([id, { chain, asset, contract }]) => [id, { chain, asset, contract }]));
   assert.equal(Object.keys(seeds).length, 4);
-  assert.deepEqual(definitions(browser), seeds); assert.deepEqual(definitions(edge), seeds); assert.deepEqual(worker, seeds);
+  assert.deepEqual(definitions(browser), { ...seeds, "bsc-usdt": { chain: "bsc", asset: "USDT", contract: "0x55d398326f99059ff775485246999027b3197955" } });
+  assert.deepEqual(definitions(edge), seeds); assert.deepEqual(worker, seeds);
   assert.deepEqual(Object.keys(worker), ["tron-usdt", "ethereum-usdt", "ethereum-usdc", "base-usdc"]);
 });
 function order(routeId = "ethereum-usdt") {

@@ -237,8 +237,9 @@ test('Stripe then wallet and wallet then Stripe extend separate periods; refund 
   await db.exec('reset role');assert.deepEqual((await db.query('select starts_at,ends_at from membership_wallet_grants where order_id=$1',[wallet.order.id])).rows[0],{starts_at:wg.starts_at,ends_at:wg.ends_at});
 }));
 test('Stripe replacement changes only renewal calculation and buyer lock; validation, errors, recovery and terminal guards remain identical',async()=>{
-  const original=(await load('202610100003_membership_commerce.sql')).match(/create function public\.apply_verified_membership_payment_event\([\s\S]+?\n\$\$;/)[0];
-  const replacement=(await load('202610100005_membership_wallet_payments.sql')).match(/create or replace function public\.apply_verified_membership_payment_event\([\s\S]+?\n\$\$;/)[0];
+  const normalize=value=>value.replaceAll('\r\n','\n');
+  const original=normalize((await load('202610100003_membership_commerce.sql')).match(/create function public\.apply_verified_membership_payment_event\([\s\S]+?\n\$\$;/)[0]);
+  const replacement=normalize((await load('202610100005_membership_wallet_payments.sql')).match(/create or replace function public\.apply_verified_membership_payment_event\([\s\S]+?\n\$\$;/)[0]);
   const oldCalc=/    select greatest\(p_paid_at,coalesce\(max\(g\.ends_at\),p_paid_at\)\) into v_start[\s\S]+?o\.payment_mode=v_order\.payment_mode;/;
   assert.equal(replacement,original.replace('create function','create or replace function').replace(oldCalc,'    v_start:=public.membership_wallet_renewal_start(v_order.buyer_id,v_order.plan_key,p_paid_at,v_order.payment_mode);')
     .replace("  if v_order.id is null then raise exception 'order_not_found'; end if;","  if v_order.id is null then raise exception 'order_not_found'; end if;\n  perform 1 from public.profiles where id=v_order.buyer_id for no key update;"));
@@ -339,7 +340,7 @@ test('actual SQL receipts cross all four production Edge, web parser and worker/
   const web=await productionModule('../apps/web/src/lib/membership/wallet-types.ts'),contracts=await productionModule('../ai-gateway/src/membership-wallet/contracts.ts');
   const worker=await productionModule('../ai-gateway/src/membership-wallet/worker.ts'),address=await productionModule('../ai-gateway/src/membership-wallet/address.ts');
   for(const route of ['tron-usdt','ethereum-usdt','ethereum-usdc','base-usdc']) await fixture(async db=>{
-    const c=await setup(db,{route});const definition=contracts.WALLET_ROUTES[route];assert.ok(definition);assert.deepEqual(web.walletRouteDefinitions[route],{chain:definition.chain,asset:definition.asset,contract:definition.contract});
+    const c=await setup(db,{route});const definition=contracts.WALLET_ROUTES[route];assert.ok(definition);assert.deepEqual(web.walletRouteDefinitions[route],{chain:definition.chain,asset:definition.asset,contract:definition.contract,decimals:6});
     const edge=await checkoutEdge(db),request=randomUUID();const response=await edge(new Request('https://isolated.example.com/functions/v1/membership-wallet-checkout',{method:'POST',headers:{authorization:'Bearer synthetic-user'},body:JSON.stringify({actorId:ids.member,priceId:c.price.id,routeId:route,requestId:request,expectedQuote:c.quote})}));
     assert.equal(response.status,200);const {order}=await response.json();assert.equal(web.parseWalletOrder(order).route_id,route);assert.equal(order.contract,definition.contract);
     assert.equal((await edge(new Request('https://isolated.example.com/functions/v1/membership-wallet-checkout',{method:'POST',headers:{authorization:'Bearer synthetic-user'},body:JSON.stringify({actorId:ids.member,priceId:c.price.id,routeId:route,requestId:request,expectedQuote:c.quote})}))).status,200);
