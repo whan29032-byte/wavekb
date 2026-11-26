@@ -5,16 +5,32 @@ import { walletPreviewAdmin, walletPreviewMine, walletPreviewOrder, walletPrevie
 describe("wallet exact invoices and canonical assets", () => {
   it("keeps exact micro-units and unique tails without floating conversion", () => { expect(walletAmountDecimal("52001237")).toBe("52.001237"); expect(walletAmountDecimal("520000001")).toBe("520.000001"); expect(walletAmountDecimal("999999999999999999")).toBe("999999999999.999999"); });
   it.each(["0", "052000000", "5e7", "-1", "52.001237", "52000000.0"])("rejects noncanonical units %s", (value) => { expect(() => walletAmountDecimal(value)).toThrow(); });
-  it("requires all four issuer-verified chain/asset contracts and no invented address", () => {
+  it("requires all five issuer-verified chain/asset contracts and no invented address", () => {
     expect(parseWalletCatalog(walletPreviewMine().catalog).purchase_available).toBe(false); expect(parseWalletAdminStore(walletPreviewAdmin()).routes.every((route) => route.recipient === null && !route.enabled)).toBe(true);
     const route = walletPreviewRoutes(true)[0]; expect(() => parseWalletRoute({ ...route, contract: "T" + "1".repeat(33) })).toThrow(); expect(() => parseWalletRoute({ ...route, id: "base-usdt" })).toThrow();
     expect(() => parseWalletRoute({ ...route, enabled: true, recipient: null })).toThrow(); expect(() => parseWalletCatalog({ ...walletPreviewMine().catalog, purchase_available: true })).toThrow();
   });
+  it("accepts the exact four-route production response during the staged BSC rollout", () => {
+    const catalog = walletPreviewMine(true).catalog;
+    catalog.routes = catalog.routes.filter((route) => route.id !== "bsc-usdt");
+    const parsed = parseWalletCatalog(catalog);
+    expect(parsed.routes.map((route) => route.id)).not.toContain("bsc-usdt");
+    expect(parsed.purchase_available).toBe(true);
+  });
+  it("parses BSC USDT atomic units without losing the six-decimal checkout amount", () => {
+    const route = { id: "bsc-usdt", chain: "bsc", asset: "USDT", contract: "0x55d398326f99059ff775485246999027b3197955", decimals: 18,
+      recipient: "0x1111111111111111111111111111111111111111", enabled: true, revision: 1 };
+    expect(parseWalletRoute(route)).toEqual(route);
+    expect(walletAmountDecimal("52001237000000000000", 18)).toBe("52.001237");
+    const order = { ...walletPreviewOrder(), route_id: route.id, chain: route.chain, asset: route.asset, contract: route.contract, recipient: route.recipient,
+      token_decimals: 18, base_amount_units: "52000000000000000000", amount_units: "52001237000000000000", amount_decimal: "52.001237" };
+    expect(parseWalletOrder(order).amount_decimal).toBe("52.001237");
+  });
   it("parses an authoritative order's frozen address and all six decimals", () => { expect(parseWalletOrder(walletPreviewOrder()).amount_decimal).toBe("52.001237"); const mine = walletPreviewMine(); mine.orders = [walletPreviewOrder()]; expect(parseMyMembershipWallet(mine).orders).toHaveLength(1); });
-  it.each([{ amount_units: "52000000", amount_decimal: "52.000000" }, { amount_units: "52010000", amount_decimal: "52.010000" }, { amount_decimal: "52.00" }, { amount_units: 52001237 }, { base_amount_units: "52000001" }, { recipient: "0x" + "0".repeat(40) }, { asset: "USDT" }, { status: "paid", paid_at: null }, { expires_at: "2099-10-10T00:31:00Z" }])("rejects unsafe frozen invoice $amount_decimal", (patch) => { expect(() => parseWalletOrder({ ...walletPreviewOrder(), ...patch })).toThrow(); });
+  it.each([{ amount_units: "52000000000000000000", amount_decimal: "52.000000" }, { amount_units: "52010000000000000000", amount_decimal: "52.010000" }, { amount_decimal: "52.00" }, { amount_units: 52001237 }, { base_amount_units: "52000000000000000001" }, { recipient: "0x" + "0".repeat(40) }, { asset: "USDC" }, { status: "paid", paid_at: null }, { expires_at: "2099-10-10T00:31:00Z" }])("rejects unsafe frozen invoice $amount_decimal", (patch) => { expect(() => parseWalletOrder({ ...walletPreviewOrder(), ...patch })).toThrow(); });
   it("normalizes complete network-specific transaction hashes only", () => { expect(walletTransferHash("base", " 0x" + "A".repeat(64) + " ")).toBe("0x" + "a".repeat(64)); expect(walletTransferHash("tron", "A".repeat(64))).toBe("a".repeat(64)); expect(() => walletTransferHash("tron", "0x" + "a".repeat(64))).toThrow(); expect(() => walletTransferHash("base", "0x" + "1".repeat(40))).toThrow(); });
   it("only exposes bounded reconciliation data and allowlisted reason codes, stripping private evidence", () => {
-    const receipt = { id: "00000000-0000-4000-8000-000000000119", order_id: walletPreviewOrder().id, verification_id: walletPreviewVerification().id, chain: "base", tx_hash: walletPreviewVerification().tx_hash, event_index: 0, outcome: "review", reason_code: "payment_amount_mismatch", created_at: "2099-10-10T00:15:00Z", evidence: { provider: "private raw response" } };
+    const receipt = { id: "00000000-0000-4000-8000-000000000119", order_id: walletPreviewOrder().id, verification_id: walletPreviewVerification().id, chain: "bsc", tx_hash: walletPreviewVerification().tx_hash, event_index: 0, outcome: "review", reason_code: "payment_amount_mismatch", created_at: "2099-10-10T00:15:00Z", evidence: { provider: "private raw response" } };
     const store = { ...walletPreviewAdmin(), orders: [walletPreviewOrder()], verifications: [{ ...walletPreviewVerification("review"), reason_code: "payment_amount_mismatch", reason: "private provider exception", worker_id: "internal" }], receipts: [receipt] };
     const result = parseWalletAdminStore(store); expect(result.receipts[0]).not.toHaveProperty("evidence"); expect(result.verifications[0]).not.toHaveProperty("reason"); expect(result.verifications[0]).not.toHaveProperty("worker_id");
     expect(() => parseWalletAdminStore({ ...store, receipts: [{ ...receipt, reason_code: "unapproved_provider_secret" }] })).toThrow();
