@@ -437,6 +437,781 @@ grant execute on function public.publish_exchange_sync_generation(
   uuid, uuid, bigint, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb, timestamptz
 ) to service_role;
 
+alter table public.trading_fills
+  add constraint trading_fills_annotation_owner_unique
+  unique (id, owner_id, native_fill_id);
+
+create or replace function public.trade_chart_tags_valid(p_tags text[])
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(cardinality(p_tags), 0) <= 10
+    and not exists (
+      select 1 from unnest(coalesce(p_tags, '{}'::text[])) tag
+      where tag is null
+         or char_length(tag) not between 1 and 40
+         or tag <> lower(btrim(tag))
+    )
+    and coalesce(cardinality(p_tags), 0) = (
+      select count(distinct tag)::integer
+      from unnest(coalesce(p_tags, '{}'::text[])) tag
+    )
+$$;
+
+create or replace function public.trade_chart_viewport_valid(p_viewport jsonb)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(jsonb_typeof(p_viewport) = 'object'
+    and octet_length(p_viewport::text) <= 512
+    and jsonb_typeof(p_viewport->'from') = 'number'
+    and jsonb_typeof(p_viewport->'to') = 'number'
+    and (p_viewport->>'from')::numeric < (p_viewport->>'to')::numeric
+    and abs((p_viewport->>'from')::numeric) <= 1000000000
+    and abs((p_viewport->>'to')::numeric) <= 1000000000
+    and not exists (
+      select 1 from jsonb_object_keys(p_viewport) key
+      where key not in ('from', 'to')
+    ), false)
+$$;
+
+create or replace function public.trade_chart_json_array_valid(
+  p_value jsonb,
+  p_maximum_count integer,
+  p_maximum_bytes integer
+)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(jsonb_typeof(p_value) = 'array'
+    and jsonb_array_length(p_value) <= p_maximum_count
+    and octet_length(p_value::text) <= p_maximum_bytes
+    and not exists (
+      select 1 from jsonb_array_elements(p_value) item
+      where jsonb_typeof(item) <> 'object'
+    ), false)
+$$;
+
+create or replace function public.trade_chart_annotation_image_path_valid(
+  p_owner_id uuid,
+  p_annotation_id uuid,
+  p_image_id uuid,
+  p_storage_path text,
+  p_mime_type text
+)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select p_storage_path = p_owner_id::text || '/' || p_annotation_id::text || '/' || p_image_id::text ||
+    case p_mime_type
+      when 'image/jpeg' then '.jpg'
+      when 'image/png' then '.png'
+      when 'image/webp' then '.webp'
+      else '.invalid'
+    end
+$$;
+
+create table public.trading_fill_annotations (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  cycle_id uuid not null,
+  fill_id bigint not null,
+  native_fill_id text not null,
+  cycle_revision integer not null check (cycle_revision > 0),
+  body text not null default '' check (char_length(body) <= 5000),
+  tags text[] not null default '{}'::text[] check (public.trade_chart_tags_valid(tags)),
+  remap_status text not null default 'current'
+    check (remap_status in ('current', 'remapped', 'needs_confirmation')),
+  remapped_from_revision integer,
+  version integer not null default 1 check (version > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  constraint trading_fill_annotations_owner_cycle_fill_unique
+    unique (owner_id, cycle_id, fill_id),
+  constraint trading_fill_annotations_id_owner_unique
+    unique (id, owner_id),
+  constraint trading_fill_annotations_cycle_owner_fkey
+    foreign key (cycle_id, owner_id)
+    references public.trading_trade_cycles(id, owner_id) on delete cascade,
+  constraint trading_fill_annotations_cycle_revision_fkey
+    foreign key (cycle_id, cycle_revision)
+    references public.trading_trade_cycle_revisions(cycle_id, revision),
+  constraint trading_fill_annotations_fill_owner_fkey
+    foreign key (fill_id, owner_id, native_fill_id)
+    references public.trading_fills(id, owner_id, native_fill_id) on delete cascade,
+  constraint trading_fill_annotations_remap_state_check check (
+    (remap_status = 'current' and remapped_from_revision is null)
+    or (
+      remap_status in ('remapped', 'needs_confirmation')
+      and remapped_from_revision is not null
+      and remapped_from_revision > 0
+      and remapped_from_revision < cycle_revision
+    )
+  )
+);
+
+create index trading_fill_annotations_owner_cycle_idx
+on public.trading_fill_annotations(owner_id, cycle_id, deleted_at, updated_at desc);
+
+create table public.trading_fill_annotation_images (
+  id uuid primary key,
+  annotation_id uuid not null,
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  storage_path text not null unique,
+  mime_type text not null check (mime_type in ('image/jpeg', 'image/png', 'image/webp')),
+  byte_size integer not null check (byte_size between 1 and 2097152),
+  sort_order smallint not null check (sort_order between 0 and 4),
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  constraint trading_fill_annotation_images_annotation_owner_fkey
+    foreign key (annotation_id, owner_id)
+    references public.trading_fill_annotations(id, owner_id) on delete cascade,
+  constraint trading_fill_annotation_images_path_check check (
+    public.trade_chart_annotation_image_path_valid(
+      owner_id, annotation_id, id, storage_path, mime_type
+    )
+  )
+);
+
+create unique index trading_fill_annotation_images_active_order_unique
+on public.trading_fill_annotation_images(annotation_id, sort_order)
+where deleted_at is null;
+
+create index trading_fill_annotation_images_owner_annotation_idx
+on public.trading_fill_annotation_images(owner_id, annotation_id, sort_order)
+where deleted_at is null;
+
+create table public.trading_chart_states (
+  cycle_id uuid not null,
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  cycle_revision integer not null check (cycle_revision > 0),
+  schema_version text not null default 'wavekb-trade-chart-v1'
+    check (schema_version = 'wavekb-trade-chart-v1'),
+  timeframe text not null check (timeframe in (
+    '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h',
+    '6h', '8h', '12h', '1d', '1w', '1M'
+  )),
+  price_type text not null check (price_type in ('trade', 'mark', 'bid', 'ask', 'both')),
+  viewport jsonb not null check (public.trade_chart_viewport_valid(viewport)),
+  indicators jsonb not null default '[]'::jsonb
+    check (public.trade_chart_json_array_valid(indicators, 32, 65536)),
+  drawings jsonb not null default '[]'::jsonb
+    check (public.trade_chart_json_array_valid(drawings, 200, 262144)),
+  version integer not null default 1 check (version > 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint trading_chart_states_pkey primary key (cycle_id, owner_id),
+  constraint trading_chart_states_cycle_owner_fkey
+    foreign key (cycle_id, owner_id)
+    references public.trading_trade_cycles(id, owner_id) on delete cascade,
+  constraint trading_chart_states_cycle_revision_fkey
+    foreign key (cycle_id, cycle_revision)
+    references public.trading_trade_cycle_revisions(cycle_id, revision)
+);
+
+create index trading_chart_states_owner_updated_idx
+on public.trading_chart_states(owner_id, updated_at desc);
+
+create table public.trading_candle_cache (
+  provider text not null check (provider in ('binance', 'okx', 'bybit', 'bitget', 'exness')),
+  product text not null check (product in ('usdt_perpetual', 'usdt_delivery', 'cfd')),
+  native_symbol text not null check (
+    char_length(native_symbol) between 1 and 100
+    and native_symbol ~ '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$'
+  ),
+  timeframe text not null check (timeframe in (
+    '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h',
+    '6h', '8h', '12h', '1d', '1w', '1M'
+  )),
+  scope_kind text not null check (scope_kind in ('public_market', 'private_account')),
+  scope_hash text not null check (
+    (scope_kind = 'public_market' and scope_hash = 'public-market-v1')
+    or (
+      scope_kind = 'private_account'
+      and scope_hash ~ '^hmac-sha256-v1:[0-9a-f]{64}$'
+    )
+  ),
+  price_type text not null check (price_type in ('trade', 'mark', 'bid', 'ask', 'both')),
+  open_time timestamptz not null,
+  close_time timestamptz not null,
+  open_price numeric(38, 18) not null check (open_price > 0),
+  high_price numeric(38, 18) not null check (high_price > 0),
+  low_price numeric(38, 18) not null check (low_price > 0),
+  close_price numeric(38, 18) not null check (close_price > 0),
+  volume numeric(38, 18) check (volume is null or volume >= 0),
+  is_final boolean not null,
+  source_host_kind text not null check (source_host_kind in ('public_api', 'account_access_point')),
+  source_timestamp timestamptz not null,
+  coverage_status text not null check (coverage_status in ('complete', 'partial', 'gapped', 'stale')),
+  gap_before boolean not null default false,
+  gap_after boolean not null default false,
+  fetched_at timestamptz not null,
+  expires_at timestamptz not null,
+  constraint trading_candle_cache_pkey primary key (
+    provider, product, native_symbol, timeframe, scope_hash, price_type, open_time
+  ),
+  constraint trading_candle_cache_time_check check (
+    close_time > open_time
+    and source_timestamp <= fetched_at
+    and expires_at > fetched_at
+  ),
+  constraint trading_candle_cache_ohlc_check check (
+    high_price >= greatest(open_price, close_price, low_price)
+    and low_price <= least(open_price, close_price, high_price)
+  ),
+  constraint trading_candle_cache_source_check check (
+    (
+      provider = 'exness'
+      and product = 'cfd'
+      and scope_kind = 'private_account'
+      and price_type in ('bid', 'ask', 'both')
+      and source_host_kind = 'account_access_point'
+    )
+    or (
+      provider in ('binance', 'okx', 'bybit', 'bitget')
+      and product in ('usdt_perpetual', 'usdt_delivery')
+      and scope_kind = 'public_market'
+      and price_type in ('trade', 'mark')
+      and source_host_kind = 'public_api'
+    )
+  )
+);
+
+create index trading_candle_cache_lookup_idx
+on public.trading_candle_cache(
+  provider, product, native_symbol, timeframe, scope_hash, price_type, open_time desc
+);
+
+create index trading_candle_cache_expiry_idx
+on public.trading_candle_cache(expires_at);
+
+alter table public.trading_fill_annotations enable row level security;
+alter table public.trading_fill_annotations force row level security;
+alter table public.trading_fill_annotation_images enable row level security;
+alter table public.trading_fill_annotation_images force row level security;
+alter table public.trading_chart_states enable row level security;
+alter table public.trading_chart_states force row level security;
+alter table public.trading_candle_cache enable row level security;
+alter table public.trading_candle_cache force row level security;
+
+revoke all on table
+  public.trading_fill_annotations,
+  public.trading_fill_annotation_images,
+  public.trading_chart_states,
+  public.trading_candle_cache
+from public, anon, authenticated, service_role;
+
+grant select on table
+  public.trading_fill_annotations,
+  public.trading_fill_annotation_images,
+  public.trading_chart_states
+to authenticated;
+
+grant select, insert, update, delete on table
+  public.trading_fill_annotations,
+  public.trading_fill_annotation_images,
+  public.trading_chart_states,
+  public.trading_candle_cache
+to service_role;
+
+create policy trading_fill_annotations_select_own
+on public.trading_fill_annotations
+for select to authenticated
+using (owner_id = (select auth.uid()));
+
+create policy trading_fill_annotations_service_all
+on public.trading_fill_annotations
+for all to service_role
+using (true) with check (true);
+
+create policy trading_fill_annotation_images_select_own
+on public.trading_fill_annotation_images
+for select to authenticated
+using (owner_id = (select auth.uid()));
+
+create policy trading_fill_annotation_images_service_all
+on public.trading_fill_annotation_images
+for all to service_role
+using (true) with check (true);
+
+create policy trading_chart_states_select_own
+on public.trading_chart_states
+for select to authenticated
+using (owner_id = (select auth.uid()));
+
+create policy trading_chart_states_service_all
+on public.trading_chart_states
+for all to service_role
+using (true) with check (true);
+
+create policy trading_candle_cache_service_all
+on public.trading_candle_cache
+for all to service_role
+using (true) with check (true);
+
+create or replace function public.upsert_trading_fill_annotation(
+  p_annotation_id uuid,
+  p_cycle_id uuid,
+  p_fill_id bigint,
+  p_cycle_revision integer,
+  p_body text,
+  p_tags text[],
+  p_images jsonb,
+  p_expected_version integer,
+  p_deleted boolean
+)
+returns public.trading_fill_annotations
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  current_annotation public.trading_fill_annotations;
+  saved_annotation public.trading_fill_annotations;
+  native_fill text;
+  normalized_tags text[];
+  image jsonb;
+  image_count integer;
+  active_image_count integer;
+  distinct_image_count integer;
+  distinct_path_count integer;
+  image_ordinality bigint;
+begin
+  if auth.uid() is null or not public.account_is_active() then
+    raise exception 'trade_chart_account_restricted';
+  end if;
+  if p_annotation_id is null
+     or p_cycle_id is null
+     or p_fill_id is null
+     or p_cycle_revision is null
+     or p_cycle_revision <= 0
+     or p_body is null
+     or char_length(p_body) > 5000
+     or p_tags is null
+     or p_images is null
+     or p_expected_version is null
+     or p_expected_version < 0
+     or p_deleted is null
+     or cardinality(p_tags) > 10
+     or exists (
+       select 1 from unnest(p_tags) tag
+       where tag is null or char_length(btrim(tag)) not between 1 and 40
+     ) then
+    raise exception 'invalid_trade_chart_annotation';
+  end if;
+
+  select coalesce(array_agg(normalized.tag order by normalized.first_position), '{}'::text[])
+  into normalized_tags
+  from (
+    select lower(btrim(tag)) as tag, min(position) as first_position
+    from unnest(p_tags) with ordinality input(tag, position)
+    group by lower(btrim(tag))
+  ) normalized;
+
+  if jsonb_typeof(p_images) <> 'array' then
+    raise exception 'invalid_trade_chart_annotation_images';
+  end if;
+  image_count := jsonb_array_length(p_images);
+  if image_count > 5
+     or exists (
+       select 1 from jsonb_array_elements(p_images) candidate
+       where jsonb_typeof(candidate) <> 'object'
+          or not (candidate ?& array['id', 'storage_path', 'mime_type', 'byte_size'])
+          or exists (
+            select 1 from jsonb_object_keys(candidate) key
+            where key not in ('id', 'storage_path', 'mime_type', 'byte_size')
+          )
+          or jsonb_typeof(candidate->'id') <> 'string'
+          or jsonb_typeof(candidate->'storage_path') <> 'string'
+          or jsonb_typeof(candidate->'mime_type') <> 'string'
+          or jsonb_typeof(candidate->'byte_size') <> 'number'
+          or candidate->>'id' !~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          or (candidate->>'mime_type') not in ('image/jpeg', 'image/png', 'image/webp')
+          or candidate->>'byte_size' !~ '^[0-9]+$'
+     ) then
+    raise exception 'invalid_trade_chart_annotation_images';
+  end if;
+  select count(distinct candidate->>'id'), count(distinct candidate->>'storage_path')
+  into distinct_image_count, distinct_path_count
+  from jsonb_array_elements(p_images) candidate;
+  if distinct_image_count <> image_count or distinct_path_count <> image_count then
+    raise exception 'invalid_trade_chart_annotation_images';
+  end if;
+
+  for image, image_ordinality in
+    select candidate, ordinality
+    from jsonb_array_elements(p_images) with ordinality payload(candidate, ordinality)
+  loop
+    if (image->>'byte_size')::numeric not between 1 and 2097152
+       or not public.trade_chart_annotation_image_path_valid(
+      auth.uid(), p_annotation_id, (image->>'id')::uuid,
+      image->>'storage_path', image->>'mime_type'
+    ) then
+      raise exception 'invalid_trade_chart_annotation_images';
+    end if;
+  end loop;
+
+  select fill.native_fill_id into native_fill
+  from public.trading_trade_cycle_fills allocation
+  join public.trading_fills fill
+    on fill.id = allocation.fill_id
+   and fill.owner_id = allocation.owner_id
+   and fill.native_fill_id = allocation.native_fill_id
+  join public.trading_trade_cycles cycle
+    on cycle.id = allocation.cycle_id
+   and cycle.owner_id = allocation.owner_id
+  where allocation.cycle_id = p_cycle_id
+    and allocation.cycle_revision = p_cycle_revision
+    and allocation.fill_id = p_fill_id
+    and allocation.owner_id = auth.uid()
+    and cycle.revision = p_cycle_revision
+  limit 1;
+  if native_fill is null then
+    raise exception 'trade_chart_fill_not_owned';
+  end if;
+
+  select * into current_annotation
+  from public.trading_fill_annotations annotation
+  where annotation.owner_id = auth.uid()
+    and annotation.cycle_id = p_cycle_id
+    and annotation.fill_id = p_fill_id
+  for update;
+
+  if current_annotation.id is null then
+    if coalesce(p_expected_version, -1) <> 0
+       or exists (
+         select 1 from public.trading_fill_annotations annotation
+         where annotation.id = p_annotation_id
+       ) then
+      raise exception 'stale_trade_chart_annotation';
+    end if;
+    insert into public.trading_fill_annotations (
+      id, owner_id, cycle_id, fill_id, native_fill_id, cycle_revision,
+      body, tags, remap_status, remapped_from_revision, version, deleted_at
+    ) values (
+      p_annotation_id, auth.uid(), p_cycle_id, p_fill_id, native_fill,
+      p_cycle_revision, p_body, normalized_tags, 'current', null, 1,
+      case when p_deleted then clock_timestamp() else null end
+    ) returning * into saved_annotation;
+  else
+    if current_annotation.id <> p_annotation_id
+       or current_annotation.version <> p_expected_version then
+      raise exception 'stale_trade_chart_annotation';
+    end if;
+    update public.trading_fill_annotations annotation
+    set native_fill_id = native_fill,
+        cycle_revision = p_cycle_revision,
+        body = p_body,
+        tags = normalized_tags,
+        remap_status = case
+          when current_annotation.cycle_revision <> p_cycle_revision then 'remapped'
+          else current_annotation.remap_status
+        end,
+        remapped_from_revision = case
+          when current_annotation.cycle_revision <> p_cycle_revision
+            then current_annotation.cycle_revision
+          else current_annotation.remapped_from_revision
+        end,
+        version = current_annotation.version + 1,
+        updated_at = clock_timestamp(),
+        deleted_at = case when p_deleted then clock_timestamp() else null end
+    where annotation.id = current_annotation.id
+      and annotation.owner_id = auth.uid()
+    returning * into saved_annotation;
+  end if;
+
+  update public.trading_fill_annotation_images existing_image
+  set deleted_at = clock_timestamp()
+  where existing_image.annotation_id = saved_annotation.id
+    and existing_image.owner_id = auth.uid()
+    and existing_image.deleted_at is null;
+
+  if not p_deleted then
+    for image, image_ordinality in
+      select candidate, ordinality
+      from jsonb_array_elements(p_images) with ordinality payload(candidate, ordinality)
+    loop
+      insert into public.trading_fill_annotation_images (
+        id, annotation_id, owner_id, storage_path, mime_type, byte_size,
+        sort_order, deleted_at
+      ) values (
+        (image->>'id')::uuid, saved_annotation.id, auth.uid(),
+        image->>'storage_path', image->>'mime_type',
+        (image->>'byte_size')::integer, (image_ordinality - 1)::smallint, null
+      )
+      on conflict (id) do update
+      set storage_path = excluded.storage_path,
+          mime_type = excluded.mime_type,
+          byte_size = excluded.byte_size,
+          sort_order = excluded.sort_order,
+          deleted_at = null
+      where public.trading_fill_annotation_images.annotation_id = saved_annotation.id
+        and public.trading_fill_annotation_images.owner_id = auth.uid();
+    end loop;
+  end if;
+
+  select count(*)::integer into active_image_count
+  from public.trading_fill_annotation_images stored_image
+  where stored_image.annotation_id = saved_annotation.id
+    and stored_image.owner_id = auth.uid()
+    and stored_image.deleted_at is null;
+  if active_image_count <> (case when p_deleted then 0 else image_count end) then
+    raise exception 'invalid_trade_chart_annotation_images';
+  end if;
+
+  return saved_annotation;
+end;
+$$;
+
+revoke all on function public.upsert_trading_fill_annotation(
+  uuid, uuid, bigint, integer, text, text[], jsonb, integer, boolean
+) from public, anon, authenticated, service_role;
+grant execute on function public.upsert_trading_fill_annotation(
+  uuid, uuid, bigint, integer, text, text[], jsonb, integer, boolean
+) to authenticated;
+
+create or replace function public.upsert_trading_chart_state(
+  p_cycle_id uuid,
+  p_cycle_revision integer,
+  p_schema_version text,
+  p_timeframe text,
+  p_price_type text,
+  p_viewport jsonb,
+  p_indicators jsonb,
+  p_drawings jsonb,
+  p_expected_version integer,
+  p_expected_updated_at timestamptz
+)
+returns public.trading_chart_states
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  current_state public.trading_chart_states;
+  saved_state public.trading_chart_states;
+begin
+  if auth.uid() is null or not public.account_is_active() then
+    raise exception 'trade_chart_account_restricted';
+  end if;
+  if p_cycle_id is null
+     or p_cycle_revision is null
+     or p_cycle_revision <= 0
+     or p_expected_version is null
+     or p_expected_version < 0
+     or p_schema_version is distinct from 'wavekb-trade-chart-v1'
+     or p_timeframe is null
+     or p_timeframe not in (
+       '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h',
+       '6h', '8h', '12h', '1d', '1w', '1M'
+     )
+     or p_price_type is null
+     or p_price_type not in ('trade', 'mark', 'bid', 'ask', 'both')
+     or not public.trade_chart_viewport_valid(p_viewport)
+     or not public.trade_chart_json_array_valid(p_indicators, 32, 65536)
+     or not public.trade_chart_json_array_valid(p_drawings, 200, 262144) then
+    raise exception 'invalid_trade_chart_state';
+  end if;
+  if not exists (
+    select 1 from public.trading_trade_cycles cycle
+    join public.trading_trade_cycle_revisions revision
+      on revision.cycle_id = cycle.id
+     and revision.owner_id = cycle.owner_id
+     and revision.revision = p_cycle_revision
+    where cycle.id = p_cycle_id
+      and cycle.owner_id = auth.uid()
+      and cycle.revision = p_cycle_revision
+  ) then
+    raise exception 'trade_chart_cycle_not_owned';
+  end if;
+
+  select * into current_state
+  from public.trading_chart_states state
+  where state.cycle_id = p_cycle_id and state.owner_id = auth.uid()
+  for update;
+
+  if current_state.cycle_id is null then
+    if coalesce(p_expected_version, -1) <> 0 or p_expected_updated_at is not null then
+      raise exception 'stale_trade_chart_state';
+    end if;
+    insert into public.trading_chart_states (
+      cycle_id, owner_id, cycle_revision, schema_version, timeframe, price_type,
+      viewport, indicators, drawings, version, created_at, updated_at
+    ) values (
+      p_cycle_id, auth.uid(), p_cycle_revision, p_schema_version, p_timeframe,
+      p_price_type, p_viewport, p_indicators, p_drawings, 1,
+      clock_timestamp(), clock_timestamp()
+    ) returning * into saved_state;
+  else
+    if current_state.version <> p_expected_version
+       or p_expected_updated_at is null
+       or current_state.updated_at is distinct from p_expected_updated_at then
+      raise exception 'stale_trade_chart_state';
+    end if;
+    update public.trading_chart_states state
+    set cycle_revision = p_cycle_revision,
+        schema_version = p_schema_version,
+        timeframe = p_timeframe,
+        price_type = p_price_type,
+        viewport = p_viewport,
+        indicators = p_indicators,
+        drawings = p_drawings,
+        version = current_state.version + 1,
+        updated_at = clock_timestamp()
+    where state.cycle_id = p_cycle_id and state.owner_id = auth.uid()
+    returning * into saved_state;
+  end if;
+  return saved_state;
+end;
+$$;
+
+revoke all on function public.upsert_trading_chart_state(
+  uuid, integer, text, text, text, jsonb, jsonb, jsonb, integer, timestamptz
+) from public, anon, authenticated, service_role;
+grant execute on function public.upsert_trading_chart_state(
+  uuid, integer, text, text, text, jsonb, jsonb, jsonb, integer, timestamptz
+) to authenticated;
+
+insert into storage.buckets (
+  id, name, public, file_size_limit, allowed_mime_types
+) values (
+  'trade-chart-annotation-images',
+  'trade-chart-annotation-images',
+  false,
+  2097152,
+  array['image/jpeg', 'image/png', 'image/webp']
+)
+on conflict (id) do update set
+  public = false,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+create policy trade_chart_annotation_images_select_own
+on storage.objects
+for select to authenticated
+using (
+  bucket_id = 'trade-chart-annotation-images'
+  and exists (
+    select 1 from public.trading_fill_annotation_images image
+    join public.trading_fill_annotations annotation
+      on annotation.id = image.annotation_id and annotation.owner_id = image.owner_id
+    where image.storage_path = name
+      and image.owner_id = (select auth.uid())
+      and image.deleted_at is null
+      and annotation.deleted_at is null
+  )
+);
+
+create policy trade_chart_annotation_images_insert_own
+on storage.objects
+for insert to authenticated
+with check (
+  bucket_id = 'trade-chart-annotation-images'
+  and (select public.account_is_active())
+  and exists (
+    select 1 from public.trading_fill_annotation_images image
+    join public.trading_fill_annotations annotation
+      on annotation.id = image.annotation_id and annotation.owner_id = image.owner_id
+    where image.storage_path = name
+      and image.owner_id = (select auth.uid())
+      and image.deleted_at is null
+      and annotation.deleted_at is null
+      and metadata->>'mimetype' = image.mime_type
+      and metadata->>'size' ~ '^[0-9]+$'
+      and (metadata->>'size')::numeric = image.byte_size
+  )
+);
+
+create policy trade_chart_annotation_images_delete_own
+on storage.objects
+for delete to authenticated
+using (
+  bucket_id = 'trade-chart-annotation-images'
+  and exists (
+    select 1 from public.trading_fill_annotation_images image
+    where image.storage_path = name
+      and image.owner_id = (select auth.uid())
+  )
+);
+
+-- Restrictive policies ensure an older permissive storage policy for another
+-- bucket cannot widen this bucket's owner, metadata, MIME, size, or lifecycle
+-- boundaries.
+create policy trade_chart_annotation_images_select_bound
+on storage.objects as restrictive
+for select to authenticated
+using (
+  bucket_id <> 'trade-chart-annotation-images'
+  or exists (
+    select 1 from public.trading_fill_annotation_images image
+    join public.trading_fill_annotations annotation
+      on annotation.id = image.annotation_id and annotation.owner_id = image.owner_id
+    where image.storage_path = name
+      and image.owner_id = (select auth.uid())
+      and image.deleted_at is null
+      and annotation.deleted_at is null
+  )
+);
+
+create policy trade_chart_annotation_images_insert_bound
+on storage.objects as restrictive
+for insert to authenticated
+with check (
+  bucket_id <> 'trade-chart-annotation-images'
+  or (
+    (select public.account_is_active())
+    and exists (
+      select 1 from public.trading_fill_annotation_images image
+      join public.trading_fill_annotations annotation
+        on annotation.id = image.annotation_id and annotation.owner_id = image.owner_id
+      where image.storage_path = name
+        and image.owner_id = (select auth.uid())
+        and image.deleted_at is null
+        and annotation.deleted_at is null
+        and metadata->>'mimetype' = image.mime_type
+        and metadata->>'size' ~ '^[0-9]+$'
+        and (metadata->>'size')::numeric = image.byte_size
+    )
+  )
+);
+
+create policy trade_chart_annotation_images_delete_bound
+on storage.objects as restrictive
+for delete to authenticated
+using (
+  bucket_id <> 'trade-chart-annotation-images'
+  or exists (
+    select 1 from public.trading_fill_annotation_images image
+    where image.storage_path = name
+      and image.owner_id = (select auth.uid())
+  )
+);
+
+create policy trade_chart_annotation_images_anon_no_select
+on storage.objects as restrictive
+for select to anon
+using (bucket_id <> 'trade-chart-annotation-images');
+
+create policy trade_chart_annotation_images_anon_no_insert
+on storage.objects as restrictive
+for insert to anon
+with check (bucket_id <> 'trade-chart-annotation-images');
+
+create policy trade_chart_annotation_images_no_update
+on storage.objects as restrictive
+for update to anon, authenticated
+using (bucket_id <> 'trade-chart-annotation-images')
+with check (bucket_id <> 'trade-chart-annotation-images');
+
 create or replace function public.wavekb_schema_version()
 returns text
 language sql
