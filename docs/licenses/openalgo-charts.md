@@ -26,7 +26,7 @@ WaveKB imports only documented export-map entries:
 | --- | --- |
 | `openalgo-charts` | `createChart`; chart/series methods for candles, markers, indicators, viewport, and `destroy()` |
 | `openalgo-charts/indicators` | side-effect registration of the built-in indicator catalog; `registerBuiltinIndicators` and 113 descriptors are public exports |
-| `openalgo-charts/draw` | `DrawingController`, its JSON document boundary and `destroy()`; public drawing-tool registry |
+| `openalgo-charts/draw` | `DrawingController` placement/cancel/undo/redo, its JSON document boundary and `destroy()`; `hasDrawingTool()` public registry |
 
 WaveKB does not import undocumented files, `openalgo-charts/trade`, the widget,
 an OpenAlgo backend, or any broker command surface. Application code must import
@@ -35,8 +35,9 @@ the dependency only through
 
 ## Drawing identifiers
 
-After importing the public `openalgo-charts/draw` tier, its public
-`hasDrawingTool()` registry reports all five required manual Elliott tools:
+After importing the public `openalgo-charts/draw` tier, an executable contract
+test checks the public `hasDrawingTool()` registry for every identifier exposed
+by the WaveKB adapter. This includes the five required manual Elliott tools:
 
 - `elliott-impulse`
 - `elliott-correction`
@@ -46,6 +47,12 @@ After importing the public `openalgo-charts/draw` tier, its public
 
 These are drawing identifiers only. WaveKB does not provide automatic Elliott
 wave counting or trading recommendations.
+
+The same registry contract covers WaveKB's bounded basic, position, and
+Fibonacci tool allowlists. The adapter maps controller documents into the
+versioned `wavekb-chart-drawings-v1` shape and drops library-only fields before
+notifying application listeners; callers never receive the controller or its
+opaque state.
 
 ## React and Next.js compatibility
 
