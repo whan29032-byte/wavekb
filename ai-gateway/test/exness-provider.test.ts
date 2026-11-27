@@ -37,8 +37,29 @@ function account(overrides: Partial<ProviderAccount> = {}): ProviderAccount {
   };
 }
 
-function limits() {
-  return { limits: { rest: { global_account_rate: { limit: 10, window_seconds: 1 }, methods: [{ api_operation_id: "getDealsHistory", http_method: "GET", path: "/v1/history/accounts/{account_id}/deals", rate_limit: { limit: 5, window_seconds: 1 }, limits: { history_age_days: 120, history_range_days: 14 } }] }, websocket: { global_account_limits: {}, endpoints: [] } } };
+function limits(maxCandles: number | null = 2) {
+  const methods: Array<Record<string, unknown>> = [{
+    api_operation_id: "getDealsHistory", http_method: "GET", path: "/v1/history/accounts/{account_id}/deals",
+    rate_limit: { limit: 5, window_seconds: 1 }, limits: { history_age_days: 120, history_range_days: 14 },
+  }];
+  if (maxCandles !== null) methods.push({
+    api_operation_id: "getCandleHistory", http_method: "GET", path: "/v1/market-data/accounts/{account_id}/candles",
+    rate_limit: { limit: 5, window_seconds: 1 }, limits: { max_candles_per_request: maxCandles },
+  });
+  return { limits: { rest: { global_account_rate: { limit: 10, window_seconds: 1 }, methods }, websocket: { global_account_limits: {}, endpoints: [] } } };
+}
+
+function candleRequest() {
+  return {
+    product: "cfd" as const,
+    native_symbol: "XAUUSD",
+    normalized_symbol: "XAU/USD",
+    timeframe: "1m" as const,
+    price_mode: "bid" as const,
+    from: "2026-11-24T11:58:00.000Z",
+    to: "2026-11-24T12:00:00.000Z",
+    limit: 2,
+  };
 }
 
 test("signs exact EXN-DATA bytes, discovers official access points, and validates 1-10 read-only accounts", async () => {
@@ -76,6 +97,435 @@ test("signs exact EXN-DATA bytes, discovers official access points, and validate
     assert.equal(signed.body_hash, "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU");
     assert.equal(verify(null, data, publicKey, Buffer.from(call.headers.get("EXN-SIGN") ?? "", "base64url")), true);
   }
+});
+
+test("signs the exact DNS-widget discovery path with the required empty idempotency key before loading candles", async () => {
+  const calls: Array<{ url: URL; headers: Headers }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    calls.push({ url, headers: new Headers(init?.headers) });
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits());
+    if (url.pathname.endsWith("/candles")) return json({ candles: [] });
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  await adapter.fetchCandles(account(), candleRequest());
+
+  const discovery = calls[0];
+  assert.ok(discovery);
+  assert.equal(discovery.url.origin, "https://gateway.exness.com");
+  assert.equal(discovery.url.pathname + discovery.url.search, "/v1/trading/access-point?account_id=101");
+  assert.equal(discovery.headers.get("EXN-IDEMPOTENCY-KEY"), "");
+  const data = Buffer.from(discovery.headers.get("EXN-DATA") ?? "", "base64url");
+  assert.deepEqual(JSON.parse(data.toString("utf8")), {
+    api_key: "exnsk-test-key",
+    idempotency_key: "",
+    timestamp: now,
+    sign_version: 1,
+    method: "GET",
+    path: "/v1/trading/access-point?account_id=101",
+    body_hash: "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+  });
+  assert.equal(verify(null, data, publicKey, Buffer.from(discovery.headers.get("EXN-SIGN") ?? "", "base64url")), true);
+});
+
+test("loads candles only from the discovered access point and signs the exact official path and query", async () => {
+  const calls: Array<{ url: URL; headers: Headers }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    calls.push({ url, headers: new Headers(init?.headers) });
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits());
+    if (url.pathname.endsWith("/candles")) return json({
+      candles: [
+        { time: "2026-11-24T11:58:00.000Z", open: 2000.1, high: 2001.2, low: 1999.9, close: 2000.8, volume: 12 },
+        { time: "2026-11-24T11:59:00.000Z", open: 2000.8, high: 2002.1, low: 2000.4, close: 2001.7, volume: 8 },
+      ],
+    });
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  await adapter.fetchCandles(account(), candleRequest());
+
+  const candleCall = calls.find((call) => call.url.pathname.endsWith("/candles"));
+  assert.ok(candleCall);
+  assert.equal(candleCall.url.origin, "https://ap-demo.exness.com");
+  const expectedPath = "/v1/market-data/accounts/101/candles?instrument=XAUUSD&price_type=bid&timeframe=M1&from=2026-11-24T11%3A58%3A00.000Z&to=2026-11-24T12%3A00%3A00.000Z";
+  assert.equal(candleCall.url.pathname + candleCall.url.search, expectedPath);
+  assert.equal(candleCall.headers.get("EXN-IDEMPOTENCY-KEY"), "");
+  const data = Buffer.from(candleCall.headers.get("EXN-DATA") ?? "", "base64url");
+  assert.equal((JSON.parse(data.toString("utf8")) as Record<string, unknown>).path, expectedPath);
+  assert.equal(verify(null, data, publicKey, Buffer.from(candleCall.headers.get("EXN-SIGN") ?? "", "base64url")), true);
+});
+
+test("discovers Exness candle capabilities from the live getCandleHistory account limit", async () => {
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(37));
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const result = await adapter.discoverCapabilities(account());
+
+  assert.deepEqual(result.candles, {
+    availability: "available",
+    timeframes: ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d", "1w", "1M"],
+    maximum_page_size: 37,
+    maximum_range_seconds: 37 * 60,
+    price_modes: ["bid", "ask", "both"],
+    unavailable_reason: null,
+  });
+});
+
+test("reports candles as account-scope unavailable when Exness omits getCandleHistory from live limits", async () => {
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(null));
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const result = await adapter.discoverCapabilities(account());
+
+  assert.deepEqual(result.candles, {
+    availability: "unavailable",
+    timeframes: [],
+    maximum_page_size: null,
+    maximum_range_seconds: null,
+    price_modes: [],
+    unavailable_reason: "account_scope_unavailable",
+  });
+});
+
+test("normalizes official Exness bid, ask, and both payloads into separate decimal-string candle series", async () => {
+  let discoveries = 0;
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") {
+      discoveries += 1;
+      return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    }
+    if (url.pathname.endsWith("/limits")) return json(limits(2));
+    if (url.pathname.endsWith("/candles")) {
+      const priceType = url.searchParams.get("price_type");
+      if (priceType === "both") return json({ candles: [{
+        time: "2026-11-24T11:59:00+00:00",
+        bid: { open: 2000.1, high: 2001.2, low: 1999.9, close: 2000.8 },
+        ask: { open: 2000.3, high: 2001.4, low: 2000.1, close: 2001 },
+        volume: 12,
+      }] });
+      return json({ candles: [{
+        time: "2026-11-24T11:59:00+00:00",
+        open: priceType === "bid" ? 2000.1 : 2000.3,
+        high: priceType === "bid" ? 2001.2 : 2001.4,
+        low: priceType === "bid" ? 1999.9 : 2000.1,
+        close: priceType === "bid" ? 2000.8 : 2001,
+        volume: 12,
+      }] });
+    }
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+  const singleRange = { ...candleRequest(), from: "2026-11-24T11:59:00.000Z" };
+
+  const bid = await adapter.fetchCandles(account(), { ...singleRange, price_mode: "bid" });
+  const ask = await adapter.fetchCandles(account(), { ...singleRange, price_mode: "ask" });
+  const both = await adapter.fetchCandles(account(), { ...singleRange, price_mode: "both", limit: 4 });
+
+  assert.equal(discoveries, 1);
+  assert.deepEqual(bid.candles.map((item) => [item.series_basis, item.open, item.high, item.low, item.close, item.volume, item.status]), [
+    ["bid", "2000.1", "2001.2", "1999.9", "2000.8", "12", "final"],
+  ]);
+  assert.deepEqual(ask.candles.map((item) => [item.series_basis, item.open, item.high, item.low, item.close, item.volume, item.status]), [
+    ["ask", "2000.3", "2001.4", "2000.1", "2001", "12", "final"],
+  ]);
+  assert.deepEqual(both.candles.map((item) => [item.series_basis, item.open, item.close]), [
+    ["bid", "2000.1", "2000.8"],
+    ["ask", "2000.3", "2001"],
+  ]);
+  assert.ok([...bid.candles, ...ask.candles, ...both.candles].every((item) => item.source === "signed_account"));
+});
+
+test("maps every supported WaveKB timeframe to the exact official Exness timeframe and rejects unsupported ones before fetch", async () => {
+  const seen: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(2));
+    if (url.pathname.endsWith("/candles")) {
+      seen.push(url.searchParams.get("timeframe") ?? "");
+      return json({ candles: [] });
+    }
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+  const mappings = [
+    ["1m", "M1"], ["3m", "M3"], ["5m", "M5"], ["15m", "M15"], ["30m", "M30"],
+    ["1h", "H1"], ["2h", "H2"], ["4h", "H4"], ["1d", "D1"], ["1w", "W1"], ["1M", "MN"],
+  ] as const;
+  for (const [timeframe] of mappings) {
+    const from = timeframe === "1M" ? "2026-11-01T00:00:00.000Z" : "2026-11-24T11:59:00.000Z";
+    const to = timeframe === "1M" ? "2026-12-01T00:00:00.000Z" : "2026-11-24T12:00:00.000Z";
+    await adapter.fetchCandles(account(), { ...candleRequest(), timeframe, from, to });
+  }
+  assert.deepEqual(seen, mappings.map(([, upstream]) => upstream));
+  const before = seen.length;
+  await assert.rejects(
+    () => adapter.fetchCandles(account(), { ...candleRequest(), timeframe: "6h" }),
+    /exness_invalid_candle_request/,
+  );
+  assert.equal(seen.length, before);
+});
+
+test("pages by the live Exness candle limit, deduplicates rows, and preserves ascending UTC order", async () => {
+  const windows: Array<[string | null, string | null]> = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(1));
+    if (url.pathname.endsWith("/candles")) {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      windows.push([from, to]);
+      const candle = { time: from, open: 1.1, high: 1.3, low: 1, close: 1.2, volume: 4 };
+      return json({ candles: windows.length === 1 ? [candle, { ...candle }] : [candle] });
+    }
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const result = await adapter.fetchCandles(account(), {
+    ...candleRequest(), from: "2026-11-24T11:57:00.000Z", to: "2026-11-24T12:00:00.000Z", limit: 3,
+  });
+
+  assert.deepEqual(windows, [
+    ["2026-11-24T11:57:00.000Z", "2026-11-24T11:58:00.000Z"],
+    ["2026-11-24T11:58:00.000Z", "2026-11-24T11:59:00.000Z"],
+    ["2026-11-24T11:59:00.000Z", "2026-11-24T12:00:00.000Z"],
+  ]);
+  assert.deepEqual(result.candles.map((item) => item.open_time), windows.map(([from]) => from));
+  assert.equal(result.coverage.status, "complete");
+});
+
+test("marks the current Exness candle partial without fabricating a completed bar", async () => {
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(2));
+    if (url.pathname.endsWith("/candles")) return json({ candles: [{
+      time: "2026-11-24T12:00:00.000Z", open: 1.1, high: 1.3, low: 1, close: 1.2, volume: 4,
+    }] });
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const result = await adapter.fetchCandles(account(), {
+    ...candleRequest(), from: "2026-11-24T12:00:00.000Z", to: "2026-11-24T12:01:00.000Z",
+  });
+
+  assert.equal(result.candles[0]?.status, "partial");
+  assert.equal(result.candles[0]?.close_time, "2026-11-24T12:01:00.000Z");
+});
+
+test("returns bounded partial coverage when the Exness page budget is exhausted", async () => {
+  let candleRequests = 0;
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(1));
+    if (url.pathname.endsWith("/candles")) {
+      candleRequests += 1;
+      return json({ candles: [] });
+    }
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const result = await adapter.fetchCandles(account(), {
+    ...candleRequest(), from: "2026-11-24T11:50:00.000Z", to: "2026-11-24T12:00:00.000Z", limit: 2,
+  });
+
+  assert.equal(candleRequests, 3);
+  assert.equal(result.coverage.status, "partial");
+  assert.deepEqual(result.warnings, ["partial_coverage", "provider_limit_reached"]);
+});
+
+test("uses one whole-fetch deadline and returns time-limit partial coverage after preserving parsed candles", async () => {
+  let clock = now;
+  let candleRequests = 0;
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(1));
+    if (url.pathname.endsWith("/candles")) {
+      candleRequests += 1;
+      clock += 12_001;
+      return json({ candles: [{ time: url.searchParams.get("from"), open: 1.1, high: 1.3, low: 1, close: 1.2, volume: 4 }] });
+    }
+    throw new Error(`unexpected path ${url.pathname}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => clock);
+
+  const result = await adapter.fetchCandles(account(), {
+    ...candleRequest(), from: "2026-11-24T11:57:00.000Z", to: "2026-11-24T12:00:00.000Z", limit: 3,
+  });
+
+  assert.equal(candleRequests, 1);
+  assert.equal(result.candles.length, 1);
+  assert.equal(result.coverage.status, "partial");
+  assert.ok(result.warnings.includes("time_limit_reached"));
+});
+
+test("caches an access point per credential scope and refreshes it once after a stale-host failure", async () => {
+  let discoveries = 0;
+  let oldHostCandles = 0;
+  let newHostCandles = 0;
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") {
+      discoveries += 1;
+      return json({ access_point: discoveries === 1 ? "https://old-ap.exness.com" : "https://new-ap.exness.com", account_id: "101" });
+    }
+    if (url.pathname.endsWith("/limits")) return json(limits(2));
+    if (url.pathname.endsWith("/candles") && url.hostname === "old-ap.exness.com") {
+      oldHostCandles += 1;
+      return json({ code: "SYSTEM_TEMPORARY_UNAVAILABLE", description: "old internal host" }, 503);
+    }
+    if (url.pathname.endsWith("/candles") && url.hostname === "new-ap.exness.com") {
+      newHostCandles += 1;
+      return json({ candles: [{ time: "2026-11-24T11:59:00.000Z", open: 1.1, high: 1.3, low: 1, close: 1.2, volume: 4 }] });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const first = await adapter.fetchCandles(account(), { ...candleRequest(), from: "2026-11-24T11:59:00.000Z" });
+  const second = await adapter.fetchCandles(account(), { ...candleRequest(), from: "2026-11-24T11:59:00.000Z" });
+
+  assert.equal(first.candles.length, 1);
+  assert.equal(second.candles.length, 1);
+  assert.equal(discoveries, 2);
+  assert.equal(oldHostCandles, 1);
+  assert.equal(newHostCandles, 2);
+});
+
+test("does not reuse a cached access point after the API-key or DNS-widget Gateway scope changes", async () => {
+  const discoveries: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") {
+      discoveries.push(url.origin);
+      return json({ access_point: discoveries.length === 1 ? "https://ap-one.exness.com" : "https://ap-two.exness.com", account_id: "101" });
+    }
+    if (url.pathname.endsWith("/limits")) return json(limits(2));
+    if (url.pathname.endsWith("/candles")) return json({ candles: [] });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  await adapter.fetchCandles(account(), candleRequest());
+  await adapter.fetchCandles(account({ credentials: credentials({
+    api_key: "exnsk-rotated-key",
+    discovery_base_url: "https://rotated-gateway.exness.com",
+    account_ids: JSON.stringify(["101"]),
+  }) }), candleRequest());
+
+  assert.deepEqual(discoveries, ["https://gateway.exness.com", "https://rotated-gateway.exness.com"]);
+});
+
+test("maps 401, 403, 429, and repeated 503 candle failures to redacted degraded coverage", async () => {
+  const cases = [
+    [401, "AUTH_INVALID_API_KEY", "account_scope_unavailable", false],
+    [401, "UNKNOWN_AUTH_FAILURE", "account_scope_unavailable", false],
+    [403, "AUTH_PERMISSION_DENIED", "account_scope_unavailable", false],
+    [429, "REQUEST_RATE_LIMIT", "rate_limited", true],
+    [503, "SYSTEM_TEMPORARY_UNAVAILABLE", "upstream_unavailable", false],
+  ] as const;
+  for (const [status, code, reason, rateLimited] of cases) {
+    const sensitive = `secret-${status}-https://private-ap.exness.com`;
+    const fetcher: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://private-ap.exness.com", account_id: "101" });
+      if (url.pathname.endsWith("/limits")) return json(limits(2));
+      if (url.pathname.endsWith("/candles")) return json({ code, description: sensitive, api_key: "exnsk-test-key", private_key: privatePem }, status);
+      throw new Error(`unexpected URL ${url}`);
+    };
+    const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+    const result = await adapter.fetchCandles(account(), candleRequest());
+
+    assert.equal(result.coverage.status, "unavailable");
+    assert.equal(result.coverage.unavailable_reason, reason);
+    assert.equal(result.warnings.includes("rate_limited"), rateLimited);
+    const serialized = JSON.stringify(result);
+    assert.equal(serialized.includes(sensitive), false);
+    assert.equal(serialized.includes("private-ap.exness.com"), false);
+    assert.equal(serialized.includes("exnsk-test-key"), false);
+    assert.equal(serialized.includes("PRIVATE KEY"), false);
+    assert.equal(serialized.includes("101"), false);
+  }
+});
+
+test("returns account-scope unavailable coverage when the DNS-widget Gateway Host is missing without guessing a host", async () => {
+  let fetches = 0;
+  const adapter = new ExnessTradingProviderAdapter(async () => {
+    fetches += 1;
+    throw new Error("must not fetch");
+  }, () => now);
+  const missingGateway = account({ credentials: credentials({ discovery_base_url: "" }) });
+
+  const result = await adapter.fetchCandles(missingGateway, candleRequest());
+
+  assert.equal(fetches, 0);
+  assert.equal(result.coverage.status, "unavailable");
+  assert.equal(result.coverage.unavailable_reason, "account_scope_unavailable");
+  assert.deepEqual(result.warnings, ["candles_unavailable"]);
+});
+
+test("degrades malformed Exness candle payloads without exposing raw upstream data", async () => {
+  const raw = "raw-private-upstream-payload";
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(2));
+    if (url.pathname.endsWith("/candles")) return json({ candles: [{ time: raw, open: raw }] });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const result = await adapter.fetchCandles(account(), candleRequest());
+
+  assert.equal(result.coverage.status, "unavailable");
+  assert.equal(result.coverage.unavailable_reason, "upstream_unavailable");
+  assert.equal(JSON.stringify(result).includes(raw), false);
+});
+
+test("degrades an Exness response that returns a candle outside the exact signed page window", async () => {
+  const fetcher: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
+    if (url.pathname.endsWith("/limits")) return json(limits(2));
+    if (url.pathname.endsWith("/candles")) return json({ candles: [
+      { time: "2026-11-24T11:57:00.000Z", open: 1.1, high: 1.3, low: 1, close: 1.2, volume: 4 },
+      { time: "2026-11-24T11:58:00.000Z", open: 1.2, high: 1.4, low: 1.1, close: 1.3, volume: 5 },
+      { time: "2026-11-24T11:59:00.000Z", open: 1.3, high: 1.5, low: 1.2, close: 1.4, volume: 6 },
+    ] });
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+  const result = await adapter.fetchCandles(account(), {
+    ...candleRequest(), from: "2026-11-24T11:57:00.000Z", to: "2026-11-24T12:00:00.000Z", limit: 2,
+  });
+
+  assert.equal(result.coverage.status, "unavailable");
+  assert.equal(result.coverage.unavailable_reason, "upstream_unavailable");
 });
 
 test("rejects a generated Exness private key whose public half does not match its seed before fetch", async () => {
