@@ -397,6 +397,38 @@ test("private trade chart routes are owner-authenticated, fixed, no-store and or
   })).statusCode, 404);
 });
 
+test("pilot chart access applies to reads and writes using the authorized account UID", async () => {
+  const cycleId = "11111111-1111-4111-8111-111111111111";
+  const server = buildServer({
+    config: { ...config, TRADING_FILL_CHART_ENABLED: true, TRADING_FILL_CHART_PILOT_UIDS: [12345] },
+    api: {
+      ...api,
+      authorize: async (token: string) => token === "pilot" ? { id: "pilot-id", role: "user", publicUid: 12345 }
+        : token === "regular" ? { id: "other-id", role: "user", publicUid: 42345 } : null,
+    },
+    tradingWorkbench: {
+      getChart: async (owner: string) => ({ owner }),
+      saveChartState: async (owner: string) => ({ owner }),
+      saveFillAnnotation: async (owner: string) => ({ owner }),
+    } as any,
+  });
+  try {
+    for (const token of ["pilot", "regular"]) {
+      const headers = { authorization: `Bearer ${token}`, origin: "http://localhost:8765", "x-wavekb-uid": "12345" };
+      const availability = await server.inject({ url: "/v1/user/trading-chart-access", headers });
+      assert.equal(availability.statusCode, 200);
+      assert.deepEqual(availability.json(), { enabled: token === "pilot" });
+      assert.equal(availability.headers["cache-control"], "no-store");
+      for (const [method, suffix] of [["GET", "chart"], ["PUT", "chart-state"], ["PUT", "fills/101/annotation"]] as const) {
+        const result = await server.inject({ method, url: `/v1/user/trading-trades/${cycleId}/${suffix}`, headers, payload: {} });
+        assert.equal(result.statusCode, token === "pilot" ? 200 : 404, suffix);
+      }
+    }
+  } finally {
+    await server.close();
+  }
+});
+
 test("private trade chart failures preserve only fixed safe codes and no-store headers", async () => {
   const cycleId = "11111111-1111-4111-8111-111111111111";
   const tradingWorkbench = {

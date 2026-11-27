@@ -33,6 +33,19 @@ describe("fill chart availability", () => {
     expect(await tradingFillChartEnabled({ ...env, TRADING_FILL_CHART_ENABLED: "true" })).toBe(false);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it("consults Gateway pilot access with the verified session token", async () => {
+    const env = { AUTH_GATEWAY_INTERNAL_URL: "http://127.0.0.1:8787/" };
+    const fetcher = vi.fn(async (url: string) => url.endsWith("/health")
+      ? Response.json({ ok: true, features: { trading_fill_chart: false, trading_fill_chart_pilot: true } })
+      : Response.json({ enabled: true }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await tradingFillChartEnabled(env)).toBe(false);
+    expect(await tradingFillChartEnabled(env, async () => "verified-token")).toBe(true);
+    expect(fetcher).toHaveBeenLastCalledWith("http://127.0.0.1:8787/v1/user/trading-chart-access", expect.objectContaining({
+      cache: "no-store", headers: { authorization: "Bearer verified-token" },
+    }));
+  });
 });
 
 describe("trading workbench cutover flag", () => {

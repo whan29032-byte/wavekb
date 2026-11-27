@@ -90,3 +90,18 @@ test("fill chart rollout defaults off and publishes only a strict boolean", asyn
     await server.close();
   }
 });
+
+test("pilot UIDs are validated and never published by the Gateway health endpoint", async () => {
+  assert.throws(() => loadConfig({ ...baseEnv, TRADING_FILL_CHART_PILOT_UIDS: "00000,12345" }), /TRADING_FILL_CHART_PILOT_UIDS/);
+  const config = loadConfig({ ...baseEnv, TRADING_FILL_CHART_ENABLED: "true", TRADING_FILL_CHART_PILOT_UIDS: "12345, 234567" });
+  const server = buildServer({ config });
+  try {
+    const response = await server.inject({ url: "/health" });
+    assert.deepEqual((response.json() as { features: unknown }).features, {
+      trading_workbench_v2: false, trading_fill_chart: false, trading_fill_chart_pilot: true,
+    });
+    assert.doesNotMatch(response.body, /12345|234567/);
+  } finally {
+    await server.close();
+  }
+});

@@ -81,12 +81,15 @@ export class SupabaseGatewayApi implements GatewayApi {
     const user = await this.database.userForJwt(token);
     if (!user) return null;
     const rows = await this.database.request(
-      `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,account_status&limit=1`,
+      `/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=id,role,account_status,public_uid&limit=1`,
     );
     const profile = rows?.[0];
-    return profile && profile.account_status !== "banned"
-      ? { id: profile.id, role: profile.role ?? "user" }
-      : null;
+    if (!profile || profile.account_status === "banned") return null;
+    const publicUid = profile.account_status === "active" ? Number(profile.public_uid) : NaN;
+    return {
+      id: profile.id, role: profile.role ?? "user",
+      ...(Number.isInteger(publicUid) && publicUid >= 10_000 && publicUid <= 999_999 ? { publicUid } : {}),
+    };
   }
 
   async listDirectoryResources(includeInactive = false): Promise<unknown[]> {

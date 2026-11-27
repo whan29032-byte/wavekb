@@ -1,7 +1,11 @@
 import "server-only";
 
 type TradingEnvironment = Readonly<Record<string, string | undefined>>;
-type GatewayTradingFeature = "trading_workbench_v2" | "trading_fill_chart";
+type GatewayTradingFeatures = {
+  trading_workbench_v2?: unknown;
+  trading_fill_chart?: unknown;
+  trading_fill_chart_pilot?: unknown;
+};
 
 export function tradingWorkbenchV2Enabled(
   env: TradingEnvironment = process.env,
@@ -12,27 +16,51 @@ export function tradingWorkbenchV2Enabled(
   if (value !== undefined && value !== "") {
     return Promise.reject(new Error("TRADING_WORKBENCH_V2_ENABLED must be true or false"));
   }
-  return gatewayTradingFeature(env, "trading_workbench_v2");
+  return gatewayTradingFeatures(env).then((features) => features?.trading_workbench_v2 === true);
 }
 
-export function tradingFillChartEnabled(env: TradingEnvironment = process.env): Promise<boolean> {
+export async function tradingFillChartEnabled(
+  env: TradingEnvironment = process.env,
+  accessToken?: () => Promise<string | null>,
+): Promise<boolean> {
   const value = env.TRADING_FILL_CHART_ENABLED;
-  if (value !== undefined && value !== "" && value !== "true") return Promise.resolve(false);
-  return gatewayTradingFeature(env, "trading_fill_chart");
+  if (value !== undefined && value !== "" && value !== "true") return false;
+  const features = await gatewayTradingFeatures(env);
+  if (features?.trading_fill_chart === true) return true;
+  if (features?.trading_fill_chart_pilot !== true || !accessToken) return false;
+
+  const origin = gatewayOrigin(env);
+  if (!origin) return false;
+  try {
+    const token = await accessToken();
+    if (!token) return false;
+    const response = await fetch(`${origin}/v1/user/trading-chart-access`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(3_000),
+      headers: { authorization: `Bearer ${token}` },
+    });
+    return response.ok && (await response.json() as { enabled?: unknown }).enabled === true;
+  } catch {
+    return false;
+  }
 }
 
-function gatewayTradingFeature(env: TradingEnvironment, name: GatewayTradingFeature): Promise<boolean> {
-  const gatewayOrigin = env.AUTH_GATEWAY_INTERNAL_URL?.replace(/\/$/, "");
-  if (!gatewayOrigin) return Promise.resolve(false);
-  return fetch(`${gatewayOrigin}/health`, {
+function gatewayOrigin(env: TradingEnvironment) {
+  return env.AUTH_GATEWAY_INTERNAL_URL?.replace(/\/$/, "");
+}
+
+function gatewayTradingFeatures(env: TradingEnvironment): Promise<GatewayTradingFeatures | null> {
+  const origin = gatewayOrigin(env);
+  if (!origin) return Promise.resolve(null);
+  return fetch(`${origin}/health`, {
     cache: "no-store",
     signal: AbortSignal.timeout(3_000),
   }).then(async (response) => {
-    if (!response.ok) return false;
+    if (!response.ok) return null;
     const payload = await response.json() as {
       ok?: unknown;
-      features?: Partial<Record<GatewayTradingFeature, unknown>>;
+      features?: GatewayTradingFeatures;
     };
-    return payload.ok === true && payload.features?.[name] === true;
-  }).catch(() => false);
+    return payload.ok === true ? payload.features ?? null : null;
+  }).catch(() => null);
 }

@@ -35,7 +35,7 @@ export type ServerDeps = {
   tradingSync?: Pick<TradingSyncService, "syncConnection">;
 };
 
-export type GatewayUser = { id: string; role: string };
+export type GatewayUser = { id: string; role: string; publicUid?: number };
 export type GatewayApi = {
   authorize(token: string): Promise<GatewayUser | null>;
   listDirectoryResources(includeInactive?: boolean): Promise<unknown[]>;
@@ -154,7 +154,10 @@ function healthPayload(deps: ServerDeps): object {
     deployment,
     features: {
       trading_workbench_v2: deps.config.TRADING_WORKBENCH_V2_ENABLED,
-      trading_fill_chart: deps.config.TRADING_FILL_CHART_ENABLED,
+      trading_fill_chart: deps.config.TRADING_FILL_CHART_ENABLED && deps.config.TRADING_FILL_CHART_PILOT_UIDS.length === 0,
+      ...(deps.config.TRADING_FILL_CHART_ENABLED && deps.config.TRADING_FILL_CHART_PILOT_UIDS.length > 0
+        ? { trading_fill_chart_pilot: true }
+        : {}),
     },
     time: (deps.now ?? (() => new Date()))().toISOString(),
   };
@@ -385,6 +388,11 @@ function routeFailure(error: unknown): RouteResult {
 function authOriginAllowed(config: GatewayConfig, headers: Record<string, string>): boolean {
   const origin = String(headers.origin || "").trim().toLowerCase();
   return !origin || config.ALLOWED_WEB_ORIGINS.includes(origin);
+}
+
+function canUseTradeChart(config: GatewayConfig, actor: GatewayUser): boolean {
+  return config.TRADING_FILL_CHART_ENABLED && (config.TRADING_FILL_CHART_PILOT_UIDS.length === 0
+    || (actor.publicUid !== undefined && config.TRADING_FILL_CHART_PILOT_UIDS.includes(actor.publicUid)));
 }
 
 function clientIp(headers: Record<string, string>): string {
@@ -645,9 +653,12 @@ async function route(
     if (!deps.tradingWorkbench) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return { statusCode: 200, body: { workbench: await deps.tradingWorkbench.getDashboard(actor.id, query) }, headers: { "cache-control": "no-store" } };
   }
+  if (method === "GET" && path === "/v1/user/trading-chart-access") {
+    return authResult(200, { enabled: canUseTradeChart(deps.config, actor) });
+  }
   const tradeChartMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart$/i);
   if (tradeChartMatch?.[1]) {
-    if (!deps.config.TRADING_FILL_CHART_ENABLED) return authResult(404, { error: "not_found" });
+    if (!canUseTradeChart(deps.config, actor)) return authResult(404, { error: "not_found" });
     if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
     const cycleId = decodeURIComponent(tradeChartMatch[1]);
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)
@@ -656,7 +667,7 @@ async function route(
   }
   const tradeChartStateMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart-state$/i);
   if (tradeChartStateMatch?.[1]) {
-    if (!deps.config.TRADING_FILL_CHART_ENABLED) return authResult(404, { error: "not_found" });
+    if (!canUseTradeChart(deps.config, actor)) return authResult(404, { error: "not_found" });
     if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
     const cycleId = decodeURIComponent(tradeChartStateMatch[1]);
     if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {
@@ -671,7 +682,7 @@ async function route(
   }
   const tradeFillAnnotationMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/fills\/([1-9]\d{0,29})\/annotation$/i);
   if (tradeFillAnnotationMatch?.[1] && tradeFillAnnotationMatch[2]) {
-    if (!deps.config.TRADING_FILL_CHART_ENABLED) return authResult(404, { error: "not_found" });
+    if (!canUseTradeChart(deps.config, actor)) return authResult(404, { error: "not_found" });
     if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
     const cycleId = decodeURIComponent(tradeFillAnnotationMatch[1]);
     if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {
