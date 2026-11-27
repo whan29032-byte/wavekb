@@ -6,6 +6,7 @@ import {
   TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS,
   type TradeChartDrawingToolId,
 } from "@wavekb/domain/trading-review";
+import type { IPrimitive, PrimitiveRenderContext } from "openalgo-charts";
 
 export const BASIC_DRAWING_TOOL_IDS = TRADE_CHART_BASIC_DRAWING_TOOL_IDS;
 export const FIBONACCI_DRAWING_TOOL_IDS = TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS;
@@ -68,6 +69,7 @@ export interface WaveKbChartMarker {
   color: string;
   text?: string;
   textColor?: string;
+  bold?: boolean;
 }
 
 export interface WaveKbChartIndicator {
@@ -175,8 +177,26 @@ export interface WaveKbChartViewport {
   to: number;
 }
 
+interface WaveKbFillCluster {
+  id: string;
+  time: number;
+  count: number;
+}
+
+export interface WaveKbChartTheme {
+  background: string;
+  grid: string;
+  axisText: string;
+  axisLine: string;
+  primary: string;
+  positive: string;
+  negative: string;
+}
+
 export interface WaveKbChartEngine {
   setCandles(candles: readonly WaveKbChartCandle[]): void;
+  setCandleGaps(gaps: readonly { from: number; to: number }[]): void;
+  setFillClusters(clusters: readonly WaveKbFillCluster[]): void;
   setMarkers(markers: readonly WaveKbChartMarker[]): void;
   setIndicators(indicators: readonly WaveKbChartIndicator[]): Promise<void>;
   setDrawings(document: WaveKbChartDrawingDocument): Promise<void>;
@@ -186,6 +206,9 @@ export interface WaveKbChartEngine {
   redoDrawings(): boolean;
   getDrawings(): WaveKbChartDrawingDocument;
   subscribeDrawings(listener: (change: WaveKbChartDrawingChange) => void): () => void;
+  subscribeMarkerClicks(listener: (markerId: string | null) => void): () => void;
+  setTheme(theme: WaveKbChartTheme): void;
+  resize(width: number, height: number, devicePixelRatio: number): void;
   setViewport(viewport: WaveKbChartViewport | null): void;
   getViewport(): WaveKbChartViewport;
   destroy(): void;
@@ -193,6 +216,58 @@ export interface WaveKbChartEngine {
 
 export interface WaveKbChartEngineOptions {
   timezone?: string;
+  ariaLabel?: string;
+}
+
+function fillClusterLayer(clusters: readonly WaveKbFillCluster[]): IPrimitive {
+  const top = 6;
+  const height = 22;
+  const chips = clusters.map(({ id, time, count }) => {
+    const text = `+${count}`;
+    return { id, time, text, width: 12 + 7 * text.length };
+  });
+
+  function chipLeft(chip: (typeof chips)[number], { dataLayer, timeScale, plotWidth }: PrimitiveRenderContext): number | null {
+    const index = dataLayer.timeToIndex(chip.time);
+    if (index === undefined || plotWidth < chip.width) return null;
+    const x = timeScale.indexToX(index);
+    return x < 0 || x > plotWidth ? null : Math.max(0, Math.min(x - chip.width / 2, plotWidth - chip.width));
+  }
+
+  return {
+    zOrder: () => "top",
+    draw(ctx, rc) {
+      const { dpr, theme } = rc;
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `600 ${12 * dpr}px system-ui, sans-serif`;
+      for (const chip of chips) {
+        const left = chipLeft(chip, rc);
+        if (left === null) continue;
+        ctx.fillStyle = theme.axisText;
+        ctx.beginPath();
+        ctx.roundRect(left * dpr, top * dpr, chip.width * dpr, height * dpr, 4 * dpr);
+        ctx.fill();
+        ctx.fillStyle = theme.background;
+        ctx.fillText(chip.text, (left + chip.width / 2) * dpr, (top + height / 2) * dpr);
+      }
+      ctx.restore();
+    },
+    hitTest(x, y, rc) {
+      if (y < top || y > top + height) return null;
+      // Match paint order when adjacent badges overlap at a wide zoom.
+      for (let index = chips.length - 1; index >= 0; index -= 1) {
+        const chip = chips[index];
+        if (chip === undefined) continue;
+        const left = chipLeft(chip, rc);
+        if (left !== null && x >= left && x <= left + chip.width) {
+          return { externalId: chip.id, zOrder: "top", distance: 0, cursor: "pointer" };
+        }
+      }
+      return null;
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -688,13 +763,16 @@ export async function createWaveKbChartEngine(
     throw new Error("WaveKB chart engine can only be created in a browser");
   }
 
-  const { createChart } = await import("openalgo-charts");
+  const { createChart, lightTheme } = await import("openalgo-charts");
   const chart = createChart(container, {
     branding: false,
     timezone: options.timezone ?? "UTC",
+    ariaLabel: options.ariaLabel,
   });
   const candleSeries = chart.addSeries("candlestick");
   const markerLayer = candleSeries.createMarkers();
+  let candleGapLayer: IPrimitive | null = null;
+  let clusterLayer: IPrimitive | null = null;
 
   let drawingModule: OpenAlgoDrawingModule | null = null;
   let drawingController: OpenAlgoDrawingController | null = null;
@@ -704,6 +782,7 @@ export async function createWaveKbChartEngine(
   let lifecycleVersion = 0;
   const drawingListeners = new Set<(change: WaveKbChartDrawingChange) => void>();
   const drawingEventOff: Array<() => void> = [];
+  const markerClickEventOff = new Set<() => void>();
 
   const destroyedError = () => new Error("WaveKB chart engine has been destroyed");
   const assertAlive = () => {
@@ -774,6 +853,37 @@ export async function createWaveKbChartEngine(
     setCandles(candles) {
       assertAlive();
       candleSeries.setData(candles);
+    },
+    setCandleGaps(gaps) {
+      assertAlive();
+      if (candleGapLayer) chart.removePrimitive(candleGapLayer);
+      candleGapLayer = null;
+      if (gaps.length === 0) return;
+
+      // Shade the gap on the compressed time scale without feeding fake OHLC
+      // values or missing-price points into the candle series and indicators.
+      candleGapLayer = {
+        zOrder: () => "bottom",
+        draw(ctx, { dataLayer, timeScale, plotWidth, plotHeight, dpr, theme }) {
+          const halfBar = timeScale.barSpacing / 2;
+          ctx.save();
+          ctx.globalAlpha = 0.45;
+          ctx.fillStyle = theme.axisLine;
+          for (const { from, to } of gaps) {
+            const left = Math.max(0, timeScale.indexToX(dataLayer.timeToIndexFloat(from)) - halfBar);
+            const right = Math.min(plotWidth, timeScale.indexToX(dataLayer.timeToIndexFloat(to)) - halfBar);
+            if (right > left) ctx.fillRect(left * dpr, 0, (right - left) * dpr, plotHeight * dpr);
+          }
+          ctx.restore();
+        },
+      };
+      chart.addPrimitive(candleGapLayer, { anchor: "primary-pane" });
+    },
+    setFillClusters(clusters) {
+      assertAlive();
+      if (clusterLayer) chart.removePrimitive(clusterLayer);
+      clusterLayer = clusters.length > 0 ? fillClusterLayer(clusters) : null;
+      if (clusterLayer) chart.addPrimitive(clusterLayer, { anchor: "primary-pane" });
     },
     setMarkers(markers) {
       assertAlive();
@@ -851,6 +961,54 @@ export async function createWaveKbChartEngine(
         drawingListeners.delete(listener);
       };
     },
+    subscribeMarkerClicks(listener) {
+      assertAlive();
+      const off = chart.on("click", ({ id }) => listener(typeof id === "string" ? id : null));
+      markerClickEventOff.add(off);
+      let subscribed = true;
+      return () => {
+        if (!subscribed) return;
+        subscribed = false;
+        markerClickEventOff.delete(off);
+        off();
+      };
+    },
+    setTheme(theme) {
+      assertAlive();
+      chart.setTheme({
+        ...lightTheme,
+        background: theme.background,
+        grid: theme.grid,
+        axisText: theme.axisText,
+        axisLine: theme.axisLine,
+        paneSeparator: theme.axisLine,
+        crosshair: theme.primary,
+        crosshairLabelBackground: theme.primary,
+        upColor: theme.positive,
+        downColor: theme.negative,
+        wickUpColor: theme.positive,
+        wickDownColor: theme.negative,
+        lineColor: theme.primary,
+        areaTopColor: theme.primary,
+        areaBottomColor: theme.background,
+        baselineTopLine: theme.positive,
+        baselineTopFill: theme.positive,
+        baselineBottomLine: theme.negative,
+        baselineBottomFill: theme.negative,
+        lastPriceUp: theme.positive,
+        lastPriceDown: theme.negative,
+        lastPriceText: theme.background,
+        buy: theme.positive,
+        sell: theme.negative,
+        profit: theme.positive,
+        loss: theme.negative,
+      });
+    },
+    resize(width, height, _devicePixelRatio) {
+      assertAlive();
+      void _devicePixelRatio;
+      chart.applySize(width, height);
+    },
     setViewport(viewport) {
       assertAlive();
       if (viewport) {
@@ -868,10 +1026,14 @@ export async function createWaveKbChartEngine(
       destroyed = true;
       lifecycleVersion += 1;
       for (const off of drawingEventOff.splice(0)) off();
+      for (const off of markerClickEventOff) off();
+      markerClickEventOff.clear();
       drawingListeners.clear();
       drawingController?.destroy();
       drawingController = null;
       drawingModule = null;
+      candleGapLayer = null;
+      clusterLayer = null;
       chart.destroy();
     },
   };

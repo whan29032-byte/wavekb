@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { IPrimitive, PrimitiveRenderContext } from "openalgo-charts";
 
 import {
   ELLIOTT_DRAWING_TOOL_IDS,
@@ -18,6 +19,8 @@ const library = vi.hoisted(() => {
   const state = {
     candles: [] as unknown[],
     markers: [] as unknown[],
+    primitives: new Set<IPrimitive>(),
+    chartOptions: null as Record<string, unknown> | null,
     indicators: [] as Array<{ id: string; indicatorId: string }>,
     drawings: { version: 2, drawings: [] } as {
       version: number;
@@ -30,6 +33,8 @@ const library = vi.hoisted(() => {
     chartDestroyCount: 0,
     drawingCreateCount: 0,
     drawingDestroyCount: 0,
+    theme: null as Record<string, unknown> | null,
+    size: null as { width: number; height: number } | null,
     handlers: new Map<string, Set<(payload: unknown) => void>>(),
   };
 
@@ -50,44 +55,56 @@ const library = vi.hoisted(() => {
 });
 
 vi.mock("openalgo-charts", () => ({
-  createChart: () => ({
-    addSeries: () => ({
-      setData: (candles: unknown[]) => {
-        library.state.candles = candles;
-      },
-      createMarkers: () => ({
-        setMarkers: (markers: unknown[]) => {
-          library.state.markers = markers;
+  lightTheme: {},
+  createChart: (_container: HTMLElement, options: Record<string, unknown>) => {
+    library.state.chartOptions = options;
+    return {
+      addSeries: () => ({
+        setData: (candles: unknown[]) => {
+          library.state.candles = candles;
         },
+        createMarkers: () => ({
+          setMarkers: (markers: unknown[]) => {
+            library.state.markers = markers;
+          },
+        }),
       }),
-    }),
-    addIndicator: (indicatorId: string, _settings: unknown, options: { instanceId: string }) => {
-      const indicator = { id: options.instanceId, indicatorId };
-      library.state.indicators.push(indicator);
-      return indicator;
-    },
-    removeIndicator: (instanceId: string) => {
-      library.state.indicators = library.state.indicators.filter(({ id }) => id !== instanceId);
-      return true;
-    },
-    getVisibleLogicalRange: () => library.state.viewport,
-    setVisibleLogicalRange: (viewport: { from: number; to: number }) => {
-      library.state.viewport = viewport;
-    },
-    fitContent: () => {
-      library.state.viewport = { from: 0, to: 0 };
-    },
-    on: (event: string, handler: (payload: unknown) => void) => {
-      const handlers = library.state.handlers.get(event) ?? new Set();
-      handlers.add(handler);
-      library.state.handlers.set(event, handlers);
-      return () => handlers.delete(handler);
-    },
-    emit: library.emit,
-    destroy: () => {
-      library.state.chartDestroyCount += 1;
-    },
-  }),
+      addIndicator: (indicatorId: string, _settings: unknown, options: { instanceId: string }) => {
+        const indicator = { id: options.instanceId, indicatorId };
+        library.state.indicators.push(indicator);
+        return indicator;
+      },
+      removeIndicator: (instanceId: string) => {
+        library.state.indicators = library.state.indicators.filter(({ id }) => id !== instanceId);
+        return true;
+      },
+      addPrimitive: (primitive: IPrimitive) => library.state.primitives.add(primitive),
+      removePrimitive: (primitive: IPrimitive) => library.state.primitives.delete(primitive),
+      getVisibleLogicalRange: () => library.state.viewport,
+      setVisibleLogicalRange: (viewport: { from: number; to: number }) => {
+        library.state.viewport = viewport;
+      },
+      fitContent: () => {
+        library.state.viewport = { from: 0, to: 0 };
+      },
+      on: (event: string, handler: (payload: unknown) => void) => {
+        const handlers = library.state.handlers.get(event) ?? new Set();
+        handlers.add(handler);
+        library.state.handlers.set(event, handlers);
+        return () => handlers.delete(handler);
+      },
+      setTheme: (theme: Record<string, unknown>) => {
+        library.state.theme = theme;
+      },
+      applySize: (width: number, height: number) => {
+        library.state.size = { width, height };
+      },
+      emit: library.emit,
+      destroy: () => {
+        library.state.chartDestroyCount += 1;
+      },
+    };
+  },
 }));
 
 vi.mock("openalgo-charts/indicators", async () => {
@@ -144,6 +161,8 @@ describe.sequential("WaveKB chart engine boundary", () => {
   afterEach(() => {
     library.state.candles = [];
     library.state.markers = [];
+    library.state.primitives.clear();
+    library.state.chartOptions = null;
     library.state.indicators = [];
     library.state.drawings = { version: 2, drawings: [] };
     library.state.viewport = { from: 0, to: 10 };
@@ -153,8 +172,55 @@ describe.sequential("WaveKB chart engine boundary", () => {
     library.state.chartDestroyCount = 0;
     library.state.drawingCreateCount = 0;
     library.state.drawingDestroyCount = 0;
+    library.state.theme = null;
+    library.state.size = null;
     library.state.handlers.clear();
     vi.unstubAllGlobals();
+  });
+
+  it("shades the reported discontinuity without adding bars to the price series", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const candles = [
+      { time: 0, open: 10, high: 13, low: 9, close: 11 },
+      { time: 180, open: 11, high: 14, low: 10, close: 12 },
+    ];
+    engine.setCandles(candles);
+    engine.setCandleGaps([{ from: 60, to: 180 }]);
+
+    const region = [...library.state.primitives][0]!;
+    expect(region.zOrder()).toBe("bottom");
+    const ctx = { save: vi.fn(), restore: vi.fn(), fillRect: vi.fn() };
+    const rc = {
+      dataLayer: { timeToIndexFloat: (time: number) => time / 180 },
+      timeScale: { indexToX: (index: number) => 10 + 12 * index, barSpacing: 12 },
+      plotWidth: 40, plotHeight: 100, dpr: 2, theme: { axisLine: "#000" },
+    } as unknown as PrimitiveRenderContext;
+    region.draw(ctx as unknown as CanvasRenderingContext2D, rc);
+    expect(ctx.fillRect).toHaveBeenCalledWith(16, 0, 16, 200);
+    expect(library.state.candles).toEqual(candles);
+
+    engine.setCandleGaps([]);
+    expect(library.state.primitives.size).toBe(0);
+    engine.destroy();
+  });
+
+  it("hits the visible cluster count label anywhere in the chip body", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"), { ariaLabel: "成交 K 线图" });
+    expect(library.state.chartOptions?.ariaLabel).toBe("成交 K 线图");
+    engine.setFillClusters([{ id: "cluster:180", time: 180, count: 8 }]);
+    const badges = [...library.state.primitives][0]!;
+    const ctx = { save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), roundRect: vi.fn(), fill: vi.fn(), fillText: vi.fn() };
+    const rc = {
+      dataLayer: { timeToIndex: () => 3 },
+      timeScale: { indexToX: () => 60 },
+      plotWidth: 120, plotHeight: 160, dpr: 2,
+      theme: { axisText: "#000", background: "#fff" },
+    } as unknown as PrimitiveRenderContext;
+    badges.draw(ctx as unknown as CanvasRenderingContext2D, rc);
+    expect(ctx.fillText).toHaveBeenCalledWith("+8", 120, 34);
+    expect(badges.hitTest?.(70, 22, rc)).toMatchObject({ externalId: "cluster:180", distance: 0 });
+    expect(badges.hitTest?.(70, 30, rc)).toBeNull();
+    engine.destroy();
   });
 
   it("does not add indicators when their tier finishes loading after destroy", async () => {
@@ -571,6 +637,52 @@ describe.sequential("WaveKB chart engine boundary", () => {
     expect(library.state.indicators).toEqual([{ id: "study-1", indicatorId: "sma" }]);
     expect(engine.getViewport()).toEqual({ from: 2, to: 8 });
 
+    engine.destroy();
+  });
+
+  it("forwards marker click identity and removes the listener when unsubscribed", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const selected: Array<string | null> = [];
+    const unsubscribe = engine.subscribeMarkerClicks((markerId) => selected.push(markerId));
+
+    library.emit("click", { id: "fill:7:42" });
+    library.emit("click", { id: null });
+    unsubscribe();
+    library.emit("click", { id: "fill:7:99" });
+
+    expect(selected).toEqual(["fill:7:42", null]);
+    expect(library.state.handlers.get("click")?.size ?? 0).toBe(0);
+    engine.destroy();
+  });
+
+  it("maps resolved WaveKB colors to the chart theme and applies explicit size", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+
+    engine.setTheme({
+      background: "rgb(25, 35, 47)",
+      grid: "rgb(43, 56, 71)",
+      axisText: "rgb(174, 185, 199)",
+      axisLine: "rgb(53, 67, 84)",
+      primary: "rgb(139, 188, 245)",
+      positive: "rgb(109, 211, 168)",
+      negative: "rgb(255, 123, 133)",
+    });
+    engine.resize(640, 360, 2);
+
+    expect(library.state.theme).toMatchObject({
+      background: "rgb(25, 35, 47)",
+      grid: "rgb(43, 56, 71)",
+      axisText: "rgb(174, 185, 199)",
+      axisLine: "rgb(53, 67, 84)",
+      paneSeparator: "rgb(53, 67, 84)",
+      crosshair: "rgb(139, 188, 245)",
+      upColor: "rgb(109, 211, 168)",
+      downColor: "rgb(255, 123, 133)",
+      wickUpColor: "rgb(109, 211, 168)",
+      wickDownColor: "rgb(255, 123, 133)",
+    });
+    expect(JSON.stringify(library.state.theme)).not.toContain("var(");
+    expect(library.state.size).toEqual({ width: 640, height: 360 });
     engine.destroy();
   });
 

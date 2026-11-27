@@ -1,11 +1,14 @@
 "use client";
 
+import type { TradeChartProjection, TradeChartTimeframe } from "@wavekb/domain/trading-review";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { ArrowLeft, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
 import { Field, Input, Label, Textarea } from "@wavekb/ui";
 import {
   browserTimezone,
+  getTradeChart,
   getTradeReviewAiJob,
   getTradingTrade,
   saveTradingReview,
@@ -28,6 +31,37 @@ const books = [
 
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
+const DynamicOpenAlgoTradeChart = dynamic(
+  () => import("./trading/openalgo-trade-chart").then(({ OpenAlgoTradeChart }) => OpenAlgoTradeChart),
+  {
+    ssr: false,
+    loading: () => <p className="rounded-xl border bg-surface p-4 text-sm text-muted-foreground" role="status">正在准备交互式图表…</p>,
+  },
+);
+
+function initialChartRequest(openedAt: string, closedAt: string | null) {
+  const opened = Date.parse(openedAt);
+  const closed = closedAt === null ? Date.now() : Date.parse(closedAt);
+  const duration = Math.max(5 * 60_000, closed - opened);
+  const timeframe: TradeChartTimeframe = duration < 2 * 60 * 60_000
+    ? "1m"
+    : duration <= 24 * 60 * 60_000
+      ? "5m"
+      : duration <= 3 * 24 * 60 * 60_000
+        ? "15m"
+        : duration <= 7 * 24 * 60 * 60_000
+          ? "1h"
+          : duration <= 30 * 24 * 60 * 60_000
+            ? "4h"
+            : "1d";
+  const context = Math.max(60_000, Math.round(duration * 0.2));
+  return {
+    timeframe,
+    from: new Date(opened - context).toISOString(),
+    to: new Date(closed + context).toISOString(),
+  };
+}
+
 export function TradingTradeReview({ tradeId }: { tradeId: string }) {
   const [detail, setDetail] = useState<TradingTradeDetail | null>(null);
   const [draft, setDraft] = useState<SaveTradingReviewInput | null>(null);
@@ -39,6 +73,12 @@ export function TradingTradeReview({ tradeId }: { tradeId: string }) {
   const [aiError, setAiError] = useState("");
   const [aiOutput, setAiOutput] = useState<TradeReviewAiOutput | null>(null);
   const [aiStale, setAiStale] = useState(false);
+  const [chartResult, setChartResult] = useState<{
+    requestKey: string;
+    projection: TradeChartProjection | null;
+    loadError: "rate_limited" | "unavailable" | null;
+  }>({ requestKey: "", projection: null, loadError: null });
+  const [chartReloadToken, setChartReloadToken] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -60,6 +100,37 @@ export function TradingTradeReview({ tradeId }: { tradeId: string }) {
     });
     return () => { active = false; };
   }, [tradeId]);
+
+  const chartCycleId = detail?.trade.id;
+  const chartCycleRevision = detail?.trade.revision;
+  const chartOpenedAt = detail?.trade.opened_at;
+  const chartClosedAt = detail?.trade.closed_at;
+  const chartRequestKey = chartCycleId && chartCycleId === tradeId && chartOpenedAt && chartCycleRevision !== undefined
+    ? [chartCycleId, chartCycleRevision, chartOpenedAt, chartClosedAt ?? "open", chartReloadToken].join(":")
+    : null;
+  const chartProjection = chartRequestKey !== null && chartResult.requestKey === chartRequestKey ? chartResult.projection : null;
+  const chartLoadError = chartRequestKey !== null && chartResult.requestKey === chartRequestKey ? chartResult.loadError : null;
+  const chartLoading = chartRequestKey !== null && chartResult.requestKey !== chartRequestKey;
+
+  useEffect(() => {
+    if (chartRequestKey === null || !chartCycleId || !chartOpenedAt) return;
+    let active = true;
+    const input = initialChartRequest(chartOpenedAt, chartClosedAt ?? null);
+    void getTradeChart(chartCycleId, input).then((value) => {
+      if (!active) return;
+      setChartResult({ requestKey: chartRequestKey, projection: value, loadError: null });
+    }).catch((cause) => {
+      if (!active) return;
+      const code = cause instanceof TradingRepositoryError ? cause.code : "";
+      const rateLimited = cause instanceof TradingRepositoryError && (cause.status === 429 || code.includes("rate_limit"));
+      setChartResult({
+        requestKey: chartRequestKey,
+        projection: null,
+        loadError: rateLimited ? "rate_limited" : "unavailable",
+      });
+    });
+    return () => { active = false; };
+  }, [chartClosedAt, chartCycleId, chartOpenedAt, chartRequestKey]);
 
   useEffect(() => {
     if (!draft || !dirty) return;
@@ -141,6 +212,15 @@ export function TradingTradeReview({ tradeId }: { tradeId: string }) {
           : <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2"><p>合约数量 {detail.provider_facts.contract_quantity}</p><p>资金费 {detail.provider_facts.funding}</p><p>结算币种 {detail.provider_facts.settlement_currency}</p></div>}
         <details className="mt-4 border-t pt-4"><summary className="cursor-pointer text-sm font-medium">原始交易信息</summary><dl className="mt-3 grid gap-2 text-sm text-muted-foreground"><div><dt className="inline">周期 ID：</dt><dd className="inline">{trade.id}</dd></div><div><dt className="inline">数据版本：</dt><dd className="inline">{trade.revision}</dd></div><div><dt className="inline">完整性：</dt><dd className="inline">{trade.completeness}</dd></div></dl></details>
       </section>
+
+      <div data-testid="trade-chart-boundary">
+        <DynamicOpenAlgoTradeChart
+          projection={chartProjection}
+          loading={chartLoading}
+          loadError={chartLoadError}
+          onReload={() => setChartReloadToken((token) => token + 1)}
+        />
+      </div>
 
       {detail.reconciliation.length || detail.review?.needs_reconciliation ? <section className="rounded-xl border border-amber-300/50 bg-amber-50/50 p-5 dark:bg-amber-950/10"><h2 className="flex items-center gap-2 font-semibold"><WarningCircle />需要处理历史复盘冲突</h2><p className="mt-2 text-sm text-muted-foreground">迟到成交改变了交易周期。旧复盘没有自动覆盖，请核对后保存当前版本。</p>{detail.reconciliation.map((item) => <blockquote key={item.cycle_id} className="mt-3 border-l-2 pl-3 text-sm">{item.reason || item.next_improvement}</blockquote>)}</section> : null}
 
