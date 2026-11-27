@@ -880,7 +880,22 @@ test("published private chart schema upgrades through the forward snapshot harde
              ) as authenticated_execute,
              has_function_privilege(
                'anon', 'public.load_private_trade_chart_facts(uuid,uuid)', 'EXECUTE'
-             ) as anon_execute
+             ) as anon_execute,
+             has_function_privilege(
+               'service_role',
+               'public.reconcile_trade_chart_annotations(uuid,uuid,uuid,integer)',
+               'EXECUTE'
+             ) as service_reconcile_execute,
+             has_function_privilege(
+               'authenticated',
+               'public.reconcile_trade_chart_annotations(uuid,uuid,uuid,integer)',
+               'EXECUTE'
+             ) as authenticated_reconcile_execute,
+             has_function_privilege(
+               'anon',
+               'public.reconcile_trade_chart_annotations(uuid,uuid,uuid,integer)',
+               'EXECUTE'
+             ) as anon_reconcile_execute
     `);
     assert.deepEqual(hardened.rows[0], {
       version: "202611270001",
@@ -889,8 +904,227 @@ test("published private chart schema upgrades through the forward snapshot harde
       service_execute: true,
       authenticated_execute: false,
       anon_execute: false,
+      service_reconcile_execute: false,
+      authenticated_reconcile_execute: false,
+      anon_reconcile_execute: false,
     });
   } finally {
+    await database.close();
+  }
+});
+
+test("snapshot hardening backfills stale annotations once without crossing owner or fill identity", async () => {
+  const database = new PGlite();
+  try {
+    await createLegacyDatabase(database);
+    await database.exec(await fs.readFile(baseMigrationUrl, "utf8"));
+    await database.exec(await fs.readFile(privateChartMigrationUrl, "utf8"));
+    const { ownerTwoFillId } = await seedPrivateChartFacts(database);
+
+    const removedAt = "2026-11-24T07:30:00.000Z";
+    await publish(database, {
+      expectedGeneration: 1,
+      capturedAt: "2026-11-24T09:30:00.000Z",
+      fills: [
+        fill("open-1", "2026-11-24T07:00:00.000Z"),
+        fill("removed-1", removedAt),
+        fill("ambiguous-1", "2026-11-24T08:00:00.000Z"),
+      ],
+      cycles: [cycle({
+        revision: 2,
+        fillIds: ["open-1", "removed-1", "ambiguous-1"],
+        allocations: [
+          { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+          { native_fill_id: "removed-1", quantity: "1", role: "add", sort_order: 1 },
+          { native_fill_id: "ambiguous-1", quantity: "1", role: "add", sort_order: 2 },
+        ],
+      })],
+    });
+    const ownerOneFills = await database.query(`
+      select id, native_fill_id from public.trading_fills
+      where owner_id = $1 and native_fill_id in ('open-1', 'removed-1', 'ambiguous-1')
+      order by native_fill_id
+    `, [ownerOne]);
+    const exactFillId = ownerOneFills.rows.find((row) => row.native_fill_id === "open-1")?.id;
+    const missingFillId = ownerOneFills.rows.find((row) => row.native_fill_id === "removed-1")?.id;
+    const ambiguousFillId = ownerOneFills.rows.find((row) => row.native_fill_id === "ambiguous-1")?.id;
+    assert.ok(exactFillId && missingFillId && ambiguousFillId && ownerTwoFillId);
+
+    const exactAnnotationId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const missingAnnotationId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const ambiguousAnnotationId = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
+    const ownerTwoAnnotationId = "abababab-abab-4bab-8bab-abababababab";
+    await actor(database, ownerOne);
+    await upsertAnnotation(database, {
+      annotationId: exactAnnotationId,
+      fillId: exactFillId,
+      cycleRevision: 2,
+      body: "exact stale annotation",
+    });
+    await upsertAnnotation(database, {
+      annotationId: missingAnnotationId,
+      fillId: missingFillId,
+      cycleRevision: 2,
+      body: "missing stale annotation",
+    });
+    await upsertAnnotation(database, {
+      annotationId: ambiguousAnnotationId,
+      fillId: ambiguousFillId,
+      cycleRevision: 2,
+      body: "ambiguous stale annotation",
+    });
+    await actor(database, ownerTwo);
+    await upsertAnnotation(database, {
+      annotationId: ownerTwoAnnotationId,
+      cycleId: cycleTwo,
+      fillId: ownerTwoFillId,
+      cycleRevision: 1,
+      body: "other owner stale annotation",
+    });
+
+    await database.exec("reset role");
+    await database.exec(`
+      insert into public.trading_trade_cycle_revisions (
+        cycle_id, owner_id, revision, fill_digest, facts
+      ) values (
+        '${cycleTwo}', '${ownerTwo}', 2, 'other-digest-2',
+        '{"fill_ids":["other-open"],"anchor_fill_id":"other-open"}'::jsonb
+      );
+      insert into public.trading_trade_cycle_fills (
+        cycle_id, cycle_revision, owner_id, connection_id, fill_id,
+        native_fill_id, allocation_quantity, allocation_role, sort_order, generation
+      ) select '${cycleTwo}', 2, '${ownerTwo}', '${connectionTwo}', id,
+        native_fill_id, 1, 'open', 0, 1
+      from public.trading_fills
+      where owner_id = '${ownerTwo}' and native_fill_id = 'other-open';
+      update public.trading_trade_cycles
+      set revision = 2, fill_digest = 'other-digest-2', is_current = false, updated_at = now()
+      where id = '${cycleTwo}' and owner_id = '${ownerTwo}';
+    `);
+    await publish(database, {
+      expectedGeneration: 2,
+      capturedAt: "2026-11-24T10:00:00.000Z",
+      fills: [fill("open-1", "2026-11-24T07:00:00.000Z")],
+      cycles: [cycle({
+        revision: 3,
+        fillIds: ["open-1"],
+        allocations: [
+          { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+        ],
+      })],
+    });
+    await database.exec(`
+      insert into public.trading_trade_cycle_fills (
+        cycle_id, cycle_revision, owner_id, connection_id, fill_id,
+        native_fill_id, allocation_quantity, allocation_role, sort_order, generation
+      ) values
+        (
+          '${cycleOne}', 3, '${ownerOne}', '${connectionOne}', '${ambiguousFillId}',
+          'ambiguous-1', 1, 'add', 1, 3
+        ),
+        (
+          '${cycleOne}', 3, '${ownerOne}', '${connectionOne}', '${ambiguousFillId}',
+          'ambiguous-1', 1, 'reduce', 2, 3
+        );
+    `);
+
+    const stale = await database.query(`
+      select id, owner_id, fill_id, native_fill_id, cycle_revision, remap_status,
+             remapped_from_revision, version
+      from public.trading_fill_annotations
+      order by id
+    `);
+    assert.equal(stale.rows.every((row) => row.remap_status === "current"), true);
+
+    const hardening = await fs.readFile(snapshotHardeningMigrationUrl, "utf8");
+    await database.exec(hardening);
+    const first = await database.query(`
+      select id, owner_id, fill_id, native_fill_id, cycle_revision, remap_status,
+             remapped_from_revision, version, updated_at
+      from public.trading_fill_annotations
+      order by id
+    `);
+    assert.deepEqual(first.rows.map((row) => ({
+      ...row,
+      fill_id: String(row.fill_id),
+      updated_at: row.updated_at.toISOString(),
+    })), [
+      {
+        id: ownerTwoAnnotationId,
+        owner_id: ownerTwo,
+        fill_id: String(ownerTwoFillId),
+        native_fill_id: "other-open",
+        cycle_revision: 2,
+        remap_status: "remapped",
+        remapped_from_revision: 1,
+        version: 2,
+        updated_at: first.rows[0].updated_at.toISOString(),
+      },
+      {
+        id: ambiguousAnnotationId,
+        owner_id: ownerOne,
+        fill_id: String(ambiguousFillId),
+        native_fill_id: "ambiguous-1",
+        cycle_revision: 2,
+        remap_status: "needs_confirmation",
+        remapped_from_revision: 2,
+        version: 2,
+        updated_at: first.rows[1].updated_at.toISOString(),
+      },
+      {
+        id: exactAnnotationId,
+        owner_id: ownerOne,
+        fill_id: String(exactFillId),
+        native_fill_id: "open-1",
+        cycle_revision: 3,
+        remap_status: "remapped",
+        remapped_from_revision: 2,
+        version: 2,
+        updated_at: first.rows[2].updated_at.toISOString(),
+      },
+      {
+        id: missingAnnotationId,
+        owner_id: ownerOne,
+        fill_id: String(missingFillId),
+        native_fill_id: "removed-1",
+        cycle_revision: 2,
+        remap_status: "needs_confirmation",
+        remapped_from_revision: 2,
+        version: 2,
+        updated_at: first.rows[3].updated_at.toISOString(),
+      },
+    ]);
+    const firstStable = first.rows.map((row) => ({
+      id: row.id,
+      cycle_revision: row.cycle_revision,
+      remap_status: row.remap_status,
+      remapped_from_revision: row.remapped_from_revision,
+      version: row.version,
+      updated_at: row.updated_at.toISOString(),
+    }));
+
+    await database.exec(hardening);
+    const second = await database.query(`
+      select id, cycle_revision, remap_status, remapped_from_revision, version, updated_at
+      from public.trading_fill_annotations
+      order by id
+    `);
+    assert.deepEqual(second.rows.map((row) => ({
+      ...row,
+      updated_at: row.updated_at.toISOString(),
+    })), firstStable);
+    const hardeningState = await database.query(`
+      select public.wavekb_schema_version() as version,
+             (select count(*)::integer from pg_trigger
+              where tgname = 'remap_trade_chart_annotations_after_revision'
+                and not tgisinternal) as remap_triggers
+    `);
+    assert.deepEqual(hardeningState.rows[0], {
+      version: "202611270001",
+      remap_triggers: 1,
+    });
+  } finally {
+    await database.exec("reset role").catch(() => {});
     await database.close();
   }
 });
@@ -1134,7 +1368,7 @@ test("publishing a new cycle revision remaps only exact fill identities and mark
     assert.deepEqual(annotation, {
       fill_id: ownerOneFillId,
       native_fill_id: "open-1",
-      cycle_revision: 3,
+      cycle_revision: 2,
       remap_status: "needs_confirmation",
       remapped_from_revision: 1,
       version: 3,

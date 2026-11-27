@@ -1,9 +1,90 @@
 begin;
 
+-- A pending annotation keeps the last revision where its fill identity was
+-- actually known. This permits user confirmation without pretending that the
+-- old fill belongs to the new revision.
+alter table public.trading_fill_annotations
+  drop constraint if exists trading_fill_annotations_remap_state_check;
+alter table public.trading_fill_annotations
+  add constraint trading_fill_annotations_remap_state_check check (
+    (remap_status = 'current' and remapped_from_revision is null)
+    or (
+      remap_status = 'remapped'
+      and remapped_from_revision is not null
+      and remapped_from_revision > 0
+      and remapped_from_revision < cycle_revision
+    )
+    or (
+      remap_status = 'needs_confirmation'
+      and remapped_from_revision is not null
+      and remapped_from_revision > 0
+      and remapped_from_revision <= cycle_revision
+    )
+  );
+
+-- Both the deferred trigger and the one-time migration backfill use this
+-- owner/cycle/connection-bound reconciliation. Only one exact immutable
+-- allocation identity may move an annotation to the target revision.
+create or replace function public.reconcile_trade_chart_annotations(
+  p_owner_id uuid,
+  p_cycle_id uuid,
+  p_connection_id uuid,
+  p_target_revision integer
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  with annotation_matches as (
+    select annotation.id,
+           count(allocation.fill_id)::integer as exact_match_count
+    from public.trading_fill_annotations annotation
+    left join public.trading_trade_cycle_fills allocation
+      on allocation.owner_id = p_owner_id
+     and allocation.connection_id = p_connection_id
+     and allocation.cycle_id = p_cycle_id
+     and allocation.cycle_revision = p_target_revision
+     and allocation.fill_id = annotation.fill_id
+     and allocation.native_fill_id = annotation.native_fill_id
+    where annotation.owner_id = p_owner_id
+      and annotation.cycle_id = p_cycle_id
+      and annotation.cycle_revision < p_target_revision
+      and annotation.deleted_at is null
+    group by annotation.id
+  )
+  update public.trading_fill_annotations annotation
+  set cycle_revision = case
+        when matched.exact_match_count = 1 then p_target_revision
+        else annotation.cycle_revision
+      end,
+      remap_status = case
+        when matched.exact_match_count = 1 then 'remapped'
+        else 'needs_confirmation'
+      end,
+      remapped_from_revision = coalesce(
+        annotation.remapped_from_revision,
+        annotation.cycle_revision
+      ),
+      version = annotation.version + 1,
+      updated_at = clock_timestamp()
+  from annotation_matches matched
+  where annotation.id = matched.id
+    and (
+      matched.exact_match_count = 1
+      or annotation.remap_status <> 'needs_confirmation'
+      or annotation.remapped_from_revision is null
+    );
+end;
+$$;
+
+revoke all on function public.reconcile_trade_chart_annotations(uuid, uuid, uuid, integer)
+  from public, anon, authenticated, service_role;
+
 -- Revision publication and annotation remapping must commit atomically. A
 -- deferred trigger runs after the immutable allocation rows for the new
--- revision have been inserted, so exact fill identities can be distinguished
--- from references that genuinely need user confirmation.
+-- revision have been inserted.
 create or replace function public.remap_trade_chart_annotations_after_revision()
 returns trigger
 language plpgsql
@@ -21,31 +102,12 @@ begin
     return null;
   end if;
 
-  update public.trading_fill_annotations annotation
-  set cycle_revision = new.revision,
-      remap_status = case
-        when exists (
-          select 1
-          from public.trading_trade_cycle_fills allocation
-          where allocation.owner_id = new.owner_id
-            and allocation.connection_id = new.connection_id
-            and allocation.cycle_id = new.id
-            and allocation.cycle_revision = new.revision
-            and allocation.fill_id = annotation.fill_id
-            and allocation.native_fill_id = annotation.native_fill_id
-        ) then 'remapped'
-        else 'needs_confirmation'
-      end,
-      remapped_from_revision = coalesce(
-        annotation.remapped_from_revision,
-        annotation.cycle_revision
-      ),
-      version = annotation.version + 1,
-      updated_at = clock_timestamp()
-  where annotation.owner_id = new.owner_id
-    and annotation.cycle_id = new.id
-    and annotation.cycle_revision < new.revision
-    and annotation.deleted_at is null;
+  perform public.reconcile_trade_chart_annotations(
+    new.owner_id,
+    new.id,
+    new.connection_id,
+    new.revision
+  );
   return null;
 end;
 $$;
@@ -61,6 +123,35 @@ deferrable initially deferred
 for each row
 when (old.revision is distinct from new.revision)
 execute function public.remap_trade_chart_annotations_after_revision();
+
+-- Repair rows that became stale while the published 202611260001 schema had
+-- no revision trigger. Repeated migration application is a no-op for pending
+-- rows and for exact rows already advanced to the current revision.
+do $$
+declare
+  current_cycle record;
+begin
+  for current_cycle in
+    select cycle.owner_id, cycle.id, cycle.connection_id, cycle.revision
+    from public.trading_trade_cycles cycle
+    where exists (
+        select 1
+        from public.trading_fill_annotations annotation
+        where annotation.owner_id = cycle.owner_id
+          and annotation.cycle_id = cycle.id
+          and annotation.cycle_revision < cycle.revision
+          and annotation.deleted_at is null
+      )
+  loop
+    perform public.reconcile_trade_chart_annotations(
+      current_cycle.owner_id,
+      current_cycle.id,
+      current_cycle.connection_id,
+      current_cycle.revision
+    );
+  end loop;
+end;
+$$;
 
 -- The private chart projection must be assembled from one PostgreSQL statement.
 -- This prevents a publish between REST reads from splicing two cycle revisions.
