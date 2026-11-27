@@ -64,6 +64,12 @@ on:
         type: choice
         default: preserve
         options: [preserve, enable, disable]
+      trading_public_strategies:
+        description: "Preserve, enable, or disable public strategy sharing"
+        required: true
+        type: choice
+        default: preserve
+        options: [preserve, enable, disable]
 
 permissions:
   contents: read
@@ -114,6 +120,7 @@ jobs:
           pnpm --dir ai-gateway test
           node --test tests/ai-gateway-packaging.test.mjs tests/deploy-preflight.test.mjs tests/deploy-workflow.test.mjs tests/hermes-theory-artifact.test.mjs tests/hermes-private-research-postgres.test.mjs tests/wave-analysis-images-postgres.test.mjs tests/trading-leaderboard.test.mjs tests/trading-leaderboard-postgres.test.mjs tests/multi-exchange-trading-postgres.test.mjs tests/trade-chart-private-postgres.test.mjs tests/trading-release-preflight.test.mjs tests/reward-lottery-postgres.test.mjs tests/mentor-checkout-postgres.test.mjs tests/mentor-notification-postgres.test.mjs tests/admin-mentor-publish-postgres.test.mjs tests/mentor-service-lifecycle-postgres.test.mjs tests/youtube-sync-postgres.test.mjs tests/youtube-policy-consent-postgres.test.mjs tests/admin-payment-hardening-postgres.test.mjs tests/mentor-payment-webhook.test.mjs tests/mentor-checkout-function.test.mjs tests/membership-foundation-postgres.test.mjs tests/membership-commerce-postgres.test.mjs tests/membership-payment-functions.test.mjs tests/membership-benefits-postgres.test.mjs tests/membership-wallet-postgres.test.mjs tests/membership-wallet-functions.test.mjs
           node scripts/trading-release-preflight.mjs --static
+          node --test tests/public-strategy-snapshots-postgres.test.mjs
 
       - name: Package immutable gateway release
         run: |
@@ -196,18 +203,21 @@ jobs:
           REMOTE
 
       - name: Apply exact production migrations and verify schema marker
+        id: database_schema
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           set -Eeuo pipefail
           test -n "$SUPABASE_DB_URL"
+          expected_schema=$(node scripts/trading-release-preflight.mjs --schema-version)
+          [[ "$expected_schema" =~ ^[0-9]{12}$ ]]
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
           schema_before=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
           # Validate the marker before any DDL, then repair this marker-neutral
           # baseline even when the latest version has already been recorded.
           case "$schema_before" in
-            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002|202611240001|202611240002|202611250001|202611250002|202611260001|202611270001|202611270002) ;;
+            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002|202611240001|202611240002|202611250001|202611250002|202611260001|202611270001|202611270002|202611270003|202611270004|202611270005) ;;
             *)
               echo "Unexpected production schema marker; refusing migration."
               exit 1
@@ -324,6 +334,15 @@ jobs:
               echo "Private trade charts applied; adding snapshot hardening."
               ;;
             202611270002)
+              echo "Private chart snapshot hardening applied; adding public strategy snapshots."
+              ;;
+            202611270003)
+              echo "Public strategy snapshot tables applied; adding transactional publishing."
+              ;;
+            202611270004)
+              echo "Transactional strategy publishing applied; adding strategy marker comment safeguards."
+              ;;
+            202611270005)
               echo "Production migrations already applied; continuing idempotently."
               ;;
             *)
@@ -373,8 +392,17 @@ jobs:
           if [[ "$schema_before" < 202611270002 ]]; then
             psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611270002_trade_chart_snapshot_hardening.sql
           fi
+          if [[ "$schema_before" < 202611270003 ]]; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/202611270003_public_strategy_snapshots.sql
+          fi
+          if [[ "$schema_before" < 202611270004 ]]; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/202611270004_public_strategy_publish.sql
+          fi
+          if [[ "$schema_before" < 202611270005 ]]; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/202611270005_strategy_marker_comments.sql
+          fi
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema_after" = 202611270002
+          test "$schema_after" = "$expected_schema"
           wallet_bsc_route=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from public.membership_wallet_routes where id='bsc-usdt' and chain='bsc' and asset='USDT' and contract='0x55d398326f99059ff775485246999027b3197955' and decimals=18;" | tr -d '[:space:]')
           test "$wallet_bsc_route" = 1
           wallet_legacy_enabled=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from public.membership_wallet_routes where id in ('ethereum-usdt','ethereum-usdc','base-usdc') and enabled;" | tr -d '[:space:]')
@@ -425,23 +453,83 @@ jobs:
           test "$trade_chart_table_writes_closed" = t
           trade_chart_cache_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select not has_table_privilege('anon','public.trading_candle_cache','SELECT') and not has_table_privilege('authenticated','public.trading_candle_cache','SELECT') and not has_table_privilege('authenticated','public.trading_candle_cache','INSERT') and not has_table_privilege('authenticated','public.trading_candle_cache','UPDATE') and not has_table_privilege('authenticated','public.trading_candle_cache','DELETE');" | tr -d '[:space:]')
           test "$trade_chart_cache_closed" = t
+          public_strategy_schema_ready=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 <<'SQL' | tr -d '[:space:]'
+          with strategy_tables as (
+            select c.oid, c.relname, c.relrowsecurity, c.relforcerowsecurity
+            from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and c.relname in ('public_strategy_snapshots', 'trading_post_sources', 'strategy_share_previews')
+          ), browser_roles(role_name) as (
+            values ('anon'::name), ('authenticated'::name)
+          ), strategy_rpcs(rpc_oid) as (
+            values (to_regprocedure('public.load_public_strategy_share_source(uuid,uuid)')),
+                   (to_regprocedure('public.publish_public_strategy_preview(uuid,uuid,text,uuid,text,text,text,text,uuid)'))
+          )
+          select
+            (select count(*) = 3 from strategy_tables where relrowsecurity and relforcerowsecurity)
+            and not exists (
+              select 1
+              from strategy_tables t cross join browser_roles r
+              where has_any_column_privilege(r.role_name, t.oid, 'INSERT,UPDATE,REFERENCES')
+                or has_table_privilege(r.role_name, t.oid, 'DELETE,TRUNCATE,TRIGGER')
+                or case when t.relname = 'public_strategy_snapshots'
+                  then not has_table_privilege(r.role_name, t.oid, 'SELECT')
+                  else has_any_column_privilege(r.role_name, t.oid, 'SELECT') end
+            )
+            and exists (
+              select 1 from pg_policies
+              where schemaname = 'public' and tablename = 'public_strategy_snapshots'
+                and policyname = 'public_strategy_snapshots_read_published_post'
+                and cmd = 'SELECT' and roles @> array['anon', 'authenticated']::name[]
+            )
+            and (select count(*) = 2
+              from strategy_rpcs r join pg_proc p on p.oid = r.rpc_oid
+              where p.prosecdef
+                and has_function_privilege('service_role', r.rpc_oid, 'EXECUTE')
+                and not has_function_privilege('anon', r.rpc_oid, 'EXECUTE')
+                and not has_function_privilege('authenticated', r.rpc_oid, 'EXECUTE'))
+            and exists (
+              select 1 from pg_proc p
+              where p.oid = to_regprocedure('public.soft_delete_my_post_comment(uuid)')
+                and p.prosecdef
+                and has_function_privilege('authenticated', p.oid, 'EXECUTE')
+                and not has_function_privilege('anon', p.oid, 'EXECUTE')
+                and not has_function_privilege('service_role', p.oid, 'EXECUTE')
+            )
+            and (select count(*) = 2 from pg_trigger
+              where tgrelid = to_regclass('public.posts')
+                and not tgisinternal and tgenabled in ('O', 'A')
+                and (tgname = 'preserve_strategy_post_chart_pointer'
+                  or (tgname = 'verify_strategy_post_snapshot_link' and tgdeferrable and tginitdeferred))
+            )
+            and (select count(*) = 2 from information_schema.columns
+              where table_schema = 'public' and data_type = 'text'
+                and ((table_name = 'strategy_share_previews' and column_name = 'source_fingerprint' and is_nullable = 'NO')
+                  or (table_name = 'post_comments' and column_name = 'marker_key' and is_nullable = 'YES')))
+            as ready;
+          SQL
+          )
+          test "$public_strategy_schema_ready" = t
+          printf 'marker=%s\n' "$schema_after" >> "$GITHUB_OUTPUT"
 
       - name: Verify the public schema marker before release upload
         env:
+          EXPECTED_SCHEMA_VERSION: ${{ steps.database_schema.outputs.marker }}
           NEXT_PUBLIC_SUPABASE_URL: https://odmtxwlnlvwldrjttyqu.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_PGarmRpGdqoro6CGEmxsxw_LO0eWVAL
         run: |
           set -Eeuo pipefail
+          [[ "$EXPECTED_SCHEMA_VERSION" =~ ^[0-9]{12}$ ]]
           schema=""
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             schema=$(curl --fail --silent --show-error \
               -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
               -H 'content-type: application/json' \
               -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]') || true
-            test "$schema" = 202611270002 && break
+            test "$schema" = "$EXPECTED_SCHEMA_VERSION" && break
             sleep 2
           done
-          test "$schema" = 202611270002
+          test "$schema" = "$EXPECTED_SCHEMA_VERSION"
 
       - name: Upload gateway archive and systemd units
         env:
@@ -478,15 +566,18 @@ jobs:
           TRADING_BYBIT: ${{ inputs.trading_provider_bybit }}
           TRADING_BITGET: ${{ inputs.trading_provider_bitget }}
           TRADING_EXNESS: ${{ inputs.trading_provider_exness }}
+          TRADING_PUBLIC_STRATEGIES: ${{ inputs.trading_public_strategies }}
+          EXPECTED_SCHEMA_VERSION: ${{ steps.database_schema.outputs.marker }}
         run: |
           set -Eeuo pipefail
+          [[ "$EXPECTED_SCHEMA_VERSION" =~ ^[0-9]{12}$ ]]
           case "$PRIVATE_RESEARCH" in preserve|enable|disable) ;; *) exit 1 ;; esac
           case "$MANAGED_AI" in preserve|enable|disable) ;; *) exit 1 ;; esac
-          for trading_action in "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS"; do
+          for trading_action in "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS" "$TRADING_PUBLIC_STRATEGIES"; do
             case "$trading_action" in preserve|enable|disable) ;; *) exit 1 ;; esac
           done
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' TRADING_CUTOVER='${TRADING_CUTOVER}' TRADING_BINANCE='${TRADING_BINANCE}' TRADING_OKX='${TRADING_OKX}' TRADING_BYBIT='${TRADING_BYBIT}' TRADING_BITGET='${TRADING_BITGET}' TRADING_EXNESS='${TRADING_EXNESS}' MANAGED_AI='${MANAGED_AI}' bash -s" <<'REMOTE'
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' TRADING_CUTOVER='${TRADING_CUTOVER}' TRADING_BINANCE='${TRADING_BINANCE}' TRADING_OKX='${TRADING_OKX}' TRADING_BYBIT='${TRADING_BYBIT}' TRADING_BITGET='${TRADING_BITGET}' TRADING_EXNESS='${TRADING_EXNESS}' TRADING_PUBLIC_STRATEGIES='${TRADING_PUBLIC_STRATEGIES}' EXPECTED_SCHEMA_VERSION='${EXPECTED_SCHEMA_VERSION}' MANAGED_AI='${MANAGED_AI}' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           release_root=/opt/elliott-wave-gateway
@@ -613,15 +704,15 @@ jobs:
               --backup-file "${backup_root}/gateway.env" "${runtime_arguments[@]}"
           fi
 
-          if test "$TRADING_CUTOVER" != preserve || test "$TRADING_BINANCE" != preserve || test "$TRADING_OKX" != preserve || test "$TRADING_BYBIT" != preserve || test "$TRADING_BITGET" != preserve || test "$TRADING_EXNESS" != preserve; then
+          if test "$TRADING_CUTOVER" != preserve || test "$TRADING_BINANCE" != preserve || test "$TRADING_OKX" != preserve || test "$TRADING_BYBIT" != preserve || test "$TRADING_BITGET" != preserve || test "$TRADING_EXNESS" != preserve || test "$TRADING_PUBLIC_STRATEGIES" != preserve; then
             if ! sudo test -f "${backup_root}/gateway.env"; then
               sudo install -m 0600 /etc/elliott-wave/gateway.env "${backup_root}/gateway.env"
             fi
             sudo /usr/bin/node --input-type=module - /etc/elliott-wave/gateway.env \
-              "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS" <<'NODE'
+              "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS" "$TRADING_PUBLIC_STRATEGIES" <<'NODE'
           import fs from "node:fs";
           const [file, ...actions] = process.argv.slice(2);
-          const names = ["TRADING_WORKBENCH_V2_ENABLED", "TRADING_PROVIDER_BINANCE_ENABLED", "TRADING_PROVIDER_OKX_ENABLED", "TRADING_PROVIDER_BYBIT_ENABLED", "TRADING_PROVIDER_BITGET_ENABLED", "TRADING_PROVIDER_EXNESS_ENABLED"];
+          const names = ["TRADING_WORKBENCH_V2_ENABLED", "TRADING_PROVIDER_BINANCE_ENABLED", "TRADING_PROVIDER_OKX_ENABLED", "TRADING_PROVIDER_BYBIT_ENABLED", "TRADING_PROVIDER_BITGET_ENABLED", "TRADING_PROVIDER_EXNESS_ENABLED", "TRADING_PUBLIC_STRATEGIES_ENABLED"];
           if (!file || actions.length !== names.length || actions.some((action) => !["preserve", "enable", "disable"].includes(action))) process.exit(2);
           const original = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
           const changes = new Map(names.flatMap((name, index) => actions[index] === "preserve" ? [] : [[name, actions[index] === "enable" ? "true" : "false"]]));
@@ -669,9 +760,9 @@ jobs:
             });
           ')
           runtime_observation="${backup_root}/trading-runtime-observation.json"
-          sudo /usr/bin/node --input-type=module - /etc/elliott-wave/gateway.env "$RELEASE_SHA" "$rollback_sha" "$trading_metric" "$runtime_observation" <<'NODE'
+          sudo /usr/bin/node --input-type=module - /etc/elliott-wave/gateway.env "$RELEASE_SHA" "$rollback_sha" "$trading_metric" "$runtime_observation" "$EXPECTED_SCHEMA_VERSION" <<'NODE'
           import fs from "node:fs";
-          const [envFile, releaseSha, rollbackTarget, metricJson, output] = process.argv.slice(2);
+          const [envFile, releaseSha, rollbackTarget, metricJson, output, schemaVersion] = process.argv.slice(2);
           const allowlisted = new Map();
           for (const line of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
             const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(line);
@@ -687,10 +778,11 @@ jobs:
           const metric = JSON.parse(metricJson);
           const observedAt = new Date().toISOString();
           const observation = {
-            expectedSchemaVersion: "202611270002", schemaVersion: "202611270002", releaseSha, rollbackTarget,
+            expectedSchemaVersion: schemaVersion, schemaVersion, releaseSha, rollbackTarget,
             sameCodeRollback: releaseSha === rollbackTarget,
             flags: {
               TRADING_WORKBENCH_V2_ENABLED: boolean("TRADING_WORKBENCH_V2_ENABLED"),
+              TRADING_PUBLIC_STRATEGIES_ENABLED: boolean("TRADING_PUBLIC_STRATEGIES_ENABLED"),
               TRADING_PROVIDER_BINANCE_ENABLED: boolean("TRADING_PROVIDER_BINANCE_ENABLED"),
               TRADING_PROVIDER_OKX_ENABLED: boolean("TRADING_PROVIDER_OKX_ENABLED"),
               TRADING_PROVIDER_BYBIT_ENABLED: boolean("TRADING_PROVIDER_BYBIT_ENABLED"),
@@ -709,12 +801,18 @@ jobs:
           };
           fs.writeFileSync(output, JSON.stringify(observation), { flag: "wx", mode: 0o600 });
           NODE
-          sudo /usr/bin/node "${release_dir}/release-preflight.mjs" --runtime-file "$runtime_observation"
+          verified_observation=$(sudo /usr/bin/node "${release_dir}/release-preflight.mjs" --runtime-file "$runtime_observation")
+          printf '%s\n' "$verified_observation"
+          public_strategies_enabled=$(printf '%s\n' "$verified_observation" | /usr/bin/node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).runtime.publicStrategiesEnabled')
           sudo rm -f "$runtime_observation"
 
           accepted=0
           for attempt in 1 2 3 4 5 6 7 8; do
-            if curl --fail --silent --show-error http://127.0.0.1:8787/health | grep -F "\"deployment\":\"${RELEASE_SHA}\"" > /dev/null; then
+            if curl --fail --silent --show-error http://127.0.0.1:8787/health | /usr/bin/node -e '
+              const health = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+              const [releaseSha, requestedFlag] = process.argv.slice(1);
+              if (health.deployment !== releaseSha || (health.features?.trading_public_strategies === true) !== (requestedFlag === "true")) process.exit(1);
+            ' "$RELEASE_SHA" "$public_strategies_enabled"; then
               accepted=1
               break
             fi

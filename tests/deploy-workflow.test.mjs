@@ -150,8 +150,14 @@ test("multi-exchange trading cutover is explicit, fail-closed and covered by exa
   }
   const contracts = backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name));
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  assert.equal(inputs.trading_public_strategies.default, "preserve");
+  assert.deepEqual(inputs.trading_public_strategies.options, ["preserve", "enable", "disable"]);
+  assert.equal(activation.env.TRADING_PUBLIC_STRATEGIES, "${{ inputs.trading_public_strategies }}");
+  assert.match(activation.run, /TRADING_PUBLIC_STRATEGIES_ENABLED/);
+  assert.match(activation.run, /health\.features\?\.trading_public_strategies/);
   assert.match(contracts.run, /multi-exchange-trading-postgres\.test\.mjs/);
   assert.match(contracts.run, /trading-release-preflight\.test\.mjs/);
+  assert.match(contracts.run, /public-strategy-snapshots-postgres\.test\.mjs/);
   assert.match(contracts.run, /trading-release-preflight\.mjs --static/);
   assert.equal(activation.env.TRADING_CUTOVER, "${{ inputs.trading_cutover }}");
   assert.match(activation.run, /for trading_action in "\$TRADING_CUTOVER" "\$TRADING_BINANCE" "\$TRADING_OKX" "\$TRADING_BYBIT" "\$TRADING_BITGET" "\$TRADING_EXNESS"/);
@@ -166,7 +172,8 @@ test("multi-exchange trading cutover is explicit, fail-closed and covered by exa
   assert.match(activation.run, /mv -Tf "\$environment_rollback" \/etc\/elliott-wave\/gateway\.env/);
   assert.match(activation.run, /release-preflight\.mjs" --runtime-file/);
   assert.match(activation.run, /trading-runtime-observation\.json/);
-  assert.match(activation.run, /expectedSchemaVersion: "202611270002", schemaVersion: "202611270002"/);
+  assert.equal(activation.env.EXPECTED_SCHEMA_VERSION, "${{ steps.database_schema.outputs.marker }}");
+  assert.match(activation.run, /expectedSchemaVersion: schemaVersion, schemaVersion/);
   assert.doesNotMatch(activation.run, /test "\$rollback_sha" != "\$RELEASE_SHA"/);
   assert.match(activation.run, /sameCodeRollback: releaseSha === rollbackTarget/);
   assert.match(activation.run, /enabled-state[\s\S]*active-state/);
@@ -188,6 +195,36 @@ test("web release follows the Gateway-owned cutover and requires authenticated t
   assert.equal(production.if, undefined);
   assert.equal(production.env.TRADING_LIVE_ACCEPTANCE, "1");
   assert.equal(production.env.E2E_POSTING_IDENTIFIER, "${{ secrets.E2E_POSTING_IDENTIFIER }}");
+});
+
+test("the activation updates public sharing independently and accepts the gateway's matching flag", (t) => {
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const update = activation.run.match(/"\$TRADING_PUBLIC_STRATEGIES" <<'NODE'\n([\s\S]*?)\nNODE/)?.[1];
+  const verify = activation.run.match(/if curl [^\n]*\/health \| \/usr\/bin\/node -e '\n([\s\S]*?)\n\s*' "\$RELEASE_SHA" "\$public_strategies_enabled"/)?.[1];
+  assert.ok(update);
+  assert.ok(verify);
+
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-public-flag-"));
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+  const envFile = path.join(temp, "gateway.env");
+  const privateSettings = "TRADING_WORKBENCH_V2_ENABLED=false\nTRADING_FILL_CHART_ENABLED=true\nTRADING_PROVIDER_BINANCE_ENABLED=true\n";
+  fs.writeFileSync(envFile, privateSettings);
+  for (const [action, flag] of [["enable", "true"], ["disable", "false"]]) {
+    const change = spawnSync(process.execPath, ["--input-type=module", "-", envFile,
+      ...Array(6).fill("preserve"), action], { encoding: "utf8", input: update });
+    assert.equal(change.status, 0, change.stderr);
+    assert.equal(fs.readFileSync(envFile, "utf8"), `${privateSettings}TRADING_PUBLIC_STRATEGIES_ENABLED=${flag}\n`);
+  }
+
+  const sha = "a".repeat(40);
+  for (const [expectedFlag, actualFlag, accepted] of [
+    ["false", undefined, true], ["true", true, true], ["false", true, false], ["true", undefined, false],
+  ]) {
+    const health = { deployment: sha, features: { trading_fill_chart: true, trading_public_strategies: actualFlag } };
+    const acceptance = spawnSync(process.execPath, ["-e", verify, sha, expectedFlag],
+      { encoding: "utf8", input: JSON.stringify(health) });
+    assert.equal(acceptance.status, accepted ? 0 : 1, acceptance.stderr);
+  }
 });
 
 test("backend release installs and verifies the daily Discord market settlement timer", () => {
@@ -403,7 +440,12 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /202611270001_trade_chart_private\.sql/);
   assert.match(backendSteps[schemaGate].run, /202611270002_trade_chart_snapshot_hardening\.sql/);
   assert.match(backendSteps[schemaGate].run, /test "\$trading_review_rls_tables" = 13/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611270002/);
+  assert.match(backendSteps[schemaGate].run, /expected_schema=\$\(node scripts\/trading-release-preflight\.mjs --schema-version\)/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = "\$expected_schema"/);
+  assert.match(backendSteps[schemaGate].run, /--single-transaction -f supabase\/migrations\/202611270003_public_strategy_snapshots\.sql/);
+  assert.match(backendSteps[schemaGate].run, /--single-transaction -f supabase\/migrations\/202611270004_public_strategy_publish\.sql/);
+  assert.match(backendSteps[schemaGate].run, /--single-transaction -f supabase\/migrations\/202611270005_strategy_marker_comments\.sql/);
+  assert.match(backendSteps[schemaGate].run, /test "\$public_strategy_schema_ready" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rls_tables" = 5/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_bucket_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rpc_closed" = t/);
@@ -427,7 +469,8 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611270002/);
+  assert.equal(backendSteps[publicSchemaCheck].env.EXPECTED_SCHEMA_VERSION, "${{ steps.database_schema.outputs.marker }}");
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = "\$EXPECTED_SCHEMA_VERSION"/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -482,6 +525,9 @@ test("backend markers preserve the Discord and BSC cutover and select the chart 
     "202611260001_membership_wallet_bsc_usdt.sql",
     "202611270001_trade_chart_private.sql",
     "202611270002_trade_chart_snapshot_hardening.sql",
+    "202611270003_public_strategy_snapshots.sql",
+    "202611270004_public_strategy_publish.sql",
+    "202611270005_strategy_marker_comments.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -503,6 +549,7 @@ ${selection}`;
     ["202611240001", 17], ["202611240002", 18], ["202611250001", 19],
     // A legacy Discord draft marker keeps the existing replay of final Discord and wallet DDL.
     ["202611250002", 19], ["202611260001", 21], ["202611270001", 22], ["202611270002", 23],
+    ["202611270003", 24], ["202611270004", 25], ["202611270005", 26],
   ]) {
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
@@ -547,6 +594,84 @@ test("exact deployment consent metadata checks reject the old schema and unexpec
   } finally { await db.close(); }
 });
 
+test("public strategy schema verification detects missing migrations and unsafe grants with a read-only query", async () => {
+  const step = backendSteps.find(({ id }) => id === "database_schema");
+  const query = step?.run.match(/public_strategy_schema_ready=\$\(psql[^\n]*<<'SQL'[^\n]*\n([\s\S]*?)\nSQL\n\)/)?.[1];
+  assert.ok(query, "the gateway release must verify the public strategy schema");
+
+  const db = new PGlite();
+  async function ready() {
+    await db.exec("begin read only");
+    try {
+      return (await db.query(query)).rows[0].ready;
+    } finally {
+      await db.exec("rollback");
+    }
+  }
+  try {
+    await db.exec(`
+      create role anon;
+      create role authenticated;
+      create role service_role bypassrls;
+      create schema auth;
+      create function auth.uid() returns uuid language sql stable as $$ select null::uuid $$;
+      create function public.is_verified_user() returns boolean language sql stable as $$ select false $$;
+      create function public.is_admin() returns boolean language sql stable as $$ select false $$;
+      create function public.touch_updated_at() returns trigger language plpgsql
+      as $$ begin new.updated_at = now(); return new; end $$;
+      create table public.profiles(id uuid primary key);
+      create table public.posts(id uuid primary key, author_id uuid not null, status text,
+        comments_enabled boolean, chart_package jsonb);
+      create table public.trading_trade_cycles(
+        id uuid primary key, owner_id uuid not null, unique (id, owner_id),
+        revision integer, fill_digest text, provider text, product text, symbol text, direction text,
+        opened_at timestamptz, closed_at timestamptz, entry_price numeric, exit_price numeric,
+        completeness text, account_currency text, quantity numeric, net_pnl numeric
+      );
+      create function public.load_private_trade_chart_facts(uuid, uuid) returns jsonb language sql
+      as $$ select null::jsonb $$;
+    `);
+    await db.exec(fs.readFileSync(new URL("../supabase/migrations/202607260003_comments_reports.sql", import.meta.url), "utf8"));
+    assert.equal(await ready(), false);
+    const migrationFiles = [
+      "202611270003_public_strategy_snapshots.sql",
+      "202611270004_public_strategy_publish.sql",
+      "202611270005_strategy_marker_comments.sql",
+    ];
+    for (const [index, name] of migrationFiles.entries()) {
+      await db.exec(fs.readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8"));
+      assert.equal(await ready(), index === migrationFiles.length - 1, name);
+    }
+
+    for (const [grant, revoke] of [
+      ["grant select (token_hash) on public.strategy_share_previews to authenticated",
+        "revoke select (token_hash) on public.strategy_share_previews from authenticated"],
+      ["grant select on public.trading_post_sources to anon", "revoke select on public.trading_post_sources from anon"],
+      ["grant update (projection) on public.public_strategy_snapshots to authenticated",
+        "revoke update (projection) on public.public_strategy_snapshots from authenticated"],
+      ["grant execute on function public.load_public_strategy_share_source(uuid, uuid) to authenticated",
+        "revoke execute on function public.load_public_strategy_share_source(uuid, uuid) from authenticated"],
+      ["grant execute on function public.publish_public_strategy_preview(uuid,uuid,text,uuid,text,text,text,text,uuid) to anon",
+        "revoke execute on function public.publish_public_strategy_preview(uuid,uuid,text,uuid,text,text,text,text,uuid) from anon"],
+      ["grant execute on function public.soft_delete_my_post_comment(uuid) to anon",
+        "revoke execute on function public.soft_delete_my_post_comment(uuid) from anon"],
+      ["alter table public.posts disable trigger preserve_strategy_post_chart_pointer",
+        "alter table public.posts enable trigger preserve_strategy_post_chart_pointer"],
+      ["alter table public.posts disable trigger verify_strategy_post_snapshot_link",
+        "alter table public.posts enable trigger verify_strategy_post_snapshot_link"],
+      ["alter table public.public_strategy_snapshots no force row level security",
+        "alter table public.public_strategy_snapshots force row level security"],
+    ]) {
+      await db.exec(grant);
+      assert.equal(await ready(), false, grant);
+      await db.exec(revoke);
+      assert.equal(await ready(), true, revoke);
+    }
+  } finally {
+    await db.close();
+  }
+});
+
 test("every known backend marker repairs the drawdown baseline and validates its shape before suffix migrations", () => {
   const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
   const start = migrationStep.run.indexOf('case "$schema_before" in');
@@ -578,7 +703,7 @@ printf 'BASELINE_READY\\n'`;
   function run(marker, count = "1", exit = "0") {
     return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
   }
-  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001", "202611250002", "202611260001", "202611270001", "202611270002"];
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001", "202611250002", "202611260001", "202611270001", "202611270002", "202611270003", "202611270004", "202611270005"];
   for (const marker of markers) {
     const result = run(marker);
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
