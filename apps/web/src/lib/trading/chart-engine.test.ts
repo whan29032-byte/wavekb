@@ -22,6 +22,7 @@ const library = vi.hoisted(() => {
     primitives: new Set<IPrimitive>(),
     chartOptions: null as Record<string, unknown> | null,
     indicators: [] as Array<{ id: string; indicatorId: string }>,
+    failingIndicator: null as string | null,
     drawings: { version: 2, drawings: [] } as {
       version: number;
       drawings: Array<Record<string, unknown>>;
@@ -73,6 +74,12 @@ vi.mock("openalgo-charts", () => ({
         const indicator = { id: options.instanceId, indicatorId };
         library.state.indicators.push(indicator);
         return indicator;
+      },
+      indicators: () => {
+        if (library.state.indicators.some(({ indicatorId }) => indicatorId === library.state.failingIndicator)) {
+          throw new Error("indicator computation failed");
+        }
+        return library.state.indicators;
       },
       removeIndicator: (instanceId: string) => {
         library.state.indicators = library.state.indicators.filter(({ id }) => id !== instanceId);
@@ -146,6 +153,25 @@ vi.mock("openalgo-charts/draw", async () => {
         library.emit("draw:restore", {});
       }
 
+      get(id: string) {
+        return library.state.drawings.drawings.find((drawing) => drawing.id === id);
+      }
+
+      update(id: string, patch: Record<string, unknown>) {
+        const drawing = this.get(id);
+        if (!drawing) return false;
+        Object.assign(drawing, patch);
+        library.emit("drawing:change", { kind: "update", ids: [id] });
+        return true;
+      }
+
+      remove(id: string) {
+        if (!this.get(id)) return false;
+        library.state.drawings.drawings = library.state.drawings.drawings.filter((drawing) => drawing.id !== id);
+        library.emit("drawing:change", { kind: "remove", ids: [id] });
+        return true;
+      }
+
       toJSON() {
         return library.state.drawings;
       }
@@ -164,6 +190,7 @@ describe.sequential("WaveKB chart engine boundary", () => {
     library.state.primitives.clear();
     library.state.chartOptions = null;
     library.state.indicators = [];
+    library.state.failingIndicator = null;
     library.state.drawings = { version: 2, drawings: [] };
     library.state.viewport = { from: 0, to: 10 };
     library.state.activeTool = null;
@@ -234,6 +261,16 @@ describe.sequential("WaveKB chart engine boundary", () => {
 
     await expect(update).rejects.toThrow("destroyed");
     expect(library.state.indicators).toEqual([]);
+  });
+
+  it("keeps the indicator selection empty if it was cleared while the study tier was loading", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const pending = engine.setIndicators([{ instanceId: "removed-sma", indicatorId: "sma" }]);
+    await engine.setIndicators([]);
+    library.gates.indicators.resolve();
+    await pending;
+    expect(library.state.indicators).toEqual([]);
+    engine.destroy();
   });
 
   it("does not retain a drawing controller when its tier finishes loading after destroy", async () => {
@@ -637,6 +674,45 @@ describe.sequential("WaveKB chart engine boundary", () => {
     expect(library.state.indicators).toEqual([{ id: "study-1", indicatorId: "sma" }]);
     expect(engine.getViewport()).toEqual({ from: 2, to: 8 });
 
+    engine.destroy();
+  });
+
+  it("removes only the study whose deferred computation fails", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    library.state.failingIndicator = "ema";
+    const errors = await engine.setIndicators([
+      { instanceId: "fast", indicatorId: "sma" },
+      { instanceId: "broken", indicatorId: "ema" },
+      { instanceId: "slow", indicatorId: "sma" },
+    ]);
+    expect(errors).toEqual(["broken"]);
+    expect(library.state.indicators.map(({ id }) => id)).toEqual(["fast", "slow"]);
+    engine.destroy();
+  });
+
+  it("edits drawing visibility and text through the change stream and rejects HTML", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    await engine.setDrawings({
+      schemaVersion: WAVEKB_DRAWING_DOCUMENT_SCHEMA,
+      drawings: [{
+        id: "note", tool: "text", paneIndex: 0, zIndex: 0,
+        points: [{ time: 1700000000, price: 20 }],
+        style: {},
+        text: { value: "旧文字", color: "#223344" },
+      }],
+    });
+    const changed = vi.fn();
+    const stop = engine.subscribeDrawings(changed);
+    expect(() => engine.setDrawingText("note", "<img src=x>")).toThrow();
+    expect(changed).not.toHaveBeenCalled();
+    expect(engine.setDrawingText("note", "复盘要点")).toBe(true);
+    expect(engine.setDrawingVisibility("note", false)).toBe(true);
+    expect(changed.mock.calls.at(-1)?.[0].document.drawings[0]).toMatchObject({
+      visible: false, text: { value: "复盘要点", color: "#223344" },
+    });
+    expect(engine.removeDrawing("note")).toBe(true);
+    expect(changed.mock.calls.at(-1)?.[0].document.drawings).toEqual([]);
+    stop();
     engine.destroy();
   });
 

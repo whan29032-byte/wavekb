@@ -111,7 +111,7 @@ function engineSpies(): EngineSpies {
     setCandleGaps: vi.fn(),
     setFillClusters: vi.fn(),
     setMarkers: vi.fn(),
-    setIndicators: vi.fn(async () => undefined),
+    setIndicators: vi.fn(async () => []),
     setDrawings: vi.fn(async () => undefined),
     armDrawingTool: vi.fn(async () => undefined),
     cancelDrawingTool: vi.fn(() => false),
@@ -119,6 +119,11 @@ function engineSpies(): EngineSpies {
     redoDrawings: vi.fn(() => false),
     getDrawings: vi.fn(() => ({ schemaVersion: "wavekb-chart-drawings-v1" as const, drawings: [] })),
     subscribeDrawings: vi.fn(() => vi.fn()),
+    subscribeDrawingTool: vi.fn(() => vi.fn()),
+    subscribeViewport: vi.fn(() => vi.fn()),
+    setDrawingText: vi.fn(() => false),
+    setDrawingVisibility: vi.fn(() => false),
+    removeDrawing: vi.fn(() => false),
     subscribeMarkerClicks: vi.fn((listener) => { markerListener = listener; return markerUnsubscribe; }),
     setTheme: vi.fn(),
     resize: vi.fn(),
@@ -165,6 +170,26 @@ afterEach(() => {
 });
 
 describe("OpenAlgoTradeChart", () => {
+  it("lists an unmatched memo separately and fits candles instead of restoring a viewport from another timeframe", async () => {
+    const engine = engineSpies();
+    createEngine.mockResolvedValue(engine);
+    render(<OpenAlgoTradeChart projection={{
+      ...projection,
+      unmatched_annotations: [{
+        id: "33333333-3333-4333-8333-333333333333", body: "保留旧成交备忘录", tags: ["复盘"],
+        image_count: 0, version: 2, remap_status: "needs_confirmation",
+      }],
+      chart_state: {
+        schema_version: "wavekb-trade-chart-v1", cycle_id: cycleId, cycle_revision: 6,
+        timeframe: "5m", price_type: "both", viewport: { from: 500, to: 520 },
+        indicators: [], drawings: [], version: 2, updated_at: "2026-11-01T00:06:00.000Z",
+      },
+    }} />);
+    expect(screen.getByText("需要确认的备忘录（1）")).toBeTruthy();
+    expect(screen.getByText("保留旧成交备忘录")).toBeTruthy();
+    await waitFor(() => expect(engine.setViewport).toHaveBeenCalledWith(null));
+  });
+
   it("keeps initial loading and transport errors distinct from an engine failure or an empty list", () => {
     const { rerender } = render(<OpenAlgoTradeChart projection={null} loading />);
     expect(screen.getByText("行情加载中…")).toBeTruthy();

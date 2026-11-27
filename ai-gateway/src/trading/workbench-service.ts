@@ -2,6 +2,7 @@ import type {
   ChartStateV1,
   ExchangeConnectionView,
   FillMarker,
+  FillMarkerAnnotationV1,
   TradeChartPriceType,
   TradeChartProjection,
   TradeChartTimeframe,
@@ -22,7 +23,7 @@ import type { GatewayConfig } from "../config.ts";
 import { decryptSecret, type EncryptedSecret } from "../secrets/crypto.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
 import { buildPortfolioSeries, calculateTradingMetrics, type PortfolioPoint } from "./accounting.ts";
-import { assertChartStateV1, assertTradeChartProjection } from "./chart-contracts.ts";
+import { assertChartStateV1, assertTradeChartProjection, isChartStateTimestamp } from "./chart-contracts.ts";
 import { configuredTradingProviders } from "./provider-flags.ts";
 import { BinanceTradingProviderAdapter } from "./providers/binance.ts";
 import { BitgetTradingProviderAdapter } from "./providers/bitget.ts";
@@ -537,14 +538,28 @@ export class TradingWorkbenchService {
     if (facts.annotations.some((annotation) => annotation.cycle_revision > facts.cycle.revision)) {
       throw chartError("trade_chart_facts_invalid", 500);
     }
-    const annotations = new Map(facts.annotations
-      .filter((annotation) => annotation.deleted_at === null)
+    const activeAnnotations = facts.annotations.filter((annotation) => annotation.deleted_at === null);
+    const annotations = new Map(activeAnnotations
+      .filter((annotation) => annotation.remap_status !== "needs_confirmation")
       .map((annotation) => [`${annotation.fill_id}\u0000${annotation.native_fill_id}`, annotation]));
     const imageCounts = new Map<string, number>();
     for (const image of facts.images) {
       if (image.deleted_at !== null) continue;
       imageCounts.set(image.annotation_id, (imageCounts.get(image.annotation_id) ?? 0) + 1);
     }
+    const toAnnotation = <Status extends FillMarkerAnnotationV1["remap_status"]>(
+      note: WorkbenchChartAnnotationRecord, remapStatus: Status,
+    ) => ({
+      id: note.id,
+      body: note.body,
+      tags: note.tags,
+      image_count: imageCounts.get(note.id) ?? 0,
+      version: note.version,
+      remap_status: remapStatus,
+    });
+    const unmatchedAnnotations = activeAnnotations.flatMap((note) => note.remap_status === "needs_confirmation"
+      ? [toAnnotation(note, "needs_confirmation")]
+      : []);
     const markers: FillMarker[] = allocations.map((allocation, index) => {
       const fill = fills.get(allocation.fill_id);
       if (!fill
@@ -567,16 +582,9 @@ export class TradingWorkbenchService {
         position_side: fill.position_side,
         liquidity: fill.liquidity,
         provider_fill_id_mask: providerFillMask(fill.native_fill_id),
-        annotation: annotation ? {
-          id: annotation.id,
-          body: annotation.body,
-          tags: annotation.tags,
-          image_count: imageCounts.get(annotation.id) ?? 0,
-          version: annotation.version,
-          remap_status: annotation.cycle_revision < facts.cycle.revision
-            ? "remapped"
-            : annotation.remap_status,
-        } : null,
+        annotation: annotation ? toAnnotation(annotation,
+          annotation.cycle_revision < facts.cycle.revision ? "remapped" : annotation.remap_status,
+        ) : null,
       };
     });
     if (markers.length !== facts.fills.length || markers.length === 0) throw chartError("trade_chart_facts_invalid", 500);
@@ -585,9 +593,10 @@ export class TradingWorkbenchService {
     if (facts.fills.some((fill) => fill.native_symbol !== firstFill.native_symbol)) throw chartError("trade_chart_facts_invalid", 500);
     const requestedState = facts.chart_state;
     const defaultPriceType: TradeChartPriceType = facts.cycle.provider === "exness" ? "both" : "trade";
-    const priceType = requestedState?.cycle_revision === facts.cycle.revision && requestedState.timeframe === query.timeframe
-      ? requestedState.price_type
-      : defaultPriceType;
+    if (requestedState && (requestedState.cycle_id !== cycleId || requestedState.cycle_revision > facts.cycle.revision)) {
+      throw chartError("trade_chart_facts_invalid", 500);
+    }
+    const priceType = requestedState?.price_type ?? defaultPriceType;
     const request: CandleRequest = {
       product: facts.cycle.product,
       native_symbol: firstFill.native_symbol,
@@ -630,8 +639,10 @@ export class TradingWorkbenchService {
       range: { from: query.from, to: query.to },
       candles: batch.candles,
       markers,
-      chart_state: requestedState?.cycle_revision === facts.cycle.revision
-        && requestedState.timeframe === query.timeframe && requestedState.price_type === priceType ? requestedState : null,
+      ...(unmatchedAnnotations.length > 0 ? { unmatched_annotations: unmatchedAnnotations } : {}),
+      // Drawings have absolute anchors. Preserve the saved version and price
+      // preference even when a new cycle revision changes the default frame.
+      chart_state: requestedState,
       coverage: {
         status: batch.coverage.status,
         source: batch.coverage.source,
@@ -651,7 +662,7 @@ export class TradingWorkbenchService {
     const expectedUpdatedAt = raw.expected_updated_at;
     if (!Number.isInteger(expectedVersion) || (expectedVersion as number) < 0
       || ((expectedVersion as number) === 0 ? expectedUpdatedAt !== null : typeof expectedUpdatedAt !== "string")
-      || (typeof expectedUpdatedAt === "string" && chartTimestamp(expectedUpdatedAt) !== expectedUpdatedAt)
+      || (typeof expectedUpdatedAt === "string" && !isChartStateTimestamp(expectedUpdatedAt))
       || typeof accessToken !== "string" || accessToken.length === 0) {
       throw chartError("invalid_trade_chart_request", 400);
     }
@@ -796,6 +807,11 @@ function mapCycle(row: any): WorkbenchCycleRecord {
   } as WorkbenchCycleRecord;
 }
 
+function chartFactTimestamp(value: unknown): string {
+  if (!isChartStateTimestamp(value)) throw chartError("trade_chart_snapshot_inconsistent", 500);
+  return new Date(value).toISOString();
+}
+
 function mapChartCycle(row: any): WorkbenchChartCycleRecord {
   return {
     id: String(row.id),
@@ -805,8 +821,8 @@ function mapChartCycle(row: any): WorkbenchChartCycleRecord {
     product: row.product,
     symbol: String(row.symbol),
     direction: row.direction,
-    opened_at: String(row.opened_at),
-    closed_at: row.closed_at === null ? null : String(row.closed_at),
+    opened_at: chartFactTimestamp(row.opened_at),
+    closed_at: row.closed_at === null ? null : chartFactTimestamp(row.closed_at),
     generation: Number(row.generation),
     is_current: row.is_current === true,
   };
@@ -952,7 +968,7 @@ export class SupabaseTradingWorkbenchStore implements TradingWorkbenchStore {
         id: String(row.id),
         native_fill_id: String(row.native_fill_id),
         native_symbol: String(row.native_symbol),
-        occurred_at: String(row.occurred_at),
+        occurred_at: chartFactTimestamp(row.occurred_at),
         price: typeof row.price === "string" ? row.price : "",
         side: row.side,
         position_side: row.position_side,

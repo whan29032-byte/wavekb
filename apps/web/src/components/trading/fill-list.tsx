@@ -87,6 +87,11 @@ export function FillList({ fills, selectedMarkerKey, chartedMarkerKeys, gapMarke
                 <span>分配数量 <strong>{fill.allocated_quantity}</strong></span>
                 <span>成交编号 <strong>{fill.provider_fill_id_mask}</strong></span>
               </span>
+              {fill.annotation ? (
+                <span className="text-xs text-muted-foreground">
+                  {fill.annotation.image_count > 0 ? `备忘录 · ${fill.annotation.image_count} 张图片` : "有备忘录"}
+                </span>
+              ) : null}
               {!chartedMarkerKeys.has(fill.marker_key)
                 ? <span className="text-xs text-warning">{gapMarkerKeys?.has(fill.marker_key)
                   ? "该成交位于行情缺口，未附着到 K 线。"

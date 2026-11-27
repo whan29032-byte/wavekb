@@ -55,7 +55,10 @@ class Store implements TradingWorkbenchStore {
 
 test("loads one owner-bound chart snapshot through the service RPC without filtering immutable allocations by generation", async () => {
   const calls: Array<{ path: string; options: unknown }> = [];
-  const cycle = { ...facts.cycles[0]!, owner_id: owner };
+  const cycle = {
+    ...facts.cycles[0]!, owner_id: owner,
+    opened_at: "2026-11-23T18:00:00+00:00", closed_at: "2026-11-23T20:00:00+00:00",
+  };
   const connection = connections[0];
   const rpcResponse = {
     snapshot_token: {
@@ -77,7 +80,7 @@ test("loads one owner-bound chart snapshot through the service RPC without filte
       id: "101",
       native_fill_id: "open-101",
       native_symbol: "BTCUSDT",
-      occurred_at: "2026-11-23T18:00:00.000Z",
+      occurred_at: "2026-11-23T18:00:00.017+00:00",
       price: "90000",
       side: "buy",
       position_side: "long",
@@ -107,6 +110,9 @@ test("loads one owner-bound chart snapshot through the service RPC without filte
     },
   });
   assert.deepEqual(loaded?.allocations.map((allocation) => allocation.native_fill_id), ["open-101"]);
+  assert.equal(loaded?.cycle.opened_at, "2026-11-23T18:00:00.000Z");
+  assert.equal(loaded?.cycle.closed_at, "2026-11-23T20:00:00.000Z");
+  assert.equal(loaded?.fills[0]?.occurred_at, "2026-11-23T18:00:00.017Z");
 
   rpcResponse.snapshot_token.cycle_revision += 1;
   let candleFetches = 0;
@@ -172,6 +178,16 @@ test("builds the owner current-revision chart projection from allocation facts b
   const cycleId = "33333333-3333-4333-8333-333333333333";
   const annotationId = "44444444-4444-4444-8444-444444444444";
   const candleRequests: unknown[] = [];
+  const priorState = {
+    schema_version: "wavekb-trade-chart-v1",
+    cycle_id: cycleId, cycle_revision: 2, timeframe: "5m", price_type: "mark",
+    viewport: { from: 3, to: 15 }, version: 4, updated_at: "2026-11-23T18:02:00.000Z",
+    indicators: [{ instanceId: "saved-sma", indicatorId: "sma", settings: { length: 20 } }],
+    drawings: [{
+      id: "saved-trend", tool: "trend-line", points: [{ time: 1795456800, price: 90000 }, { time: 1795456860, price: 90100 }],
+      style: {}, paneIndex: 0, zIndex: 0,
+    }],
+  } as const;
   const chartFacts = {
     cycle: {
       ...facts.cycles[0]!,
@@ -196,7 +212,7 @@ test("builds the owner current-revision chart projection from allocation facts b
     images: [
       { id: "55555555-5555-4555-8555-555555555555", annotation_id: annotationId, mime_type: "image/png", byte_size: 1200, sort_order: 0, deleted_at: null },
     ],
-    chart_state: null,
+    chart_state: priorState,
   };
   const chartStore = Object.assign(new Store(), {
     async loadChartFacts(requestOwner: string, requestCycle: string) {
@@ -229,6 +245,9 @@ test("builds the owner current-revision chart projection from allocation facts b
   });
 
   assert.equal(projection.cycle_revision, 3);
+  assert.equal(projection.timeframe, "1m");
+  assert.equal(projection.price_type, "mark");
+  assert.deepEqual(projection.chart_state, priorState, "retain optimistic token and absolute anchors across revisions and timeframes");
   assert.deepEqual(projection.markers.map((marker: any) => ({
     fill_id: marker.fill_id,
     allocated_quantity: marker.allocated_quantity,
@@ -320,6 +339,10 @@ test("safely remaps an older annotation by stable fill identity and never attach
   const uncertain = await service.getChart(owner, cycleId, query);
   assert.equal(uncertain.markers[0]?.annotation, null);
   assert.equal(uncertain.markers[1]?.annotation, null);
+  assert.deepEqual(uncertain.unmatched_annotations, [{
+    id: annotationId, body: "revision one note", tags: ["plan"],
+    remap_status: "needs_confirmation", image_count: 0, version: 1,
+  }]);
 });
 
 test("loads candle credentials only after the chart connection owner is verified", async () => {
@@ -379,6 +402,7 @@ test("loads candle credentials only after the chart connection owner is verified
 
 test("saves chart state and fill annotations only through current owner allocation facts", async () => {
   const cycleId = "33333333-3333-4333-8333-333333333333";
+  const exactUpdatedAt = "2026-11-24T12:00:00.123456+00:00";
   const saved: unknown[] = [];
   const currentFacts = {
     cycle: { ...facts.cycles[0]!, id: cycleId, revision: 3, generation: 4, is_current: true },
@@ -393,7 +417,7 @@ test("saves chart state and fill annotations only through current owner allocati
     },
     async saveChartState(accessToken: string, input: unknown) {
       saved.push(["state", accessToken, input]);
-      return { schema_version: "wavekb-trade-chart-v1", cycle_id: cycleId, cycle_revision: 3, timeframe: "1m", price_type: "trade", viewport: { from: 1, to: 2 }, indicators: [], drawings: [], version: 2, updated_at: "2026-11-24T12:00:00.000Z" };
+      return { schema_version: "wavekb-trade-chart-v1", cycle_id: cycleId, cycle_revision: 3, timeframe: "1m", price_type: "trade", viewport: { from: 1, to: 2 }, indicators: [], drawings: [], version: saved.length + 1, updated_at: exactUpdatedAt };
     },
     async saveFillAnnotation(accessToken: string, input: any) {
       saved.push(["annotation", accessToken, input]);
@@ -404,6 +428,11 @@ test("saves chart state and fill annotations only through current owner allocati
   const stateInput = { cycle_revision: 3, schema_version: "wavekb-trade-chart-v1", timeframe: "1m", price_type: "trade", viewport: { from: 1, to: 2 }, indicators: [], drawings: [], expected_version: 1, expected_updated_at: "2026-11-23T18:03:00.000Z" };
   const state = await (service as any).saveChartState(owner, cycleId, stateInput, "user-jwt");
   assert.equal(state.version, 2);
+  assert.equal(state.updated_at, exactUpdatedAt);
+  const secondInput = { ...stateInput, expected_version: state.version, expected_updated_at: state.updated_at };
+  const second = await service.saveChartState(owner, cycleId, secondInput, "user-jwt");
+  assert.equal(second.version, 3);
+  assert.deepEqual(saved[1], ["state", "user-jwt", { cycle_id: cycleId, ...secondInput }]);
   const annotationInput = { annotation_id: "44444444-4444-4444-8444-444444444444", cycle_revision: 3, body: "note", tags: ["breakout"], images: [], expected_version: 1, deleted: false };
   const annotation = await (service as any).saveFillAnnotation(owner, cycleId, "101", annotationInput, "user-jwt");
   assert.equal(annotation.image_count, 0);
@@ -419,12 +448,12 @@ test("saves chart state and fill annotations only through current owner allocati
     }, "user-jwt"),
     (error: any) => error?.message === "invalid_trade_chart_request" && error?.statusCode === 400,
   );
-  assert.equal(saved.length, 2);
+  assert.equal(saved.length, 3);
   await assert.rejects(
     (service as any).saveFillAnnotation(owner, cycleId, "999", annotationInput, "user-jwt"),
     (error: any) => error?.message === "trade_chart_fill_not_owned" && error?.statusCode === 404,
   );
-  assert.equal(saved.length, 2, "unknown fill must fail before the authenticated RPC");
+  assert.equal(saved.length, 3, "unknown fill must fail before the authenticated RPC");
 });
 
 test("wires authenticated dashboard, trade detail and PUT review routes", async () => {

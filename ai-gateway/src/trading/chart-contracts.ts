@@ -36,6 +36,7 @@ const stateKeys = [
 const projectionKeys = [
   "schema_version", "cycle_id", "cycle_revision", "provider", "product", "symbol", "native_symbol", "direction",
   "opened_at", "closed_at", "timeframe", "price_type", "range", "candles", "markers", "chart_state", "coverage", "warnings",
+  "unmatched_annotations",
 ] as const;
 const indicatorKeys = ["instanceId", "indicatorId", "settings", "paneIndex"] as const;
 const drawingKeys = ["id", "tool", "points", "style", "text", "properties", "paneIndex", "locked", "visible", "zIndex"] as const;
@@ -60,6 +61,7 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const positiveIntegerStringPattern = /^[1-9]\d*$/;
 const canonicalUnsignedDecimalPattern = /^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/;
 const utcTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const postgresTimestampPattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const safeSymbolPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 const colorPattern = /^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 
@@ -128,6 +130,17 @@ function utcTimestamp(value: unknown, field: string): string {
   const result = boundedString(value, field, 30);
   if (!utcTimestampPattern.test(result) || !Number.isFinite(Date.parse(result)) || new Date(result).toISOString() !== result) invalid(field);
   return result;
+}
+
+// PostgreSQL returns timestamptz with an offset and up to six fractional
+// digits. Keep this token intact for exact optimistic concurrency checks.
+export function isChartStateTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return false;
+  const match = postgresTimestampPattern.exec(value);
+  if (!match) return false;
+  const calendar = `${match[1]}.000Z`;
+  const parsed = Date.parse(calendar);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === calendar;
 }
 
 function positiveInteger(value: unknown, field: string, maximum = Number.MAX_SAFE_INTEGER): number {
@@ -348,7 +361,7 @@ export function assertChartStateV1(value: unknown): ChartStateV1 {
   validateIndicators(state.indicators, state.timeframe as TradeChartTimeframe);
   validateDrawings(state.drawings);
   positiveInteger(state.version, "state_version");
-  utcTimestamp(state.updated_at, "state_updated_at");
+  if (!isChartStateTimestamp(state.updated_at)) invalid("state_updated_at");
   return value as ChartStateV1;
 }
 
@@ -368,21 +381,24 @@ function validateMarker(value: unknown): void {
   if (!isAllowedString(marker.liquidity, new Set(["maker", "taker", "unknown"]))) invalid("marker_liquidity");
   const providerMask = boundedString(marker.provider_fill_id_mask, "marker_mask", 80);
   if (!/^(?:\u2022{4}|\*{4})[A-Za-z0-9]{4}$/u.test(providerMask)) invalid("marker_mask");
-  if (marker.annotation !== null) {
-    const annotation = record(marker.annotation, "annotation");
-    exactKeys(annotation, annotationKeys, "annotation_keys");
-    if (typeof annotation.id !== "string" || !uuidPattern.test(annotation.id)) invalid("annotation_id");
-    plainText(annotation.body, "annotation_body", 5_000);
-    if (!Array.isArray(annotation.tags) || annotation.tags.length > 10) invalid("annotation_tags");
-    const tags = new Set<string>();
-    for (const tag of annotation.tags) {
-      if (typeof tag !== "string" || tag.length < 1 || tag.length > 40 || tag !== tag.trim().toLowerCase() || tags.has(tag)) invalid("annotation_tags");
-      tags.add(tag);
-    }
-    if (!Number.isInteger(annotation.image_count) || (annotation.image_count as number) < 0 || (annotation.image_count as number) > 5) invalid("annotation_images");
-    positiveInteger(annotation.version, "annotation_version");
-    if (!isAllowedString(annotation.remap_status, new Set(["current", "remapped", "needs_confirmation"]))) invalid("annotation_remap");
+  if (marker.annotation !== null) validateAnnotation(marker.annotation);
+}
+
+function validateAnnotation(value: unknown) {
+  const annotation = record(value, "annotation");
+  exactKeys(annotation, annotationKeys, "annotation_keys");
+  if (typeof annotation.id !== "string" || !uuidPattern.test(annotation.id)) invalid("annotation_id");
+  plainText(annotation.body, "annotation_body", 5_000);
+  if (!Array.isArray(annotation.tags) || annotation.tags.length > 10) invalid("annotation_tags");
+  const tags = new Set<string>();
+  for (const tag of annotation.tags) {
+    if (typeof tag !== "string" || tag.length < 1 || tag.length > 40 || tag !== tag.trim().toLowerCase() || tags.has(tag)) invalid("annotation_tags");
+    tags.add(tag);
   }
+  if (!Number.isInteger(annotation.image_count) || (annotation.image_count as number) < 0 || (annotation.image_count as number) > 5) invalid("annotation_images");
+  positiveInteger(annotation.version, "annotation_version");
+  if (!isAllowedString(annotation.remap_status, new Set(["current", "remapped", "needs_confirmation"]))) invalid("annotation_remap");
+  return annotation;
 }
 
 function validateProjectionCoverage(value: unknown, projection: Record<string, unknown>): void {
@@ -431,7 +447,7 @@ export function assertTradeChartProjection(value: unknown): TradeChartProjection
   exactKeys(projection, projectionKeys, "projection_keys");
   if (projection.schema_version !== TRADE_CHART_PROJECTION_SCHEMA_VERSION) invalid("projection_schema");
   if (typeof projection.cycle_id !== "string" || !uuidPattern.test(projection.cycle_id)) invalid("projection_cycle_id");
-  positiveInteger(projection.cycle_revision, "projection_cycle_revision");
+  const cycleRevision = positiveInteger(projection.cycle_revision, "projection_cycle_revision");
   if (!isTradingProvider(projection.provider)) invalid("projection_provider");
   if (typeof projection.product !== "string" || !products.has(projection.product)) invalid("projection_product");
   if ((projection.provider === "exness" && projection.product !== "cfd")
@@ -507,8 +523,19 @@ export function assertTradeChartProjection(value: unknown): TradeChartProjection
   }
   if (projection.chart_state !== null) {
     const state = assertChartStateV1(projection.chart_state);
-    if (state.cycle_id !== projection.cycle_id || state.cycle_revision !== projection.cycle_revision
-      || state.timeframe !== projection.timeframe || state.price_type !== projection.price_type) invalid("projection_state");
+    if (state.cycle_id !== projection.cycle_id || state.cycle_revision > cycleRevision
+      || state.price_type !== projection.price_type) invalid("projection_state");
+  }
+  if (projection.unmatched_annotations !== undefined) {
+    if (!Array.isArray(projection.unmatched_annotations) || projection.unmatched_annotations.length > TRADE_CHART_MAX_MARKERS) {
+      invalid("unmatched_annotations");
+    }
+    const unmatchedIds = new Set<unknown>();
+    for (const candidate of projection.unmatched_annotations) {
+      const note = validateAnnotation(candidate);
+      if (note.remap_status !== "needs_confirmation" || unmatchedIds.has(note.id)) invalid("unmatched_annotations");
+      unmatchedIds.add(note.id);
+    }
   }
   validateProjectionCoverage(projection.coverage, projection);
   if (!Array.isArray(projection.warnings) || projection.warnings.length > 50

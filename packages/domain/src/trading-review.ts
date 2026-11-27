@@ -274,6 +274,9 @@ export type TradeChartProjection = {
   range: { from: string; to: string };
   candles: TradeChartCandleV1[];
   markers: FillMarker[];
+  /** Private notes whose original fill could not be matched to this revision. */
+  unmatched_annotations?: Array<FillMarkerAnnotationV1 & { remap_status: "needs_confirmation" }>;
+  /** The last saved layout may predate the current cycle revision or candle timeframe. */
   chart_state: ChartStateV1 | null;
   coverage: {
     status: TradeChartCoverageStatus;

@@ -1755,7 +1755,22 @@ test("chart state RPC uses owner and optimistic guards while candle facts remain
       price_type: "trade",
       version: 1,
     });
-    const firstUpdatedAt = created.rows[0]?.updated_at;
+    await database.exec("reset role; set timezone to 'Asia/Shanghai';");
+    await database.query(
+      "update public.trading_chart_states set updated_at = '2026-11-24T12:00:00.123456Z' where cycle_id = $1",
+      [cycleOne],
+    );
+    await actor(database, ownerOne);
+    const tokenRow = await database.query(
+      "select to_jsonb(state)->>'updated_at' as token from public.trading_chart_states state where cycle_id = $1",
+      [cycleOne],
+    );
+    const firstUpdatedAt = tokenRow.rows[0]?.token;
+    assert.equal(firstUpdatedAt, "2026-11-24T20:00:00.123456+08:00");
+    await assert.rejects(
+      upsertChartState(database, { expectedVersion: 1, expectedUpdatedAt: "2026-11-24T12:00:00.123Z" }),
+      /stale_trade_chart_state/u,
+    );
     await assert.rejects(
       upsertChartState(database, { expectedVersion: 0, expectedUpdatedAt: firstUpdatedAt }),
       /stale_trade_chart_state/u,

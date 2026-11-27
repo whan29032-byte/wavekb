@@ -2,6 +2,7 @@
 
 import type {
   FillMarker,
+  FillMarkerAnnotationV1,
   TradeChartGapV1,
   TradeChartCandleSeriesBasis,
   TradeChartProjection,
@@ -22,6 +23,8 @@ import {
   type WaveKbChartTheme,
 } from "@/lib/trading/chart-engine";
 import { FillList } from "./fill-list";
+import { createFillAnnotationDraftScope, FillAnnotationEditor } from "./fill-annotation-editor";
+import { ChartToolPanel } from "./chart-tool-panel";
 
 type ChartLoadError = "rate_limited" | "unavailable" | null;
 
@@ -238,6 +241,15 @@ export function OpenAlgoTradeChart({
   const [selectedMarkerKey, setSelectedMarkerKey] = useState<string | null>(null);
   const [failedProjection, setFailedProjection] = useState<TradeChartProjection | null>(null);
   const [themeRevision, setThemeRevision] = useState(0);
+  const [annotationDraftScope] = useState(createFillAnnotationDraftScope);
+  const [readyChart, setReadyChart] = useState<{
+    projection: TradeChartProjection;
+    engine: WaveKbChartEngine;
+  } | null>(null);
+  const [savedNotes, setSavedNotes] = useState<{
+    projection: TradeChartProjection;
+    byFillId: ReadonlyMap<string, FillMarkerAnnotationV1 | null>;
+  } | null>(null);
   const preparation = useMemo(() => projection === null ? null : prepareChart(projection), [projection]);
 
   function readTheme(): WaveKbChartTheme {
@@ -317,7 +329,9 @@ export function OpenAlgoTradeChart({
         created.setFillClusters([...preparation.value.fillsByCandle].flatMap(([time, fills]) =>
           fills.length > 1 ? [{ id: `cluster:${time}`, time, count: fills.length }] : [],
         ));
-        created.setViewport(projection.chart_state?.viewport ?? null);
+        const savedChart = projection.chart_state;
+        created.setViewport(savedChart?.cycle_revision === projection.cycle_revision
+          && savedChart.timeframe === projection.timeframe ? savedChart.viewport : null);
         if (selectedRef.current !== null) revealFill(created, preparation.value, selectedRef.current);
         unsubscribeMarkerClicks = created.subscribeMarkerClicks((markerId) => {
           if (markerId === null) {
@@ -340,6 +354,7 @@ export function OpenAlgoTradeChart({
           });
           resizeObserver.observe(container);
         }
+        setReadyChart({ projection, engine: created });
       })
       .catch(() => {
         disposeEngine();
@@ -353,7 +368,12 @@ export function OpenAlgoTradeChart({
   }, [preparation, projection]);
 
   const prepared = preparation?.ok === true ? preparation.value : null;
-  const selectedFill = projection?.markers.find(({ marker_key }) => marker_key === selectedMarkerKey) ?? null;
+  const fills = projection === null ? [] : projection.markers.map((fill) =>
+    savedNotes?.projection === projection && savedNotes.byFillId.has(fill.fill_id)
+      ? { ...fill, annotation: savedNotes.byFillId.get(fill.fill_id) ?? null }
+      : fill,
+  );
+  const selectedFill = fills.find(({ marker_key }) => marker_key === selectedMarkerKey) ?? null;
   const selectedPrepared = prepared?.chartedFills.find(({ fill }) => fill.marker_key === selectedMarkerKey);
   const selectedCluster = selectedPrepared === undefined
     ? []
@@ -366,6 +386,15 @@ export function OpenAlgoTradeChart({
     setSelectedMarkerKey(markerKey);
     const engine = engineRef.current;
     if (engine && prepared) revealFill(engine, prepared, markerKey);
+  }
+
+  function rememberAnnotation(fillId: string, annotation: FillMarkerAnnotationV1 | null) {
+    if (projection === null) return;
+    setSavedNotes((previous) => {
+      const byFillId = new Map(previous?.projection === projection ? previous.byFillId : undefined);
+      byFillId.set(fillId, annotation);
+      return { projection, byFillId };
+    });
   }
 
   return (
@@ -412,6 +441,9 @@ export function OpenAlgoTradeChart({
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(18rem,.85fr)]">
         <div className="min-w-0">
+          {readyChart?.projection === projection ? (
+            <ChartToolPanel projection={readyChart.projection} engine={readyChart.engine} />
+          ) : null}
           <div
             ref={chartElementRef}
             className="h-[26rem] min-h-72 overflow-hidden rounded-xl border bg-surface"
@@ -456,9 +488,36 @@ export function OpenAlgoTradeChart({
               ))}
             </section>
           ) : null}
+          {projection && projection.unmatched_annotations?.length ? (
+            <details className="rounded-card border border-warning/30 bg-warning-surface p-3">
+              <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-warning">
+                需要确认的备忘录（{projection.unmatched_annotations.length}）
+              </summary>
+              <p className="mb-2 text-sm">原成交已变更，以下备忘录暂时没有关联到新成交。</p>
+              <ul className="grid gap-2 text-sm">
+                {projection.unmatched_annotations.map((note) => (
+                  <li key={note.id} className="grid gap-1 border-t pt-2">
+                    <p className="whitespace-pre-wrap break-words">{note.body || "无文字备注"}</p>
+                    {note.tags.length > 0 ? <p className="break-words text-muted-foreground">{note.tags.join("、")}</p> : null}
+                    {note.image_count > 0 ? <p className="text-muted-foreground">{note.image_count} 张私有图片</p> : null}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          {projection && selectedFill ? (
+            <FillAnnotationEditor
+              key={`${projection.cycle_id}:${projection.cycle_revision}:${selectedFill.fill_id}`}
+              cycleId={projection.cycle_id}
+              cycleRevision={projection.cycle_revision}
+              fill={selectedFill}
+              onSaved={rememberAnnotation}
+              draftScope={annotationDraftScope}
+            />
+          ) : null}
           {projection !== null ? (
             <FillList
-              fills={projection.markers}
+              fills={fills}
               selectedMarkerKey={selectedMarkerKey}
               chartedMarkerKeys={engineError ? new Set<string>() : prepared?.chartedMarkerKeys ?? new Set<string>()}
               gapMarkerKeys={prepared?.gapMarkerKeys}

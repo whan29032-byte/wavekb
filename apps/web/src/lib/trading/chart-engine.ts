@@ -198,19 +198,24 @@ export interface WaveKbChartEngine {
   setCandleGaps(gaps: readonly { from: number; to: number }[]): void;
   setFillClusters(clusters: readonly WaveKbFillCluster[]): void;
   setMarkers(markers: readonly WaveKbChartMarker[]): void;
-  setIndicators(indicators: readonly WaveKbChartIndicator[]): Promise<void>;
+  setIndicators(indicators: readonly WaveKbChartIndicator[]): Promise<readonly string[]>;
   setDrawings(document: WaveKbChartDrawingDocument): Promise<void>;
   armDrawingTool(toolId: WaveKbChartDrawingToolId): Promise<void>;
   cancelDrawingTool(): boolean;
   undoDrawings(): boolean;
   redoDrawings(): boolean;
   getDrawings(): WaveKbChartDrawingDocument;
+  setDrawingVisibility(id: string, visible: boolean): boolean;
+  setDrawingText(id: string, text: string): boolean;
+  removeDrawing(id: string): boolean;
   subscribeDrawings(listener: (change: WaveKbChartDrawingChange) => void): () => void;
+  subscribeDrawingTool(listener: (tool: WaveKbChartDrawingToolId | null) => void): () => void;
   subscribeMarkerClicks(listener: (markerId: string | null) => void): () => void;
   setTheme(theme: WaveKbChartTheme): void;
   resize(width: number, height: number, devicePixelRatio: number): void;
   setViewport(viewport: WaveKbChartViewport | null): void;
   getViewport(): WaveKbChartViewport;
+  subscribeViewport(listener: (viewport: WaveKbChartViewport) => void): () => void;
   destroy(): void;
 }
 
@@ -778,11 +783,12 @@ export async function createWaveKbChartEngine(
   let drawingController: OpenAlgoDrawingController | null = null;
   let drawingControllerPromise: Promise<OpenAlgoDrawingController> | null = null;
   let indicatorIds: string[] = [];
+  let indicatorUpdate = 0;
   let destroyed = false;
   let lifecycleVersion = 0;
   const drawingListeners = new Set<(change: WaveKbChartDrawingChange) => void>();
   const drawingEventOff: Array<() => void> = [];
-  const markerClickEventOff = new Set<() => void>();
+  const interactionEventOff = new Set<() => void>();
 
   const destroyedError = () => new Error("WaveKB chart engine has been destroyed");
   const assertAlive = () => {
@@ -794,6 +800,14 @@ export async function createWaveKbChartEngine(
     if (destroyed || version !== lifecycleVersion) {
       throw destroyedError();
     }
+  };
+  const trackInteractionEvent = (...unsubscribers: Array<() => void>) => {
+    const stop = () => {
+      if (!interactionEventOff.delete(stop)) return;
+      for (const unsubscribe of unsubscribers) unsubscribe();
+    };
+    interactionEventOff.add(stop);
+    return stop;
   };
 
   const getNormalizedDrawings = () => normalizeOpenAlgoDocument(drawingController?.toJSON());
@@ -891,28 +905,37 @@ export async function createWaveKbChartEngine(
     },
     async setIndicators(indicators) {
       assertAlive();
+      const update = ++indicatorUpdate;
+      if (indicators.length === 0 && indicatorIds.length === 0) return [];
       const version = lifecycleVersion;
-      await import("openalgo-charts/indicators");
-      assertCurrent(version);
+      if (indicators.length > 0) {
+        await import("openalgo-charts/indicators");
+        assertCurrent(version);
+        if (update !== indicatorUpdate) return [];
+      }
 
       for (const instanceId of indicatorIds) {
         chart.removeIndicator(instanceId, { force: true });
       }
       indicatorIds = [];
 
+      const failed: string[] = [];
       for (const indicator of indicators) {
-        const instance = chart.addIndicator(
-          indicator.indicatorId,
-          indicator.settings,
-          {
+        try {
+          const instance = chart.addIndicator(indicator.indicatorId, indicator.settings, {
             instanceId: indicator.instanceId,
-            ...(indicator.paneIndex === undefined
-              ? {}
-              : { paneIndex: indicator.paneIndex }),
-          },
-        );
-        indicatorIds.push(instance.id);
+            ...(indicator.paneIndex === undefined ? {} : { paneIndex: indicator.paneIndex }),
+          });
+          // The public inventory read flushes deferred computations while this
+          // instance is the only pending addition, so a failed study is isolated.
+          chart.indicators();
+          indicatorIds.push(instance.id);
+        } catch {
+          chart.removeIndicator(indicator.instanceId, { force: true });
+          failed.push(indicator.instanceId);
+        }
       }
+      return failed;
     },
     async setDrawings(value) {
       assertAlive();
@@ -951,6 +974,21 @@ export async function createWaveKbChartEngine(
       assertAlive();
       return getNormalizedDrawings();
     },
+    setDrawingVisibility(id, visible) {
+      assertAlive();
+      return drawingController?.update(id, { visible }) ?? false;
+    },
+    setDrawingText(id, value) {
+      assertAlive();
+      const drawing = drawingController?.get(id);
+      if (drawing?.tool !== "text") return false;
+      const safeValue = safeText(value, "drawing text", MAX_DRAWING_TEXT_LENGTH, "application");
+      return drawingController?.update(id, { text: { ...drawing.text, value: safeValue } }) ?? false;
+    },
+    removeDrawing(id) {
+      assertAlive();
+      return drawingController?.remove(id) ?? false;
+    },
     subscribeDrawings(listener) {
       assertAlive();
       drawingListeners.add(listener);
@@ -963,15 +1001,15 @@ export async function createWaveKbChartEngine(
     },
     subscribeMarkerClicks(listener) {
       assertAlive();
-      const off = chart.on("click", ({ id }) => listener(typeof id === "string" ? id : null));
-      markerClickEventOff.add(off);
-      let subscribed = true;
-      return () => {
-        if (!subscribed) return;
-        subscribed = false;
-        markerClickEventOff.delete(off);
-        off();
-      };
+      return trackInteractionEvent(chart.on("click", ({ id }) => listener(typeof id === "string" ? id : null)));
+    },
+    subscribeDrawingTool(listener) {
+      assertAlive();
+      return trackInteractionEvent(chart.on("draw:tool", ({ tool }) => {
+        listener(typeof tool === "string" && WAVEKB_DRAWING_TOOLS.has(tool)
+          ? tool as WaveKbChartDrawingToolId
+          : null);
+      }));
     },
     setTheme(theme) {
       assertAlive();
@@ -1021,13 +1059,21 @@ export async function createWaveKbChartEngine(
       assertAlive();
       return chart.getVisibleLogicalRange();
     },
+    subscribeViewport(listener) {
+      assertAlive();
+      const onMove = ({ logicalFrom, logicalTo }: { logicalFrom: number; logicalTo: number }) => {
+        if (Number.isFinite(logicalFrom) && Number.isFinite(logicalTo) && logicalFrom < logicalTo) {
+          listener({ from: logicalFrom, to: logicalTo });
+        }
+      };
+      return trackInteractionEvent(chart.on("pan", onMove), chart.on("zoom", onMove));
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
       lifecycleVersion += 1;
       for (const off of drawingEventOff.splice(0)) off();
-      for (const off of markerClickEventOff) off();
-      markerClickEventOff.clear();
+      for (const off of interactionEventOff) off();
       drawingListeners.clear();
       drawingController?.destroy();
       drawingController = null;
