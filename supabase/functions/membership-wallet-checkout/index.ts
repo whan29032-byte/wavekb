@@ -5,11 +5,12 @@ const cors = {
   "access-control-allow-headers": "authorization, apikey, content-type, x-client-info",
   "access-control-allow-methods": "POST, OPTIONS",
 };
-const routes: Record<string, { chain: string; asset: string; contract: string }> = {
-  "tron-usdt": { chain: "tron", asset: "USDT", contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" },
-  "ethereum-usdt": { chain: "ethereum", asset: "USDT", contract: "0xdac17f958d2ee523a2206206994597c13d831ec7" },
-  "ethereum-usdc": { chain: "ethereum", asset: "USDC", contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
-  "base-usdc": { chain: "base", asset: "USDC", contract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" },
+const routes: Record<string, { chain: string; asset: string; contract: string; decimals: 6 | 18 }> = {
+  "tron-usdt": { chain: "tron", asset: "USDT", contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", decimals: 6 },
+  "bsc-usdt": { chain: "bsc", asset: "USDT", contract: "0x55d398326f99059ff775485246999027b3197955", decimals: 18 },
+  "ethereum-usdt": { chain: "ethereum", asset: "USDT", contract: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6 },
+  "ethereum-usdc": { chain: "ethereum", asset: "USDC", contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", decimals: 6 },
+  "base-usdc": { chain: "base", asset: "USDC", contract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", decimals: 6 },
 };
 const uuid = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
@@ -49,9 +50,11 @@ async function validateOrder(order: Record<string, any>, input: Record<string, a
     || !["pending", "expired", "paid", "review", "revoked"].includes(order.status)
     || typeof order.amount_units !== "string" || !/^[1-9][0-9]{0,77}$/.test(order.amount_units)
     || typeof order.base_amount_units !== "string" || !/^[1-9][0-9]{0,77}$/.test(order.base_amount_units)) throw new Error("wallet_checkout_unavailable");
-  const amount = BigInt(order.amount_units), base = BigInt(order.base_amount_units);
-  if (base !== BigInt(input.expectedQuote.amount_minor) * 10000n || amount <= base || amount - base > 9999n
-    || order.amount_decimal !== `${amount / 1000000n}.${(amount % 1000000n).toString().padStart(6, "0")}`) throw new Error("wallet_checkout_unavailable");
+  const amount = BigInt(order.amount_units), base = BigInt(order.base_amount_units), scale = 10n ** BigInt(route.decimals - 6), tail = amount - base;
+  const micros = amount / scale;
+  if ((order.token_decimals ?? route.decimals) !== route.decimals || amount % scale !== 0n || base !== BigInt(input.expectedQuote.amount_minor) * 10000n * scale
+    || tail < scale || tail > 9999n * scale || tail % scale !== 0n
+    || order.amount_decimal !== `${micros / 1000000n}.${(micros % 1000000n).toString().padStart(6, "0")}`) throw new Error("wallet_checkout_unavailable");
   if (route.chain === "tron" ? !await validTronAddress(order.recipient)
     : typeof order.recipient !== "string" || !/^0x[0-9a-f]{40}$/.test(order.recipient) || /^0x0{40}$/.test(order.recipient)) throw new Error("wallet_checkout_unavailable");
   const created = Date.parse(order.created_at), expires = Date.parse(order.expires_at);

@@ -12,7 +12,7 @@ const sha = "f".repeat(40), now = 1791766800000;
 const script = fileURLToPath(new URL("../scripts/configure-wallet-runtime.mjs", import.meta.url));
 const source = fs.readFileSync(script, "utf8");
 const initial = "# preserve every other setting\nSUPABASE_URL=https://not-requested.invalid\nSUPABASE_SERVICE_ROLE_KEY=private-service-value\nYOUTUBE_SYNC_ENABLED=true\nAI_PRIVATE_KEY=private-key-sentinel\n";
-const readyEnv = `MEMBERSHIP_WALLET_ENABLED=true\nMEMBERSHIP_WALLET_ETHEREUM_RPC_URL=${WALLET_ENDPOINTS.ethereum}\nMEMBERSHIP_WALLET_BASE_RPC_URL=${WALLET_ENDPOINTS.base}\nMEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS=${WALLET_ALLOWED_HOSTS}\n`;
+const readyEnv = `MEMBERSHIP_WALLET_ENABLED=true\nMEMBERSHIP_WALLET_ETHEREUM_RPC_URL=${WALLET_ENDPOINTS.ethereum}\nMEMBERSHIP_WALLET_BASE_RPC_URL=${WALLET_ENDPOINTS.base}\nMEMBERSHIP_WALLET_BSC_RPC_URL=${WALLET_ENDPOINTS.bsc}\nMEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS=${WALLET_ALLOWED_HOSTS}\n`;
 function parseFixtureEnv(text) {
   const env = {};
   for (const raw of text.split(/\r?\n/)) {
@@ -29,7 +29,7 @@ async function fixtureFetch(url, init) {
   const body = JSON.parse(init.body);
   if (url === "https://api.trongrid.io/walletsolidity/getnowblock") return reply(tronHead());
   assert.ok(Object.values(WALLET_ENDPOINTS).includes(url));
-  return reply({ jsonrpc: "2.0", id: body.id, result: body.method === "eth_chainId" ? url === WALLET_ENDPOINTS.ethereum ? "0x1" : "0x2105" : evmBlock() });
+  return reply({ jsonrpc: "2.0", id: body.id, result: body.method === "eth_chainId" ? url === WALLET_ENDPOINTS.ethereum ? "0x1" : url === WALLET_ENDPOINTS.base ? "0x2105" : "0x38" : evmBlock() });
 }
 function fixture(t, text = initial) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wallet-runtime-"))); fs.chmodSync(directory, 0o700);
@@ -47,17 +47,17 @@ function fixture(t, text = initial) {
   return { directory, envFile, backupFile, state, services, options, deps: { services, fetch: fixtureFetch, now: () => now,
     wait: async milliseconds => { assert.ok([250, 1000].includes(milliseconds)); } } };
 }
-function result(operation, enabled, changed) { return { ok: true, operation, enabled, workerRunning: true, ethereumReady: true, baseReady: true, tronReady: true, changed }; }
+function result(operation, enabled, changed) { return { ok: true, operation, enabled, workerRunning: true, ethereumReady: true, baseReady: true, bscReady: true, tronReady: true, changed }; }
 async function rejected(code, callback) { await assert.rejects(callback, error => error.code === code && error.message === code); }
 
-test("enable probes five fixed read requests, preserves all other bytes, backs up and verifies a new running PID", async t => {
+test("enable probes seven fixed read requests, preserves all other bytes, backs up and verifies a new running PID", async t => {
   const f = fixture(t), calls = [];
   f.deps.fetch = async (url, init) => { calls.push({ url, init }); return fixtureFetch(url, init); };
   assert.deepEqual(await configureWalletRuntime(f.options, f.deps), result("enable", true, true));
   assert.equal(fs.readFileSync(f.backupFile, "utf8"), initial); assert.equal(fs.statSync(f.backupFile).mode & 0o7777, 0o600);
   assert.equal(fs.readFileSync(f.envFile, "utf8"), initial + readyEnv); assert.equal(fs.statSync(f.envFile).mode & 0o7777, 0o600);
-  assert.equal(f.state.restarts, 1); assert.equal(f.state.pid, 112); assert.equal(calls.length, 5);
-  assert.deepEqual(calls.map(({ init }) => JSON.parse(init.body).method ?? "tron-head"), ["eth_chainId", "eth_getBlockByNumber", "eth_chainId", "eth_getBlockByNumber", "tron-head"]);
+  assert.equal(f.state.restarts, 1); assert.equal(f.state.pid, 112); assert.equal(calls.length, 7);
+  assert.deepEqual(calls.map(({ init }) => JSON.parse(init.body).method ?? "tron-head"), ["eth_chainId", "eth_getBlockByNumber", "eth_chainId", "eth_getBlockByNumber", "eth_chainId", "eth_getBlockByNumber", "tron-head"]);
   for (const { init } of calls) { assert.equal(init.redirect, "error"); assert.equal(init.credentials, "omit"); assert.ok(init.signal instanceof AbortSignal); }
   assert.ok(!fs.existsSync(path.join(f.directory, ".gateway.env.wavekb-runtime.lock")));
 });
@@ -72,13 +72,14 @@ test("already enabled configuration is verified and restarted, but reported chan
   assert.deepEqual(await configureWalletRuntime(f.options, f.deps), result("enable", true, false));
   assert.equal(f.state.restarts, 1); assert.equal(fs.readFileSync(f.backupFile, "utf8"), initial + readyEnv);
 });
-test("existing approved URLs, reversed host order, quotes, CRLF and unrelated unterminated lines are byte-preserved", async t => {
+test("the exact previous two-chain configuration is upgraded without accepting arbitrary endpoints", async t => {
   const text = `  MEMBERSHIP_WALLET_ENABLED = 'false'  \r\nMEMBERSHIP_WALLET_ETHEREUM_RPC_URL="${WALLET_ENDPOINTS.ethereum}"\r\nMEMBERSHIP_WALLET_BASE_RPC_URL=${WALLET_ENDPOINTS.base}\r\nMEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS='base-rpc.publicnode.com, ethereum-rpc.publicnode.com'\r\nYOUTUBE_SYNC_ENABLED=true`;
   const f = fixture(t, text); await configureWalletRuntime(f.options, f.deps);
-  assert.equal(fs.readFileSync(f.envFile, "utf8"), text.replace("'false'", "'true'")); assert.equal(fs.readFileSync(f.backupFile, "utf8"), text);
+  const upgraded = text.replace("'false'", "'true'").replace("'base-rpc.publicnode.com, ethereum-rpc.publicnode.com'", `'${WALLET_ALLOWED_HOSTS}'`) + `\r\nMEMBERSHIP_WALLET_BSC_RPC_URL=${WALLET_ENDPOINTS.bsc}\r\n`;
+  assert.equal(fs.readFileSync(f.envFile, "utf8"), upgraded); assert.equal(fs.readFileSync(f.backupFile, "utf8"), text);
 });
 test("existing nonempty mismatched endpoints, hosts, flags, key or batch fail before network or writes", async t => {
-  for (const setting of ["MEMBERSHIP_WALLET_ETHEREUM_RPC_URL=https://other.invalid/private-secret", "MEMBERSHIP_WALLET_BASE_RPC_URL=https://base-rpc.publicnode.com/",
+  for (const setting of ["MEMBERSHIP_WALLET_ETHEREUM_RPC_URL=https://other.invalid/private-secret", "MEMBERSHIP_WALLET_BASE_RPC_URL=https://base-rpc.publicnode.com/", "MEMBERSHIP_WALLET_BSC_RPC_URL=https://other.invalid/",
     "MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS=*.publicnode.com", `MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS=${WALLET_ALLOWED_HOSTS},private.invalid`,
     "MEMBERSHIP_WALLET_ENABLED=yes", "MEMBERSHIP_WALLET_TRONGRID_API_KEY=bad key", "MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE=0"]) {
     const f = fixture(t, initial + setting + "\n"); f.deps.fetch = () => assert.fail("network must not run");
@@ -89,7 +90,7 @@ test("only the fixed TRON request receives an existing key and no result contain
   const f = fixture(t, initial + "MEMBERSHIP_WALLET_TRONGRID_API_KEY=private-tron-key\nMEMBERSHIP_WALLET_VERIFY_BATCH_SIZE=2\n");
   f.deps.fetch = async (url, init) => { assert.equal(init.headers["TRON-PRO-API-KEY"], url.startsWith("https://api.trongrid.io/") ? "private-tron-key" : undefined); return fixtureFetch(url, init); };
   const output = await configureWalletRuntime(f.options, f.deps);
-  assert.deepEqual(Object.keys(output).sort(), ["ok", "operation", "enabled", "workerRunning", "ethereumReady", "baseReady", "tronReady", "changed"].sort());
+  assert.deepEqual(Object.keys(output).sort(), ["ok", "operation", "enabled", "workerRunning", "ethereumReady", "baseReady", "bscReady", "tronReady", "changed"].sort());
   assert.doesNotMatch(JSON.stringify(output), /private-|https|SUPABASE|KEY|PID|112/);
 });
 test("strict arguments reject disable, secrets, omitted revision, duplicates, arbitrary commands and probe backups", () => {
@@ -262,9 +263,9 @@ test("probe rechecks live runtime and never reports a process that exited during
   f.deps.fetch = async (url, init) => { const response = await fixtureFetch(url, init); if (url.startsWith("https://api.trongrid.io/")) f.state.running = false; return response; };
   await rejected("worker_inactive", () => configureWalletRuntime(probe, f.deps)); assert.equal(f.state.restarts, 0); assert.deepEqual(fs.readdirSync(f.directory), ["gateway.env"]);
 });
-test("production adapter checks exactly six wallet keys, ignores unrelated stale config and still proves CLI/runtime identity", t => {
+test("production adapter checks exactly seven wallet keys, ignores unrelated stale config and still proves CLI/runtime identity", t => {
   const walletKeys = ["MEMBERSHIP_WALLET_ENABLED", "MEMBERSHIP_WALLET_ETHEREUM_RPC_URL", "MEMBERSHIP_WALLET_BASE_RPC_URL",
-    "MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS", "MEMBERSHIP_WALLET_TRONGRID_API_KEY", "MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE"];
+    "MEMBERSHIP_WALLET_BSC_RPC_URL", "MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS", "MEMBERSHIP_WALLET_TRONGRID_API_KEY", "MEMBERSHIP_WALLET_VERIFY_BATCH_SIZE"];
   const configured = initial + readyEnv + "MEMBERSHIP_WALLET_TRONGRID_API_KEY=private-tron-key\nMEMBERSHIP_WALLET_VERIFY_BATCH_SIZE=2\n";
   const cases = ["import-entry", "stdin-source", "unrelated-stale-config"].map(mode => ({ mode, text: initial, valid: true }));
   for (const key of walletKeys) for (const mode of ["different", "missing", "extra"]) cases.push({ mode, key, text: mode === "extra" ? initial : configured, valid: false });
@@ -287,7 +288,7 @@ fakeFs.realpathSync=(name,...args)=>String(name)==='/opt/elliott-wave-gateway/cu
 fakeFs.openSync=(name,...args)=>originalOpen(/^\\/proc\\/\\d+\\/environ$/.test(String(name))?${JSON.stringify(processEnv)}:/^\\/proc\\/\\d+\\/cmdline$/.test(String(name))?${JSON.stringify(cmdline)}:name,...args);
 fakeCp.execFileSync=(command,args)=>{if(command!=='/usr/bin/systemctl')throw new Error('unexpected-command');if(args[0]==='show')return 'LoadState=loaded\\nActiveState=active\\nSubState=running\\nMainPID='+pid+'\\n';if(args.join(',')!=='restart,elliott-wave-ai-worker.service')throw new Error('unexpected-service');pid++;fakeFs.writeFileSync(${JSON.stringify(processEnv)},fakeFs.readFileSync(${JSON.stringify(envFile)},'utf8').split('\\n').filter(line=>/^[A-Z_]+=/.test(line)).join('\\0')+'\\0');};
 syncBuiltinESMExports();
-globalThis.fetch=async(url,init)=>{const body=JSON.parse(init.body);if(url==='https://api.trongrid.io/walletsolidity/getnowblock')return new Response(JSON.stringify({blockID:'00000000055d4a80'+'b'.repeat(48),block_header:{raw_data:{number:90000000,timestamp:Date.now()-60000}}}),{headers:{'content-type':'application/json'}});if(!${JSON.stringify(Object.values(WALLET_ENDPOINTS))}.includes(url))throw new Error('unexpected-host');return new Response(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='eth_chainId'?(url===${JSON.stringify(WALLET_ENDPOINTS.ethereum)}?'0x1':'0x2105'):{number:'0x1234',hash:'0x'+'a'.repeat(64),timestamp:'0x'+Math.floor((Date.now()-600000)/1000).toString(16)}}),{headers:{'content-type':'application/json'}});};`;
+    globalThis.fetch=async(url,init)=>{const body=JSON.parse(init.body);if(url==='https://api.trongrid.io/walletsolidity/getnowblock')return new Response(JSON.stringify({blockID:'00000000055d4a80'+'b'.repeat(48),block_header:{raw_data:{number:90000000,timestamp:Date.now()-60000}}}),{headers:{'content-type':'application/json'}});if(!${JSON.stringify(Object.values(WALLET_ENDPOINTS))}.includes(url))throw new Error('unexpected-host');return new Response(JSON.stringify({jsonrpc:'2.0',id:body.id,result:body.method==='eth_chainId'?(url===${JSON.stringify(WALLET_ENDPOINTS.ethereum)}?'0x1':url===${JSON.stringify(WALLET_ENDPOINTS.base)}?'0x2105':'0x38'):{number:'0x1234',hash:'0x'+'a'.repeat(64),timestamp:'0x'+Math.floor((Date.now()-600000)/1000).toString(16)}}),{headers:{'content-type':'application/json'}});};`;
     const child = mode === "stdin-source"
       ? spawnSync(process.execPath, ["--input-type=module", "-", ...args], { input: preamble + "\n" + source, encoding: "utf8", env: {} })
       : spawnSync(process.execPath, ["--input-type=module", "-e", preamble + `\nprocess.argv=[process.execPath,${JSON.stringify(script)},...${JSON.stringify(args)}];await import(${JSON.stringify(pathToFileURL(script).href)});`], { encoding: "utf8", env: {} });

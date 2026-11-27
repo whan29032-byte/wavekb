@@ -130,10 +130,11 @@ test("managed AI activation is separately opt-in, shares the owned env and resto
   assert.match(activation.run, /if test "\$PRIVATE_RESEARCH" != preserve \|\| test "\$MANAGED_AI" != preserve/);
   assert.match(activation.run, /runtime_arguments=\(--managed-ai "\$MANAGED_AI"\)/);
   assert.match(activation.run, /--backup-file "\$\{backup_root\}\/gateway\.env" "\$\{runtime_arguments\[@\]\}"/);
-  assert.match(activation.run, /worker_was_active=0[\s\S]*is-active --quiet elliott-wave-ai-worker\.service/);
-  assert.match(activation.run, /if test "\$MANAGED_AI" = enable; then\n\s*sudo systemctl restart elliott-wave-ai-worker\.service/);
-  assert.match(activation.run, /if test "\$MANAGED_AI" = enable; then test "\$\(sudo systemctl is-active elliott-wave-ai-worker\.service\)" = active; fi/);
-  assert.match(activation.run, /if test "\$MANAGED_AI" = enable && test "\$worker_was_active" -eq 0; then\n\s*sudo systemctl stop elliott-wave-ai-worker\.service/);
+  assert.match(activation.run, /case "\$worker_state" in active\) worker_was_active=1 ;; inactive\) worker_was_active=0/);
+  assert.match(activation.run, /if test "\$MANAGED_AI" = enable \|\| test "\$worker_was_active" -eq 1; then\n\s*sudo systemctl restart elliott-wave-ai-worker\.service/);
+  assert.match(activation.run, /if test "\$MANAGED_AI" = enable \|\| test "\$worker_was_active" -eq 1; then\n\s*test "\$\(sudo systemctl is-active elliott-wave-ai-worker\.service\)" = active\n\s*elif sudo systemctl is-active --quiet elliott-wave-ai-worker\.service; then/);
+  assert.match(activation.run, /worker_restored=0[\s\S]*if sudo systemctl start elliott-wave-ai-worker\.service && sudo systemctl is-active --quiet elliott-wave-ai-worker\.service; then worker_restored=1; fi[\s\S]*if sudo systemctl stop elliott-wave-ai-worker\.service && ! sudo systemctl is-active --quiet elliott-wave-ai-worker\.service; then worker_restored=1; fi/);
+  assert.match(activation.run, /if test "\$worker_restored" -eq 1; then sudo rm -f "\$pause_marker"; fi/);
   assert.doesNotMatch(activation.run, /systemctl (?:enable|disable)(?: --now)? elliott-wave-ai-worker\.service/);
   for (const name of ["elliott-wave-gateway.service", "elliott-wave-ai-worker.service"]) {
     const unit = fs.readFileSync(new URL(`../deployment/systemd/${name}`, import.meta.url), "utf8");
@@ -165,7 +166,7 @@ test("multi-exchange trading cutover is explicit, fail-closed and covered by exa
   assert.match(activation.run, /mv -Tf "\$environment_rollback" \/etc\/elliott-wave\/gateway\.env/);
   assert.match(activation.run, /release-preflight\.mjs" --runtime-file/);
   assert.match(activation.run, /trading-runtime-observation\.json/);
-  assert.match(activation.run, /expectedSchemaVersion: "202611270001", schemaVersion: "202611270001"/);
+  assert.match(activation.run, /expectedSchemaVersion: "202611270002", schemaVersion: "202611270002"/);
   assert.doesNotMatch(activation.run, /test "\$rollback_sha" != "\$RELEASE_SHA"/);
   assert.match(activation.run, /sameCodeRollback: releaseSha === rollbackTarget/);
   assert.match(activation.run, /enabled-state[\s\S]*active-state/);
@@ -187,6 +188,22 @@ test("web release follows the Gateway-owned cutover and requires authenticated t
   assert.equal(production.if, undefined);
   assert.equal(production.env.TRADING_LIVE_ACCEPTANCE, "1");
   assert.equal(production.env.E2E_POSTING_IDENTIFIER, "${{ secrets.E2E_POSTING_IDENTIFIER }}");
+});
+
+test("backend release installs and verifies the daily Discord market settlement timer", () => {
+  const upload = backendSteps.find((step) => /Upload gateway archive and systemd units/.test(step.name));
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  for (const unit of ["elliott-wave-discord-game-settlement.service", "elliott-wave-discord-game-settlement.timer"]) {
+    assert.match(upload.run, new RegExp(unit.replaceAll(".", "\\.")));
+    assert.match(activation.run, new RegExp(unit.replaceAll(".", "\\.")));
+  }
+  assert.match(activation.run, /systemctl enable --now elliott-wave-discord-game-settlement\.timer/);
+  assert.match(activation.run, /systemctl start elliott-wave-discord-game-settlement\.service/);
+  assert.match(activation.run, /is-active elliott-wave-discord-game-settlement\.timer/);
+
+  const timer = fs.readFileSync(new URL("../deployment/systemd/elliott-wave-discord-game-settlement.timer", import.meta.url), "utf8");
+  assert.match(timer, /OnCalendar=\*-\*-\* 14:00:00 UTC/);
+  assert.match(timer, /Persistent=true/);
 });
 
 test("trading rollback restores enabled and active state instead of unconditionally starting units", () => {
@@ -251,19 +268,43 @@ ${operation}`;
   }
 });
 
-test("real rollback worker branch leaves an originally stopped worker stopped without changing autostart", () => {
+test("real rollback worker branch restores the exact pre-cutover active state without changing autostart", () => {
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
-  const operation = activation.run.match(/if test "\$MANAGED_AI" = enable && test "\$worker_was_active" -eq 0; then[\s\S]*?\n\s*fi/)?.[0];
+  const operation = activation.run.match(/worker_restored=0[\s\S]*?if test "\$worker_restored" -eq 1; then sudo rm -f "\$pause_marker"; fi/)?.[0];
   assert.ok(operation);
-  for (const managedAi of ["preserve", "enable", "disable"]) for (const wasActive of [0, 1]) {
+  assert.match(operation, /systemctl start elliott-wave-ai-worker\.service && sudo systemctl is-active --quiet elliott-wave-ai-worker\.service/);
+  assert.match(operation, /systemctl stop elliott-wave-ai-worker\.service && ! sudo systemctl is-active --quiet elliott-wave-ai-worker\.service/);
+  assert.doesNotMatch(operation, /systemctl (?:enable|disable)/);
+});
+
+test("failed rollback worker restoration retains the pause marker for the always recovery", () => {
+  const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  const operation = activation.run.match(/worker_restored=0[\s\S]*?if test "\$worker_restored" -eq 1; then sudo rm -f "\$pause_marker"; fi/)?.[0];
+  assert.ok(operation);
+  for (const wasActive of [0, 1]) for (const failRestore of [0, 1]) {
     const program = `set -eu
-MANAGED_AI="$WAVEKB_TEST_MANAGED"
 worker_was_active="$WAVEKB_TEST_ACTIVE"
-sudo() { printf '%s\\n' "$@"; }
-${operation}`;
-    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_MANAGED: managedAi, WAVEKB_TEST_ACTIVE: String(wasActive) }, encoding: "utf8" });
+pause_marker="$(mktemp)"
+service_state_file="$(mktemp)"
+printf '0\\n' > "$service_state_file"
+sudo() {
+  if test "$1" = systemctl; then
+    case "$2" in
+      start) test "$WAVEKB_TEST_FAIL" -eq 0 || return 7; printf '1\\n' > "$service_state_file" ;;
+      stop) test "$WAVEKB_TEST_FAIL" -eq 0 || return 7; printf '0\\n' > "$service_state_file" ;;
+      is-active) test "$(cat "$service_state_file")" -eq 1 ;;
+      *) return 9 ;;
+    esac
+  else
+    command "$@"
+  fi
+}
+${operation}
+if test -e "$pause_marker"; then printf 'MARKER\\n'; else printf 'CLEARED\\n'; fi
+rm -f "$pause_marker" "$service_state_file"`;
+    const result = spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_ACTIVE: String(wasActive), WAVEKB_TEST_FAIL: String(failRestore) }, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.stdout.trim().split("\n"), ["systemctl", managedAi === "enable" && !wasActive ? "stop" : "try-restart", "elliott-wave-ai-worker.service"]);
+    assert.equal(result.stdout.trim(), failRestore ? "MARKER" : "CLEARED");
   }
 });
 
@@ -359,10 +400,10 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /202611240001_multi_exchange_trade_review\.sql/);
   assert.match(backendSteps[schemaGate].run, /202611240002_trade_review_ai\.sql/);
   assert.match(backendSteps[schemaGate].run, /202611250001_discord_account_link\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202611260001_trade_chart_private\.sql/);
-  assert.match(backendSteps[schemaGate].run, /202611270001_trade_chart_snapshot_hardening\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202611270001_trade_chart_private\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202611270002_trade_chart_snapshot_hardening\.sql/);
   assert.match(backendSteps[schemaGate].run, /test "\$trading_review_rls_tables" = 13/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611270001/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611270002/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rls_tables" = 5/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_bucket_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rpc_closed" = t/);
@@ -372,6 +413,11 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /not has_function_privilege\('anon','public\.load_private_trade_chart_facts\(uuid,uuid\)','EXECUTE'\)/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_table_writes_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_cache_closed" = t/);
+  assert.match(backendSteps[schemaGate].run, /202611250002_discord_community_game\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202611260001_membership_wallet_bsc_usdt\.sql/);
+  assert.match(backendSteps[schemaGate].run, /test "\$wallet_bsc_route" = 1/);
+  assert.match(backendSteps[schemaGate].run, /test "\$wallet_legacy_enabled" = 0/);
+  assert.match(backendSteps[schemaGate].run, /test "\$wallet_numeric_amounts" = 2/);
   assert.match(backendSteps[schemaGate].run, /test "\$discord_link_rls" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$discord_link_rpc_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$mentor_publish_rpc_closed" = t/);
@@ -381,7 +427,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611270001/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611270002/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -390,7 +436,23 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.doesNotMatch(backendSteps[activation].run, /gateway\.env.*(?:cat|sed|awk)/);
 });
 
-test("every known backend marker selects only its unapplied migration suffix and unknown markers stop", () => {
+test("wallet schema cutover pauses the old verifier and restores its exact active state on success or failure", () => {
+  const pause = backendSteps.findIndex((step) => step.id === "pause_wallet_worker");
+  const migration = backendSteps.findIndex((step) => /Apply exact production migrations/.test(step.name));
+  const activation = backendSteps.findIndex((step) => /Activate gateway/.test(step.name));
+  const recovery = backendSteps.findIndex((step) => /Restore AI worker after an interrupted wallet cutover/.test(step.name));
+  assert.ok(pause >= 0 && pause < migration && migration < activation && activation < recovery);
+  assert.match(backendSteps[pause].run, /systemctl stop elliott-wave-ai-worker\.service/);
+  assert.match(backendSteps[pause].run, /wallet-cutover-\$\{release_id\}/);
+  assert.match(backendSteps[activation].run, /wallet-cutover-\$\{release_id\}/);
+  assert.match(backendSteps[activation].run, /if test "\$MANAGED_AI" = enable \|\| test "\$worker_was_active" -eq 1; then[\s\S]*systemctl restart elliott-wave-ai-worker\.service/);
+  assert.match(backendSteps[activation].run, /sudo rm -f "\$pause_marker"/);
+  assert.equal(backendSteps[recovery].if, "always() && steps.pause_wallet_worker.outcome != 'skipped'");
+  assert.match(backendSteps[recovery].run, /case "\$worker_state" in[\s\S]*active\)[\s\S]*systemctl start elliott-wave-ai-worker\.service[\s\S]*inactive\)[\s\S]*systemctl stop elliott-wave-ai-worker\.service/);
+  assert.match(backendSteps[recovery].run, /sudo rm -f "\$pause_marker"/);
+});
+
+test("backend markers preserve the Discord and BSC cutover and select the chart migration suffix", () => {
   const migrationStep = backendSteps.find((step) => /Apply exact production migrations/.test(step.name));
   const suffixStart = migrationStep.run.indexOf("# Apply only the unapplied marker suffix after baseline verification.");
   assert.ok(suffixStart > 0);
@@ -416,8 +478,10 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202611240001_multi_exchange_trade_review.sql",
     "202611240002_trade_review_ai.sql",
     "202611250001_discord_account_link.sql",
-    "202611260001_trade_chart_private.sql",
-    "202611270001_trade_chart_snapshot_hardening.sql",
+    "202611250002_discord_community_game.sql",
+    "202611260001_membership_wallet_bsc_usdt.sql",
+    "202611270001_trade_chart_private.sql",
+    "202611270002_trade_chart_snapshot_hardening.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -436,13 +500,15 @@ ${selection}`;
     ["202610080003", 4], ["202610080004", 5], ["202610100001", 6], ["202610100002", 7],
     ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11], ["20261011001354", 12],
     ["20261011152711", 13], ["202610190001", 14], ["202610220001", 15], ["202610220002", 16],
-    ["202611240001", 17], ["202611240002", 18], ["202611250001", 19], ["202611260001", 20],
-    ["202611270001", 21],
+    ["202611240001", 17], ["202611240002", 18], ["202611250001", 19],
+    // A legacy Discord draft marker keeps the existing replay of final Discord and wallet DDL.
+    ["202611250002", 19], ["202611260001", 21], ["202611270001", 22], ["202611270002", 23],
   ]) {
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
     const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
-    assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
+    const expected = migrations.slice(offset);
+    assert.deepEqual(selected, expected.map((name) => `supabase/migrations/${name}`), marker);
   }
   for (const marker of ["", "202609090001", "202610100006", "202611280001", "invalid"]) {
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
@@ -512,7 +578,7 @@ printf 'BASELINE_READY\\n'`;
   function run(marker, count = "1", exit = "0") {
     return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
   }
-  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001", "202611260001", "202611270001"];
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001", "202611250002", "202611260001", "202611270001", "202611270002"];
   for (const marker of markers) {
     const result = run(marker);
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);

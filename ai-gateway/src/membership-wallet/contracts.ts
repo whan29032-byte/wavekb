@@ -1,15 +1,16 @@
 // Only issuer-verified mainnet assets. Never infer asset identity from a ticker.
 export const WALLET_ROUTES = {
   "tron-usdt": { chain: "tron", asset: "USDT", contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", decimals: 6, chainId: null },
+  "bsc-usdt": { chain: "bsc", asset: "USDT", contract: "0x55d398326f99059ff775485246999027b3197955", decimals: 18, chainId: 56 },
   "ethereum-usdt": { chain: "ethereum", asset: "USDT", contract: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6, chainId: 1 },
   "ethereum-usdc": { chain: "ethereum", asset: "USDC", contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", decimals: 6, chainId: 1 },
   "base-usdc": { chain: "base", asset: "USDC", contract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", decimals: 6, chainId: 8453 },
 } as const;
 export type WalletRouteId = keyof typeof WALLET_ROUTES;
-export type WalletChain = "tron" | "ethereum" | "base";
+export type WalletChain = "tron" | "bsc" | "ethereum" | "base";
 export type WalletOrder = {
   id: string; buyer_id: string; request_id: string; price_id: string; route_id: WalletRouteId;
-  route_revision: number; chain: WalletChain; asset: "USDT" | "USDC"; contract: string;
+  route_revision: number; chain: WalletChain; asset: "USDT" | "USDC"; contract: string; token_decimals?: 6 | 18;
   recipient: string; amount_units: string; base_amount_units: string; amount_decimal: string;
   created_at: string; expires_at: string; status: "pending" | "expired" | "paid" | "review" | "revoked";
 };

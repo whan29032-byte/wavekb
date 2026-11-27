@@ -13,15 +13,20 @@ const txHash = `0x${"a".repeat(64)}`, blockHash = `0x${"b".repeat(64)}`, recipie
 const receiverTron = "TNPeeaaFB7K9cmo4uQpcU32zGK8G1NYqeL";
 const uuid = (number: number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
 const env = { MEMBERSHIP_WALLET_ENABLED: "true", MEMBERSHIP_WALLET_ETHEREUM_RPC_URL: "https://ethereum.rpc.example.com/private-synthetic-path",
-  MEMBERSHIP_WALLET_BASE_RPC_URL: "https://base.rpc.example.com/private-synthetic-path", MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS: "ethereum.rpc.example.com,base.rpc.example.com" };
+  MEMBERSHIP_WALLET_BASE_RPC_URL: "https://base.rpc.example.com/private-synthetic-path", MEMBERSHIP_WALLET_BSC_RPC_URL: "https://bsc.rpc.example.com/private-synthetic-path",
+  MEMBERSHIP_WALLET_RPC_ALLOWED_HOSTS: "ethereum.rpc.example.com,base.rpc.example.com,bsc.rpc.example.com" };
 const config = loadMembershipWalletVerificationConfig(env);
-const decimal = (units: string) => `${BigInt(units) / 1000000n}.${(BigInt(units) % 1000000n).toString().padStart(6, "0")}`;
+const tokenScale = (routeId: WalletRouteId) => 10n ** BigInt(WALLET_ROUTES[routeId].decimals - 6);
+const decimal = (routeId: WalletRouteId, units: string) => {
+  const micros = BigInt(units) / tokenScale(routeId);
+  return `${micros / 1000000n}.${(micros % 1000000n).toString().padStart(6, "0")}`;
+};
 function job(routeId: WalletRouteId = "ethereum-usdt", units = "52000123"): ClaimedWalletVerification {
   const route = WALLET_ROUTES[routeId];
   return { id: uuid(1), order_id: uuid(2), tx_hash: route.chain === "tron" ? txHash.slice(2) : txHash, status: "leased", attempts: 1,
     lease_id: uuid(3), lease_expires_at: new Date(now + 120000).toISOString(), order: { id: uuid(2), buyer_id: uuid(4), request_id: uuid(5), price_id: uuid(6),
-      route_id: routeId, route_revision: 1, chain: route.chain, asset: route.asset, contract: route.contract,
-      recipient: route.chain === "tron" ? receiverTron : recipient, amount_units: units, base_amount_units: (BigInt(units) - 123n).toString(), amount_decimal: decimal(units),
+      route_id: routeId, route_revision: 1, chain: route.chain, asset: route.asset, contract: route.contract, token_decimals: route.decimals,
+      recipient: route.chain === "tron" ? receiverTron : recipient, amount_units: units, base_amount_units: (BigInt(units) - 123n * tokenScale(routeId)).toString(), amount_decimal: decimal(routeId, units),
       created_at: new Date(now - 60000).toISOString(), expires_at: new Date(now + 600000).toISOString(), status: "pending" } };
 }
 function evmLog(routeId: WalletRouteId, amount = "52000123", to = recipient) {
@@ -36,7 +41,7 @@ function evmFixture(routeId: WalletRouteId = "ethereum-usdt", options: Record<st
     if (options.error) throw new Error(`synthetic-provider-secret ${String(url)}`);
     if (options.httpStatus) return new Response("private-provider-diagnostic", { status: options.httpStatus, headers: { "retry-after": "180" } });
     let result;
-    if (body.method === "eth_chainId") result = options.chainId ?? (routeId === "base-usdc" ? "0x2105" : "0x1");
+    if (body.method === "eth_chainId") result = options.chainId ?? (routeId === "base-usdc" ? "0x2105" : routeId === "bsc-usdt" ? "0x38" : "0x1");
     else if (body.method === "eth_getTransactionReceipt") result = ++receiptCalls > 1 && options.fresh ? { ...receipt, ...options.fresh } : options.missing ? null : receipt;
     else if (body.params[0] === "finalized") result = options.finalized ?? { number: "0x101", hash: `0x${"c".repeat(64)}` };
     else result = { number: "0x100", hash: blockHash, timestamp: `0x${Math.floor((options.timestamp ?? paidAt) / 1000).toString(16)}`,
@@ -63,9 +68,9 @@ function tronFixture(options: Record<string, any> = {}) {
 }
 const verify = (value: ClaimedWalletVerification, fetcher: typeof fetch) => verifyMembershipWalletTransfer(value, config, { fetch: fetcher, now: () => now });
 
-test("only four issuer-verified routes are supported, every amount has six decimals", () => {
-  assert.deepEqual(Object.keys(WALLET_ROUTES), ["tron-usdt", "ethereum-usdt", "ethereum-usdc", "base-usdc"]);
-  assert.ok(Object.values(WALLET_ROUTES).every(route => route.decimals === 6));
+test("BSC USDT is canonical while legacy routes remain verifiable for historical invoices", () => {
+  assert.deepEqual(Object.keys(WALLET_ROUTES), ["tron-usdt", "bsc-usdt", "ethereum-usdt", "ethereum-usdc", "base-usdc"]);
+  assert.deepEqual(WALLET_ROUTES["bsc-usdt"], { chain: "bsc", asset: "USDT", contract: "0x55d398326f99059ff775485246999027b3197955", decimals: 18, chainId: 56 });
   assert.equal(WALLET_ROUTES["base-usdc"].chainId, 8453);
 });
 test("TRON Base58Check conversion matches documented public address and official USDT contract", () => {
@@ -100,6 +105,21 @@ for (const routeId of ["ethereum-usdt", "ethereum-usdc", "base-usdc"] as const) 
     assert.ok(fixture.calls.every(call => call.init.redirect === "error" && call.init.signal instanceof AbortSignal));
   });
 }
+test("BSC verifies the exact 18-decimal USDT transfer while preserving the six-decimal invoice tail", async () => {
+  const amount = "52001237000000000000";
+  const fixture = evmFixture("bsc-usdt", { receipt: { logs: [evmLog("bsc-usdt", amount)] } });
+  const result = await verify(job("bsc-usdt", amount), fixture.fetcher);
+  assert.equal(result.outcome, "verified");
+  if (result.outcome !== "verified") assert.fail();
+  assert.equal(result.evidence.amount_units, amount);
+  assert.equal(fixture.calls[0]?.url, env.MEMBERSHIP_WALLET_BSC_RPC_URL);
+});
+test("legacy six-decimal claims without a frozen scale remain verifiable, while BSC requires its 18-decimal snapshot", async () => {
+  const legacy = job("ethereum-usdt"); delete legacy.order.token_decimals;
+  assert.equal((await verify(legacy, evmFixture("ethereum-usdt").fetcher)).outcome, "verified");
+  const bsc = job("bsc-usdt", "52001237000000000000"); delete bsc.order.token_decimals;
+  assert.deepEqual(await verify(bsc, async () => assert.fail("missing BSC scale must fail before RPC")), { outcome: "review", reason: "invoice_invalid" });
+});
 test("TRON uses only official mainnet solidified receipt/block APIs and validates actual TRC20 log", async () => {
   const fixture = tronFixture(), result = await verify(job("tron-usdt"), fixture.fetcher);
   assert.equal(result.outcome, "verified");

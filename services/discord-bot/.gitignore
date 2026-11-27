@@ -1,0 +1,11 @@
+.env
+node_modules/
+data/
+data/server-theme-backups/
+*.db-wal
+*.db-shm
+coverage/
+test-output/
+profile-preview-*.png
+*.log
+.worktrees/

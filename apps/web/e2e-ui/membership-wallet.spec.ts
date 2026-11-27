@@ -28,19 +28,20 @@ for (const viewport of [{ width: 375, height: 812 }, { width: 812, height: 375 }
         for (const button of await page.getByRole("button").all()) expect(await button.evaluate((node) => node.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
         for (const label of await page.locator("form label[for]").all()) { const target = await label.getAttribute("for"); await expect(page.locator(`[id="${target}"]`)).toHaveCount(1); }
         if (["pending", "checking", "waiting-confirmation", "review", "paid"].some((value) => story.id === `membership-wallet--${value}`)) {
-          await expect(page.locator("[data-wallet-amount]")).toHaveText("52.001237 USDC"); await expect(page.locator("[data-wallet-recipient]")).toHaveText("虚拟测试地址 · 不可转账");
+          await expect(page.locator("[data-wallet-amount]")).toHaveText("52.001237 USDT"); await expect(page.locator("[data-wallet-recipient]")).toHaveText("虚拟测试地址 · 不可转账");
           for (const button of await page.getByRole("button", { name: /复制|提交.*哈希/ }).all()) await expect(button).toBeDisabled();
           await expect(page.getByText("有效 VIP 会员", { exact: true })).toHaveCount(story.id.endsWith("--paid") ? 1 : 0);
         }
         if (story.id.endsWith("--multiple-networks")) {
-          const route = page.getByLabel("付款网络与币种"); await expect(route.locator("option")).toHaveCount(5);
-          for (const id of ["tron-usdt", "ethereum-usdt", "ethereum-usdc", "base-usdc"]) await expect(route.locator(`option[value="${id}"]`)).toHaveCount(1);
-          await page.getByLabel("VIP 方案").selectOption({ index: 1 }); await route.selectOption("base-usdc"); await page.getByRole("checkbox").check(); await expect(page.getByRole("button", { name: "生成钱包付款订单" })).toBeDisabled();
+          const route = page.getByLabel("付款网络与币种"); await expect(route.locator("option")).toHaveCount(3);
+          for (const id of ["tron-usdt", "bsc-usdt"]) await expect(route.locator(`option[value="${id}"]`)).toHaveCount(1);
+          for (const id of ["ethereum-usdt", "ethereum-usdc", "base-usdc"]) await expect(route.locator(`option[value="${id}"]`)).toHaveCount(0);
+          await page.getByLabel("VIP 方案").selectOption({ index: 1 }); await route.selectOption("bsc-usdt"); await page.getByRole("checkbox").check(); await expect(page.getByRole("button", { name: "生成钱包付款订单" })).toBeDisabled();
         }
         if (story.id.endsWith("--missing-addresses")) {
           await expect(page.getByRole("checkbox", { name: "允许创建新的钱包付款订单" })).toBeDisabled();
           for (const field of await page.getByLabel("公开收款地址").all()) await expect(field).toHaveValue("");
-          const form = page.locator("form").filter({ has: page.getByRole("button", { name: "保存 base-usdc 收款配置" }) });
+          const form = page.locator("form").filter({ has: page.getByRole("button", { name: "保存 bsc-usdt 收款配置" }) });
           await form.getByLabel("公开收款地址").fill("wrong-network-address"); await form.getByLabel("变更原因").fill("隔离组件地址校验"); await form.getByRole("button").click();
           await expect(page.getByRole("alert")).toContainText("完整公开收款地址"); await expect(form.getByLabel("公开收款地址")).toBeFocused();
         }

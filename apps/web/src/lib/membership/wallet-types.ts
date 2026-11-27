@@ -1,21 +1,22 @@
 import { membershipQuote, parseCommercePlan, parseEffectiveMembershipEntitlements, parseMembershipPrice, type CommercePlan, type EffectiveMembershipEntitlements, type MembershipExpectedQuote, type MembershipPrice, type MembershipPurchaseGrant } from "./commerce-types";
 
 export const walletRouteDefinitions = {
-  "tron-usdt": { chain: "tron", asset: "USDT", contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" },
-  "ethereum-usdt": { chain: "ethereum", asset: "USDT", contract: "0xdac17f958d2ee523a2206206994597c13d831ec7" },
-  "ethereum-usdc": { chain: "ethereum", asset: "USDC", contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" },
-  "base-usdc": { chain: "base", asset: "USDC", contract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" },
+  "tron-usdt": { chain: "tron", asset: "USDT", contract: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", decimals: 6 },
+  "bsc-usdt": { chain: "bsc", asset: "USDT", contract: "0x55d398326f99059ff775485246999027b3197955", decimals: 18 },
+  "ethereum-usdt": { chain: "ethereum", asset: "USDT", contract: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6 },
+  "ethereum-usdc": { chain: "ethereum", asset: "USDC", contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", decimals: 6 },
+  "base-usdc": { chain: "base", asset: "USDC", contract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", decimals: 6 },
 } as const;
 export type WalletRouteId = keyof typeof walletRouteDefinitions;
-export type WalletChain = "tron" | "ethereum" | "base";
+export type WalletChain = "tron" | "bsc" | "ethereum" | "base";
 export type WalletAsset = "USDT" | "USDC";
 export type WalletSettings = { enabled: boolean; revision: number };
-export type WalletRoute = { id: WalletRouteId; chain: WalletChain; asset: WalletAsset; contract: string; decimals: 6; recipient: string | null; enabled: boolean; revision: number };
+export type WalletRoute = { id: WalletRouteId; chain: WalletChain; asset: WalletAsset; contract: string; decimals: 6 | 18; recipient: string | null; enabled: boolean; revision: number };
 export type WalletCatalog = { settings: WalletSettings; routes: WalletRoute[]; purchase_available: boolean };
 export type WalletQuote = MembershipExpectedQuote & { route_revision: number };
 export type WalletOrder = WalletQuote & {
   id: string; buyer_id: string; request_id: string; route_id: WalletRouteId; chain: WalletChain; asset: WalletAsset; contract: string; recipient: string;
-  currency: "USD"; base_amount_units: string; amount_units: string; amount_decimal: string;
+  currency: "USD"; token_decimals: 6 | 18; base_amount_units: string; amount_units: string; amount_decimal: string;
   title_snapshot: string; description_snapshot: string; benefits_snapshot: Record<string, string>; ai_daily_limit_snapshot: number; mentor_discount_bps_snapshot: number;
   status: "pending" | "expired" | "paid" | "review" | "revoked"; created_at: string; expires_at: string; paid_at: string | null;
 };
@@ -31,7 +32,7 @@ export const walletUuid = (value: unknown): value is string => typeof value === 
 const date = (value: unknown): value is string => typeof value === "string" && Number.isFinite(Date.parse(value));
 const text = (value: unknown, min: number, max: number): value is string => typeof value === "string" && Array.from(value.trim()).length >= min && Array.from(value).length <= max;
 const notes = (value: unknown): value is Record<string, string> => object(value) && Object.keys(value).length <= 20 && Object.entries(value).every(([key, item]) => /^[a-z][a-z0-9_]{1,59}$/.test(key) && text(item, 1, 240));
-const units = (value: unknown): value is string => typeof value === "string" && /^[1-9]\d{0,17}$/.test(value);
+const units = (value: unknown): value is string => typeof value === "string" && /^[1-9]\d{0,77}$/.test(value);
 const reasonCode = (value: unknown) => value === null || typeof value === "string" && Object.prototype.hasOwnProperty.call(walletReasonLabels, value);
 export const walletRouteId = (value: unknown): value is WalletRouteId => typeof value === "string" && Object.prototype.hasOwnProperty.call(walletRouteDefinitions, value);
 function invalid(): never { throw new Error("membership_wallet_response_invalid"); }
@@ -46,12 +47,14 @@ export function walletTransferHash(chain: WalletChain, value: unknown): string {
   if (chain === "tron" ? /^[0-9a-f]{64}$/.test(hash) : /^0x[0-9a-f]{64}$/.test(hash)) return hash;
   throw new Error("membership_wallet_tx_hash_invalid");
 }
-export function walletAmountDecimal(value: string): string {
+export function walletAmountDecimal(value: string, decimals: 6 | 18 = 6): string {
   if (!units(value)) invalid();
-  const amount = BigInt(value);
-  return `${amount / BigInt(1000000)}.${(amount % BigInt(1000000)).toString().padStart(6, "0")}`;
+  const amount = BigInt(value), scale = BigInt(10) ** BigInt(decimals - 6);
+  if (amount % scale !== BigInt(0)) invalid();
+  const micros = amount / scale;
+  return `${micros / BigInt(1000000)}.${(micros % BigInt(1000000)).toString().padStart(6, "0")}`;
 }
-export const walletNetworkLabel = (chain: WalletChain) => ({ tron: "TRON（TRC20）", ethereum: "Ethereum（ERC20）", base: "Base" })[chain];
+export const walletNetworkLabel = (chain: WalletChain) => ({ tron: "TRON（TRC20）", bsc: "BNB Smart Chain（BEP20）", ethereum: "Ethereum（ERC20）", base: "Base" })[chain];
 export const walletRouteLabel = (route: Pick<WalletRoute, "chain" | "asset">) => `${walletNetworkLabel(route.chain)} · ${route.asset}`;
 const walletReasonLabels: Record<string, string> = { payment_before_invoice: "转账时间早于订单创建", payment_after_expiry: "转账时间超过报价期限", payment_amount_mismatch: "实际到账金额不符", matching_transfer_missing: "未找到本订单对应的同链同币转账", multiple_matching_transfers: "找到多笔相同转账，需人工核对", transaction_failed: "链上交易失败", invoice_invalid: "订单快照需核对", verification_disabled: "核验服务暂停", chain_rpc_unconfigured: "该网络核验服务尚未就绪", transaction_pending: "交易尚未确认或哈希未查到", finality_unavailable: "暂未取得最终确认", finality_pending: "等待网络最终确认", solidification_pending: "等待 TRON 固化确认", additional_transfer: "同一订单的额外转账，需人工处理", reconciliation_required: "需人工对账", verification_waiting: "等待核验条件恢复", order_already_paid_reconciliation: "订单已由另一哈希付款确认，此哈希仅保留人工对账" };
 export function walletReasonLabel(code: string | null | undefined): string { return code ? walletReasonLabels[code] ?? "等待进一步核对" : "—"; }
@@ -62,13 +65,15 @@ export function parseWalletSettings(value: unknown): WalletSettings {
 export function parseWalletRoute(value: unknown): WalletRoute {
   if (!object(value) || !walletRouteId(value.id)) invalid();
   const canonical = walletRouteDefinitions[value.id];
-  if (value.chain !== canonical.chain || value.asset !== canonical.asset || value.contract !== canonical.contract || value.decimals !== 6 || typeof value.enabled !== "boolean" || !int(value.revision, 1)
+  if (value.chain !== canonical.chain || value.asset !== canonical.asset || value.contract !== canonical.contract || value.decimals !== canonical.decimals || typeof value.enabled !== "boolean" || !int(value.revision, 1)
     || !(value.recipient === null || walletAddressValid(canonical.chain, value.recipient)) || value.recipient === canonical.contract || (value.enabled && value.recipient === null)) invalid();
   return value as WalletRoute;
 }
 function routes(value: unknown): WalletRoute[] {
-  if (!Array.isArray(value) || value.length !== 4) invalid();
-  const result = value.map(parseWalletRoute); if (new Set(result.map((route) => route.id)).size !== 4) invalid(); return result;
+  if (!Array.isArray(value) || ![4, 5].includes(value.length)) invalid();
+  const result = value.map(parseWalletRoute), ids = new Set(result.map((route) => route.id));
+  if (ids.size !== result.length || !ids.has("tron-usdt") || (result.length === 4 && ids.has("bsc-usdt"))) invalid();
+  return result;
 }
 export function parseWalletCatalog(value: unknown): WalletCatalog {
   if (!object(value) || typeof value.purchase_available !== "boolean") invalid();
@@ -88,14 +93,15 @@ export function parseWalletOrder(value: unknown): WalletOrder {
   if (!object(value)) invalid(); parseWalletQuote(value);
   if (!walletUuid(value.id) || !walletUuid(value.buyer_id) || !walletUuid(value.request_id) || !walletRouteId(value.route_id)) invalid();
   const canonical = walletRouteDefinitions[value.route_id];
-  if (value.chain !== canonical.chain || value.asset !== canonical.asset || value.contract !== canonical.contract || !walletAddressValid(canonical.chain, value.recipient) || value.recipient === canonical.contract
-    || !units(value.base_amount_units) || !units(value.amount_units) || value.amount_decimal !== walletAmountDecimal(value.amount_units)
-    || BigInt(value.base_amount_units) !== BigInt(value.amount_minor as number) * BigInt(10000) || BigInt(value.amount_units) - BigInt(value.base_amount_units) < BigInt(1) || BigInt(value.amount_units) - BigInt(value.base_amount_units) > BigInt(9999)
+  const tokenDecimals = value.token_decimals === undefined ? canonical.decimals : value.token_decimals, scale = BigInt(10) ** BigInt(canonical.decimals - 6);
+  if (tokenDecimals !== canonical.decimals || value.chain !== canonical.chain || value.asset !== canonical.asset || value.contract !== canonical.contract || !walletAddressValid(canonical.chain, value.recipient) || value.recipient === canonical.contract
+    || !units(value.base_amount_units) || !units(value.amount_units) || value.amount_decimal !== walletAmountDecimal(value.amount_units, canonical.decimals)
+    || BigInt(value.base_amount_units) !== BigInt(value.amount_minor as number) * BigInt(10000) * scale || BigInt(value.amount_units) - BigInt(value.base_amount_units) < scale || BigInt(value.amount_units) - BigInt(value.base_amount_units) > BigInt(9999) * scale || (BigInt(value.amount_units) - BigInt(value.base_amount_units)) % scale !== BigInt(0)
     || !text(value.title_snapshot, 2, 60) || !text(value.description_snapshot, 0, 1000) || !notes(value.benefits_snapshot)
     || !int(value.ai_daily_limit_snapshot, 0, 10000) || !int(value.mentor_discount_bps_snapshot, 0, 10000)
     || !["pending", "expired", "paid", "review", "revoked"].includes(String(value.status)) || !date(value.created_at) || !date(value.expires_at)
     || Date.parse(value.expires_at) - Date.parse(value.created_at) !== 30 * 60 * 1000 || !(value.paid_at === null || date(value.paid_at)) || (value.status === "paid" && !date(value.paid_at))) invalid();
-  return value as WalletOrder;
+  return { ...value, token_decimals: tokenDecimals } as WalletOrder;
 }
 export function parseWalletVerification(value: unknown): WalletVerification {
   if (!object(value) || !walletUuid(value.id) || !walletUuid(value.order_id) || !text(value.tx_hash, 64, 66) || !/^(?:0x)?[0-9a-f]{64}$/.test(value.tx_hash)
@@ -126,7 +132,7 @@ export function parseWalletAdminStore(value: unknown): WalletAdminStore {
   if (new Set(orders.map((order) => order.id)).size !== orders.length || new Set(verifications.map((proof) => proof.id)).size !== verifications.length
     || verifications.some((proof) => { const order = orders.find((entry) => entry.id === proof.order_id); return !order || walletTransferHash(order.chain, proof.tx_hash) !== proof.tx_hash; })) invalid();
   const receipts = receiptData.map((receipt) => {
-    if (!object(receipt) || !walletUuid(receipt.id) || !walletUuid(receipt.order_id) || !walletUuid(receipt.verification_id) || !["tron", "ethereum", "base"].includes(String(receipt.chain)) || !int(receipt.event_index, 0) || !["paid", "review", "ignored_order_state"].includes(String(receipt.outcome)) || !reasonCode(receipt.reason_code) || !date(receipt.created_at)) invalid();
+    if (!object(receipt) || !walletUuid(receipt.id) || !walletUuid(receipt.order_id) || !walletUuid(receipt.verification_id) || !["tron", "bsc", "ethereum", "base"].includes(String(receipt.chain)) || !int(receipt.event_index, 0) || !["paid", "review", "ignored_order_state"].includes(String(receipt.outcome)) || !reasonCode(receipt.reason_code) || !date(receipt.created_at)) invalid();
     const order = orders.find((entry) => entry.id === receipt.order_id); if (!order || order.chain !== receipt.chain || walletTransferHash(order.chain, receipt.tx_hash) !== receipt.tx_hash) invalid();
     const proof = verifications.find((entry) => entry.id === receipt.verification_id); if (proof && (proof.order_id !== receipt.order_id || proof.tx_hash !== receipt.tx_hash)) invalid();
     const item = receipt as WalletReconciliationReceipt;

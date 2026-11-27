@@ -826,6 +826,12 @@ export function rewardActionLabel(action: string): string {
     admin_adjustment: "人工调整",
     lottery_entry: "抽奖参与",
     lottery_prize: "抽奖奖励",
+    discord_work: "Discord 打工奖励",
+    discord_skill_draw: "Discord 技能抽奖",
+    discord_skill_duplicate: "Discord 重复技能补偿",
+    discord_pet_egg: "Discord 宠物蛋购买",
+    discord_market_bet: "Discord 虚拟行情押注",
+    discord_market_payout: "Discord 虚拟行情结算",
   } as Record<string, string>)[action] || "积分变动";
 }
 
