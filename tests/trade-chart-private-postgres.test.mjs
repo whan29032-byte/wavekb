@@ -11,6 +11,10 @@ const privateChartMigrationUrl = new URL(
   "../supabase/migrations/202611260001_trade_chart_private.sql",
   import.meta.url,
 );
+const snapshotHardeningMigrationUrl = new URL(
+  "../supabase/migrations/202611270001_trade_chart_snapshot_hardening.sql",
+  import.meta.url,
+);
 
 const ownerOne = "11111111-1111-4111-8111-111111111111";
 const ownerTwo = "22222222-2222-4222-8222-222222222222";
@@ -172,6 +176,7 @@ async function migratedDatabase() {
   await createLegacyDatabase(database);
   await database.exec(await fs.readFile(baseMigrationUrl, "utf8"));
   await database.exec(await fs.readFile(privateChartMigrationUrl, "utf8"));
+  await database.exec(await fs.readFile(snapshotHardeningMigrationUrl, "utf8"));
   return database;
 }
 
@@ -838,6 +843,58 @@ test("annotation and chart writes lock the current cycle row before validating i
   );
 });
 
+test("published private chart schema upgrades through the forward snapshot hardening migration", async () => {
+  const database = new PGlite();
+  try {
+    await createLegacyDatabase(database);
+    await database.exec(await fs.readFile(baseMigrationUrl, "utf8"));
+    await database.exec(await fs.readFile(privateChartMigrationUrl, "utf8"));
+
+    const published = await database.query(`
+      select public.wavekb_schema_version() as version,
+             to_regprocedure('public.load_private_trade_chart_facts(uuid,uuid)')::text as loader,
+             (select count(*)::integer from pg_trigger
+              where tgname = 'remap_trade_chart_annotations_after_revision'
+                and not tgisinternal) as remap_triggers
+    `);
+    assert.deepEqual(published.rows[0], {
+      version: "202611260001",
+      loader: null,
+      remap_triggers: 0,
+    });
+
+    const hardening = await fs.readFile(snapshotHardeningMigrationUrl, "utf8");
+    await database.exec(hardening);
+    await database.exec(hardening);
+    const hardened = await database.query(`
+      select public.wavekb_schema_version() as version,
+             to_regprocedure('public.load_private_trade_chart_facts(uuid,uuid)')::text as loader,
+             (select count(*)::integer from pg_trigger
+              where tgname = 'remap_trade_chart_annotations_after_revision'
+                and not tgisinternal) as remap_triggers,
+             has_function_privilege(
+               'service_role', 'public.load_private_trade_chart_facts(uuid,uuid)', 'EXECUTE'
+             ) as service_execute,
+             has_function_privilege(
+               'authenticated', 'public.load_private_trade_chart_facts(uuid,uuid)', 'EXECUTE'
+             ) as authenticated_execute,
+             has_function_privilege(
+               'anon', 'public.load_private_trade_chart_facts(uuid,uuid)', 'EXECUTE'
+             ) as anon_execute
+    `);
+    assert.deepEqual(hardened.rows[0], {
+      version: "202611270001",
+      loader: "load_private_trade_chart_facts(uuid,uuid)",
+      remap_triggers: 1,
+      service_execute: true,
+      authenticated_execute: false,
+      anon_execute: false,
+    });
+  } finally {
+    await database.close();
+  }
+});
+
 test("private trade chart schema exposes bounded owner state, private storage, and the deployment marker", async () => {
   const database = await migratedDatabase();
   try {
@@ -952,7 +1009,7 @@ test("private trade chart schema exposes bounded owner state, private storage, a
         `${name} RPC must lock the current cycle row through its write`,
       );
     }
-    assert.equal((await database.query("select public.wavekb_schema_version() as version")).rows[0]?.version, "202611260001");
+    assert.equal((await database.query("select public.wavekb_schema_version() as version")).rows[0]?.version, "202611270001");
   } finally {
     await database.close();
   }

@@ -165,6 +165,7 @@ test("multi-exchange trading cutover is explicit, fail-closed and covered by exa
   assert.match(activation.run, /mv -Tf "\$environment_rollback" \/etc\/elliott-wave\/gateway\.env/);
   assert.match(activation.run, /release-preflight\.mjs" --runtime-file/);
   assert.match(activation.run, /trading-runtime-observation\.json/);
+  assert.match(activation.run, /expectedSchemaVersion: "202611270001", schemaVersion: "202611270001"/);
   assert.doesNotMatch(activation.run, /test "\$rollback_sha" != "\$RELEASE_SHA"/);
   assert.match(activation.run, /sameCodeRollback: releaseSha === rollbackTarget/);
   assert.match(activation.run, /enabled-state[\s\S]*active-state/);
@@ -359,8 +360,9 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /202611240002_trade_review_ai\.sql/);
   assert.match(backendSteps[schemaGate].run, /202611250001_discord_account_link\.sql/);
   assert.match(backendSteps[schemaGate].run, /202611260001_trade_chart_private\.sql/);
+  assert.match(backendSteps[schemaGate].run, /202611270001_trade_chart_snapshot_hardening\.sql/);
   assert.match(backendSteps[schemaGate].run, /test "\$trading_review_rls_tables" = 13/);
-  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611260001/);
+  assert.match(backendSteps[schemaGate].run, /test "\$schema_after" = 202611270001/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rls_tables" = 5/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_bucket_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rpc_closed" = t/);
@@ -379,7 +381,7 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps.find((step) => /Verify gateway and deployment contracts/.test(step.name)).run, /wave-analysis-images-postgres\.test\.mjs/);
   assert.doesNotMatch(backendSteps[schemaGate].run, /supabase\/migrations\/\*|for migration/);
   assert.equal(backendSteps[schemaGate].env.SUPABASE_DB_URL, "${{ secrets.SUPABASE_DB_URL }}");
-  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611260001/);
+  assert.match(backendSteps[publicSchemaCheck].run, /test "\$schema" = 202611270001/);
   assert.ok(publicSchemaCheck < upload, "the public schema cache must agree before the first release upload");
   assert.match(backendSteps[activation].run, /rollback\(\)/);
   assert.match(backendSteps[activation].run, /previous-release/);
@@ -415,6 +417,7 @@ test("every known backend marker selects only its unapplied migration suffix and
     "202611240002_trade_review_ai.sql",
     "202611250001_discord_account_link.sql",
     "202611260001_trade_chart_private.sql",
+    "202611270001_trade_chart_snapshot_hardening.sql",
   ];
   const program = `set -eu
 schema_before="$WAVEKB_TEST_SCHEMA"
@@ -434,13 +437,14 @@ ${selection}`;
     ["202610100003", 8], ["202610100004", 9], ["202610100005", 10], ["20261010223739", 11], ["20261011001354", 12],
     ["20261011152711", 13], ["202610190001", 14], ["202610220001", 15], ["202610220002", 16],
     ["202611240001", 17], ["202611240002", 18], ["202611250001", 19], ["202611260001", 20],
+    ["202611270001", 21],
   ]) {
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
     const selected = result.stdout.split(/\r?\n/).filter((line) => line.startsWith("supabase/migrations/"));
     assert.deepEqual(selected, migrations.slice(offset).map((name) => `supabase/migrations/${name}`), marker);
   }
-  for (const marker of ["", "202609090001", "202610100006", "invalid"]) {
+  for (const marker of ["", "202609090001", "202610100006", "202611280001", "invalid"]) {
     const result = spawnSync("bash", ["-s"], { input: program, env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker }, encoding: "utf8" });
     assert.notEqual(result.status, 0, marker);
     assert.doesNotMatch(result.stdout, /supabase\/migrations\//);
@@ -508,13 +512,13 @@ printf 'BASELINE_READY\\n'`;
   function run(marker, count = "1", exit = "0") {
     return spawnSync("bash", ["-c", program], { env: { PATH: process.env.PATH, WAVEKB_TEST_SCHEMA: marker, WAVEKB_TEST_COLUMN_COUNT: count, WAVEKB_TEST_MIGRATION_EXIT: exit }, encoding: "utf8" });
   }
-  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001", "202611260001"];
+  const markers = ["202609090002", "202609100001", "202610080001", "202610080002", "202610080003", "202610080004", "202610100001", "202610100002", "202610100003", "202610100004", "202610100005", "20261010223739", "20261011001354", "20261011152711", "202610190001", "202610220001", "202610220002", "202611240001", "202611240002", "202611250001", "202611260001", "202611270001"];
   for (const marker of markers) {
     const result = run(marker);
     assert.equal(result.status, 0, `${marker}: ${result.stderr}`);
     assert.deepEqual(result.stdout.trim().split("\n"), ["WRITE:supabase/migrations/202608030003_workbench_drawdown.sql", "BASELINE_READY"], marker);
   }
-  for (const marker of ["", "202609090001", "202610100006", "invalid"]) {
+  for (const marker of ["", "202609090001", "202610100006", "202611280001", "invalid"]) {
     const result = run(marker);
     assert.notEqual(result.status, 0, marker);
     assert.doesNotMatch(result.stdout, /WRITE:|BASELINE_READY/);
