@@ -364,6 +364,10 @@ test("backend deployment migrates only the exact predecessor schema before uploa
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rls_tables" = 5/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_bucket_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_rpc_closed" = t/);
+  assert.match(backendSteps[schemaGate].run, /public\.load_private_trade_chart_facts\(uuid,uuid\)/);
+  assert.match(backendSteps[schemaGate].run, /has_function_privilege\('service_role','public\.load_private_trade_chart_facts\(uuid,uuid\)','EXECUTE'\)/);
+  assert.match(backendSteps[schemaGate].run, /not has_function_privilege\('authenticated','public\.load_private_trade_chart_facts\(uuid,uuid\)','EXECUTE'\)/);
+  assert.match(backendSteps[schemaGate].run, /not has_function_privilege\('anon','public\.load_private_trade_chart_facts\(uuid,uuid\)','EXECUTE'\)/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_table_writes_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$trade_chart_cache_closed" = t/);
   assert.match(backendSteps[schemaGate].run, /test "\$discord_link_rls" = t/);

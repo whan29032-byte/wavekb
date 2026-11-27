@@ -958,6 +958,165 @@ test("private trade chart schema exposes bounded owner state, private storage, a
   }
 });
 
+test("private chart read RPC returns one owner-bound snapshot and keeps same-revision allocations from older generations", async () => {
+  const database = await migratedDatabase();
+  try {
+    await seedPrivateChartFacts(database);
+    await database.exec("reset role");
+    await database.query(
+      "update public.exchange_connections set sync_generation = 3 where id = $1",
+      [connectionOne],
+    );
+    await database.query(
+      "update public.trading_trade_cycles set generation = 3 where id = $1",
+      [cycleOne],
+    );
+    const storedAllocation = await database.query(`
+      select generation from public.trading_trade_cycle_fills
+      where owner_id = $1 and cycle_id = $2 and cycle_revision = 1
+    `, [ownerOne, cycleOne]);
+    assert.equal(storedAllocation.rows[0]?.generation, 1);
+
+    const procedure = await database.query(`
+      select to_regprocedure('public.load_private_trade_chart_facts(uuid,uuid)')::text as procedure
+    `);
+    assert.ok(procedure.rows[0]?.procedure, "the atomic private chart read RPC must exist");
+
+    await actor(database, ownerOne);
+    await assert.rejects(
+      database.query("select public.load_private_trade_chart_facts($1, $2)", [ownerOne, cycleOne]),
+      /permission denied/u,
+    );
+
+    await actor(database, null, "service_role");
+    const loaded = await database.query(`
+      select public.load_private_trade_chart_facts($1, $2) as facts
+    `, [ownerOne, cycleOne]);
+    const chart = loaded.rows[0]?.facts;
+    assert.equal(chart?.snapshot_token?.cycle_revision, 1);
+    assert.equal(chart?.snapshot_token?.cycle_generation, 3);
+    assert.equal(chart?.snapshot_token?.sync_generation, 3);
+    assert.deepEqual(chart?.allocations?.map((allocation) => allocation.native_fill_id), ["open-1"]);
+    assert.deepEqual(chart?.fills?.map((fillRow) => fillRow.native_fill_id), ["open-1"]);
+    const serialized = JSON.stringify(chart);
+    for (const privateField of [
+      "credential_set_id", "external_account_id_hash", "stable_key", "fill_digest",
+      "native_position_id", "lease_owner", "storage_path", "raw_payload", "access_point",
+    ]) {
+      assert.equal(serialized.includes(privateField), false, `snapshot must omit ${privateField}`);
+    }
+
+    const crossOwner = await database.query(`
+      select public.load_private_trade_chart_facts($1, $2) as facts
+    `, [ownerOne, cycleTwo]);
+    assert.equal(crossOwner.rows[0]?.facts, null);
+  } finally {
+    await database.exec("reset role").catch(() => {});
+    await database.close();
+  }
+});
+
+test("publishing a new cycle revision remaps only exact fill identities and marks missing fills for confirmation", async () => {
+  const database = await migratedDatabase();
+  try {
+    const { ownerOneFillId } = await seedPrivateChartFacts(database);
+    const annotationId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    await actor(database, ownerOne);
+    await upsertAnnotation(database, {
+      fillId: ownerOneFillId,
+      annotationId,
+      body: "revision one note",
+    });
+
+    await database.exec("reset role");
+    const lateAt = "2026-11-24T08:00:00.000Z";
+    await publish(database, {
+      expectedGeneration: 1,
+      capturedAt: "2026-11-24T10:00:00.000Z",
+      fills: [fill("open-1", "2026-11-24T07:00:00.000Z"), fill("late-1", lateAt, { action: "close", side: "sell" })],
+      cycles: [cycle({
+        revision: 2,
+        fillIds: ["open-1", "late-1"],
+        allocations: [
+          { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+          { native_fill_id: "late-1", quantity: "1", role: "close", sort_order: 1 },
+        ],
+        closedAt: lateAt,
+      })],
+    });
+    let annotation = (await database.query(`
+      select fill_id, native_fill_id, cycle_revision, remap_status,
+             remapped_from_revision, version
+      from public.trading_fill_annotations where id = $1
+    `, [annotationId])).rows[0];
+    assert.deepEqual(annotation, {
+      fill_id: ownerOneFillId,
+      native_fill_id: "open-1",
+      cycle_revision: 2,
+      remap_status: "remapped",
+      remapped_from_revision: 1,
+      version: 2,
+    });
+
+    await publish(database, {
+      expectedGeneration: 2,
+      capturedAt: "2026-11-24T11:00:00.000Z",
+      fills: [fill("late-1", lateAt, { action: "close", side: "sell" })],
+      cycles: [cycle({
+        revision: 3,
+        fillIds: ["late-1"],
+        allocations: [{ native_fill_id: "late-1", quantity: "1", role: "close", sort_order: 0 }],
+        closedAt: lateAt,
+      })],
+    });
+    annotation = (await database.query(`
+      select fill_id, native_fill_id, cycle_revision, remap_status,
+             remapped_from_revision, version
+      from public.trading_fill_annotations where id = $1
+    `, [annotationId])).rows[0];
+    assert.deepEqual(annotation, {
+      fill_id: ownerOneFillId,
+      native_fill_id: "open-1",
+      cycle_revision: 3,
+      remap_status: "needs_confirmation",
+      remapped_from_revision: 1,
+      version: 3,
+    });
+
+    await publish(database, {
+      expectedGeneration: 3,
+      capturedAt: "2026-11-24T12:00:00.000Z",
+      fills: [fill("late-1", lateAt, { action: "close", side: "sell" })],
+      cycles: [cycle({
+        revision: 3,
+        fillIds: ["late-1"],
+        allocations: [{ native_fill_id: "late-1", quantity: "1", role: "close", sort_order: 0 }],
+        closedAt: lateAt,
+      })],
+    });
+    assert.equal((await database.query(`
+      select version from public.trading_fill_annotations where id = $1
+    `, [annotationId])).rows[0]?.version, 3, "same-revision replay must not mutate annotations");
+
+    await actor(database, null, "service_role");
+    const loaded = await database.query(`
+      select public.load_private_trade_chart_facts($1, $2) as facts
+    `, [ownerOne, cycleOne]);
+    assert.deepEqual(loaded.rows[0]?.facts?.annotations?.map((item) => ({
+      fill_id: item.fill_id,
+      native_fill_id: item.native_fill_id,
+      remap_status: item.remap_status,
+    })), [{
+      fill_id: String(ownerOneFillId),
+      native_fill_id: "open-1",
+      remap_status: "needs_confirmation",
+    }]);
+  } finally {
+    await database.exec("reset role").catch(() => {});
+    await database.close();
+  }
+});
+
 test("annotation RPC normalizes bounded content, preserves remap state, and isolates image ownership", async () => {
   const database = await migratedDatabase();
   try {

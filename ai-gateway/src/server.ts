@@ -226,6 +226,7 @@ function authFailure(error: unknown): RouteResult {
     "invalid_trade_chart_state",
     "invalid_trade_chart_annotation",
     "invalid_trade_chart_annotation_images",
+    "request_too_large",
     "trade_chart_invalid_state_price_type",
     "trade_chart_fill_not_owned",
     "trade_chart_cycle_not_owned",
@@ -336,6 +337,7 @@ function routeFailure(error: unknown): RouteResult {
     "invalid_trade_chart_state",
     "invalid_trade_chart_annotation",
     "invalid_trade_chart_annotation_images",
+    "request_too_large",
     "trade_chart_invalid_state_price_type",
     "trade_chart_fill_not_owned",
     "trade_chart_cycle_not_owned",
@@ -904,17 +906,28 @@ export function buildServer(deps: ServerDeps): GatewayServer {
           response.end();
           return;
         }
-        let raw = "";
+        const requestPath = new URL(request.url ?? "/", "http://gateway.local").pathname;
+        const isTradeChartWrite = request.method === "PUT" && (
+          /^\/v1\/user\/trading-trades\/[0-9a-f-]+\/chart-state$/i.test(requestPath)
+          || /^\/v1\/user\/trading-trades\/[0-9a-f-]+\/fills\/[1-9]\d{0,29}\/annotation$/i.test(requestPath)
+        );
+        const requestLimit = isTradeChartWrite
+          ? 32 * 1024
+          : requestPath.startsWith("/api/auth/")
+            ? 64 * 1024
+            : runtimeDeps.config.AI_MAX_IMAGE_BYTES + 1024 * 1024;
+        const chunks: Buffer[] = [];
+        let receivedBytes = 0;
         try {
           for await (const chunk of request) {
-            raw += chunk;
-            const requestLimit = String(request.url || "").startsWith("/api/auth/")
-              ? 64 * 1024
-              : runtimeDeps.config.AI_MAX_IMAGE_BYTES + 1024 * 1024;
-            if (Buffer.byteLength(raw) > requestLimit) {
-              throw Object.assign(new Error("request too large"), { statusCode: 413 });
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            receivedBytes += bytes.byteLength;
+            if (receivedBytes > requestLimit) {
+              throw Object.assign(new Error("request_too_large"), { statusCode: 413 });
             }
+            chunks.push(bytes);
           }
+          const raw = Buffer.concat(chunks, receivedBytes).toString("utf8");
           const payload = raw ? JSON.parse(raw) : undefined;
           const headers = Object.fromEntries(
             Object.entries(request.headers).map(([key, value]) => [key, String(value ?? "")]),
@@ -936,6 +949,9 @@ export function buildServer(deps: ServerDeps): GatewayServer {
           const failure = routeFailure(error);
           response.statusCode = failure.statusCode;
           response.setHeader("content-type", "application/json; charset=utf-8");
+          for (const [key, value] of Object.entries(failure.headers ?? {})) {
+            response.setHeader(key, value);
+          }
           response.end(JSON.stringify(failure.body));
         }
       });

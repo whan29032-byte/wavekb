@@ -112,10 +112,12 @@ export type WorkbenchChartFillRecord = {
 export type WorkbenchChartAnnotationRecord = {
   id: string;
   fill_id: string;
+  native_fill_id: string;
   cycle_revision: number;
   body: string;
   tags: string[];
   remap_status: NonNullable<FillMarker["annotation"]>["remap_status"];
+  remapped_from_revision: number | null;
   version: number;
   deleted_at: string | null;
 };
@@ -129,9 +131,20 @@ export type WorkbenchChartImageRecord = {
   deleted_at: string | null;
 };
 
+export type WorkbenchChartCycleRecord = Pick<
+  WorkbenchCycleRecord,
+  "id" | "connection_id" | "provider" | "revision" | "product" | "symbol"
+  | "direction" | "opened_at" | "closed_at" | "generation" | "is_current"
+>;
+
+export type WorkbenchChartConnectionRecord = Pick<
+  WorkbenchConnectionRecord,
+  "id" | "owner_id" | "provider" | "sync_generation"
+>;
+
 export type WorkbenchChartFacts = {
-  cycle: WorkbenchCycleRecord;
-  connection: WorkbenchConnectionRecord;
+  cycle: WorkbenchChartCycleRecord;
+  connection: WorkbenchChartConnectionRecord;
   allocations: WorkbenchChartAllocationRecord[];
   fills: WorkbenchChartFillRecord[];
   annotations: WorkbenchChartAnnotationRecord[];
@@ -521,7 +534,12 @@ export class TradingWorkbenchService {
 
     const allocations = [...facts.allocations].sort((left, right) => left.sort_order - right.sort_order);
     const fills = new Map(facts.fills.map((fill) => [fill.id, fill]));
-    const annotations = new Map(facts.annotations.filter((annotation) => annotation.deleted_at === null).map((annotation) => [annotation.fill_id, annotation]));
+    if (facts.annotations.some((annotation) => annotation.cycle_revision > facts.cycle.revision)) {
+      throw chartError("trade_chart_facts_invalid", 500);
+    }
+    const annotations = new Map(facts.annotations
+      .filter((annotation) => annotation.deleted_at === null)
+      .map((annotation) => [`${annotation.fill_id}\u0000${annotation.native_fill_id}`, annotation]));
     const imageCounts = new Map<string, number>();
     for (const image of facts.images) {
       if (image.deleted_at !== null) continue;
@@ -536,8 +554,7 @@ export class TradingWorkbenchService {
         || !positiveDecimalPattern.test(allocation.allocation_quantity)) {
         throw chartError("trade_chart_facts_invalid", 500);
       }
-      const annotation = annotations.get(fill.id);
-      if (annotation && annotation.cycle_revision !== facts.cycle.revision) throw chartError("trade_chart_facts_invalid", 500);
+      const annotation = annotations.get(`${fill.id}\u0000${fill.native_fill_id}`);
       return {
         marker_key: `${cycleId}:${fill.id}`,
         fill_id: fill.id,
@@ -556,7 +573,9 @@ export class TradingWorkbenchService {
           tags: annotation.tags,
           image_count: imageCounts.get(annotation.id) ?? 0,
           version: annotation.version,
-          remap_status: annotation.remap_status,
+          remap_status: annotation.cycle_revision < facts.cycle.revision
+            ? "remapped"
+            : annotation.remap_status,
         } : null,
       };
     });
@@ -695,7 +714,8 @@ export class TradingWorkbenchService {
       exactChartKeys(image, ["id", "storage_path", "mime_type", "byte_size"]);
       if (typeof image.id !== "string" || !uuidPattern.test(image.id)
         || typeof image.storage_path !== "string"
-        || !["image/jpeg", "image/png", "image/webp"].includes(String(image.mime_type))
+        || typeof image.mime_type !== "string"
+        || !["image/jpeg", "image/png", "image/webp"].includes(image.mime_type)
         || !Number.isInteger(image.byte_size) || (image.byte_size as number) < 1 || (image.byte_size as number) > 2_097_152) {
         throw chartError("invalid_trade_chart_request", 400);
       }
@@ -776,6 +796,31 @@ function mapCycle(row: any): WorkbenchCycleRecord {
   } as WorkbenchCycleRecord;
 }
 
+function mapChartCycle(row: any): WorkbenchChartCycleRecord {
+  return {
+    id: String(row.id),
+    connection_id: String(row.connection_id),
+    provider: row.provider,
+    revision: Number(row.revision),
+    product: row.product,
+    symbol: String(row.symbol),
+    direction: row.direction,
+    opened_at: String(row.opened_at),
+    closed_at: row.closed_at === null ? null : String(row.closed_at),
+    generation: Number(row.generation),
+    is_current: row.is_current === true,
+  };
+}
+
+function mapChartConnection(row: any): WorkbenchChartConnectionRecord {
+  return {
+    id: String(row.id),
+    owner_id: String(row.owner_id),
+    provider: row.provider,
+    sync_generation: Number(row.sync_generation),
+  };
+}
+
 function mapReview(row: any): WorkbenchReviewRecord {
   return {
     cycle_id: String(row.cycle_id), cycle_revision: Number(row.cycle_revision), reason: String(row.reason ?? ""),
@@ -844,30 +889,54 @@ export class SupabaseTradingWorkbenchStore implements TradingWorkbenchStore {
     return { cycle: mapCycle(cycleRow), connection: mapConnection(connection), review: Array.isArray(reviews) && reviews[0] ? mapReview(reviews[0]) : null, conflicting_reviews: (Array.isArray(conflicts) ? conflicts : []).map(mapReview) };
   }
   async loadChartFacts(ownerId: string, cycleId: string): Promise<WorkbenchChartFacts | null> {
-    const owner = encodeURIComponent(ownerId);
-    const id = encodeURIComponent(cycleId);
-    const cycleRows = await this.rest.request(`/rest/v1/trading_trade_cycles?owner_id=eq.${owner}&id=eq.${id}&is_current=eq.true&select=*&limit=1`);
-    const cycleRow = Array.isArray(cycleRows) ? cycleRows[0] : null;
-    if (!cycleRow) return null;
-    const cycle = mapCycle(cycleRow);
-    const connectionRows = await this.rest.request(`/rest/v1/exchange_connections?owner_id=eq.${owner}&id=eq.${encodeURIComponent(cycle.connection_id)}&status=neq.deleting&select=*&limit=1`);
-    const connectionRow = Array.isArray(connectionRows) ? connectionRows[0] : null;
-    if (!connectionRow) return null;
-    const connection = mapConnection(connectionRow);
-    if (cycle.generation !== connection.sync_generation) return null;
-    const revision = cycle.revision;
-    const allocations = await this.all(`/rest/v1/trading_trade_cycle_fills?owner_id=eq.${owner}&cycle_id=eq.${id}&cycle_revision=eq.${revision}&generation=eq.${cycle.generation}&select=cycle_revision,fill_id,native_fill_id,allocation_quantity:allocation_quantity::text,allocation_role,sort_order&order=sort_order.asc`);
-    const fillIds = allocations.map((row: any) => String(row.fill_id));
-    if (fillIds.length === 0 || fillIds.some((fillId) => !/^[1-9]\d{0,29}$/.test(fillId))) throw chartError("trade_chart_facts_invalid", 500);
-    const fillFilter = fillIds.join(",");
-    const [fillRows, annotationRows, stateRows] = await Promise.all([
-      this.all(`/rest/v1/trading_fills?owner_id=eq.${owner}&connection_id=eq.${encodeURIComponent(connection.id)}&id=in.(${fillFilter})&select=id,native_fill_id,native_symbol,occurred_at,price:price::text,side,position_side,liquidity&order=occurred_at.asc`),
-      this.all(`/rest/v1/trading_fill_annotations?owner_id=eq.${owner}&cycle_id=eq.${id}&fill_id=in.(${fillFilter})&deleted_at=is.null&select=id,fill_id,cycle_revision,body,tags,remap_status,version,deleted_at`),
-      this.rest.request(`/rest/v1/trading_chart_states?owner_id=eq.${owner}&cycle_id=eq.${id}&select=cycle_id,cycle_revision,schema_version,timeframe,price_type,viewport,indicators,drawings,version,updated_at&limit=1`),
-    ]);
-    const annotationIds = annotationRows.map((row: any) => String(row.id));
-    const imageRows = annotationIds.length === 0 ? [] : await this.all(`/rest/v1/trading_fill_annotation_images?owner_id=eq.${owner}&annotation_id=${encodeURIComponent(inList(annotationIds))}&deleted_at=is.null&select=id,annotation_id,mime_type,byte_size,sort_order,deleted_at&order=sort_order.asc`);
-    const stateRow = Array.isArray(stateRows) ? stateRows[0] : null;
+    const result = await this.rest.request("/rest/v1/rpc/load_private_trade_chart_facts", {
+      method: "POST",
+      body: { p_owner_id: ownerId, p_cycle_id: cycleId },
+    });
+    const payload = Array.isArray(result) ? result[0] : result;
+    if (payload === null || payload === undefined) return null;
+    if (typeof payload !== "object" || Array.isArray(payload)) throw chartError("trade_chart_snapshot_inconsistent", 500);
+    const raw = payload as Record<string, any>;
+    if (!raw.cycle || !raw.connection || !raw.snapshot_token
+      || !Array.isArray(raw.allocations) || !Array.isArray(raw.fills)
+      || !Array.isArray(raw.annotations) || !Array.isArray(raw.images)) {
+      throw chartError("trade_chart_snapshot_inconsistent", 500);
+    }
+    const cycle = mapChartCycle(raw.cycle);
+    const connection = mapChartConnection(raw.connection);
+    const snapshotToken = raw.snapshot_token as Record<string, unknown>;
+    if (String(raw.cycle.owner_id) !== ownerId
+      || String(raw.connection.owner_id) !== ownerId
+      || cycle.id !== cycleId
+      || cycle.connection_id !== connection.id
+      || !cycle.is_current
+      || cycle.generation !== connection.sync_generation
+      || Number(snapshotToken.cycle_revision) !== cycle.revision
+      || Number(snapshotToken.cycle_generation) !== cycle.generation
+      || Number(snapshotToken.sync_generation) !== connection.sync_generation) {
+      throw chartError("trade_chart_snapshot_inconsistent", 500);
+    }
+    const allocations = raw.allocations as any[];
+    const fillRows = raw.fills as any[];
+    const annotationRows = raw.annotations as any[];
+    const imageRows = raw.images as any[];
+    const fillIds = allocations.map((row) => String(row.fill_id));
+    const fillById = new Map(fillRows.map((row) => [String(row.id), row]));
+    if (fillIds.length === 0
+      || fillIds.some((fillId) => !/^[1-9]\d{0,29}$/.test(fillId))
+      || new Set(fillIds).size !== fillIds.length
+      || fillRows.length !== fillIds.length
+      || allocations.some((allocation) => {
+        const fill = fillById.get(String(allocation.fill_id));
+        return Number(allocation.cycle_revision) !== cycle.revision
+          || !fill
+          || String(allocation.native_fill_id) !== String(fill.native_fill_id);
+      })) {
+      throw chartError("trade_chart_snapshot_inconsistent", 500);
+    }
+    const stateRow = raw.chart_state && typeof raw.chart_state === "object" && !Array.isArray(raw.chart_state)
+      ? raw.chart_state
+      : null;
     return {
       cycle,
       connection,
@@ -892,10 +961,14 @@ export class SupabaseTradingWorkbenchStore implements TradingWorkbenchStore {
       annotations: annotationRows.map((row: any) => ({
         id: String(row.id),
         fill_id: String(row.fill_id),
+        native_fill_id: String(row.native_fill_id),
         cycle_revision: Number(row.cycle_revision),
         body: String(row.body ?? ""),
         tags: Array.isArray(row.tags) ? row.tags : [],
         remap_status: row.remap_status,
+        remapped_from_revision: row.remapped_from_revision === null
+          ? null
+          : Number(row.remapped_from_revision),
         version: Number(row.version),
         deleted_at: row.deleted_at === null ? null : String(row.deleted_at),
       })) as WorkbenchChartAnnotationRecord[],
@@ -973,10 +1046,14 @@ export class SupabaseTradingWorkbenchStore implements TradingWorkbenchStore {
     return {
       id: String(row.id),
       fill_id: String(row.fill_id),
+      native_fill_id: String(row.native_fill_id),
       cycle_revision: Number(row.cycle_revision),
       body: String(row.body ?? ""),
       tags: Array.isArray(row.tags) ? row.tags.map(String) : [],
       remap_status: row.remap_status,
+      remapped_from_revision: row.remapped_from_revision === null
+        ? null
+        : Number(row.remapped_from_revision),
       version: Number(row.version),
       deleted_at: row.deleted_at === null ? null : String(row.deleted_at),
     } as WorkbenchChartAnnotationRecord;
