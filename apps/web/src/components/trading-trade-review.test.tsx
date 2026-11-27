@@ -42,6 +42,15 @@ const chart = {
 };
 
 describe("TradingTradeReview", () => {
+  it("keeps the existing review usable and sends no chart request while the rollout flag is off", async () => {
+    const fetcher = vi.fn(async () => Response.json({ detail: trade }));
+    vi.stubGlobal("fetch", fetcher);
+    render(<TradingTradeReview tradeId="t-exness" chartEnabled={false} />);
+    expect(await screen.findByRole("heading", { name: "极简复盘" })).toBeTruthy();
+    expect(screen.queryByTestId("trade-chart-boundary")).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("shows Exness facts, reconciliation and the three primary subjective fields without mojibake", async () => {
     const fetcher = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       void _init;
@@ -51,7 +60,7 @@ describe("TradingTradeReview", () => {
         : new Response(JSON.stringify({ detail: trade }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetcher);
-    render(<TradingTradeReview tradeId="t-exness" />);
+    render(<TradingTradeReview tradeId="t-exness" chartEnabled />);
     expect(await screen.findByText("XAUUSD")).toBeTruthy();
     expect(screen.getByText(/position ID.*p77/i)).toBeTruthy();
     expect(screen.getByText(/Swap.*-2/i)).toBeTruthy();

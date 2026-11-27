@@ -62,7 +62,7 @@ function initialChartRequest(openedAt: string, closedAt: string | null) {
   };
 }
 
-export function TradingTradeReview({ tradeId }: { tradeId: string }) {
+export function TradingTradeReview({ tradeId, chartEnabled = false }: { tradeId: string; chartEnabled?: boolean }) {
   const [detail, setDetail] = useState<TradingTradeDetail | null>(null);
   const [draft, setDraft] = useState<SaveTradingReviewInput | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -105,7 +105,7 @@ export function TradingTradeReview({ tradeId }: { tradeId: string }) {
   const chartCycleRevision = detail?.trade.revision;
   const chartOpenedAt = detail?.trade.opened_at;
   const chartClosedAt = detail?.trade.closed_at;
-  const chartRequestKey = chartCycleId && chartCycleId === tradeId && chartOpenedAt && chartCycleRevision !== undefined
+  const chartRequestKey = chartEnabled && chartCycleId && chartCycleId === tradeId && chartOpenedAt && chartCycleRevision !== undefined
     ? [chartCycleId, chartCycleRevision, chartOpenedAt, chartClosedAt ?? "open", chartReloadToken].join(":")
     : null;
   const chartProjection = chartRequestKey !== null && chartResult.requestKey === chartRequestKey ? chartResult.projection : null;
@@ -213,14 +213,14 @@ export function TradingTradeReview({ tradeId }: { tradeId: string }) {
         <details className="mt-4 border-t pt-4"><summary className="cursor-pointer text-sm font-medium">原始交易信息</summary><dl className="mt-3 grid gap-2 text-sm text-muted-foreground"><div><dt className="inline">周期 ID：</dt><dd className="inline">{trade.id}</dd></div><div><dt className="inline">数据版本：</dt><dd className="inline">{trade.revision}</dd></div><div><dt className="inline">完整性：</dt><dd className="inline">{trade.completeness}</dd></div></dl></details>
       </section>
 
-      <div data-testid="trade-chart-boundary">
+      {chartEnabled ? <div data-testid="trade-chart-boundary">
         <DynamicOpenAlgoTradeChart
           projection={chartProjection}
           loading={chartLoading}
           loadError={chartLoadError}
           onReload={() => setChartReloadToken((token) => token + 1)}
         />
-      </div>
+      </div> : null}
 
       {detail.reconciliation.length || detail.review?.needs_reconciliation ? <section className="rounded-xl border border-amber-300/50 bg-amber-50/50 p-5 dark:bg-amber-950/10"><h2 className="flex items-center gap-2 font-semibold"><WarningCircle />需要处理历史复盘冲突</h2><p className="mt-2 text-sm text-muted-foreground">迟到成交改变了交易周期。旧复盘没有自动覆盖，请核对后保存当前版本。</p>{detail.reconciliation.map((item) => <blockquote key={item.cycle_id} className="mt-3 border-l-2 pl-3 text-sm">{item.reason || item.next_improvement}</blockquote>)}</section> : null}
 
