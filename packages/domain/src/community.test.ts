@@ -183,6 +183,12 @@ describe("reward center domain rules", () => {
     expect(rewardActionLabel("review_saved")).toBe("完成复盘");
     expect(rewardActionLabel("lottery_entry")).toBe("抽奖参与");
     expect(rewardActionLabel("lottery_prize")).toBe("抽奖奖励");
+    expect(rewardActionLabel("discord_work")).toBe("Discord 打工奖励");
+    expect(rewardActionLabel("discord_skill_draw")).toBe("Discord 技能抽奖");
+    expect(rewardActionLabel("discord_skill_duplicate")).toBe("Discord 重复技能补偿");
+    expect(rewardActionLabel("discord_pet_egg")).toBe("Discord 宠物蛋购买");
+    expect(rewardActionLabel("discord_market_bet")).toBe("Discord 虚拟行情押注");
+    expect(rewardActionLabel("discord_market_payout")).toBe("Discord 虚拟行情结算");
     expect(rewardActionLabel("future_action")).toBe("积分变动");
   });
 

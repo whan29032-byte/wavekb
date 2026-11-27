@@ -167,6 +167,34 @@ jobs:
           /usr/bin/node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)'
           curl --fail --silent --show-error http://127.0.0.1:8787/health > /dev/null
           REMOTE
+
+      - name: Pause AI worker before wallet schema cutover
+        id: pause_wallet_worker
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ && "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          pause_marker="/run/elliott-wave-wallet-cutover-${release_id}"
+          sudo test ! -e "$pause_marker"
+          worker_state=inactive
+          if sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then worker_state=active; fi
+          printf '%s\n' "$worker_state" | sudo tee "$pause_marker" > /dev/null
+          sudo chmod 0600 "$pause_marker"
+          if test "$worker_state" = active; then sudo systemctl stop elliott-wave-ai-worker.service; fi
+          if sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then exit 1; fi
+          REMOTE
+
       - name: Apply exact production migrations and verify schema marker
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
@@ -179,7 +207,7 @@ jobs:
           # Validate the marker before any DDL, then repair this marker-neutral
           # baseline even when the latest version has already been recorded.
           case "$schema_before" in
-            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002|202611240001|202611240002|202611250001|202611260001|202611270001) ;;
+            202609090002|202609100001|202610080001|202610080002|202610080003|202610080004|202610100001|202610100002|202610100003|202610100004|202610100005|20261010223739|20261011001354|20261011152711|202610190001|202610220001|202610220002|202611240001|202611240002|202611250001|202611250002|202611260001|202611270001|202611270002) ;;
             *)
               echo "Unexpected production schema marker; refusing migration."
               exit 1
@@ -284,12 +312,18 @@ jobs:
               echo "Trade review AI applied; adding Discord account linking."
               ;;
             202611250001)
-              echo "Discord account linking applied; adding private trade chart state."
+              echo "Discord account linking applied; adding Discord community game."
+              ;;
+            202611250002)
+              echo "Discord community game applied; adding BSC USDT membership wallet."
               ;;
             202611260001)
-              echo "Private trade chart state applied; adding snapshot hardening."
+              echo "BSC USDT membership wallet applied; adding private trade charts."
               ;;
             202611270001)
+              echo "Private trade charts applied; adding snapshot hardening."
+              ;;
+            202611270002)
               echo "Production migrations already applied; continuing idempotently."
               ;;
             *)
@@ -297,48 +331,64 @@ jobs:
               exit 1
               ;;
           esac
-          if test "$schema_before" != 202611270001; then
-          if test "$schema_before" != 202610100005 && test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100005_membership_wallet_payments.sql
+          if [[ "$schema_before" < 202611260001 ]]; then
+            if test "$schema_before" != 202610100005 && test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610100005_membership_wallet_payments.sql
+            fi
+            if test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261010223739_hermes_private_research.sql
+            fi
+            if test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011001354_wave_analysis_images.sql
+            fi
+            if test "$schema_before" != 20261011152711 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011152711_youtube_policy_consent.sql
+            fi
+            if test "$schema_before" != 202610190001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610190001_community_engagement.sql
+            fi
+            if test "$schema_before" != 202610220001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220001_atomic_admin_mentor_publish.sql
+            fi
+            if test "$schema_before" != 202610220002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220002_mentor_service_lifecycle.sql
+            fi
+            if test "$schema_before" != 202611240001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002 && test "$schema_before" != 202611240002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240001_multi_exchange_trade_review.sql
+            fi
+            if test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240002_trade_review_ai.sql
+            fi
+            if test "$schema_before" != 202611250001 && test "$schema_before" != 202611250002; then
+              psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250001_discord_account_link.sql
+            fi
+            # The 202611250002 marker also existed in early Discord drafts.
+            # Replay its idempotent final SQL before the BSC wallet upgrade.
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250002_discord_community_game.sql
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611260001_membership_wallet_bsc_usdt.sql
           fi
-          if test "$schema_before" != 20261010223739 && test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261010223739_hermes_private_research.sql
+          if [[ "$schema_before" < 202611270001 ]]; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611270001_trade_chart_private.sql
           fi
-          if test "$schema_before" != 20261011001354 && test "$schema_before" != 202611250001 && test "$schema_before" != 20261011152711 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011001354_wave_analysis_images.sql
-          fi
-          if test "$schema_before" != 20261011152711 && test "$schema_before" != 202611250001 && test "$schema_before" != 202610190001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261011152711_youtube_policy_consent.sql
-          fi
-          if test "$schema_before" != 202610190001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202610220001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610190001_community_engagement.sql
-          fi
-          if test "$schema_before" != 202610220001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202610220002 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220001_atomic_admin_mentor_publish.sql
-          fi
-          if test "$schema_before" != 202610220002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611240001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202610220002_mentor_service_lifecycle.sql
-          fi
-          if test "$schema_before" != 202611240001 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611240002 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240001_multi_exchange_trade_review.sql
-          fi
-          if test "$schema_before" != 202611240002 && test "$schema_before" != 202611250001 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611240002_trade_review_ai.sql
-          fi
-          if test "$schema_before" != 202611250001 && test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611250001_discord_account_link.sql
-          fi
-          if test "$schema_before" != 202611260001; then
-            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611260001_trade_chart_private.sql
-          fi
-          psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611270001_trade_chart_snapshot_hardening.sql
+          if [[ "$schema_before" < 202611270002 ]]; then
+            psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/migrations/202611270002_trade_chart_snapshot_hardening.sql
           fi
           schema_after=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c 'select public.wavekb_schema_version();' | tr -d '[:space:]')
-          test "$schema_after" = 202611270001
+          test "$schema_after" = 202611270002
+          wallet_bsc_route=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from public.membership_wallet_routes where id='bsc-usdt' and chain='bsc' and asset='USDT' and contract='0x55d398326f99059ff775485246999027b3197955' and decimals=18;" | tr -d '[:space:]')
+          test "$wallet_bsc_route" = 1
+          wallet_legacy_enabled=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from public.membership_wallet_routes where id in ('ethereum-usdt','ethereum-usdc','base-usdc') and enabled;" | tr -d '[:space:]')
+          test "$wallet_legacy_enabled" = 0
+          wallet_numeric_amounts=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select count(*) from information_schema.columns where table_schema='public' and table_name='membership_wallet_orders' and column_name in ('base_amount_units','amount_units') and data_type='numeric' and numeric_precision=78 and numeric_scale=0;" | tr -d '[:space:]')
+          test "$wallet_numeric_amounts" = 2
           discord_link_rls=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select c.relrowsecurity and not has_table_privilege('anon','public.discord_link_tokens','SELECT') and not has_table_privilege('authenticated','public.discord_link_tokens','SELECT') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='discord_link_tokens';" | tr -d '[:space:]')
           test "$discord_link_rls" = t
           discord_link_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('service_role','public.issue_discord_link_token(text,text,text)','EXECUTE') and not has_function_privilege('anon','public.issue_discord_link_token(text,text,text)','EXECUTE') and not has_function_privilege('authenticated','public.issue_discord_link_token(text,text,text)','EXECUTE') and has_function_privilege('authenticated','public.redeem_discord_link_token(text)','EXECUTE') and not has_function_privilege('anon','public.redeem_discord_link_token(text)','EXECUTE');" | tr -d '[:space:]')
           test "$discord_link_rpc_closed" = t
+          discord_game_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('service_role','public.discord_game_action(text,text,text,jsonb)','EXECUTE') and not has_function_privilege('anon','public.discord_game_action(text,text,text,jsonb)','EXECUTE') and not has_function_privilege('authenticated','public.discord_game_action(text,text,text,jsonb)','EXECUTE');" | tr -d '[:space:]')
+          test "$discord_game_rpc_closed" = t
+          discord_game_settlement_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('service_role','public.discord_game_settle_markets()','EXECUTE') and not has_function_privilege('anon','public.discord_game_settle_markets()','EXECUTE') and not has_function_privilege('authenticated','public.discord_game_settle_markets()','EXECUTE') and not has_function_privilege('service_role','public.discord_game_settle_markets(timestamptz)','EXECUTE');" | tr -d '[:space:]')
+          test "$discord_game_settlement_rpc_closed" = t
           mentor_publish_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE') and not has_function_privilege('anon','public.admin_upsert_mentor_catalog_v2(uuid,uuid,uuid,text,text,text,text,text[],boolean,integer,text,integer,text,integer,integer,boolean)','EXECUTE');" | tr -d '[:space:]')
           test "$mentor_publish_rpc_closed" = t
           mentor_service_rpc_closed=$(psql "$SUPABASE_DB_URL" -X -A -t -v ON_ERROR_STOP=1 -c "select has_function_privilege('authenticated','public.request_mentor_service_completion(uuid,text)','EXECUTE') and has_function_privilege('authenticated','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and has_function_privilege('authenticated','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE') and not has_function_privilege('anon','public.request_mentor_service_completion(uuid,text)','EXECUTE') and not has_function_privilege('anon','public.respond_mentor_service_completion(uuid,boolean,text)','EXECUTE') and not has_function_privilege('anon','public.admin_transition_mentor_service(uuid,text,text,text)','EXECUTE');" | tr -d '[:space:]')
@@ -388,10 +438,10 @@ jobs:
               -H "apikey: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}" \
               -H 'content-type: application/json' \
               -d '{}' "${NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/wavekb_schema_version" | tr -d '"[:space:]') || true
-            test "$schema" = 202611270001 && break
+            test "$schema" = 202611270002 && break
             sleep 2
           done
-          test "$schema" = 202611270001
+          test "$schema" = 202611270002
 
       - name: Upload gateway archive and systemd units
         env:
@@ -408,7 +458,7 @@ jobs:
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
             wavekb-gateway.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:wavekb-gateway-${release_id}.tar.gz"
-          for unit in elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer; do
+          for unit in elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer elliott-wave-discord-game-settlement.service elliott-wave-discord-game-settlement.timer; do
             scp -i "$HOME/.ssh/deploy_key" -o BatchMode=yes \
               "deployment/systemd/${unit}" "${DEPLOY_USER}@${DEPLOY_HOST}:${unit}-${release_id}"
           done
@@ -444,9 +494,12 @@ jobs:
           backup_root="/var/backups/elliott-wave-gateway/${release_id}"
           archive="$HOME/wavekb-gateway-${release_id}.tar.gz"
           current_link="${release_root}/current"
-          units=(elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer)
-          worker_was_active=0
-          if sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then worker_was_active=1; fi
+          pause_marker="/run/elliott-wave-wallet-cutover-${release_id}"
+          units=(elliott-wave-gateway.service elliott-wave-ai-worker.service elliott-wave-mentor-notifications.service elliott-wave-youtube-sync.service elliott-wave-trading-sync.service elliott-wave-trading-sync.timer elliott-wave-discord-game-settlement.service elliott-wave-discord-game-settlement.timer)
+          sudo test -f "$pause_marker"
+          worker_state=$(sudo cat "$pause_marker")
+          case "$worker_state" in active) worker_was_active=1 ;; inactive) worker_was_active=0 ;; *) exit 1 ;; esac
+          if sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then exit 1; fi
 
           test -d "$current_link"
           sudo test ! -e "$release_dir"
@@ -535,13 +588,15 @@ jobs:
                 *) exit 1 ;;
               esac
             done
-            if test "$MANAGED_AI" = enable && test "$worker_was_active" -eq 0; then
-              sudo systemctl stop elliott-wave-ai-worker.service || true
+            worker_restored=0
+            if test "$worker_was_active" -eq 1; then
+              if sudo systemctl start elliott-wave-ai-worker.service && sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then worker_restored=1; fi
             else
-              sudo systemctl try-restart elliott-wave-ai-worker.service || true
+              if sudo systemctl stop elliott-wave-ai-worker.service && ! sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then worker_restored=1; fi
             fi
             sudo systemctl try-restart elliott-wave-mentor-notifications.service || true
             sudo systemctl try-restart elliott-wave-youtube-sync.service || true
+            if test "$worker_restored" -eq 1; then sudo rm -f "$pause_marker"; fi
             exit "$status"
           }
           trap rollback ERR
@@ -590,7 +645,7 @@ jobs:
           sudo mv -Tf "$candidate_link" "$current_link"
           sudo systemctl daemon-reload
           sudo systemctl restart elliott-wave-gateway.service
-          if test "$MANAGED_AI" = enable; then
+          if test "$MANAGED_AI" = enable || test "$worker_was_active" -eq 1; then
             sudo systemctl restart elliott-wave-ai-worker.service
           else
             sudo systemctl try-restart elliott-wave-ai-worker.service
@@ -602,6 +657,8 @@ jobs:
           sudo systemctl enable --now elliott-wave-trading-sync.timer
           trading_worker_started_at=$(date --iso-8601=seconds)
           sudo systemctl start elliott-wave-trading-sync.service
+          sudo systemctl enable --now elliott-wave-discord-game-settlement.timer
+          sudo systemctl start elliott-wave-discord-game-settlement.service
 
           trading_metric=$(sudo journalctl -u elliott-wave-trading-sync.service --since "$trading_worker_started_at" --no-pager -o cat | /usr/bin/node -e '
             let input=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => {
@@ -630,7 +687,7 @@ jobs:
           const metric = JSON.parse(metricJson);
           const observedAt = new Date().toISOString();
           const observation = {
-            expectedSchemaVersion: "202611270001", schemaVersion: "202611270001", releaseSha, rollbackTarget,
+            expectedSchemaVersion: "202611270002", schemaVersion: "202611270002", releaseSha, rollbackTarget,
             sameCodeRollback: releaseSha === rollbackTarget,
             flags: {
               TRADING_WORKBENCH_V2_ENABLED: boolean("TRADING_WORKBENCH_V2_ENABLED"),
@@ -665,13 +722,54 @@ jobs:
           done
           test "$accepted" -eq 1
           test "$(sudo systemctl is-active elliott-wave-gateway.service)" = active
-          if test "$MANAGED_AI" = enable; then test "$(sudo systemctl is-active elliott-wave-ai-worker.service)" = active; fi
+          if test "$MANAGED_AI" = enable || test "$worker_was_active" -eq 1; then
+            test "$(sudo systemctl is-active elliott-wave-ai-worker.service)" = active
+          elif sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then
+            exit 1
+          fi
           test "$(sudo systemctl is-active elliott-wave-trading-sync.timer)" = active
+          test "$(sudo systemctl is-active elliott-wave-discord-game-settlement.timer)" = active
           test "$(sudo systemctl is-active elliott-wave-mentor-notifications.service)" = active
           test "$(sudo systemctl is-active elliott-wave-youtube-sync.service)" = active
+          sudo rm -f "$pause_marker"
           trap - ERR
           rm -f -- "$archive"
           for unit in "${units[@]}"; do rm -f -- "$HOME/${unit}-${release_id}"; done
+          REMOTE
+
+      - name: Restore AI worker after an interrupted wallet cutover
+        if: always() && steps.pause_wallet_worker.outcome != 'skipped'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          RELEASE_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ && "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
+          pause_marker="/run/elliott-wave-wallet-cutover-${release_id}"
+          if sudo test -f "$pause_marker"; then
+            worker_state=$(sudo cat "$pause_marker")
+            case "$worker_state" in
+              active)
+                sudo systemctl start elliott-wave-ai-worker.service
+                sudo systemctl is-active --quiet elliott-wave-ai-worker.service
+                ;;
+              inactive)
+                sudo systemctl stop elliott-wave-ai-worker.service
+                if sudo systemctl is-active --quiet elliott-wave-ai-worker.service; then exit 1; fi
+                ;;
+              *) exit 1 ;;
+            esac
+            sudo rm -f "$pause_marker"
+          fi
           REMOTE
 
 # The additive database migration stays forward-compatible if gateway activation rolls back.

@@ -8,11 +8,11 @@ const baseMigrationUrl = new URL(
   import.meta.url,
 );
 const privateChartMigrationUrl = new URL(
-  "../supabase/migrations/202611260001_trade_chart_private.sql",
+  "../supabase/migrations/202611270001_trade_chart_private.sql",
   import.meta.url,
 );
 const snapshotHardeningMigrationUrl = new URL(
-  "../supabase/migrations/202611270001_trade_chart_snapshot_hardening.sql",
+  "../supabase/migrations/202611270002_trade_chart_snapshot_hardening.sql",
   import.meta.url,
 );
 
@@ -858,7 +858,7 @@ test("published private chart schema upgrades through the forward snapshot harde
                 and not tgisinternal) as remap_triggers
     `);
     assert.deepEqual(published.rows[0], {
-      version: "202611260001",
+      version: "202611270001",
       loader: null,
       remap_triggers: 0,
     });
@@ -898,7 +898,7 @@ test("published private chart schema upgrades through the forward snapshot harde
              ) as anon_reconcile_execute
     `);
     assert.deepEqual(hardened.rows[0], {
-      version: "202611270001",
+      version: "202611270002",
       loader: "load_private_trade_chart_facts(uuid,uuid)",
       remap_triggers: 1,
       service_execute: true,
@@ -1120,7 +1120,7 @@ test("snapshot hardening backfills stale annotations once without crossing owner
                 and not tgisinternal) as remap_triggers
     `);
     assert.deepEqual(hardeningState.rows[0], {
-      version: "202611270001",
+      version: "202611270002",
       remap_triggers: 1,
     });
   } finally {
@@ -1243,7 +1243,7 @@ test("private trade chart schema exposes bounded owner state, private storage, a
         `${name} RPC must lock the current cycle row through its write`,
       );
     }
-    assert.equal((await database.query("select public.wavekb_schema_version() as version")).rows[0]?.version, "202611270001");
+    assert.equal((await database.query("select public.wavekb_schema_version() as version")).rows[0]?.version, "202611270002");
   } finally {
     await database.close();
   }

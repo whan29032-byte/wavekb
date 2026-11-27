@@ -292,6 +292,40 @@ test("trading leaderboard is public while exchange credentials remain owner-scop
   assert.equal((publicConnection.json() as any).connection.public_amounts_consented, true);
 });
 
+test("disabled fill chart makes no chart reads or writes and keeps the text review available", async () => {
+  const cycleId = "11111111-1111-4111-8111-111111111111";
+  const base = `/v1/user/trading-trades/${cycleId}`;
+  const chartCalls: string[] = [];
+  const chartStub = async () => {
+    chartCalls.push("chart");
+    return {};
+  };
+  const server = buildServer({
+    config,
+    api,
+    tradingWorkbench: {
+      getChart: chartStub, saveChartState: chartStub, saveFillAnnotation: chartStub,
+      async getTrade(ownerId: string, id: string) {
+        return { trade: { id, ownerId }, review: { reason: "保留文字复盘" } };
+      },
+    } as any,
+  });
+  try {
+    const headers = { authorization: "Bearer user-token", origin: "http://localhost:8765" };
+    for (const [method, suffix] of [["GET", "/chart"], ["PUT", "/chart-state"], ["PUT", "/fills/101/annotation"]] as const) {
+      const result = await server.inject({ method, url: base + suffix, headers, ...(method === "PUT" ? { payload: {} } : {}) });
+      assert.equal(result.statusCode, 404, suffix);
+      assert.equal(result.headers["cache-control"], "no-store");
+    }
+    assert.deepEqual(chartCalls, []);
+    const detail = await server.inject({ url: base, headers });
+    assert.equal(detail.statusCode, 200);
+    assert.deepEqual(detail.json(), { detail: { trade: { id: cycleId, ownerId: "user-1" }, review: { reason: "保留文字复盘" } } });
+  } finally {
+    await server.close();
+  }
+});
+
 test("private trade chart routes are owner-authenticated, fixed, no-store and origin/body bounded", async () => {
   const cycleId = "11111111-1111-4111-8111-111111111111";
   const calls: unknown[] = [];
@@ -309,7 +343,7 @@ test("private trade chart routes are owner-authenticated, fixed, no-store and or
       return { id: "22222222-2222-4222-8222-222222222222", fill_id: fillId, version: 2 };
     },
   } as any;
-  const server = buildServer({ config, api, tradingWorkbench });
+  const server = buildServer({ config: { ...config, TRADING_FILL_CHART_ENABLED: true }, api, tradingWorkbench });
 
   assert.equal((await server.inject({ url: `/v1/user/trading-trades/${cycleId}/chart?timeframe=1m&from=2026-11-23T17%3A59%3A00.000Z&to=2026-11-23T18%3A03%3A00.000Z` })).statusCode, 401);
   const chart = await server.inject({
@@ -373,7 +407,7 @@ test("private trade chart failures preserve only fixed safe codes and no-store h
       });
     },
   } as any;
-  const server = buildServer({ config, api, tradingWorkbench });
+  const server = buildServer({ config: { ...config, TRADING_FILL_CHART_ENABLED: true }, api, tradingWorkbench });
   const response = await server.inject({
     url: `/v1/user/trading-trades/${cycleId}/chart?timeframe=1m&from=a&to=b`,
     headers: { authorization: "Bearer user-token" },
@@ -384,7 +418,7 @@ test("private trade chart failures preserve only fixed safe codes and no-store h
   assert.equal(response.body.includes("private provider host"), false);
 
   const conflictServer = buildServer({
-    config,
+    config: { ...config, TRADING_FILL_CHART_ENABLED: true },
     api,
     tradingWorkbench: {
       async saveChartState() {

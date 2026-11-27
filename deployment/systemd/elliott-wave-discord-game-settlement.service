@@ -1,0 +1,28 @@
+[Unit]
+Description=WaveKB Discord virtual market settlement
+After=network-online.target elliott-wave-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+WorkingDirectory=/opt/elliott-wave-gateway/current
+EnvironmentFile=/etc/elliott-wave/gateway.env
+ExecStart=/usr/bin/node src/discord-game-settlement-worker.ts
+TimeoutStartSec=5min
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077

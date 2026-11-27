@@ -1644,7 +1644,7 @@ language sql
 stable
 security definer
 set search_path = ''
-as $$ select '202611260001'::text $$;
+as $$ select '202611270001'::text $$;
 
 notify pgrst, 'reload schema';
 

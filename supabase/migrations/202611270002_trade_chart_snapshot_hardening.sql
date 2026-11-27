@@ -124,7 +124,7 @@ for each row
 when (old.revision is distinct from new.revision)
 execute function public.remap_trade_chart_annotations_after_revision();
 
--- Repair rows that became stale while the published 202611260001 schema had
+-- Repair rows that became stale while the preceding trade chart schema had
 -- no revision trigger. Repeated migration application is a no-op for pending
 -- rows and for exact rows already advanced to the current revision.
 do $$
@@ -317,7 +317,7 @@ language sql
 stable
 security definer
 set search_path = ''
-as $$ select '202611270001'::text $$;
+as $$ select '202611270002'::text $$;
 
 notify pgrst, 'reload schema';
 

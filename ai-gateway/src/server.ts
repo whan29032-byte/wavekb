@@ -154,6 +154,7 @@ function healthPayload(deps: ServerDeps): object {
     deployment,
     features: {
       trading_workbench_v2: deps.config.TRADING_WORKBENCH_V2_ENABLED,
+      trading_fill_chart: deps.config.TRADING_FILL_CHART_ENABLED,
     },
     time: (deps.now ?? (() => new Date()))().toISOString(),
   };
@@ -646,6 +647,7 @@ async function route(
   }
   const tradeChartMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart$/i);
   if (tradeChartMatch?.[1]) {
+    if (!deps.config.TRADING_FILL_CHART_ENABLED) return authResult(404, { error: "not_found" });
     if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
     const cycleId = decodeURIComponent(tradeChartMatch[1]);
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)
@@ -654,6 +656,7 @@ async function route(
   }
   const tradeChartStateMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart-state$/i);
   if (tradeChartStateMatch?.[1]) {
+    if (!deps.config.TRADING_FILL_CHART_ENABLED) return authResult(404, { error: "not_found" });
     if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
     const cycleId = decodeURIComponent(tradeChartStateMatch[1]);
     if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {
@@ -668,6 +671,7 @@ async function route(
   }
   const tradeFillAnnotationMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/fills\/([1-9]\d{0,29})\/annotation$/i);
   if (tradeFillAnnotationMatch?.[1] && tradeFillAnnotationMatch[2]) {
+    if (!deps.config.TRADING_FILL_CHART_ENABLED) return authResult(404, { error: "not_found" });
     if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
     const cycleId = decodeURIComponent(tradeFillAnnotationMatch[1]);
     if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {

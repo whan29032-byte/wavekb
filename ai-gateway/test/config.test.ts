@@ -26,6 +26,7 @@ test("gateway never exposes server secrets in health response", async () => {
   assert.equal(Object.hasOwn(response.json() as object, "deployment"), true);
   assert.deepEqual((response.json() as { features: unknown }).features, {
     trading_workbench_v2: true,
+    trading_fill_chart: false,
   });
   assert.equal(response.body.includes("server-role-key"), false);
   assert.equal(response.body.includes(config.AI_SECRET_MASTER_KEY.toString("base64")), false);
@@ -74,4 +75,18 @@ test("trading cutover and each provider use strict independent booleans", () => 
   assert.equal(enabled.TRADING_WORKBENCH_V2_ENABLED, true);
   assert.equal(enabled.TRADING_PROVIDER_EXNESS_ENABLED, true);
   assert.throws(() => loadConfig({ ...baseEnv, TRADING_PROVIDER_OKX_ENABLED: "yes" }), /invalid boolean/);
+});
+
+test("fill chart rollout defaults off and publishes only a strict boolean", async () => {
+  assert.equal(loadConfig(baseEnv).TRADING_FILL_CHART_ENABLED, false);
+  assert.equal(loadConfig({ ...baseEnv, TRADING_FILL_CHART_ENABLED: "false" }).TRADING_FILL_CHART_ENABLED, false);
+  assert.throws(() => loadConfig({ ...baseEnv, TRADING_FILL_CHART_ENABLED: "yes" }), /invalid boolean/);
+  const config = loadConfig({ ...baseEnv, TRADING_FILL_CHART_ENABLED: "true" });
+  const server = buildServer({ config });
+  try {
+    const response = await server.inject({ method: "GET", url: "/health" });
+    assert.equal((response.json() as { features: { trading_fill_chart: boolean } }).features.trading_fill_chart, true);
+  } finally {
+    await server.close();
+  }
 });

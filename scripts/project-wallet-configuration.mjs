@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX_BYTES = 4096;
-const fields = ["ok", "operation", "enabled", "workerRunning", "ethereumReady", "baseReady", "tronReady", "changed"];
+const fields = ["ok", "operation", "enabled", "workerRunning", "ethereumReady", "baseReady", "bscReady", "tronReady", "changed"];
 const fail = () => { throw new Error("wallet_configuration_receipt_invalid"); };
 
 export function projectWalletConfigurationReceipt(bytes, operation) {
@@ -14,7 +14,7 @@ export function projectWalletConfigurationReceipt(bytes, operation) {
   if (!result || typeof result !== "object" || Array.isArray(result) || text !== JSON.stringify(result)
     || Object.keys(result).length !== fields.length || fields.some(key => !Object.hasOwn(result, key))
     || result.ok !== true || result.operation !== operation || typeof result.enabled !== "boolean" || typeof result.changed !== "boolean"
-    || ["workerRunning", "ethereumReady", "baseReady", "tronReady"].some(key => result[key] !== true)
+    || ["workerRunning", "ethereumReady", "baseReady", "bscReady", "tronReady"].some(key => result[key] !== true)
     || operation === "enable" && result.enabled !== true || operation === "probe" && result.changed !== false) fail();
   return result;
 }

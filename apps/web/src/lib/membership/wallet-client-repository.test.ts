@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import { MembershipWalletCheckoutError, membershipWalletRepository } from "./wallet-client-repository";
 import { walletPreviewAdmin, walletPreviewMine, walletPreviewOrder, walletPreviewRoutes, walletPreviewVerification } from "@/components/membership-wallet.fixtures";
 import { membershipPreviewActor, membershipPreviewPlan, membershipPreviewRequest } from "@/components/membership-commerce.fixtures";
-import { walletExpectedQuote } from "./wallet-types";
+import { walletExpectedQuote, type WalletRouteId } from "./wallet-types";
 
 const actor = membershipPreviewActor, other = "00000000-0000-4000-8000-000000000999";
+const previewRoute = (id: WalletRouteId, configured = false) => walletPreviewRoutes(configured).find((route) => route.id === id)!;
 const order = walletPreviewOrder();
-const createInput = { priceId: order.price_id, routeId: order.route_id, requestId: membershipPreviewRequest, expectedQuote: walletExpectedQuote(membershipPreviewPlan, membershipPreviewPlan.prices[0], walletPreviewRoutes(true)[3]) };
+const createInput = { priceId: order.price_id, routeId: order.route_id, requestId: membershipPreviewRequest, expectedQuote: walletExpectedQuote(membershipPreviewPlan, membershipPreviewPlan.prices[0], previewRoute("bsc-usdt", true)) };
 const transferInput = { orderId: order.id, chain: order.chain, txHash: walletPreviewVerification().tx_hash };
 const settingsInput = { enabled: false, revision: 1, reason: "保留付款关闭", requestId: membershipPreviewRequest };
 const routeInput = { routeId: order.route_id, recipient: order.recipient, enabled: true, revision: 1, reason: "公开收款地址配置", requestId: membershipPreviewRequest };
@@ -15,7 +16,7 @@ const revokeInput = { orderId: order.id, reason: "仅撤销已付款订单权益
 const revokedGrant = { id: "00000000-0000-4000-8000-000000000118", order_id: order.id, plan_key: "vip", title: "VIP 会员", benefits: {}, ai_daily_limit: 50, mentor_discount_bps: 1000, starts_at: "2099-10-10T00:10:00Z", ends_at: "2099-11-10T00:10:00Z", status: "revoked" };
 const operations = ["mine", "create", "submitTransfer", "adminStore", "saveSettings", "saveRoute", "revokeOrder"] as const;
 type Operation = typeof operations[number];
-const receipts = { mine: walletPreviewMine(), create: { order }, submitTransfer: { order, verification: walletPreviewVerification() }, adminStore: walletPreviewAdmin(), saveSettings: { enabled: false, revision: 2 }, saveRoute: { ...walletPreviewRoutes(true)[3], revision: 2 }, revokeOrder: { order: { ...walletPreviewOrder("paid"), status: "revoked" }, grant: revokedGrant } };
+const receipts = { mine: walletPreviewMine(), create: { order }, submitTransfer: { order, verification: walletPreviewVerification() }, adminStore: walletPreviewAdmin(), saveSettings: { enabled: false, revision: 2 }, saveRoute: { ...previewRoute("bsc-usdt", true), revision: 2 }, revokeOrder: { order: { ...walletPreviewOrder("paid"), status: "revoked" }, grant: revokedGrant } };
 function setup(data: unknown, error: unknown = null) {
   const getUser = vi.fn().mockResolvedValue({ data: { user: { id: actor } }, error: null });
   const rpc = vi.fn().mockResolvedValue({ data, error }); const invoke = vi.fn().mockResolvedValue({ data, error });
