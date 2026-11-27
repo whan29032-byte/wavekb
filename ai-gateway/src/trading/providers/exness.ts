@@ -399,7 +399,7 @@ export class ExnessTradingProviderAdapter implements TradingProviderAdapter {
       rawCredentials,
       options.signal,
     ), "discovery_response");
-    if (payload.account_id !== undefined && text(payload.account_id, "discovery_account_id") !== accountId) {
+    if (typeof payload.account_id !== "string" || payload.account_id !== accountId) {
       throw failure("exness_account_id_mismatch", 502);
     }
     const accessPoint = safeBaseUrl(text(payload.access_point, "access_point"), "access_point");

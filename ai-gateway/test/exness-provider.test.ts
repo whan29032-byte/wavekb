@@ -67,7 +67,10 @@ test("signs exact EXN-DATA bytes, discovers official access points, and validate
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     calls.push({ url, headers: new Headers(init?.headers) });
-    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com" });
+    if (url.pathname === "/v1/trading/access-point") return json({
+      access_point: "https://ap-demo.exness.com",
+      account_id: url.searchParams.get("account_id"),
+    });
     if (url.pathname.endsWith("/account")) {
       const id = url.pathname.split("/").at(-2);
       return json({ account_id: id, account_name: `Trading ${id}`, create_date: "2026-01-01T00:00:00Z", settings: { currency: "USD", leverage: "100", trade_mode: "enabled", account_status: "active", execution_mode: "market" } });
@@ -130,6 +133,41 @@ test("signs the exact DNS-widget discovery path with the required empty idempote
   });
   assert.equal(verify(null, data, publicKey, Buffer.from(discovery.headers.get("EXN-SIGN") ?? "", "base64url")), true);
 });
+
+const invalidDiscoveryAccountIds: Array<{ name: string; accountId?: string | number }> = [
+  { name: "missing" },
+  { name: "numeric", accountId: 101 },
+  { name: "mismatched string", accountId: "202" },
+];
+
+for (const item of invalidDiscoveryAccountIds) {
+  test(`rejects a ${item.name} Exness discovery account ID without caching the access point`, async () => {
+    let discoveries = 0;
+    let accountRequests = 0;
+    const fetcher: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/v1/trading/access-point") {
+        discoveries += 1;
+        return json({ access_point: "https://ap-demo.exness.com", ...(item.accountId === undefined ? {} : { account_id: item.accountId }) });
+      }
+      accountRequests += 1;
+      if (url.pathname.endsWith("/limits")) return json(limits(2));
+      if (url.pathname.endsWith("/candles")) return json({ candles: [] });
+      throw new Error(`unexpected path ${url.pathname}`);
+    };
+    const adapter = new ExnessTradingProviderAdapter(fetcher, () => now);
+
+    const first = await adapter.fetchCandles(account(), candleRequest());
+    const second = await adapter.fetchCandles(account(), candleRequest());
+
+    for (const result of [first, second]) {
+      assert.equal(result.coverage.status, "unavailable", item.name);
+      assert.equal(result.coverage.unavailable_reason, "upstream_unavailable", item.name);
+    }
+    assert.equal(discoveries, 2, item.name);
+    assert.equal(accountRequests, 0, item.name);
+  });
+}
 
 test("loads candles only from the discovered access point and signs the exact official path and query", async () => {
   const calls: Array<{ url: URL; headers: Headers }> = [];
@@ -570,7 +608,7 @@ test("maps official Exness authentication failures to fixed actionable errors", 
 test("uses live history limits, decimal snapshots, and opaque deal cursors", async () => {
   const fetcher: typeof fetch = async (input) => {
     const url = new URL(String(input));
-    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com" });
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
     if (url.pathname.endsWith("/limits")) return json(limits());
     if (url.pathname.endsWith("/snapshot")) return json({ orders: [], positions: [], account_state: { balance: "1000.125", equity: "1010.375", used_margin: "25.5" } });
     if (url.pathname.endsWith("/deals")) return json({ items: [], next_cursor: "opaque-next", has_more: true, range: { from: "2026-11-10T12:00:00Z", to: "2026-11-24T12:00:00Z" } });
@@ -596,7 +634,7 @@ test("walks backward through provider-sized Exness history windows until the liv
   const windows: Array<[string | null, string | null]> = [];
   const fetcher: typeof fetch = async (input) => {
     const url = new URL(String(input));
-    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com" });
+    if (url.pathname === "/v1/trading/access-point") return json({ access_point: "https://ap-demo.exness.com", account_id: "101" });
     if (url.pathname.endsWith("/deals")) {
       windows.push([url.searchParams.get("from"), url.searchParams.get("to")]);
       return json({ items: [], has_more: false });
@@ -650,7 +688,7 @@ test("keeps same-symbol position IDs separate through partial close and classifi
 });
 
 test("rejects full-access scopes and malicious discovery hosts before sending account requests", async () => {
-  const adapter = new ExnessTradingProviderAdapter(async () => json({ access_point: "http://127.0.0.1:8080" }), () => now);
+  const adapter = new ExnessTradingProviderAdapter(async () => json({ access_point: "http://127.0.0.1:8080", account_id: "101" }), () => now);
   await assert.rejects(() => adapter.validateCredentials({ provider: "exness", credentials: credentials({ trading_scope: "full_access", account_ids: JSON.stringify(["101"]) }), read_only_ack: true }), /read_only_scope_required/);
   await assert.rejects(() => adapter.validateCredentials({ provider: "exness", credentials: credentials({ account_ids: JSON.stringify(["101"]) }), read_only_ack: true }), /access_point_not_allowed/);
 });
