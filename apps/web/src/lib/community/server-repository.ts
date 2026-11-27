@@ -1,6 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { BOARD_SLUGS, type BoardSlug, type CommunityPost, type ExternalReference, type PostComment, type ResearchTimelineNode } from "@wavekb/domain";
+import { BOARD_SLUGS, isStrategyMarkerKey, type BoardSlug, type CommunityPost, type ExternalReference, type PostComment, type ResearchTimelineNode } from "@wavekb/domain";
 import { publicSupabaseConfig } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
 import { pageRange, parsePage } from "@/lib/pagination";
@@ -124,26 +124,34 @@ export async function getPost(id: string): Promise<CommunityPost | null> {
   return post ?? null;
 }
 
-export function listPostComments(postId: string): Promise<PostComment[]>;
-export function listPostComments(postId: string, page: number): Promise<PageResult<PostComment>>;
-export async function listPostComments(postId: string, page?: number): Promise<PostComment[] | PageResult<PostComment>> {
-  if (!publicSupabaseConfig().configured) return page === undefined ? [] : { items: [], hasNext: false, total: 0 };
+export function listPostComments(postId: string, page?: undefined, markerKey?: string | null): Promise<PostComment[]>;
+export function listPostComments(postId: string, page: number, markerKey?: string | null): Promise<PageResult<PostComment>>;
+export async function listPostComments(postId: string, page?: number, markerKey?: string | null): Promise<PostComment[] | PageResult<PostComment>> {
+  if (!publicSupabaseConfig().configured || (markerKey != null && !isStrategyMarkerKey(markerKey))) {
+    return page === undefined ? [] : { items: [], hasNext: false, total: 0 };
+  }
   const client = await createClient();
   const size = page === undefined ? 200 : 50;
   const { from, to } = pageRange(parsePage(page), size);
-  const baseSelect = "id,post_id,author_id,parent_id,body,status,created_at,updated_at";
-  const query = (select: string) => client.from("post_comments")
-    .select(select, { count: "exact" })
-    .eq("post_id", postId)
-    .eq("status", "visible")
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .range(from, to + 1);
-  let result = await query(`${baseSelect},post_comment_images(id,storage_path,sort_order)`);
-  // The image relation ships with the engagement migration. Keep comments
-  // readable while the backend is still on the previous schema.
+  const legacySelect = "id,post_id,author_id,parent_id,body,status,created_at,updated_at";
+  const baseSelect = `${legacySelect},marker_key`;
+  const images = ",post_comment_images(id,storage_path,sort_order)";
+  const query = (select: string) => {
+    const rows = client.from("post_comments").select(select, { count: "exact" }).eq("post_id", postId).eq("status", "visible");
+    if (markerKey != null) rows.eq("marker_key", markerKey);
+    return rows.order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to + 1);
+  };
+  let select = baseSelect;
+  let result = await query(`${select}${images}`);
+  if (markerKey == null && result.error?.code === "42703" && /\bmarker_key\b/i.test(result.error.message)) {
+    select = legacySelect;
+    result = await query(`${select}${images}`);
+  }
   if (result.error && (/PGRST200|42P01/.test(String(result.error.code ?? "")) || /post_comment_images/i.test(String(result.error.message ?? "")))) {
-    result = await query(baseSelect);
+    result = await query(select);
+    if (markerKey == null && select === baseSelect && result.error?.code === "42703" && /\bmarker_key\b/i.test(result.error.message)) {
+      result = await query(legacySelect);
+    }
   }
   if (result.error) throw result.error;
   const fetched = (result.data ?? []) as unknown as Array<Omit<PostComment, "profiles"> & { post_comment_images?: Array<{ id: string; storage_path: string; sort_order: number }> }>;
@@ -153,8 +161,9 @@ export async function listPostComments(postId: string, page?: number): Promise<P
   if (!authorIds.length) return page === undefined ? [] : { ...pagination, items: [] };
   const profiles = await loadPublicIdentities(client, authorIds);
   const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-  const items = rows.map(({ post_comment_images, ...comment }) => ({
+  const items = rows.map(({ post_comment_images, marker_key, ...comment }) => ({
     ...comment,
+    marker_key: marker_key ?? null,
     images: [...(post_comment_images ?? [])].sort((a, b) => a.sort_order - b.sort_order),
     profiles: profileById.get(comment.author_id) ?? null,
   }));

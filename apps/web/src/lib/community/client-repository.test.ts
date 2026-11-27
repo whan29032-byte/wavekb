@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { addPostComment, appendPostTimelineNode, createPost, deletePost, updatePost } from "./client-repository";
+import { addPostComment, appendPostTimelineNode, createPost, deletePost, deletePostComment, updatePost } from "./client-repository";
 import type { PostPublishingProgress } from "./client-repository";
 import { UncertainMutationError } from "../mutation-recovery";
 
@@ -387,6 +387,13 @@ describe("post editing transaction", () => {
     }));
   });
 
+  it("retains the strategy snapshot pointer on a normal title or body edit", async () => {
+    const rpc = vi.fn(async () => ({ error: null }));
+    const pointer = { provider: "wavekb-trade-snapshot", snapshot_id: "11111111-1111-4111-8111-111111111111" };
+    await updatePost({ rpc } as never, { ...editingPost(), chart_package: pointer }, updateInput([]));
+    expect(rpc).toHaveBeenCalledWith("update_my_post_v4", expect.objectContaining({ p_chart_package: pointer }));
+  });
+
   it("bounds new-image uploads, keeps RPC image order and reports phases before the atomic update", async () => {
     const files = imageFiles(4);
     const uploads = files.map(() => deferred<{ error: null }>());
@@ -609,7 +616,7 @@ describe("post deletion transaction", () => {
 
 describe("comment publishing", () => {
   it("uses one real UUID for persistence and immediate reply/delete actions", async () => {
-    const insert = vi.fn(async () => ({ error: null }));
+    const insert = vi.fn(() => ({ select: () => ({ single: async () => ({ error: null, data: { marker_key: null, created_at: "2026-11-27", updated_at: "2026-11-27" } }) }) }));
     const client = { from: vi.fn(() => ({ insert })) } as never;
 
     const comment = await addPostComment(client, {
@@ -620,5 +627,57 @@ describe("comment publishing", () => {
 
     expect(comment.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ id: comment.id, body: "评论已经写入数据库。", status: "visible" }));
+    expect(comment.marker_key).toBeNull();
+  });
+
+  it("persists a valid marker and uses the database's inherited marker after a reply", async () => {
+    const markerKey = "a".repeat(32);
+    const single = vi.fn(async () => ({ error: null, data: { marker_key: markerKey, created_at: "2026-11-27", updated_at: "2026-11-27" } }));
+    const insert = vi.fn(() => ({ select: () => ({ single }) }));
+    const client = { from: vi.fn(() => ({ insert })) } as never;
+    const input = { postId: "post", userId: "owner", body: "成交点评论" };
+
+    const parent = await addPostComment(client, { ...input, markerKey });
+    expect(insert).toHaveBeenNthCalledWith(1, expect.objectContaining({ marker_key: markerKey }));
+    const reply = await addPostComment(client, { ...input, parentId: parent.id });
+    expect(insert).toHaveBeenNthCalledWith(2, expect.objectContaining({ parent_id: parent.id }));
+    expect(reply).toMatchObject({ marker_key: markerKey, parent_id: parent.id, created_at: "2026-11-27" });
+    await expect(addPostComment(client, { ...input, markerKey: "private-fill-id" })).rejects.toThrow();
+    expect(insert).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the marker on an image comment and soft-deletes if image metadata is rejected", async () => {
+    const markerKey = "b".repeat(32);
+    const saved = { marker_key: markerKey, created_at: "2026-11-27", updated_at: "2026-11-27" };
+    const mediaError = { code: "42501", message: "mock image rejection" };
+    const upload = vi.fn().mockResolvedValue({ error: null });
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    const imageSelect = vi.fn().mockResolvedValueOnce({ data: [{ id: "img", storage_path: "owner/img", sort_order: 0 }], error: null })
+      .mockResolvedValueOnce({ error: mediaError });
+    const insertImages = vi.fn(() => ({ select: imageSelect }));
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const client = {
+      from: (table: string) => table === "post_comments"
+        ? { insert: () => ({ select: () => ({ single: async () => ({ data: saved, error: null }) }) }) }
+        : { insert: insertImages },
+      storage: { from: () => ({ upload, remove }) },
+      rpc,
+    } as never;
+    const input = { postId: "post", userId: "owner", body: "图表记录", markerKey, files: imageFiles(1) };
+
+    const comment = await addPostComment(client, input);
+    expect(comment).toMatchObject({ marker_key: markerKey, images: [{ id: "img", storage_path: "owner/img", sort_order: 0 }] });
+    expect(insertImages).toHaveBeenNthCalledWith(1, [expect.objectContaining({ comment_id: comment.id, owner_id: "owner" })]);
+    await expect(addPostComment(client, input)).rejects.toEqual(mediaError);
+    expect(rpc).toHaveBeenCalledExactlyOnceWith("soft_delete_my_post_comment", { p_comment_id: expect.any(String) });
+    expect(remove).toHaveBeenCalledExactlyOnceWith([upload.mock.calls[1][0]]);
+  });
+
+  it("soft deletes through the session-bound RPC and reports a rejected deletion", async () => {
+    const rpc = vi.fn().mockResolvedValueOnce({ data: true, error: null }).mockResolvedValueOnce({ data: false, error: null });
+    const client = { rpc } as never;
+    await expect(deletePostComment(client, "comment")).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith("soft_delete_my_post_comment", { p_comment_id: "comment" });
+    await expect(deletePostComment(client, "other-comment")).rejects.toThrow();
   });
 });

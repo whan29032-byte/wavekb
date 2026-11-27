@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BoardSlug, CommunityPost, ExternalKind, ExternalReference, TimelineNodeKind } from "@wavekb/domain";
+import { isStrategyMarkerKey, type BoardSlug, type CommunityPost, type ExternalKind, type ExternalReference, type PostComment, type TimelineNodeKind } from "@wavekb/domain";
 import type { TradingViewPackage } from "@/lib/workbench/tradingview";
 import { mapWithConcurrency } from "../uploads";
 import { isDefiniteDatabaseRejection, sameJsonValue, UncertainMutationError } from "../mutation-recovery";
@@ -242,6 +242,7 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
   const keptIds = new Set(input.keptImageIds);
   const kept = post.post_images.filter((image) => keptIds.has(image.id));
   const removed = post.post_images.filter((image) => !keptIds.has(image.id));
+  const chartPackage = post.chart_package?.provider === "wavekb-trade-snapshot" ? post.chart_package : input.chartPackage ?? null;
   const uploadedPaths: string[] = [];
   const references = input.externalReferences ?? (input.externalUrl && input.externalKind
     ? [{ url: input.externalUrl, kind: input.externalKind, sort_order: 0 }]
@@ -283,7 +284,7 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
         p_body: input.body,
         p_images: desiredImages(),
         p_external_references: references.map(({ url, kind }) => ({ url, kind })),
-        p_chart_package: input.chartPackage ?? null,
+        p_chart_package: chartPackage,
       });
       updateError = result.error;
       if (!updateError) break;
@@ -311,7 +312,7 @@ export async function updatePost(client: SupabaseClient, post: CommunityPost, in
     const savedReferences = Array.isArray(snapshot?.post_external_references) && snapshot.post_external_references.every((reference) => reference && typeof reference.url === "string" && typeof reference.kind === "string" && typeof reference.sort_order === "number")
       ? snapshot.post_external_references.slice().sort((a, b) => a.sort_order - b.sort_order).map(({ url, kind }) => ({ url, kind })) : undefined;
     const confirmed = snapshot && snapshot.title === input.title.trim() && snapshot.body === input.body.trim()
-      && sameJsonValue(snapshot.chart_package, input.chartPackage ?? null)
+      && sameJsonValue(snapshot.chart_package, chartPackage)
       && sameJsonValue(savedImages, desiredImages())
       && sameJsonValue(savedReferences, references.map(({ url, kind }) => ({ url, kind })));
     if (!confirmed) {
@@ -438,10 +439,12 @@ export async function addPostComment(client: SupabaseClient, input: {
   userId: string;
   body: string;
   parentId?: string | null;
+  markerKey?: string | null;
   files?: File[];
-}) {
+}): Promise<Omit<PostComment, "profiles">> {
   const body = input.body.trim();
   if (!body || body.length > 2000) throw new Error("评论需要 1 到 2000 个字符。");
+  if (input.markerKey != null && !isStrategyMarkerKey(input.markerKey)) throw new Error("成交点无效，请重新选择。");
   const files = (input.files ?? []).slice(0, 4);
   if ((input.files?.length ?? 0) > 4) throw new Error("每条评论最多上传 4 张图片。");
   for (const file of files) {
@@ -450,8 +453,8 @@ export async function addPostComment(client: SupabaseClient, input: {
   }
 
   const id = crypto.randomUUID();
-  const createdAt = new Date().toISOString();
   const uploadedPaths: string[] = [];
+  let commentSaved = false;
   try {
     const uploads = files.map((file, sortOrder) => {
       const extension = imageExtension(file.type)!;
@@ -464,15 +467,23 @@ export async function addPostComment(client: SupabaseClient, input: {
       if (upload.error) throw upload.error;
     });
 
-    const result = await client.from("post_comments").insert({
+    const row = {
       id,
       post_id: input.postId,
       author_id: input.userId,
       parent_id: input.parentId ?? null,
       body,
       status: "visible",
-    });
+      ...(input.markerKey ? { marker_key: input.markerKey } : {}),
+    } as const;
+    const insert = (columns: string) => client.from("post_comments").insert(row).select(columns).single();
+    let result = await insert("marker_key,created_at,updated_at");
+    if (input.markerKey == null && result.error?.code === "42703" && /\bmarker_key\b/i.test(result.error.message)) {
+      result = await insert("created_at,updated_at");
+    }
     if (result.error) throw result.error;
+    const saved = result.data as unknown as Pick<PostComment, "created_at" | "updated_at"> & { marker_key?: string | null };
+    commentSaved = true;
 
     let images: Array<{ id: string; storage_path: string; sort_order: number }> = [];
     if (uploads.length) {
@@ -483,35 +494,30 @@ export async function addPostComment(client: SupabaseClient, input: {
         sort_order: sortOrder,
       }))).select("id,storage_path,sort_order");
       if (inserted.error) {
-        await client.from("post_comments").delete().eq("id", id).eq("author_id", input.userId);
+        await deletePostComment(client, id);
+        commentSaved = false;
         throw inserted.error;
       }
       images = inserted.data ?? [];
     }
 
     return {
-      id,
-      post_id: input.postId,
-      author_id: input.userId,
-      parent_id: input.parentId ?? null,
-      body,
-      status: "visible" as const,
-      created_at: createdAt,
-      updated_at: createdAt,
+      ...row,
+      marker_key: saved.marker_key ?? null,
+      created_at: saved.created_at,
+      updated_at: saved.updated_at,
       images,
     };
   } catch (error) {
-    if (uploadedPaths.length) {
+    if (!commentSaved && uploadedPaths.length) {
       await client.storage.from("post-images").remove(uploadedPaths).catch(() => undefined);
     }
     throw error;
   }
 }
 
-export async function deletePostComment(client: SupabaseClient, commentId: string, userId: string) {
-  const result = await client.from("post_comments")
-    .update({ status: "deleted_by_author", body: "该评论已由作者删除。" })
-    .eq("id", commentId)
-    .eq("author_id", userId);
+export async function deletePostComment(client: SupabaseClient, commentId: string) {
+  const result = await client.rpc("soft_delete_my_post_comment", { p_comment_id: commentId });
   if (result.error) throw result.error;
+  if (result.data !== true) throw new Error("评论未被删除，请刷新后重试。");
 }

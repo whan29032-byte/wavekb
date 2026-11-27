@@ -193,11 +193,16 @@ export type PostCommentImage = {
   sort_order: number;
 };
 
+export function isStrategyMarkerKey(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+}
+
 export type PostComment = {
   id: string;
   post_id: string;
   author_id: string;
   parent_id: string | null;
+  marker_key: string | null;
   body: string;
   status: "visible" | "deleted_by_author" | "hidden_by_admin";
   created_at: string;

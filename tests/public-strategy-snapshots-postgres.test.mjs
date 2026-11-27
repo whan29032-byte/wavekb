@@ -408,6 +408,85 @@ test("publish atomically persists the exact preview, creates one visible post an
   await assert.rejects(publishPreview(db), /public_strategy_preview_consumed/);
 }));
 
+test("preserves linked charts on generic edits, rejects forged pointers, and permits atomic publication", async () => withPublishContract(async (db) => {
+  await db.exec(await migration("202611270005_strategy_marker_comments.sql"));
+  await asRole(db, "service_role");
+  await addPublishPreview(db);
+  const saved = await publishPreview(db);
+  await asRole(db);
+  await db.query("update public.posts set title='Edited post title', chart_package=null where id=$1", [saved.post_id]);
+  const [edited] = (await db.query("select title, chart_package from public.posts where id=$1", [saved.post_id])).rows;
+  assert.deepEqual(edited, { title: "Edited post title", chart_package: { provider: "wavekb-trade-snapshot", snapshot_id: saved.snapshot_id } });
+  await assert.rejects(db.query("update public.posts set chart_package=$2 where id=$1", [saved.post_id, JSON.stringify(pointer)]), /strategy_post_pointer_immutable/);
+  await assert.rejects(db.query("update public.posts set chart_package=$2 where id=$1", [ordinaryPost, JSON.stringify(pointer)]), /invalid_strategy_post_pointer/);
+  await assert.rejects(db.query("insert into public.posts(id,author_id,status,chart_package) values($1,$2,'published',$3)", [connection, owner, JSON.stringify(edited.chart_package)]), /invalid_strategy_post_pointer/);
+  await assert.rejects(db.query("insert into public.posts(id,author_id,status,chart_package) values($1,$2,'published',$3)", [connection, owner, JSON.stringify({ ...edited.chart_package, api_key: "hidden" })]), /invalid_strategy_post_pointer/);
+  await asRole(db, "anon");
+  assert.deepEqual(await visibleSnapshots(db), [projection]);
+}));
+
+test("soft deletes verified authors' comments idempotently without altering replies or hidden rows", async () => fixture(async (db) => {
+  await db.exec(await migration("202611270005_strategy_marker_comments.sql"));
+  await addSnapshot(db);
+  await db.query("update public.posts set status='published' where id=$1", [post]);
+  await asRole(db, "authenticated", reader);
+  const [{ id }] = (await db.query("insert into public.post_comments (post_id,author_id,body,marker_key) values($1,$2,'original comment',$3) returning id", [post, reader, marker])).rows;
+  const [{ id: replyId }] = (await db.query("insert into public.post_comments (post_id,author_id,body,parent_id) values($1,$2,'reply stays',$3) returning id", [post, reader, id])).rows;
+  const softDelete = async (commentId) => (await db.query("select public.soft_delete_my_post_comment($1) as deleted", [commentId])).rows[0].deleted;
+  await asRole(db, "authenticated", owner);
+  assert.equal(await softDelete(id), false);
+  await asRole(db, "anon");
+  await assert.rejects(softDelete(id), /permission denied/);
+  await asRole(db);
+  await db.exec(`create or replace function public.is_verified_user() returns boolean language sql stable as $$
+    select coalesce(current_setting('test.verified',true), '') = 'yes' $$`);
+  await asRole(db, "authenticated", reader);
+  await assert.rejects(softDelete(id), /comment_delete_forbidden/);
+  await db.exec("select set_config('test.verified','yes',false)");
+  assert.equal(await softDelete(id), true);
+  assert.equal(await softDelete(id), true);
+  await asRole(db, "anon");
+  assert.deepEqual((await db.query("select id,body,marker_key from public.post_comments")).rows, [{ id: replyId, body: "reply stays", marker_key: marker }]);
+  await asRole(db, "service_role");
+  assert.deepEqual((await db.query("select status,body,marker_key from public.post_comments where id=$1", [id])).rows,
+    [{ status: "deleted_by_author", body: "该评论已由作者删除。", marker_key: marker }]);
+  await db.query("update public.post_comments set status='hidden_by_admin' where id=$1", [replyId]);
+  await asRole(db, "authenticated", reader);
+  assert.equal(await softDelete(replyId), false);
+}));
+
+test("only the service purges at most 500 expired unconsumed previews in expiry order", async () => withPublishContract(async (db) => {
+  await db.exec(await migration("202611270005_strategy_marker_comments.sql"));
+  await asRole(db, "service_role");
+  await addPublishPreview(db);
+  await publishPreview(db);
+  const validHash = "a".repeat(64);
+  await addPublishPreview(db, { hash: validHash, key: snapshot });
+  await asRole(db);
+  await db.query(`insert into public.strategy_share_previews (
+    owner_id, cycle_id, cycle_revision, source_fill_digest, chart_state_version, source_fingerprint, token_hash, projection_digest, projection, created_at, expires_at
+  ) select $1, $2, 1, 'private-fill-digest', 0, repeat('f', 64), lpad(n::text, 64, '0'), $3, $4,
+    statement_timestamp() - interval '1 hour' + n * interval '1 second',
+    statement_timestamp() - interval '50 minutes' + n * interval '1 second'
+  from generate_series(1, 501) as rows(n)`, [owner, cycle, digest, JSON.stringify(projection)]);
+  await db.exec(`alter table public.strategy_share_previews disable trigger guard_strategy_share_preview_consumption;
+    update public.strategy_share_previews set created_at = created_at - interval '1 hour',
+      expires_at = expires_at - interval '1 hour', consumed_at = consumed_at - interval '1 hour' where consumed_at is not null;
+    alter table public.strategy_share_previews enable trigger guard_strategy_share_preview_consumption;`);
+  const purge = async () => (await db.query("select public.purge_expired_strategy_share_previews() as affected")).rows[0].affected;
+  for (const role of ["anon", "authenticated"]) {
+    await asRole(db, role, owner);
+    await assert.rejects(purge(), /permission denied/);
+  }
+  await asRole(db, "service_role");
+  assert.equal(await purge(), 500);
+  const remaining = async () => (await db.query("select token_hash from public.strategy_share_previews order by token_hash")).rows.map((row) => row.token_hash);
+  assert.deepEqual(await remaining(), ["501".padStart(64, "0"), validHash, tokenHash]);
+  assert.equal(await purge(), 1);
+  assert.equal(await purge(), 0);
+  assert.deepEqual(await remaining(), [validHash, tokenHash]);
+}));
+
 test("publish handles retries and rejects stale, expired and cross-owner previews", async () => withPublishContract(async (db) => {
   await asRole(db, "service_role");
   await addPublishPreview(db);
