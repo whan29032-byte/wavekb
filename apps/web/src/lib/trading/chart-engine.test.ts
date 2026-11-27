@@ -22,6 +22,12 @@ const library = vi.hoisted(() => {
     primitives: new Set<IPrimitive>(),
     chartOptions: null as Record<string, unknown> | null,
     indicators: [] as Array<{ id: string; indicatorId: string }>,
+    frozenSeries: [] as Array<{
+      type: string;
+      options: Record<string, unknown>;
+      data: unknown[];
+      removed: boolean;
+    }>,
     failingIndicator: null as string | null,
     drawings: { version: 2, drawings: [] } as {
       version: number;
@@ -60,16 +66,22 @@ vi.mock("openalgo-charts", () => ({
   createChart: (_container: HTMLElement, options: Record<string, unknown>) => {
     library.state.chartOptions = options;
     return {
-      addSeries: () => ({
-        setData: (candles: unknown[]) => {
-          library.state.candles = candles;
-        },
-        createMarkers: () => ({
-          setMarkers: (markers: unknown[]) => {
-            library.state.markers = markers;
+      addSeries: (type: string, options: Record<string, unknown> = {}) => {
+        const record = { type, options, data: [] as unknown[], removed: false };
+        if (type !== "candlestick") library.state.frozenSeries.push(record);
+        return {
+          setData: (candles: unknown[]) => {
+            record.data = candles;
+            if (type === "candlestick") library.state.candles = candles;
           },
-        }),
-      }),
+          remove: () => { record.removed = true; },
+          createMarkers: () => ({
+            setMarkers: (markers: unknown[]) => {
+              library.state.markers = markers;
+            },
+          }),
+        };
+      },
       addIndicator: (indicatorId: string, _settings: unknown, options: { instanceId: string }) => {
         const indicator = { id: options.instanceId, indicatorId };
         library.state.indicators.push(indicator);
@@ -190,6 +202,7 @@ describe.sequential("WaveKB chart engine boundary", () => {
     library.state.primitives.clear();
     library.state.chartOptions = null;
     library.state.indicators = [];
+    library.state.frozenSeries = [];
     library.state.failingIndicator = null;
     library.state.drawings = { version: 2, drawings: [] };
     library.state.viewport = { from: 0, to: 10 };
@@ -261,6 +274,41 @@ describe.sequential("WaveKB chart engine boundary", () => {
 
     await expect(update).rejects.toThrow("destroyed");
     expect(library.state.indicators).toEqual([]);
+  });
+
+  it("plots frozen indicator points verbatim without invoking the indicator calculator", async () => {
+    const engine = await createWaveKbChartEngine(document.createElement("div"));
+    const frozen = engine as typeof engine & {
+      setFrozenIndicatorSeries(series: readonly {
+        id: string;
+        paneIndex?: number;
+        color: string;
+        points: readonly { time: number; value: number | null }[];
+      }[]): void;
+    };
+
+    frozen.setFrozenIndicatorSeries([{
+      id: "public-sma:0",
+      paneIndex: 1,
+      color: "rgb(63, 111, 159)",
+      points: [{ time: 1_700_000_000, value: 101.25 }, { time: 1_700_000_060, value: null }],
+    }]);
+
+    expect(library.state.indicators).toEqual([]);
+    expect(library.state.frozenSeries).toEqual([{
+      type: "line",
+      options: {
+        paneIndex: 1,
+        priceScaleId: "overlay:public-sma:0",
+        style: { color: "rgb(63, 111, 159)", lineWidth: 2 },
+      },
+      data: [{ time: 1_700_000_000, value: 101.25 }, { time: 1_700_000_060 }],
+      removed: false,
+    }]);
+
+    frozen.setFrozenIndicatorSeries([]);
+    expect(library.state.frozenSeries[0]?.removed).toBe(true);
+    engine.destroy();
   });
 
   it("keeps the indicator selection empty if it was cleared while the study tier was loading", async () => {

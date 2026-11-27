@@ -6,7 +6,7 @@ import {
   TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS,
   type TradeChartDrawingToolId,
 } from "@wavekb/domain/trading-review";
-import type { IPrimitive, PrimitiveRenderContext } from "openalgo-charts";
+import type { IPrimitive, PrimitiveRenderContext, SeriesApi } from "openalgo-charts";
 
 export const BASIC_DRAWING_TOOL_IDS = TRADE_CHART_BASIC_DRAWING_TOOL_IDS;
 export const FIBONACCI_DRAWING_TOOL_IDS = TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS;
@@ -77,6 +77,13 @@ export interface WaveKbChartIndicator {
   indicatorId: string;
   settings?: Record<string, unknown>;
   paneIndex?: number;
+}
+
+export interface WaveKbFrozenIndicatorSeries {
+  id: string;
+  paneIndex?: number;
+  color: string;
+  points: readonly { time: number; value: number | null }[];
 }
 
 export interface WaveKbChartDrawingPoint {
@@ -198,6 +205,8 @@ export interface WaveKbChartEngine {
   setCandleGaps(gaps: readonly { from: number; to: number }[]): void;
   setFillClusters(clusters: readonly WaveKbFillCluster[]): void;
   setMarkers(markers: readonly WaveKbChartMarker[]): void;
+  /** Draw persisted public-study output verbatim; this never invokes an indicator calculator. */
+  setFrozenIndicatorSeries?(series: readonly WaveKbFrozenIndicatorSeries[]): void;
   setIndicators(indicators: readonly WaveKbChartIndicator[]): Promise<readonly string[]>;
   setDrawings(document: WaveKbChartDrawingDocument): Promise<void>;
   armDrawingTool(toolId: WaveKbChartDrawingToolId): Promise<void>;
@@ -783,6 +792,7 @@ export async function createWaveKbChartEngine(
   let drawingController: OpenAlgoDrawingController | null = null;
   let drawingControllerPromise: Promise<OpenAlgoDrawingController> | null = null;
   let indicatorIds: string[] = [];
+  let frozenIndicatorSeries: SeriesApi[] = [];
   let indicatorUpdate = 0;
   let destroyed = false;
   let lifecycleVersion = 0;
@@ -902,6 +912,20 @@ export async function createWaveKbChartEngine(
     setMarkers(markers) {
       assertAlive();
       markerLayer.setMarkers(markers);
+    },
+    setFrozenIndicatorSeries(series) {
+      assertAlive();
+      for (const existing of frozenIndicatorSeries) existing.remove();
+      frozenIndicatorSeries = [];
+      for (const item of series) {
+        const handle = chart.addSeries("line", {
+          ...(item.paneIndex === undefined ? {} : { paneIndex: item.paneIndex }),
+          priceScaleId: `overlay:${item.id}`,
+          style: { color: item.color, lineWidth: 2 },
+        });
+        handle.setData(item.points.map(({ time, value }) => value === null ? { time } : { time, value }));
+        frozenIndicatorSeries.push(handle);
+      }
     },
     async setIndicators(indicators) {
       assertAlive();
@@ -1078,6 +1102,7 @@ export async function createWaveKbChartEngine(
       drawingController?.destroy();
       drawingController = null;
       drawingModule = null;
+      frozenIndicatorSeries = [];
       candleGapLayer = null;
       clusterLayer = null;
       chart.destroy();
