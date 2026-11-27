@@ -5,6 +5,7 @@ type GatewayTradingFeatures = {
   trading_workbench_v2?: unknown;
   trading_fill_chart?: unknown;
   trading_fill_chart_pilot?: unknown;
+  trading_public_strategies?: unknown;
 };
 
 export function tradingWorkbenchV2Enabled(
@@ -23,25 +24,37 @@ export async function tradingFillChartEnabled(
   env: TradingEnvironment = process.env,
   accessToken?: () => Promise<string | null>,
 ): Promise<boolean> {
+  return (await tradingChartAvailability(env, accessToken)).chart;
+}
+
+export async function tradingChartAvailability(
+  env: TradingEnvironment = process.env,
+  accessToken?: () => Promise<string | null>,
+): Promise<{ chart: boolean; share: boolean }> {
+  const disabled = { chart: false, share: false };
   const value = env.TRADING_FILL_CHART_ENABLED;
-  if (value !== undefined && value !== "" && value !== "true") return false;
+  if (value !== undefined && value !== "" && value !== "true") return disabled;
   const features = await gatewayTradingFeatures(env);
-  if (features?.trading_fill_chart === true) return true;
-  if (features?.trading_fill_chart_pilot !== true || !accessToken) return false;
+  if (features?.trading_fill_chart === true) return { chart: true, share: features.trading_public_strategies === true };
+  if (features?.trading_fill_chart_pilot !== true || !accessToken) return disabled;
 
   const origin = gatewayOrigin(env);
-  if (!origin) return false;
+  if (!origin) return disabled;
   try {
     const token = await accessToken();
-    if (!token) return false;
+    if (!token) return disabled;
     const response = await fetch(`${origin}/v1/user/trading-chart-access`, {
       cache: "no-store",
       signal: AbortSignal.timeout(3_000),
       headers: { authorization: `Bearer ${token}` },
     });
-    return response.ok && (await response.json() as { enabled?: unknown }).enabled === true;
+    if (!response.ok) return disabled;
+    const status = await response.json() as { enabled?: unknown; share_enabled?: unknown };
+    return status.enabled === true
+      ? { chart: true, share: status.share_enabled === true }
+      : disabled;
   } catch {
-    return false;
+    return disabled;
   }
 }
 

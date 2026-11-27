@@ -50,6 +50,7 @@ test("a maintenance batch always purges due private data after synchronization",
       observed.purgeAt = value;
       return 3;
     },
+    async purgeExpiredStrategyPreviews() { return 2; },
   };
 
   const result = await runTradingMaintenance(config, {
@@ -58,7 +59,7 @@ test("a maintenance batch always purges due private data after synchronization",
     now: () => Date.parse("2026-11-24T12:00:00.000Z"),
   });
 
-  assert.deepEqual(result, { checked: 0, published: 0, skipped: 0, failed: 0, purged: 3 });
+  assert.deepEqual(result, { checked: 0, published: 0, skipped: 0, failed: 0, purged: 3, expired_previews: 2 });
   assert.deepEqual(observed.providers, ["binance"]);
   assert.equal(observed.purgeAt, "2026-11-24T12:00:00.000Z");
 });

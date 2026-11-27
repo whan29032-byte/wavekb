@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { tradingFillChartEnabled, tradingWorkbenchV2Enabled } from "./config";
+import { tradingChartAvailability, tradingFillChartEnabled, tradingWorkbenchV2Enabled } from "./config";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -45,6 +45,21 @@ describe("fill chart availability", () => {
     expect(fetcher).toHaveBeenLastCalledWith("http://127.0.0.1:8787/v1/user/trading-chart-access", expect.objectContaining({
       cache: "no-store", headers: { authorization: "Bearer verified-token" },
     }));
+  });
+
+  it("exposes sharing only when both the chart and sharing are enabled for this member", async () => {
+    const env = { AUTH_GATEWAY_INTERNAL_URL: "http://127.0.0.1:8787" };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_public_strategies: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart_pilot: true, trading_public_strategies: true } }))
+      .mockResolvedValueOnce(Response.json({ enabled: false, share_enabled: true }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart: true, trading_public_strategies: true } }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await tradingChartAvailability(env)).toEqual({ chart: false, share: false });
+    expect(await tradingChartAvailability(env)).toEqual({ chart: true, share: false });
+    expect(await tradingChartAvailability(env, async () => "verified-token")).toEqual({ chart: false, share: false });
+    expect(await tradingChartAvailability(env)).toEqual({ chart: true, share: true });
   });
 });
 

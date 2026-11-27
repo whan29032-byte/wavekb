@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "@phosphor-icons/react/dist/ssr";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { BOARDS, plainTextExcerpt } from "@wavekb/domain";
 import { Badge } from "@wavekb/ui";
 import { PostOwnerActions } from "@/components/post-owner-actions";
 import { PostComments } from "@/components/post-comments";
 import { PostEngagement } from "@/components/post-engagement";
 import { PostViewTracker } from "@/components/post-view-tracker";
+import { PublicStrategyChart } from "@/components/community/public-strategy-chart";
 import { Pagination } from "@/components/pagination";
 import { parsePage } from "@/lib/pagination";
 import { ResearchAuthor } from "@/components/research-author";
@@ -17,13 +18,14 @@ import { ResearchLightbox } from "@/components/research-lightbox";
 import { ResearchMedia } from "@/components/research-media";
 import { ResearchTimeline } from "@/components/research-timeline";
 import { getPost, listPostComments } from "@/lib/community/server-repository";
+import { publicStrategyForPost } from "@/lib/community/public-strategy";
 import { publicPostImageUrl } from "@/lib/env";
 import { getCurrentUser } from "@/lib/auth/dal";
 import { getMyProfile } from "@/lib/member/server-repository";
 import { tradingViewEmbedUrl, type TradingViewPackage } from "@/lib/workbench/tradingview";
 import { publicMetadata } from "@/lib/seo";
 
-type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ page?: string | string[] }> };
+type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<{ page?: string | string[]; marker?: string | string[] }> };
 
 const RESEARCH_GENRE = {
   case_submission: "案例研究",
@@ -53,11 +55,21 @@ export async function generateMetadata({ params }: Pick<PageProps, "params">): P
 
 export default async function PostPage({ params, searchParams }: PageProps) {
   const { id } = await params;
-  const page = parsePage((await searchParams)?.page);
-  const [post, comments] = await Promise.all([getPostForRoute(id), listPostComments(id, page)]);
+  const query = await searchParams;
+  const page = parsePage(query?.page);
+  const [post, user] = await Promise.all([getPostForRoute(id), getCurrentUser()]);
+  const strategy = post ? await publicStrategyForPost(post) : null;
+  if (!user && !strategy) {
+    const next = `/community/post/${encodeURIComponent(id)}${page > 1 ? `?page=${page}` : ""}`;
+    redirect(`/login?next=${encodeURIComponent(next)}`);
+  }
   if (!post || post.status === "hidden") notFound();
-  const user = await getCurrentUser();
-  const actorProfile = user ? await getMyProfile(user.id).catch(() => null) : null;
+  const marker = typeof query?.marker === "string" && strategy?.projection.markers.some(({ marker_key }) => marker_key === query.marker)
+    ? query.marker : null;
+  const [actorProfile, comments] = await Promise.all([
+    user ? getMyProfile(user.id).catch(() => null) : null,
+    listPostComments(id, page, marker),
+  ]);
   const images = [...post.post_images].sort((a, b) => a.sort_order - b.sort_order);
   const chart = post.chart_package?.provider === "tradingview" ? post.chart_package as TradingViewPackage : null;
   const likeDisabledReason = user
@@ -86,6 +98,10 @@ export default async function PostPage({ params, searchParams }: PageProps) {
         </header>
         <section className="mx-auto w-full max-w-4xl" aria-label="正文观点"><ResearchBody body={post.body} /></section>
         {chart?.symbol ? <section className="research-section" aria-labelledby="post-chart-title"><header className="research-section-heading"><p>实时参考</p><h2 id="post-chart-title">TradingView 图表</h2><span>{chart.symbol} · {chart.interval}</span></header><iframe title={`${chart.symbol} TradingView 图表`} src={tradingViewEmbedUrl(chart)} className="aspect-video min-h-[420px] w-full rounded-xl border bg-muted max-md:min-h-[300px]" loading="lazy" referrerPolicy="no-referrer" /></section> : null}
+        {strategy ? <section className="research-section" aria-label="公开策略图">
+          <PublicStrategyChart key={marker ?? strategy.id} projection={strategy.projection}
+            commentsPostId={post.id} activeMarkerKey={marker ?? undefined} />
+        </section> : null}
         {images.length ? (
           <section className="research-section" aria-labelledby="post-images-title">
             <header className="research-section-heading"><p>核心证据</p><h2 id="post-images-title">研究图表</h2><span>点击图片可放大、切换并查看原图。</span></header>
@@ -98,7 +114,12 @@ export default async function PostPage({ params, searchParams }: PageProps) {
           {user?.id === post.author_id ? <PostOwnerActions post={post} userId={user.id} /> : null}
         </div>
       </article>
-      <div className="mx-auto grid w-full max-w-4xl gap-5"><PostComments key={`${post.id}:${page}`} postId={post.id} comments={comments.items} actorId={user?.id} actorProfile={actorProfile} activeMember={actorProfile?.public_uid != null} commentsEnabled={post.comments_enabled} /><Pagination page={page} hasNext={comments.hasNext} pathname={`/community/post/${id}`} /></div>
+      <div className="mx-auto grid w-full max-w-4xl gap-5">
+        <PostComments key={`${post.id}:${marker ?? "all"}:${page}`} postId={post.id} comments={comments.items}
+          actorId={user?.id} actorProfile={actorProfile} activeMember={actorProfile?.public_uid != null}
+          commentsEnabled={post.comments_enabled} markerKey={marker} />
+        <Pagination page={page} hasNext={comments.hasNext} pathname={`/community/post/${id}`} query={marker ? { marker } : undefined} />
+      </div>
     </main>
   );
 }

@@ -239,7 +239,13 @@ function renderStudies(session: Session) {
   });
 }
 
-export function ChartToolPanel({ projection, engine }: { projection: TradeChartProjection; engine: WaveKbChartEngine }) {
+export type SavedStrategyLayout = { version: number; indicators: IndicatorSpecV1[]; drawings: DrawingSpecV1[] };
+
+export function ChartToolPanel({ projection, engine, onShare }: {
+  projection: TradeChartProjection;
+  engine: WaveKbChartEngine;
+  onShare?: ((layout: SavedStrategyLayout) => void) | undefined;
+}) {
   const labelId = useId();
   const sessionRef = useRef<Session | null>(null);
   const [indicatorQuery, setIndicatorQuery] = useState("");
@@ -350,6 +356,14 @@ export function ChartToolPanel({ projection, engine }: { projection: TradeChartP
   const saveError = ["failed", "conflict", "oversized", "restore_failed"].includes(view.saveStatus);
   const indicatorCounts = new Map<TradeChartIndicatorId, number>();
   const drawingCounts = new Map<TradeChartDrawingToolId, number>();
+  const readyToShare = view.ready && (view.saveStatus === "saved" || view.saveStatus === "idle") && view.tool === null;
+
+  function openShare() {
+    const session = sessionRef.current;
+    if (!onShare || !session?.state.ready || session.edit !== session.savedEdit || session.running
+      || session.uncertain || session.state.tool !== null) return;
+    onShare({ version: session.version, indicators: session.state.indicators, drawings: session.state.drawings });
+  }
 
   return (
     <div className="grid min-w-0 gap-2 rounded-card border bg-surface p-3" aria-label="私人图表工具">
@@ -454,6 +468,9 @@ export function ChartToolPanel({ projection, engine }: { projection: TradeChartP
         ? <p role="alert" className="text-sm text-destructive">{saveLabels[view.saveStatus]}</p>
         : <p role="status" aria-live="polite" className="text-xs text-muted-foreground">{saveLabels[view.saveStatus]}</p>}
       {view.saveStatus === "failed" && <Button type="button" variant="outline" className="justify-self-start" onClick={retrySave}>重试保存</Button>}
+      {onShare && <Button type="button" variant="outline" className="justify-self-start" disabled={!readyToShare} onClick={openShare}>
+        分享策略图
+      </Button>}
     </div>
   );
 }

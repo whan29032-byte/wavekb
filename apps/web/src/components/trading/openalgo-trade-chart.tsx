@@ -23,8 +23,9 @@ import {
   type WaveKbChartTheme,
 } from "@/lib/trading/chart-engine";
 import { FillList } from "./fill-list";
-import { createFillAnnotationDraftScope, FillAnnotationEditor } from "./fill-annotation-editor";
-import { ChartToolPanel } from "./chart-tool-panel";
+import { createFillAnnotationDraftScope, FillAnnotationEditor, hasDraftForStrategyShare } from "./fill-annotation-editor";
+import { ChartToolPanel, type SavedStrategyLayout } from "./chart-tool-panel";
+import { ShareStrategyDialog } from "./share-strategy-dialog";
 
 type ChartLoadError = "rate_limited" | "unavailable" | null;
 
@@ -33,6 +34,7 @@ export interface OpenAlgoTradeChartProps {
   loading?: boolean;
   loadError?: ChartLoadError;
   onReload?: () => void;
+  shareEnabled?: boolean;
 }
 
 type PreparedFill = {
@@ -228,6 +230,7 @@ export function OpenAlgoTradeChart({
   loading = false,
   loadError = null,
   onReload,
+  shareEnabled = false,
 }: OpenAlgoTradeChartProps) {
   const chartElementRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<WaveKbChartEngine | null>(null);
@@ -242,6 +245,8 @@ export function OpenAlgoTradeChart({
   const [failedProjection, setFailedProjection] = useState<TradeChartProjection | null>(null);
   const [themeRevision, setThemeRevision] = useState(0);
   const [annotationDraftScope] = useState(createFillAnnotationDraftScope);
+  const [share, setShare] = useState<{ projection: TradeChartProjection; layout: SavedStrategyLayout; open: boolean } | null>(null);
+  const [shareError, setShareError] = useState("");
   const [readyChart, setReadyChart] = useState<{
     projection: TradeChartProjection;
     engine: WaveKbChartEngine;
@@ -397,6 +402,18 @@ export function OpenAlgoTradeChart({
     });
   }
 
+  function openShare(layout: SavedStrategyLayout) {
+    if (projection === null) return;
+    if (hasDraftForStrategyShare(annotationDraftScope, projection.cycle_id)) {
+      setShareError("请保存成交备忘录，再分享策略图。");
+      return;
+    }
+    setShareError("");
+    setShare((current) => current?.projection === projection
+      ? { ...current, open: true }
+      : { projection, layout, open: true });
+  }
+
   return (
     <section className="grid gap-4" aria-labelledby="trade-chart-title">
       <span aria-hidden className="pointer-events-none absolute size-px overflow-hidden opacity-0">
@@ -438,11 +455,17 @@ export function OpenAlgoTradeChart({
       {statusMessage ? <p className="rounded-xl border border-warning/30 bg-warning-surface p-3 text-sm text-warning" role="status">{statusMessage}</p> : null}
       {preparation?.ok === false ? <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">{preparation.message}</p> : null}
       {engineError ? <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">{engineError}</p> : null}
+      {shareError ? <p role="alert" className="text-sm text-destructive">{shareError}</p> : null}
+      {shareEnabled && projection !== null && share?.projection === projection && (
+        <ShareStrategyDialog projection={projection} layout={share.layout} fills={fills} open={share.open}
+          onClose={(keepReceipt) => setShare((current) => current && keepReceipt ? { ...current, open: false } : null)} />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(18rem,.85fr)]">
         <div className="min-w-0">
           {readyChart?.projection === projection ? (
-            <ChartToolPanel projection={readyChart.projection} engine={readyChart.engine} />
+            <ChartToolPanel projection={readyChart.projection} engine={readyChart.engine}
+              onShare={shareEnabled && readyChart.projection.candles.length > 0 ? openShare : undefined} />
           ) : null}
           <div
             ref={chartElementRef}

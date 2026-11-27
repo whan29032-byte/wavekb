@@ -37,6 +37,9 @@ export type ServerDeps = {
   tradingWorkbench?: TradingWorkbenchService;
   chartSharing?: Pick<ChartSharingService, "createPreview" | "publish">;
   readPublicStrategy?: (id: string) => Promise<PublicStrategySnapshot | null>;
+  strategyMetric?: (event: "strategy_preview" | "strategy_publish", values: {
+    status: number; error?: string; bytes?: number; candles?: number; replayed?: boolean;
+  }) => void;
   tradingSync?: Pick<TradingSyncService, "syncConnection">;
 };
 
@@ -722,9 +725,24 @@ async function route(
       limiter.subject(actor.id), preview ? 12 : 8, 60_000);
     if (!decision.allowed) return authResult(429, { error: "rate_limited" }, { "retry-after": String(decision.retryAfterSeconds) });
     const id = shareAction[1].toLowerCase();
-    if (preview) return authResult(201, await deps.chartSharing.createPreview(actor.id, id, payload));
-    const result = await deps.chartSharing.publish(actor.id, id, payload);
-    return authResult(result.replayed ? 200 : 201, result);
+    try {
+      if (preview) {
+        const result = await deps.chartSharing.createPreview(actor.id, id, payload);
+        deps.strategyMetric?.("strategy_preview", {
+          status: 201, bytes: Buffer.byteLength(JSON.stringify(result.projection), "utf8"), candles: result.projection.candles.length,
+        });
+        return authResult(201, result);
+      }
+      const result = await deps.chartSharing.publish(actor.id, id, payload);
+      const status = result.replayed ? 200 : 201;
+      deps.strategyMetric?.("strategy_publish", { status, replayed: result.replayed });
+      return authResult(status, result);
+    } catch (error) {
+      const result = routeFailure(error);
+      const { error: reason } = result.body as { error: string };
+      deps.strategyMetric?.(preview ? "strategy_preview" : "strategy_publish", { status: result.statusCode, error: reason });
+      return result;
+    }
   }
   const tradeChartMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart$/i);
   if (tradeChartMatch?.[1]) {
@@ -1081,6 +1099,7 @@ if (isMain) {
     tradingWorkbench,
     chartSharing: new ChartSharingService(new SupabaseChartSharingStore(new SupabaseRest(config)), tradingWorkbench),
     readPublicStrategy: (id) => readPublicStrategySnapshot(config, id),
+    strategyMetric: (event, values) => process.stdout.write(`${JSON.stringify({ event, ...values })}\n`),
     tradingSync: createTradingSyncService(config),
     ...(youtubeApi ? { youtubeApi } : {}),
   });

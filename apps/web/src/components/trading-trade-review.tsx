@@ -62,7 +62,11 @@ function initialChartRequest(openedAt: string, closedAt: string | null) {
   };
 }
 
-export function TradingTradeReview({ tradeId, chartEnabled = false }: { tradeId: string; chartEnabled?: boolean }) {
+export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled = false }: {
+  tradeId: string;
+  chartEnabled?: boolean;
+  shareEnabled?: boolean;
+}) {
   const [detail, setDetail] = useState<TradingTradeDetail | null>(null);
   const [draft, setDraft] = useState<SaveTradingReviewInput | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -218,6 +222,7 @@ export function TradingTradeReview({ tradeId, chartEnabled = false }: { tradeId:
           projection={chartProjection}
           loading={chartLoading}
           loadError={chartLoadError}
+          shareEnabled={shareEnabled}
           onReload={() => setChartReloadToken((token) => token + 1)}
         />
       </div> : null}

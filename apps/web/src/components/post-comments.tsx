@@ -11,13 +11,14 @@ import { addPostComment, deletePostComment } from "@/lib/community/client-reposi
 import { publicPostImageUrl } from "@/lib/env";
 import { createClient } from "@/lib/supabase/client";
 
-export function PostComments({ postId, comments, actorId, actorProfile, commentsEnabled, activeMember }: {
+export function PostComments({ postId, comments, actorId, actorProfile, commentsEnabled, activeMember, markerKey = null }: {
   postId: string;
   comments: PostComment[];
   actorId?: string;
   actorProfile?: PublicProfile | null;
   commentsEnabled: boolean;
   activeMember: boolean;
+  markerKey?: string | null;
 }) {
   const [added, setAdded] = useState<PostComment[]>([]);
   const hydrated = useSyncExternalStore(
@@ -51,6 +52,7 @@ export function PostComments({ postId, comments, actorId, actorProfile, comments
         parentId,
         body,
         files,
+        ...(parentId === null && markerKey !== null ? { markerKey } : {}),
       });
       setAdded((current) => [...current, {
         ...created,
@@ -71,7 +73,7 @@ export function PostComments({ postId, comments, actorId, actorProfile, comments
     setPending(true);
     setError("");
     try {
-      await deletePostComment(createClient(), commentId, actorId);
+      await deletePostComment(createClient(), commentId);
       window.location.reload();
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "评论删除失败，请重试。");
@@ -95,8 +97,10 @@ export function PostComments({ postId, comments, actorId, actorProfile, comments
     <section className="grid gap-5" aria-labelledby="comments-title">
       <div className="flex items-end justify-between gap-4 border-b pb-4">
         <div className="grid gap-1">
-          <h2 id="comments-title" className="text-xl font-semibold">评论</h2>
-          <p className="text-sm text-muted-foreground">围绕规则、证据、边界和反例展开讨论。</p>
+          <h2 id="comments-title" className="text-xl font-semibold">{markerKey ? "这笔成交的讨论" : "评论"}</h2>
+          {markerKey ? <Link href={`/community/post/${encodeURIComponent(postId)}#comments-title`}
+            className="w-fit text-sm text-primary hover:underline">查看全部评论</Link>
+            : <p className="text-sm text-muted-foreground">围绕规则、证据、边界和反例展开讨论。</p>}
         </div>
         <span className="text-sm tabular-nums text-muted-foreground">{items.length} 条</span>
       </div>
@@ -104,13 +108,17 @@ export function PostComments({ postId, comments, actorId, actorProfile, comments
         <div className="grid gap-3">
           {items.map((comment) => {
             return (
-              <article key={comment.id} className={`surface-card grid gap-2 p-4 ${comment.parent_id ? "ml-5 md:ml-10" : ""}`}>
+              <article key={comment.id} id={`comment-${comment.id}`} className={`surface-card grid gap-2 p-4 ${comment.parent_id ? "ml-5 md:ml-10" : ""}`}>
                 <header className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span className="flex items-center gap-2">
                     {comment.profiles ? <AvatarFrame profile={comment.profiles} size="small" /> : null}
                     {comment.profiles?.public_uid ? <Link href={`/member/${comment.profiles.public_uid}`} className="inline-flex items-center gap-2 font-medium hover:underline"><IdentityName profile={comment.profiles} /><Nameplate uid={comment.profiles.public_uid} style={comment.profiles.nameplate_style} compact /></Link> : <span>{comment.profiles?.display_name || "UID 未设置"}</span>}
                   </span>
                   <time dateTime={comment.created_at}>{new Date(comment.created_at).toLocaleString("zh-CN")}</time>
+                  {markerKey === null && comment.marker_key && (
+                    <Link href={`/community/post/${encodeURIComponent(postId)}?marker=${encodeURIComponent(comment.marker_key)}#comments-title`}
+                      className="font-semibold text-primary hover:underline">查看对应成交</Link>
+                  )}
                 </header>
                 <p className="whitespace-pre-wrap text-sm leading-6">{comment.body}</p>
                 {comment.images?.length ? (

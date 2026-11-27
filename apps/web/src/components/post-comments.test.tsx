@@ -32,6 +32,7 @@ describe("PostComments hydration guard", () => {
       post_id: props.postId,
       author_id: "44444444-4444-4444-8444-444444444444",
       parent_id: null,
+      marker_key: null,
       body: "带图的评论",
       status: "visible",
       created_at: "2026-10-19T00:00:00.000Z",
@@ -49,5 +50,19 @@ describe("PostComments hydration guard", () => {
 
     expect((await screen.findByAltText("作者的头像")) as HTMLImageElement).toBeDefined();
     expect(screen.getByLabelText("图片（可选，最多 4 张）")).toBeDefined();
+  });
+
+  it("links a marker comment to its fill and provides a return to the full discussion", () => {
+    const markerKey = "ab".repeat(16);
+    const comment: PostComment = {
+      id: "33333333-3333-4333-8333-333333333333", post_id: props.postId, author_id: props.actorId,
+      parent_id: null, marker_key: markerKey, body: "检查这个成交点。", status: "visible",
+      created_at: "2026-11-26T00:00:00.000Z", updated_at: "2026-11-26T00:00:00.000Z", profiles: null,
+    };
+    const view = render(<PostComments {...props} comments={[comment]} />);
+    expect(screen.getByRole("link", { name: "查看对应成交" }).getAttribute("href")).toContain(`?marker=${markerKey}#comments-title`);
+    view.rerender(<PostComments {...props} comments={[comment]} markerKey={markerKey} />);
+    expect(screen.getByRole("heading", { name: "这笔成交的讨论" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "查看全部评论" }).getAttribute("href")).toBe(`/community/post/${props.postId}#comments-title`);
   });
 });

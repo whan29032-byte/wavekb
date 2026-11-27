@@ -192,6 +192,11 @@ export const LayoutPersistence: Story = {
   render: () => <LayoutPersistenceFixture />,
 };
 
+export const ShareStrategy: Story = {
+  name: "分享策略图",
+  args: { projection: projection(longMarkers), shareEnabled: true },
+};
+
 function DarkPreview({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const preview = document.documentElement;

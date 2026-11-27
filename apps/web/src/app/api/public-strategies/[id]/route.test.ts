@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublicStrategySnapshot } from "@wavekb/domain/trading-review";
+import { publicStrategyForPost } from "@/lib/community/public-strategy";
 import { GET } from "./route";
 
 const fetchMock = vi.fn();
@@ -50,6 +51,16 @@ afterEach(() => {
 });
 
 describe("public strategy snapshot proxy", () => {
+  it("binds a guest strategy embed to that exact published community post", async () => {
+    const chart_package = { provider: "wavekb-trade-snapshot", snapshot_id: id };
+    const published = { id: postId, status: "published" as const, chart_package };
+    fetchMock.mockResolvedValue(gatewayJson(payload));
+    expect(await publicStrategyForPost(published, fetchMock)).toEqual(payload);
+    expect(await publicStrategyForPost({ ...published, id }, fetchMock)).toBeNull();
+    expect(await publicStrategyForPost({ ...published, status: "hidden" }, fetchMock)).toBeNull();
+    expect(await publicStrategyForPost({ ...published, chart_package: { provider: "tradingview", snapshot_id: id } }, fetchMock)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it("returns the public DTO and revalidation headers without forwarding credentials", async () => {
     fetchMock.mockResolvedValue(gatewayJson(payload));
     const response = await request(id, { cookie: "hidden=session", authorization: "Bearer hidden-token", "if-none-match": `"${"f".repeat(64)}"` });

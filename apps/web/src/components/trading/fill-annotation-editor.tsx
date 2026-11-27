@@ -57,6 +57,10 @@ export function createFillAnnotationDraftScope(): FillAnnotationDraftScope {
   return new Map();
 }
 
+export function hasDraftForStrategyShare(drafts: FillAnnotationDraftScope, cycleId: string): boolean {
+  return [...drafts.values()].some((session) => session.context.cycleId === cycleId && hasPendingDraft(session));
+}
+
 const emptyDraft: Draft = { body: "", tagsText: "" };
 const messages: Record<Issue, string> = {
   body_length: "备忘录最多 5000 个字符。",
@@ -163,6 +167,7 @@ function flush(session: EditorSession) {
 function queueDraft(session: EditorSession, draft: Draft) {
   clearDebounce(session);
   session.edit += 1;
+  session.drafts.set(session.key, session);
   session.due = false;
   const issue = session.state.issue;
   const validation = validateFillAnnotationDraft(parseDraft(draft));
@@ -305,6 +310,7 @@ export function FillAnnotationEditor({ cycleId, cycleRevision, fill, onSaved, dr
     }
     clearDebounce(session);
     session.edit += 1;
+    session.drafts.set(session.key, session);
     session.images = changes;
     session.due = true;
     if (changes.removeId === preview) setPreview(null);
