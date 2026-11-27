@@ -46,6 +46,9 @@ class Store implements TradingWorkbenchStore {
     if (ownerId !== owner || !cycle || !connection) return null;
     return { cycle, connection, review: facts.reviews.find((item) => item.cycle_id === id) ?? null, conflicting_reviews: [] };
   }
+  async loadChartFacts() { return null; }
+  async saveChartState(): Promise<any> { throw new Error("not_implemented"); }
+  async saveFillAnnotation(): Promise<any> { throw new Error("not_implemented"); }
   async saveReview(input: WorkbenchReviewRecord & { owner_id: string }): Promise<WorkbenchReviewRecord> { this.saved = input; return input; }
 }
 
@@ -90,6 +93,196 @@ test("serves provider-specific safe facts and saves only the narrow review field
   const saved = await service.saveReview(owner, "t-exness", { expected_cycle_revision: 1, reason: "计划内反转", plan_compliance: "partial", next_improvement: "等待收盘确认", tags: ["黄金"], planned_stop_price: "2420", planned_risk_amount: "50", ignored: "not saved" });
   assert.equal(saved.cycle_revision, 1);
   assert.deepEqual(Object.keys(store.saved as object).sort(), ["cycle_id", "cycle_revision", "needs_reconciliation", "next_improvement", "owner_id", "plan_compliance", "planned_risk_amount", "planned_stop_price", "reason", "tags"]);
+});
+
+test("builds the owner current-revision chart projection from allocation facts before loading candles", async () => {
+  const cycleId = "33333333-3333-4333-8333-333333333333";
+  const annotationId = "44444444-4444-4444-8444-444444444444";
+  const candleRequests: unknown[] = [];
+  const chartFacts = {
+    cycle: {
+      ...facts.cycles[0]!,
+      id: cycleId,
+      revision: 3,
+      opened_at: "2026-11-23T18:00:00.000Z",
+      closed_at: "2026-11-23T18:02:00.000Z",
+      is_current: true,
+    },
+    connection: connections[0]!,
+    allocations: [
+      { cycle_revision: 3, fill_id: "101", native_fill_id: "binance-open-12345678", allocation_quantity: "0.125000000000000001", allocation_role: "open", sort_order: 0 },
+      { cycle_revision: 3, fill_id: "102", native_fill_id: "binance-close-87654321", allocation_quantity: "0.025000000000000001", allocation_role: "reduce", sort_order: 1 },
+    ],
+    fills: [
+      { id: "101", native_fill_id: "binance-open-12345678", native_symbol: "BTCUSDT", occurred_at: "2026-11-23T18:00:00.000Z", price: "90000.000000000000000001", side: "buy", position_side: "both", liquidity: "maker" },
+      { id: "102", native_fill_id: "binance-close-87654321", native_symbol: "BTCUSDT", occurred_at: "2026-11-23T18:01:00.000Z", price: "90120.000000000000000001", side: "sell", position_side: "both", liquidity: "taker" },
+    ],
+    annotations: [
+      { id: annotationId, fill_id: "101", cycle_revision: 3, body: "waited for confirmation", tags: ["breakout"], remap_status: "current", version: 2, deleted_at: null },
+    ],
+    images: [
+      { id: "55555555-5555-4555-8555-555555555555", annotation_id: annotationId, mime_type: "image/png", byte_size: 1200, sort_order: 0, deleted_at: null },
+    ],
+    chart_state: null,
+  };
+  const chartStore = Object.assign(new Store(), {
+    async loadChartFacts(requestOwner: string, requestCycle: string) {
+      if (requestOwner !== owner || requestCycle !== cycleId) return null;
+      return chartFacts;
+    },
+  });
+  const service = new TradingWorkbenchService({
+    store: chartStore,
+    now: () => now,
+    candleLoader: {
+      async fetch(input: unknown) {
+        candleRequests.push(input);
+        const request = (input as any).request;
+        return {
+          provider: "binance",
+          request,
+          candles: [],
+          coverage: { status: "unavailable", range_start: request.from, range_end: request.to, source: null, fetched_at: null, gaps: [], unavailable_reason: "upstream_unavailable" },
+          warnings: ["candles_unavailable"],
+        };
+      },
+    },
+  } as any);
+
+  const projection = await (service as any).getChart(owner, cycleId, {
+    timeframe: "1m",
+    from: "2026-11-23T17:59:00.000Z",
+    to: "2026-11-23T18:03:00.000Z",
+  });
+
+  assert.equal(projection.cycle_revision, 3);
+  assert.deepEqual(projection.markers.map((marker: any) => ({
+    fill_id: marker.fill_id,
+    allocated_quantity: marker.allocated_quantity,
+    allocation_role: marker.allocation_role,
+    sort_order: marker.sort_order,
+    provider_fill_id_mask: marker.provider_fill_id_mask,
+    image_count: marker.annotation?.image_count ?? 0,
+  })), [
+    { fill_id: "101", allocated_quantity: "0.125000000000000001", allocation_role: "open", sort_order: 0, provider_fill_id_mask: "••••5678", image_count: 1 },
+    { fill_id: "102", allocated_quantity: "0.025000000000000001", allocation_role: "reduce", sort_order: 1, provider_fill_id_mask: "••••4321", image_count: 0 },
+  ]);
+  assert.equal(candleRequests.length, 1);
+  assert.equal(JSON.stringify(projection).includes("binance-open-12345678"), false);
+  assert.equal(JSON.stringify(projection).includes("raw_payload"), false);
+
+  const degraded = await new TradingWorkbenchService({ store: chartStore }).getChart(owner, cycleId, {
+    timeframe: "1m",
+    from: "2026-11-23T17:59:00.000Z",
+    to: "2026-11-23T18:03:00.000Z",
+  });
+  assert.equal(degraded.coverage.status, "unavailable");
+  assert.deepEqual(degraded.warnings, ["candles_unavailable"]);
+  assert.equal(degraded.markers.length, 2, "unavailable candles must not hide canonical fill markers");
+
+  await assert.rejects(
+    (service as any).getChart("22222222-2222-4222-8222-222222222222", cycleId, { timeframe: "1m", from: "2026-11-23T17:59:00.000Z", to: "2026-11-23T18:03:00.000Z" }),
+    (error: any) => error?.message === "trade_cycle_not_found" && error?.statusCode === 404,
+  );
+  chartFacts.cycle.is_current = false;
+  await assert.rejects(
+    (service as any).getChart(owner, cycleId, { timeframe: "1m", from: "2026-11-23T17:59:00.000Z", to: "2026-11-23T18:03:00.000Z" }),
+    (error: any) => error?.message === "trade_cycle_not_found" && error?.statusCode === 404,
+  );
+  assert.equal(candleRequests.length, 1, "authorization/current-revision checks must happen before provider fetch");
+});
+
+test("loads candle credentials only after the chart connection owner is verified", async () => {
+  const module = await import("../src/trading/workbench-service.ts");
+  const Loader = (module as any).SupabaseTradingWorkbenchCandleLoader;
+  assert.equal(typeof Loader, "function", "the production chart service needs a credential-safe candle loader");
+  let decrypted = 0;
+  let fetched = 0;
+  const request = {
+    product: "usdt_perpetual", native_symbol: "BTCUSDT", normalized_symbol: "BTCUSDT", timeframe: "1m",
+    price_mode: "trade", from: "2026-11-23T17:59:00.000Z", to: "2026-11-23T18:03:00.000Z", limit: 3000,
+  };
+  const store = {
+    async getConnection() {
+      return {
+        id: "c-binance", owner_id: owner, provider: "binance", credential_set_id: "credential-set",
+        external_account_id_hash: null, account_currency: "USDT", capabilities: { candles: { availability: "available" } },
+        sync_generation: 4, status: "active", last_synced_at: null, history_coverage_started_at: null, data_hidden_at: null,
+      };
+    },
+    async loadCredentialEnvelope() { return { ciphertext: "ciphertext", iv: "iv", auth_tag: "tag", key_version: 1 }; },
+  };
+  const adapter = {
+    async validateCredentials() {
+      return [{ external_account_id: "account-1", account_label: "main", account_identifier_mask: "•••1234", account_currency: "USDT", products: ["usdt_perpetual"], read_only_status: "verified" }];
+    },
+    async fetchCandles(account: any, received: any) {
+      fetched += 1;
+      assert.equal(account.connection_id, "c-binance");
+      assert.deepEqual(received, request);
+      return {
+        provider: "binance", request: received, candles: [],
+        coverage: { status: "unavailable", range_start: received.from, range_end: received.to, source: null, fetched_at: null, gaps: [], unavailable_reason: "upstream_unavailable" },
+        warnings: ["candles_unavailable"],
+      };
+    },
+  };
+  const loader = new Loader({
+    store,
+    adapters: new Map([["binance", adapter]]),
+    masterKey: Buffer.alloc(32, 1),
+    identityKey: Buffer.alloc(32, 2),
+    decrypt: () => { decrypted += 1; return JSON.stringify({ api_key: "secret" }); },
+  });
+
+  await assert.rejects(
+    loader.fetch({ owner_id: "22222222-2222-4222-8222-222222222222", connection_id: "c-binance", provider: "binance", request }),
+    (error: any) => error?.message === "trade_cycle_not_found" && error?.statusCode === 404,
+  );
+  assert.equal(decrypted, 0);
+  assert.equal(fetched, 0);
+  const batch = await loader.fetch({ owner_id: owner, connection_id: "c-binance", provider: "binance", request });
+  assert.equal(batch.coverage.status, "unavailable");
+  assert.equal(decrypted, 1);
+  assert.equal(fetched, 1);
+});
+
+test("saves chart state and fill annotations only through current owner allocation facts", async () => {
+  const cycleId = "33333333-3333-4333-8333-333333333333";
+  const saved: unknown[] = [];
+  const currentFacts = {
+    cycle: { ...facts.cycles[0]!, id: cycleId, revision: 3, generation: 4, is_current: true },
+    connection: connections[0]!,
+    allocations: [{ cycle_revision: 3, fill_id: "101", native_fill_id: "binance-open-12345678", allocation_quantity: "0.1", allocation_role: "open", sort_order: 0 }],
+    fills: [{ id: "101", native_fill_id: "binance-open-12345678", native_symbol: "BTCUSDT", occurred_at: "2026-11-23T18:00:00.000Z", price: "90000", side: "buy", position_side: "both", liquidity: "maker" }],
+    annotations: [], images: [], chart_state: null,
+  };
+  const chartStore = Object.assign(new Store(), {
+    async loadChartFacts(requestOwner: string, requestCycle: string) {
+      return requestOwner === owner && requestCycle === cycleId ? currentFacts : null;
+    },
+    async saveChartState(accessToken: string, input: unknown) {
+      saved.push(["state", accessToken, input]);
+      return { schema_version: "wavekb-trade-chart-v1", cycle_id: cycleId, cycle_revision: 3, timeframe: "1m", price_type: "trade", viewport: { from: 1, to: 2 }, indicators: [], drawings: [], version: 2, updated_at: "2026-11-24T12:00:00.000Z" };
+    },
+    async saveFillAnnotation(accessToken: string, input: any) {
+      saved.push(["annotation", accessToken, input]);
+      return { id: input.annotation_id, fill_id: input.fill_id, cycle_revision: 3, body: input.body, tags: input.tags, remap_status: "current", version: 2, deleted_at: null };
+    },
+  });
+  const service = new TradingWorkbenchService({ store: chartStore } as any);
+  const stateInput = { cycle_revision: 3, schema_version: "wavekb-trade-chart-v1", timeframe: "1m", price_type: "trade", viewport: { from: 1, to: 2 }, indicators: [], drawings: [], expected_version: 1, expected_updated_at: "2026-11-23T18:03:00.000Z" };
+  const state = await (service as any).saveChartState(owner, cycleId, stateInput, "user-jwt");
+  assert.equal(state.version, 2);
+  const annotationInput = { annotation_id: "44444444-4444-4444-8444-444444444444", cycle_revision: 3, body: "note", tags: ["breakout"], images: [], expected_version: 1, deleted: false };
+  const annotation = await (service as any).saveFillAnnotation(owner, cycleId, "101", annotationInput, "user-jwt");
+  assert.equal(annotation.image_count, 0);
+  assert.equal(saved.length, 2);
+  await assert.rejects(
+    (service as any).saveFillAnnotation(owner, cycleId, "999", annotationInput, "user-jwt"),
+    (error: any) => error?.message === "trade_chart_fill_not_owned" && error?.statusCode === 404,
+  );
+  assert.equal(saved.length, 2, "unknown fill must fail before the authenticated RPC");
 });
 
 test("wires authenticated dashboard, trade detail and PUT review routes", async () => {

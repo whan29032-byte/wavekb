@@ -7,9 +7,15 @@ function json(body: object, status = 200) { return NextResponse.json(body, { sta
 
 type Method = "GET" | "POST" | "PUT";
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const fillIdPattern = /^[1-9][0-9]{0,29}$/;
+
 function destination(segments: string[], method: Method) {
   if (method === "GET" && segments.length === 1 && segments[0] === "workbench") return "/v1/user/trading-workbench";
+  if (method === "GET" && segments.length === 3 && segments[0] === "trades" && uuidPattern.test(segments[1] || "") && segments[2] === "chart") return `/v1/user/trading-trades/${segments[1]}/chart`;
   if (method === "GET" && segments.length === 2 && segments[0] === "trades" && segments[1]) return `/v1/user/trading-trades/${encodeURIComponent(segments[1])}`;
+  if (method === "PUT" && segments.length === 3 && segments[0] === "trades" && uuidPattern.test(segments[1] || "") && segments[2] === "chart-state") return `/v1/user/trading-trades/${segments[1]}/chart-state`;
+  if (method === "PUT" && segments.length === 5 && segments[0] === "trades" && uuidPattern.test(segments[1] || "") && segments[2] === "fills" && fillIdPattern.test(segments[3] || "") && segments[4] === "annotation") return `/v1/user/trading-trades/${segments[1]}/fills/${segments[3]}/annotation`;
   if (method === "PUT" && segments.length === 3 && segments[0] === "trades" && segments[1] && segments[2] === "review") return `/v1/user/trading-trades/${encodeURIComponent(segments[1])}/review`;
   if (method === "POST" && segments.length === 3 && segments[0] === "trades" && segments[1] && segments[2] === "ai-review") return `/v1/user/trading-trades/${encodeURIComponent(segments[1])}/ai-review`;
   return null;

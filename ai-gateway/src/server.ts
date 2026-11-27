@@ -221,6 +221,17 @@ function authFailure(error: unknown): RouteResult {
     "trade_cycle_not_found",
     "stale_trade_cycle_revision",
     "invalid_trade_review",
+    "invalid_trade_chart_query",
+    "invalid_trade_chart_request",
+    "invalid_trade_chart_state",
+    "invalid_trade_chart_annotation",
+    "invalid_trade_chart_annotation_images",
+    "trade_chart_invalid_state_price_type",
+    "trade_chart_fill_not_owned",
+    "trade_chart_cycle_not_owned",
+    "trade_chart_account_restricted",
+    "stale_trade_chart_state",
+    "stale_trade_chart_annotation",
     "invalid_trade_cycle_id",
     "invalid_trade_review_request",
     "trade_not_found",
@@ -258,6 +269,16 @@ function authFailure(error: unknown): RouteResult {
 function routeFailure(error: unknown): RouteResult {
   const candidate = error as { statusCode?: number; message?: string };
   const code = String(candidate?.message || "");
+  const chartStatus = new Map<string, number>([
+    ["invalid_trade_chart_state", 400],
+    ["invalid_trade_chart_annotation", 400],
+    ["invalid_trade_chart_annotation_images", 400],
+    ["trade_chart_fill_not_owned", 404],
+    ["trade_chart_cycle_not_owned", 404],
+    ["trade_chart_account_restricted", 403],
+    ["stale_trade_chart_state", 409],
+    ["stale_trade_chart_annotation", 409],
+  ]);
   const allowed = new Set([
     "ai_connection_required",
     "invalid_provider_url",
@@ -310,6 +331,17 @@ function routeFailure(error: unknown): RouteResult {
     "trade_cycle_not_found",
     "stale_trade_cycle_revision",
     "invalid_trade_review",
+    "invalid_trade_chart_query",
+    "invalid_trade_chart_request",
+    "invalid_trade_chart_state",
+    "invalid_trade_chart_annotation",
+    "invalid_trade_chart_annotation_images",
+    "trade_chart_invalid_state_price_type",
+    "trade_chart_fill_not_owned",
+    "trade_chart_cycle_not_owned",
+    "trade_chart_account_restricted",
+    "stale_trade_chart_state",
+    "stale_trade_chart_annotation",
     "binance_1021",
     "binance_1022",
     "binance_2014",
@@ -337,14 +369,14 @@ function routeFailure(error: unknown): RouteResult {
     "exness_account_trading_disabled",
     "reason_required",
   ]);
-  return {
-    statusCode: Number(candidate?.statusCode || 500),
-    body: {
+  return authResult(
+    Number(candidate?.statusCode || chartStatus.get(code) || 500),
+    {
       error: allowed.has(code) || isPublicTradingProviderError(code)
         ? code
         : "request_failed",
     },
-  };
+  );
 }
 
 function authOriginAllowed(config: GatewayConfig, headers: Record<string, string>): boolean {
@@ -609,6 +641,48 @@ async function route(
   if (method === "GET" && path === "/v1/user/trading-workbench") {
     if (!deps.tradingWorkbench) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return { statusCode: 200, body: { workbench: await deps.tradingWorkbench.getDashboard(actor.id, query) }, headers: { "cache-control": "no-store" } };
+  }
+  const tradeChartMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart$/i);
+  if (tradeChartMatch?.[1]) {
+    if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
+    const cycleId = decodeURIComponent(tradeChartMatch[1]);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)
+      || method !== "GET") return authResult(404, { error: "not_found" });
+    return authResult(200, { chart: await deps.tradingWorkbench.getChart(actor.id, cycleId, query) });
+  }
+  const tradeChartStateMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart-state$/i);
+  if (tradeChartStateMatch?.[1]) {
+    if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
+    const cycleId = decodeURIComponent(tradeChartStateMatch[1]);
+    if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {
+      return authResult(404, { error: "not_found" });
+    }
+    if (!authOriginAllowed(deps.config, headers)) return authResult(403, { error: "invalid_request" });
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return authResult(400, { error: "invalid_trade_chart_request" });
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 32 * 1024) return authResult(413, { error: "request_too_large" });
+    return authResult(200, {
+      chart_state: await deps.tradingWorkbench.saveChartState(actor.id, cycleId, payload, bearer(headers)),
+    });
+  }
+  const tradeFillAnnotationMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/fills\/([1-9]\d{0,29})\/annotation$/i);
+  if (tradeFillAnnotationMatch?.[1] && tradeFillAnnotationMatch[2]) {
+    if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
+    const cycleId = decodeURIComponent(tradeFillAnnotationMatch[1]);
+    if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {
+      return authResult(404, { error: "not_found" });
+    }
+    if (!authOriginAllowed(deps.config, headers)) return authResult(403, { error: "invalid_request" });
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return authResult(400, { error: "invalid_trade_chart_request" });
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 32 * 1024) return authResult(413, { error: "request_too_large" });
+    return authResult(200, {
+      annotation: await deps.tradingWorkbench.saveFillAnnotation(
+        actor.id,
+        cycleId,
+        tradeFillAnnotationMatch[2],
+        payload,
+        bearer(headers),
+      ),
+    });
   }
   const tradingAiReviewMatch = path.match(/^\/v1\/user\/trading-trades\/([^/]+)\/ai-review$/);
   if (method === "POST" && tradingAiReviewMatch?.[1]) {

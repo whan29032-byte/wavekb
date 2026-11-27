@@ -1,4 +1,14 @@
-import type { ExchangeConnectionView, TradeCycleView, TradePlanCompliance, TradingMetricSummary, TradingRange } from "@wavekb/domain/trading-review";
+import type {
+  ChartStateV1,
+  ExchangeConnectionView,
+  FillMarkerAnnotationV1,
+  TradeChartProjection,
+  TradeChartTimeframe,
+  TradeCycleView,
+  TradePlanCompliance,
+  TradingMetricSummary,
+  TradingRange,
+} from "@wavekb/domain/trading-review";
 
 export type WorkbenchHeadline = { key: string; label: string; value: string };
 export type WorkbenchAttribution = { key: string; label: string; trade_count: number; net_pnl_usd: string | null };
@@ -43,6 +53,36 @@ export type SaveTradingReviewInput = {
   tags: string[];
   planned_stop_price: string | null;
   planned_risk_amount: string | null;
+};
+
+export type GetTradeChartInput = {
+  timeframe: TradeChartTimeframe;
+  from: string;
+  to: string;
+};
+
+export type SaveTradeChartStateInput = Pick<ChartStateV1,
+  "cycle_revision" | "schema_version" | "timeframe" | "price_type" | "viewport" | "indicators" | "drawings"
+> & {
+  expected_version: number;
+  expected_updated_at: string | null;
+};
+
+export type SaveTradeFillAnnotationImageInput = {
+  id: string;
+  storage_path: string;
+  mime_type: "image/jpeg" | "image/png" | "image/webp";
+  byte_size: number;
+};
+
+export type SaveTradeFillAnnotationInput = {
+  annotation_id: string;
+  cycle_revision: number;
+  body: string;
+  tags: string[];
+  images: SaveTradeFillAnnotationImageInput[];
+  expected_version: number;
+  deleted: boolean;
 };
 
 export type TradeReviewAiCitation = {
@@ -97,6 +137,39 @@ export async function getTradingWorkbench(input: { range: TradingRange; provider
 export async function getTradingTrade(id: string, timezone: string) {
   const query = new URLSearchParams({ timezone });
   return json<TradingTradeDetail>(await fetch(`/api/trading/trades/${encodeURIComponent(id)}?${query}`, { cache: "no-store" }), "detail");
+}
+
+export async function getTradeChart(id: string, input: GetTradeChartInput) {
+  const query = new URLSearchParams({
+    timeframe: input.timeframe,
+    from: input.from,
+    to: input.to,
+  });
+  return json<TradeChartProjection>(await fetch(
+    `/api/trading/trades/${encodeURIComponent(id)}/chart?${query}`,
+    { cache: "no-store" },
+  ), "chart");
+}
+
+export async function saveTradeChartState(id: string, input: SaveTradeChartStateInput) {
+  return json<ChartStateV1>(await fetch(`/api/trading/trades/${encodeURIComponent(id)}/chart-state`, {
+    method: "PUT",
+    cache: "no-store",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  }), "chart_state");
+}
+
+export async function saveTradeFillAnnotation(id: string, fillId: string, input: SaveTradeFillAnnotationInput) {
+  return json<FillMarkerAnnotationV1>(await fetch(
+    `/api/trading/trades/${encodeURIComponent(id)}/fills/${encodeURIComponent(fillId)}/annotation`,
+    {
+      method: "PUT",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  ), "annotation");
 }
 
 export async function saveTradingReview(id: string, input: SaveTradingReviewInput) {
