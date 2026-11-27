@@ -271,3 +271,210 @@ test("marker comments bind to a live snapshot, replies inherit the marker, and m
   await asRole(db, "authenticated", reader);
   await assert.rejects(add(post, marker), /invalid_strategy_comment_marker/);
 }));
+
+const connection = "88888888-8888-4888-8888-888888888888";
+
+async function withPublishContract(run) {
+  await fixture(async (db) => {
+    // The private chart ABI is already exercised with its real migrations in
+    // trade-chart-private-postgres.test.mjs. This fixture gives the public
+    // wrapper current owner-bound facts and real relational write targets.
+    await db.exec(`
+      alter table public.posts add column board text, add column title text, add column body text;
+      alter table public.profiles add column public_uid integer, add column account_status text default 'active',
+        add column muted_until timestamptz;
+      update public.profiles set public_uid = 33333;
+      create table auth.users(id uuid primary key, email_confirmed_at timestamptz);
+      insert into auth.users select id, now() from public.profiles;
+      create table public.exchange_connections(
+        id uuid primary key, owner_id uuid not null, status text not null, sync_generation bigint not null
+      );
+      insert into public.exchange_connections values ('${connection}', '${owner}', 'active', 3);
+      alter table public.trading_trade_cycles
+        add column connection_id uuid references public.exchange_connections(id),
+        add column provider text default 'binance', add column product text default 'usdt_perpetual',
+        add column symbol text default 'BTCUSDT', add column direction text default 'long',
+        add column entry_price numeric(38,18) default 70000.123456789012345678,
+        add column exit_price numeric(38,18) default 72000.876543210987654321,
+        add column quantity numeric(38,18) default 0.010000000000000001,
+        add column net_pnl numeric(38,18) default 12.345678901234567891,
+        add column completeness text default 'complete', add column account_currency text default 'USDT',
+        add column opened_at timestamptz default '2026-11-26T00:00:03Z',
+        add column closed_at timestamptz default '2026-11-26T00:00:40Z',
+        add column is_current boolean default true, add column generation bigint default 3;
+      update public.trading_trade_cycles set connection_id = '${connection}';
+      create table public.test_chart_facts(cycle_id uuid primary key, chart_state jsonb, notes jsonb, price jsonb);
+      insert into public.test_chart_facts values ('${cycle}',
+        '{"version":2,"price_type":"mark","drawings":[{"id":"saved","tool":"trend-line"}]}',
+        '[{"version":1,"body":"private memo"}]', '"70000.123456789012345678"');
+      create function public.load_private_trade_chart_facts(p_owner_id uuid, p_cycle_id uuid)
+      returns jsonb language sql stable as $$
+        select jsonb_build_object(
+          'chart_state', f.chart_state, 'annotations', f.notes, 'fills', jsonb_build_array(f.price),
+          'snapshot_token', jsonb_build_object('sync_generation', conn.sync_generation)
+        )
+        from public.test_chart_facts f
+        join public.trading_trade_cycles c on c.id = f.cycle_id
+        join public.exchange_connections conn on conn.id = c.connection_id and conn.owner_id = c.owner_id
+        where c.id = p_cycle_id and c.owner_id = p_owner_id and c.is_current and c.generation = conn.sync_generation
+          and conn.status <> 'deleting'
+      $$;
+    `);
+    await db.exec(await migration("202611270004_public_strategy_publish.sql"));
+    await run(db);
+  });
+}
+
+async function readSource(db, actor = owner, tradeId = cycle) {
+  return (await db.query("select public.load_public_strategy_share_source($1,$2) as value", [actor, tradeId])).rows[0]?.value;
+}
+
+async function addPublishPreview(db, {
+  hash = tokenHash, key = idempotencyKey, tradeId = cycle, fingerprint, age = 0, payload = projection,
+} = {}) {
+  const source = await readSource(db, owner, tradeId);
+  return db.query(`
+    insert into public.strategy_share_previews (
+      owner_id, cycle_id, cycle_revision, source_fill_digest, chart_state_version, source_fingerprint,
+      token_hash, idempotency_key, projection_digest, projection, created_at, expires_at
+    ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+      clock_timestamp() - ($11::integer * interval '1 minute'),
+      clock_timestamp() - ($11::integer * interval '1 minute') + interval '14 minutes')
+  `, [owner, tradeId, source.revision, source.fill_digest, source.chart_state_version,
+    fingerprint ?? source.source_fingerprint, hash, key, digest, JSON.stringify(payload), age]);
+}
+
+async function publishPreview(db, {
+  actor = owner, tradeId = cycle, hash = tokenHash, key = idempotencyKey, expectedDigest = digest,
+  board = "idea_sharing", title = "Equal preview and publication", body = "This body follows the same existing post rules.",
+  predecessor = null,
+} = {}) {
+  return (await db.query("select public.publish_public_strategy_preview($1,$2,$3,$4,$5,$6,$7,$8,$9) as value",
+    [actor, tradeId, hash, key, expectedDigest, board, title, body, predecessor])).rows[0]?.value;
+}
+
+test("a service-only source fingerprint uses owner, private annotations, saved studies and exact decimal facts", async () => withPublishContract(async (db) => {
+  await asRole(db, "service_role");
+  assert.equal(await readSource(db, reader), null);
+  const original = await readSource(db);
+  assert.equal(original.trade.entry_price, "70000.123456789012345678");
+  assert.equal(original.trade.quantity, "0.010000000000000001");
+  assert.equal(original.trade.net_pnl, "12.345678901234567891");
+  assert.equal(original.chart_state_version, 2);
+  assert.equal(original.price_type, "mark");
+  assert.deepEqual(original.drawings, [{ id: "saved", tool: "trend-line" }]);
+  assert.match(original.source_fingerprint, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(JSON.stringify(original), /private memo/);
+  await asRole(db);
+  await db.exec("set timezone to 'Asia/Shanghai'");
+  assert.equal((await readSource(db)).source_fingerprint, original.source_fingerprint);
+  await db.exec("update public.test_chart_facts set notes = '[{\"version\":2,\"body\":\"changed\"}]'");
+  const noteEdited = await readSource(db);
+  assert.notEqual(noteEdited.source_fingerprint, original.source_fingerprint);
+  await db.exec("update public.trading_trade_cycles set entry_price = entry_price + 0.000000000000000001");
+  assert.notEqual((await readSource(db)).source_fingerprint, noteEdited.source_fingerprint);
+  for (const role of ["anon", "authenticated"]) {
+    await asRole(db, role, owner);
+    await assert.rejects(readSource(db), /permission denied/);
+    await assert.rejects(publishPreview(db), /permission denied/);
+  }
+}));
+
+test("publish atomically persists the exact preview, creates one visible post and does not repeat on retry", async () => withPublishContract(async (db) => {
+  await asRole(db, "service_role");
+  await addPublishPreview(db);
+  const saved = await publishPreview(db);
+  assert.equal(saved.replayed, false);
+  await asRole(db, "anon");
+  const read = (await db.query("select post_id, projection, projection_digest from public.public_strategy_snapshots")).rows;
+  assert.deepEqual(read, [{ post_id: saved.post_id, projection, projection_digest: digest }]);
+  await asRole(db);
+  await db.exec(`
+    update public.trading_trade_cycles set revision = 2;
+    alter table public.strategy_share_previews disable trigger guard_strategy_share_preview_consumption;
+    update public.strategy_share_previews set
+      created_at = created_at - interval '1 hour', expires_at = expires_at - interval '1 hour',
+      consumed_at = consumed_at - interval '1 hour';
+    alter table public.strategy_share_previews enable trigger guard_strategy_share_preview_consumption;
+  `);
+  await asRole(db, "service_role");
+  assert.deepEqual(await publishPreview(db), { ...saved, replayed: true });
+  await assert.rejects(publishPreview(db, { expectedDigest: "b".repeat(64) }), /public_strategy_preview_stale/);
+  await assert.rejects(publishPreview(db, { key: snapshot }), /public_strategy_preview_consumed/);
+  await asRole(db);
+  assert.equal((await db.query("select count(*)::integer as count from public.posts where status = 'published' and chart_package is not null")).rows[0].count, 1);
+  await db.query("update public.posts set status='hidden' where id=$1", [saved.post_id]);
+  await asRole(db, "service_role");
+  await assert.rejects(publishPreview(db), /public_strategy_preview_consumed/);
+}));
+
+test("publish handles retries and rejects stale, expired and cross-owner previews", async () => withPublishContract(async (db) => {
+  await asRole(db, "service_role");
+  await addPublishPreview(db);
+  await assert.rejects(publishPreview(db, { actor: reader }), /public_strategy_preview_not_found/);
+  await assert.rejects(publishPreview(db, { board: "unsupported" }), /public_strategy_publish_invalid/);
+  await assert.rejects(publishPreview(db, { predecessor: ordinaryPost }), /public_strategy_publish_invalid/);
+  await asRole(db);
+  await db.exec("update public.test_chart_facts set notes = '[{\"version\":2,\"body\":\"new\"}]'");
+  await asRole(db, "service_role");
+  await assert.rejects(publishPreview(db), /public_strategy_preview_stale/);
+  await addPublishPreview(db, { hash: "b".repeat(64), key: snapshot, age: 30 });
+  await assert.rejects(publishPreview(db, { hash: "b".repeat(64), key: snapshot }), /public_strategy_preview_expired/);
+  const fresh = { hash: "c".repeat(64), key: ordinaryPost };
+  await addPublishPreview(db, fresh);
+  const [a, b] = await Promise.all([publishPreview(db, fresh), publishPreview(db, fresh)]);
+  assert.deepEqual(b, { ...a, replayed: true });
+  await asRole(db);
+  await db.query("update public.profiles set account_status='banned' where id=$1", [owner]);
+  await asRole(db, "service_role");
+  await assert.rejects(publishPreview(db, fresh), /public_strategy_publish_forbidden/);
+}));
+
+test("a successor must belong to the same source and leaves its predecessor visible", async () => withPublishContract(async (db) => {
+  await asRole(db, "service_role");
+  await addPublishPreview(db);
+  const first = await publishPreview(db);
+  const next = { hash: "b".repeat(64), key: snapshot, predecessor: first.post_id };
+  await addPublishPreview(db, next);
+  const second = await publishPreview(db, next);
+  await asRole(db, "anon");
+  const { rows } = await db.query(
+    "select post_id, supersedes_post_id from public.public_strategy_snapshots where post_id = any($1::uuid[])",
+    [[first.post_id, second.post_id]],
+  );
+  assert.deepEqual(new Map(rows.map(({ post_id, supersedes_post_id }) => [post_id, supersedes_post_id])),
+    new Map([[first.post_id, null], [second.post_id, first.post_id]]));
+
+  await asRole(db);
+  const otherCycle = "43224564-a4f2-4efa-a544-e186d281e254";
+  await db.query(`insert into public.trading_trade_cycles (id, owner_id, connection_id, fill_digest, revision)
+    values ($1,$2,$3,'another-private-digest',1)`,
+    [otherCycle, owner, connection]);
+  await db.query(`insert into public.test_chart_facts (cycle_id,chart_state,notes,price)
+    select $1,chart_state,notes,price from public.test_chart_facts where cycle_id=$2`, [otherCycle, cycle]);
+  await asRole(db, "service_role");
+  const wrongSource = { hash: "c".repeat(64), key: ordinaryPost, tradeId: otherCycle, predecessor: first.post_id };
+  await addPublishPreview(db, wrongSource);
+  await assert.rejects(publishPreview(db, wrongSource), /public_strategy_publish_invalid/);
+}));
+
+test("a failed activation rolls back the post, snapshot, source and preview consumption", async () => withPublishContract(async (db) => {
+  await asRole(db, "service_role");
+  await addPublishPreview(db);
+  await asRole(db);
+  await db.exec(`create function public.test_reject_publication() returns trigger language plpgsql as $$
+    begin if new.status = 'published' then raise exception 'activation_fixture_failure'; end if; return new; end $$;
+    create trigger test_reject_publication before update of status on public.posts for each row
+      execute function public.test_reject_publication();`);
+  await asRole(db, "service_role");
+  await assert.rejects(publishPreview(db), /activation_fixture_failure/);
+  assert.equal((await db.query("select count(*)::integer as count from public.posts")).rows[0].count, 2);
+  assert.deepEqual((await db.query("select * from public.public_strategy_snapshots")).rows, []);
+  assert.deepEqual((await db.query("select * from public.trading_post_sources")).rows, []);
+  assert.deepEqual((await db.query("select consumed_at,published_post_id from public.strategy_share_previews")).rows,
+    [{ consumed_at: null, published_post_id: null }]);
+  await asRole(db);
+  await db.exec("drop trigger test_reject_publication on public.posts");
+  await asRole(db, "service_role");
+  assert.equal((await publishPreview(db)).replayed, false);
+}));
