@@ -421,7 +421,8 @@ function validateProjectionCoverage(value: unknown, projection: Record<string, u
       || coverage.unavailable_reason !== null) invalid("coverage_empty");
   } else {
     if (coverage.source === null || coverage.fetched_at === null || coverage.unavailable_reason !== null) invalid("coverage_available");
-    if (coverage.status === "gapped" ? coverage.gaps.length === 0 : coverage.gaps.length > 0) invalid("coverage_gaps");
+    if ((coverage.status === "gapped" && coverage.gaps.length === 0)
+      || (coverage.status !== "gapped" && coverage.status !== "partial" && coverage.gaps.length > 0)) invalid("coverage_gaps");
   }
 }
 

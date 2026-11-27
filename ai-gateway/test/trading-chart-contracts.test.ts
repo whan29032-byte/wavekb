@@ -419,6 +419,34 @@ test("rejects false candle coverage evidence and accepts explicit empty coverage
   assert.equal(assertTradeChartProjection(empty), empty);
 });
 
+test("accepts partial projection coverage with a real internal gap and rejects gaps on incompatible statuses", () => {
+  const partial = structuredClone(validProjection()) as Record<string, any>;
+  partial.range.to = "2026-11-24T08:02:00.000Z";
+  partial.candles.push({
+    ...structuredClone(partial.candles[0]),
+    open_time: "2026-11-24T08:00:00.000Z",
+    close_time: "2026-11-24T08:01:00.000Z",
+    source_timestamp: "2026-11-24T08:00:00.000Z",
+    gap_before: true,
+    gap_after: false,
+  });
+  partial.coverage.status = "partial";
+  partial.warnings = ["historical_gap", "partial_coverage", "time_limit_reached"];
+  assert.equal(assertTradeChartProjection(partial), partial);
+
+  for (const status of ["complete", "stale", "empty", "unavailable"]) {
+    const invalid = structuredClone(partial);
+    invalid.coverage.status = status;
+    if (status === "empty" || status === "unavailable") invalid.candles = [];
+    if (status === "unavailable") {
+      invalid.coverage.source = null;
+      invalid.coverage.fetched_at = null;
+      invalid.coverage.unavailable_reason = "implementation_pending";
+    }
+    assert.throws(() => assertTradeChartProjection(invalid));
+  }
+});
+
 test("rejects hidden and symbol-keyed chart fields", () => {
   const hiddenField = validProjection() as unknown as Record<string, any>;
   Object.defineProperty(hiddenField, "raw_provider_response", { value: {}, enumerable: false });

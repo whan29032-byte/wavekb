@@ -206,6 +206,29 @@ test("returns structured Binance time-limit coverage when the whole fetch deadli
   assert.equal(batch.warnings.includes("historical_gap"), false);
 });
 
+test("keeps Binance response body reads inside the shared fetch deadline", async (t) => {
+  const controller = new AbortController();
+  t.mock.method(AbortSignal, "timeout", () => controller.signal);
+  let calls = 0;
+  const adapter = new BinanceTradingProviderAdapter("https://fapi.binance.com", async () => {
+    calls += 1;
+    if (calls === 1) return json([binanceKline(candleStart)]);
+    const response = new Response(null, { status: 200 });
+    response.json = async () => {
+      controller.abort();
+      throw new Error("private upstream body");
+    };
+    return response;
+  }, () => candleStart + 5 * minute);
+
+  const batch = await adapter.fetchCandles(account(), candleRequest());
+  assert.equal(calls, 2);
+  assert.equal(batch.candles.length, 1);
+  assert.equal(batch.coverage.status, "partial");
+  assert.deepEqual(batch.warnings, ["partial_coverage", "time_limit_reached"]);
+  assert.equal(JSON.stringify(batch).includes("private upstream body"), false);
+});
+
 test("loads public USD-M trade candles through the gateway with exact pagination, deduplication, partial state, and gap evidence", async () => {
   const calls: Array<{ url: URL; init: RequestInit | undefined }> = [];
   const fetcher: typeof fetch = async (input, init) => {

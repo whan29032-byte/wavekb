@@ -281,7 +281,16 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
         }
         throw candleFailure("binance_unavailable", 503);
       }
-      const payload: unknown = await response.json().catch(() => null);
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        if (guard.signal.aborted) {
+          stopReason = "time_limit";
+          break;
+        }
+        payload = null;
+      }
       if (!response.ok) throw safeCandleError(response.status);
       if (!Array.isArray(payload)) throw candleFailure("binance_invalid_candles", 502);
       if (payload.length === 0) break;
