@@ -26,6 +26,7 @@ test("real HTTP enforces the chart raw-byte limit, preserves the AI limit, and c
     AI_SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString("base64"),
     AUTH_SITE_URL: "https://knowledge.example.com/",
     ALLOWED_WEB_ORIGINS: "https://knowledge.example.com",
+    TRADING_FILL_CHART_ENABLED: "true",
   });
   let chartSaves = 0;
   let aiEnqueues = 0;
