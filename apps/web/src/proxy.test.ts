@@ -21,6 +21,16 @@ it.each(["/community/idea_sharing", "/community/idea_sharing/new", "/community/p
   expect(boundary.session).toHaveBeenCalledWith(request);
 });
 
+it("keeps anonymous snapshot reads outside Supabase session refresh", async () => {
+  const request = new NextRequest("https://wavekb.com/api/public-strategies/11111111-1111-4111-8111-111111111111", {
+    headers: { cookie: "session=account-cookie" },
+  });
+  const response = await proxy(request);
+  expect(boundary.session).not.toHaveBeenCalled();
+  expect(response.headers.get("set-cookie")).toBeNull();
+  expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+});
+
 it.each(["/admin/users", "/friends", "/messages/abc", "/member/profile", "/tutoring/abc", "/mentor/manage", "/workbench", "/login", "/register", "/recover", "/community/idea_sharing/new", "/community/post/abc/edit"])("marks private route %s noindex at the HTTP boundary", async (pathname) => {
   const response = await proxy(new NextRequest(`https://wavekb.com${pathname}`));
 

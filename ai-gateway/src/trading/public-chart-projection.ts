@@ -1,56 +1,46 @@
 import { createHash, createHmac } from "node:crypto";
 import {
+  PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION,
+  PUBLIC_STRATEGY_MAX_BYTES,
+  PUBLIC_STRATEGY_RENDERER_VERSION,
+  PUBLIC_STRATEGY_SCHEMA_VERSION,
   TRADE_CHART_DRAWING_TOOL_SCHEMAS,
   TRADE_CHART_MAX_CANDLES,
   TRADE_CHART_MAX_DRAWINGS,
   TRADE_CHART_MAX_INDICATORS,
   TRADE_CHART_MAX_MARKERS,
+  isPublicStrategyText,
   type DrawingSpecV1,
   type DrawingStyleV1,
-  type FillMarker,
+  type IndicatorPoint,
+  type IndicatorSeries,
   type IndicatorSpecV1,
+  type PublicAmount,
+  type PublicAnnotation,
+  type PublicCandle,
+  type PublicIndicator,
+  type PublicMarker,
+  type PublicStrategyChoices,
+  type PublicStrategyProjection,
   type TradeChartCandleV1,
   type TradeChartProjection,
-  type TradeChartWarningCode,
   type TradeCycleView,
 } from "@wavekb/domain/trading-review";
 import { assertTradeChartProjection } from "./chart-contracts.ts";
 
-export const PUBLIC_STRATEGY_SCHEMA_VERSION = "wavekb-public-strategy-snapshot-v1";
-export const PUBLIC_STRATEGY_RENDERER_VERSION = "wavekb-public-trade-chart-v1";
-export const PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION = "openalgo-charts-2.7.5";
-export const PUBLIC_STRATEGY_MAX_BYTES = 4 * 1024 * 1024;
-
-type PublicAmount = { amount: string; currency: string };
-type PublicMarker = Pick<FillMarker, "marker_key" | "occurred_at" | "price" | "allocation_role" | "side" | "position_side" | "liquidity"> & {
-  quantity?: string;
-  absolute_pnl?: PublicAmount;
-};
-type PublicCandle = Pick<TradeChartCandleV1,
-  "series_basis" | "open_time" | "close_time" | "open" | "high" | "low" | "close" | "volume" | "status" | "gap_before" | "gap_after">;
-type PublicAnnotation = { marker_key: string; body: string; tags: string[] };
-type IndicatorPoint = { time: string; value: string | null };
-type IndicatorSeries = { points: IndicatorPoint[] };
-type PublicIndicator = {
-  id: string;
-  indicator_id: IndicatorSpecV1["indicatorId"];
-  settings?: IndicatorSpecV1["settings"];
-  pane_index?: number;
-  series: IndicatorSeries[];
-};
+export {
+  PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION,
+  PUBLIC_STRATEGY_MAX_BYTES,
+  PUBLIC_STRATEGY_RENDERER_VERSION,
+  PUBLIC_STRATEGY_SCHEMA_VERSION,
+  type PublicStrategyChoices,
+  type PublicStrategyProjection,
+} from "@wavekb/domain/trading-review";
 
 /** Frozen series in the indicator registry's declared output order. */
 export type ComputedStrategyIndicator = {
   instanceId: string;
   series: readonly { points: readonly IndicatorPoint[] }[];
-};
-
-export type PublicStrategyChoices = {
-  show_quantity?: boolean;
-  show_absolute_pnl?: boolean;
-  annotation_fill_ids?: readonly string[];
-  drawing_ids?: readonly string[];
-  indicator_instance_ids?: readonly string[];
 };
 
 export type PublicStrategyProjectionInput = {
@@ -63,26 +53,6 @@ export type PublicStrategyProjectionInput = {
   computedIndicators?: readonly ComputedStrategyIndicator[];
   /** Optional exact realized values from owner-bound fill facts. */
   fillPnl?: ReadonlyMap<string, string>;
-};
-
-export type PublicStrategyProjection = Pick<TradeChartProjection, "provider" | "product" | "symbol" | "direction" | "timeframe" | "price_type" | "range"> & {
-  schema_version: typeof PUBLIC_STRATEGY_SCHEMA_VERSION;
-  renderer_schema_version: typeof PUBLIC_STRATEGY_RENDERER_VERSION;
-  calculation_engine_version: typeof PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION;
-  snapshot_status: "closed" | "open_at_snapshot";
-  candles: PublicCandle[];
-  markers: PublicMarker[];
-  public_annotations: PublicAnnotation[];
-  indicators: PublicIndicator[];
-  drawings: DrawingSpecV1[];
-  coverage: Pick<TradeChartProjection["coverage"], "status" | "source" | "fetched_at" | "gaps">;
-  show_quantity: boolean;
-  show_absolute_pnl: boolean;
-  price_return_rate: string | null;
-  price_return_label: string;
-  warnings: Array<TradeChartWarningCode | "hidden_value_may_be_inferred">;
-  quantity?: string;
-  absolute_pnl?: PublicAmount;
 };
 
 const decimalPattern = /^-?(?:0|[1-9]\d{0,39})(?:\.\d{1,18})?$/;
@@ -109,11 +79,7 @@ function selectedIds(value: unknown, maximum: number) {
 }
 
 function publicText(value: string): string {
-  const comparison = value.normalize("NFKC").replace(/\s/g, "").toLowerCase();
-  if (/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\uD800-\uDFFF]/u.test(value)
-    || /(?:[<>]|https?:\/\/|ftp:\/\/|www\.|javascript:|data:|expression\(|url\(|-----begin|api[_-]?key[:=]|api[_-]?secret[:=]|private[_-]?key[:=]|authorization:bearer)/u.test(comparison)) {
-    invalid("text_unsafe");
-  }
+  if (!isPublicStrategyText(value)) invalid("text_unsafe");
   return value;
 }
 

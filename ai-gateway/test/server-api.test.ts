@@ -11,6 +11,59 @@ const config = loadConfig({
   AUTH_SITE_URL: "https://knowledge.example.com/",
 });
 
+test("strategy sharing writes are disabled by default and scoped to the authorized trade and origin", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const url = `/v1/user/trading-trades/${id}/share-preview`;
+  const headers = { authorization: "Bearer user-token", origin: "http://localhost:8765" };
+  const calls: unknown[] = [];
+  const chartSharing = {
+    async createPreview(...arguments_: unknown[]) { calls.push(arguments_); return { preview_token: "opaque" }; },
+    async publish() { throw Object.assign(new Error("public_strategy_preview_stale"), { statusCode: 409 }); },
+  } as any;
+  const disabled = buildServer({ config, api, chartSharing });
+  assert.equal((await disabled.inject({ method: "POST", url, headers, payload: {} })).statusCode, 404);
+  const enabled = buildServer({ config: {
+    ...config, TRADING_FILL_CHART_ENABLED: true, TRADING_PUBLIC_STRATEGIES_ENABLED: true,
+  }, api, chartSharing });
+  assert.equal((await enabled.inject({ method: "POST", url, payload: {} })).statusCode, 401);
+  assert.equal((await enabled.inject({ method: "POST", url, headers: { ...headers, origin: "https://foreign.example" }, payload: {} })).statusCode, 403);
+  assert.equal((await enabled.inject({ method: "POST", url, headers, payload: { body: "x".repeat(65_536) } })).statusCode, 413);
+  const created = await enabled.inject({ method: "POST", url, headers, payload: { cycle_revision: 2 } });
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.headers["cache-control"], "no-store");
+  assert.deepEqual(created.json(), { preview_token: "opaque" });
+  assert.deepEqual(calls, [["user-1", id, { cycle_revision: 2 }]]);
+  const stale = await enabled.inject({ method: "POST", url: url.replace("share-preview", "share-publish"), headers, payload: {} });
+  assert.equal(stale.statusCode, 409);
+  assert.deepEqual(stale.json(), { error: "public_strategy_preview_stale" });
+});
+
+test("public strategy cache revalidation requires a still-visible snapshot without an actor", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const url = `/v1/public/strategy-snapshots/${id}`;
+  const projectionDigest = "1".repeat(64);
+  let visible = true;
+  const server = buildServer({
+    config: { ...config, TRADING_PUBLIC_STRATEGIES_ENABLED: true },
+    async readPublicStrategy(snapshotId) {
+      assert.equal(snapshotId, id);
+      return visible ? {
+        id, post_id: "22222222-2222-4222-8222-222222222222", projection_digest: projectionDigest, projection: {},
+      } as any : null;
+    },
+  });
+  const result = await server.inject({ url });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.headers["cache-control"], "public, max-age=0, must-revalidate");
+  assert.equal(result.headers.etag, `"${projectionDigest}"`);
+  const request = { url, headers: { "if-none-match": result.headers.etag! } };
+  assert.equal((await server.inject(request)).statusCode, 304);
+  visible = false;
+  const removed = await server.inject(request);
+  assert.equal(removed.statusCode, 404);
+  assert.equal(removed.headers["cache-control"], "no-store");
+});
+
 let lastEnqueue: unknown[] = [];
 
 const api = {

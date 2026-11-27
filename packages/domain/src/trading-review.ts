@@ -54,6 +54,32 @@ export const TRADE_CHART_INDICATOR_IDS = [
 ] as const;
 export type TradeChartIndicatorId = (typeof TRADE_CHART_INDICATOR_IDS)[number];
 
+export const TRADE_CHART_INDICATOR_SETTING_KEYS: Readonly<Record<string, readonly string[]>> = {
+  sma: ["length", "source", "color", "timeframe"],
+  ema: ["length", "source", "color", "timeframe"],
+  wma: ["length", "source", "color", "timeframe"],
+  hma: ["length", "source", "color", "timeframe"],
+  vwap: ["anchor", "source", "offset", "calcMode", "showBand1", "bandMult1", "showBand2", "bandMult2", "showBand3", "bandMult3", "color", "band1Color", "band2Color", "band3Color"],
+  bollinger: ["length", "stdDev", "source", "basisColor", "bandColor", "timeframe"],
+  rsi: ["length", "source", "color", "overbought", "oversold", "bandColor", "timeframe"],
+  macd: ["fastPeriod", "slowPeriod", "signalPeriod", "source", "macdColor", "histUpColor", "histUpFadeColor", "histDownColor", "histDownFadeColor", "signalColor", "timeframe"],
+  stochastic: ["kPeriod", "kSmoothing", "dPeriod", "kColor", "dColor", "bandColor", "timeframe"],
+  adx: ["period", "adxPeriod", "adxColor", "plusColor", "minusColor", "timeframe"],
+  atr: ["period", "color", "timeframe"],
+  supertrend: ["period", "multiplier", "upColor", "downColor", "timeframe"],
+  ichimoku: ["conversionPeriod", "basePeriod", "laggingSpanPeriod", "displacement", "conversionColor", "baseColor", "spanAColor", "spanBColor", "laggingColor", "cloudUpColor", "cloudDownColor"],
+  donchian: ["length", "offset", "basisColor", "bandColor", "fillColor", "timeframe"],
+  "keltner-channel": ["length", "mult", "source", "exp", "bandsStyle", "atrlength", "basisColor", "bandColor", "fillColor", "timeframe"],
+  "chandelier-exit": ["length", "atrLength", "atrMultiplier", "longColor", "shortColor"],
+  zigzag: ["deviation", "color"],
+  "williams-fractals": ["periods", "showUp", "showDown", "upColor", "downColor"],
+  "pivot-points": ["kind", "frame", "showP", "show1", "show2", "show3", "show4", "show5", "pivotColor", "supportColor", "resistanceColor"],
+  cpr: ["pivotMode", "showDaily", "showWeekly", "showMonthly", "displaypivots", "displaysupport", "displayresistance", "displaycpr", "displayS1R1", "dPivotColor", "dSupportColor", "dResistanceColor", "dCprColor", "dFillColor", "wPivotColor", "wSupportColor", "wResistanceColor", "wCprColor", "wFillColor", "mPivotColor", "mSupportColor", "mResistanceColor", "mCprColor", "mFillColor"],
+  obv: ["color", "maType", "maLength", "bbMult", "maColor", "bbUpperColor", "bbLowerColor"],
+  mfi: ["period", "color", "bandColor"],
+  "chaikin-money-flow": ["length", "color"],
+};
+
 export const TRADE_CHART_BASIC_DRAWING_TOOL_IDS = [
   "trend-line", "ray", "horizontal-line", "vertical-line", "rectangle", "text", "long-position", "short-position",
 ] as const;
@@ -287,6 +313,70 @@ export type TradeChartProjection = {
   };
   warnings: TradeChartWarningCode[];
 };
+
+export const PUBLIC_STRATEGY_SCHEMA_VERSION = "wavekb-public-strategy-snapshot-v1";
+export const PUBLIC_STRATEGY_RENDERER_VERSION = "wavekb-public-trade-chart-v1";
+export const PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION = "openalgo-charts-2.7.5";
+export const PUBLIC_STRATEGY_MAX_BYTES = 4 * 1024 * 1024;
+
+export type PublicAmount = { amount: string; currency: string };
+export type PublicMarker = Pick<FillMarker, "marker_key" | "occurred_at" | "price" | "allocation_role" | "side" | "position_side" | "liquidity"> & {
+  quantity?: string;
+  absolute_pnl?: PublicAmount;
+};
+export type PublicCandle = Pick<TradeChartCandleV1,
+  "series_basis" | "open_time" | "close_time" | "open" | "high" | "low" | "close" | "volume" | "status" | "gap_before" | "gap_after">;
+export type PublicAnnotation = { marker_key: string; body: string; tags: string[] };
+export type IndicatorPoint = { time: string; value: string | null };
+export type IndicatorSeries = { points: IndicatorPoint[] };
+export type PublicIndicator = {
+  id: string;
+  indicator_id: IndicatorSpecV1["indicatorId"];
+  settings?: IndicatorSpecV1["settings"];
+  pane_index?: number;
+  series: IndicatorSeries[];
+};
+
+export type PublicStrategyChoices = {
+  show_quantity?: boolean;
+  show_absolute_pnl?: boolean;
+  annotation_fill_ids?: readonly string[];
+  drawing_ids?: readonly string[];
+  indicator_instance_ids?: readonly string[];
+};
+
+export type PublicStrategyProjection = Pick<TradeChartProjection, "provider" | "product" | "symbol" | "direction" | "timeframe" | "price_type" | "range"> & {
+  schema_version: typeof PUBLIC_STRATEGY_SCHEMA_VERSION;
+  renderer_schema_version: typeof PUBLIC_STRATEGY_RENDERER_VERSION;
+  calculation_engine_version: typeof PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION;
+  snapshot_status: "closed" | "open_at_snapshot";
+  candles: PublicCandle[];
+  markers: PublicMarker[];
+  public_annotations: PublicAnnotation[];
+  indicators: PublicIndicator[];
+  drawings: DrawingSpecV1[];
+  coverage: Pick<TradeChartProjection["coverage"], "status" | "source" | "fetched_at" | "gaps">;
+  show_quantity: boolean;
+  show_absolute_pnl: boolean;
+  price_return_rate: string | null;
+  price_return_label: string;
+  warnings: Array<TradeChartWarningCode | "hidden_value_may_be_inferred">;
+  quantity?: string;
+  absolute_pnl?: PublicAmount;
+};
+
+export type PublicStrategySnapshot = {
+  id: string;
+  post_id: string;
+  projection_digest: string;
+  projection: PublicStrategyProjection;
+};
+
+export function isPublicStrategyText(value: string): boolean {
+  const comparison = value.normalize("NFKC").replace(/\s/g, "").toLowerCase();
+  return !/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\uD800-\uDFFF]/u.test(value)
+    && !/(?:[<>]|https?:\/\/|ftp:\/\/|www\.|javascript:|data:|expression\(|url\(|-----begin|api[_-]?key[:=]|api[_-]?secret[:=]|private[_-]?key[:=]|authorization:bearer)/u.test(comparison);
+}
 
 export function isTradingProvider(value: unknown): value is TradingProvider {
   return typeof value === "string" && (TRADING_PROVIDERS as readonly string[]).includes(value);

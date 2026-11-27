@@ -27,7 +27,7 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-import { GET, PUT } from "./route";
+import { GET, POST, PUT } from "./route";
 
 const fetchMock = vi.fn();
 const cycleId = "22222222-2222-4222-8222-222222222222";
@@ -53,6 +53,14 @@ function write(path: string, body: object, origin = "https://wavekb.com") {
   });
 }
 
+function shareRequest(action: string, input: object, origin = "https://wavekb.com") {
+  return new NextRequest(`https://wavekb.com/api/trading/trades/${cycleId}/${action}?unexpected=query`, {
+    method: "POST",
+    headers: { origin, "sec-fetch-site": origin === "https://wavekb.com" ? "same-origin" : "cross-site", cookie: "must-not-forward", "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.stubEnv("AUTH_GATEWAY_INTERNAL_URL", "http://127.0.0.1:8787");
@@ -61,6 +69,43 @@ beforeEach(() => {
   boundary.configured = true;
   boundary.owner = "11111111-1111-4111-8111-111111111111";
   boundary.token = "private-user-token";
+});
+
+describe("private public-strategy writes", () => {
+  it.each(["share-preview", "share-publish"])("only forwards the authenticated POST %s", async (action) => {
+    const input = { cycle_revision: 7, preview_token: "preview-token" };
+    fetchMock.mockResolvedValue(upstream({ retained: true }, 200, { "set-cookie": "private=server" }));
+    const response = await POST(shareRequest(action, input), context("trades", cycleId, action));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`http://127.0.0.1:8787/v1/user/trading-trades/${cycleId}/${action}`, {
+      method: "POST", cache: "no-store", body: JSON.stringify(input),
+      headers: { authorization: "Bearer private-user-token", "content-type": "application/json" },
+    });
+  });
+
+  it("rejects new write routes for invalid IDs, methods, origins, users and body lengths", async () => {
+    const path = `trades/${cycleId}/share-preview`;
+    const route = context("trades", cycleId, "share-preview");
+    expect((await GET(request(path), route)).status).toBe(404);
+    expect((await POST(shareRequest("share-preview", {}), context("trades", "bad-id", "share-preview"))).status).toBe(404);
+    expect((await POST(shareRequest("share-preview", {}, "https://cross-origin.example"), route)).status).toBe(403);
+    expect((await POST(shareRequest("share-preview", { note: "汉".repeat(22 * 1024) }), route)).status).toBe(413);
+    boundary.owner = "";
+    expect((await POST(shareRequest("share-preview", {}), route)).status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes a rate limit retry delay without exposing other upstream headers", async () => {
+    fetchMock.mockResolvedValue(upstream({ error: "rate_limited" }, 429, { "retry-after": "30", "set-cookie": "private=session" }));
+    const response = await POST(shareRequest("share-preview", {}), context("trades", cycleId, "share-preview"));
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("30");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
 });
 
 afterEach(() => {

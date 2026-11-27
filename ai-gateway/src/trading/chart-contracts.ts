@@ -4,6 +4,7 @@ import {
   TRADE_CHART_DRAWING_TOOL_IDS,
   TRADE_CHART_DRAWING_TOOL_SCHEMAS,
   TRADE_CHART_INDICATOR_IDS,
+  TRADE_CHART_INDICATOR_SETTING_KEYS,
   TRADE_CHART_MAX_CANDLES,
   TRADE_CHART_MAX_DRAWING_POINTS,
   TRADE_CHART_MAX_DRAWINGS,
@@ -64,32 +65,6 @@ const utcTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const postgresTimestampPattern = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
 const safeSymbolPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 const colorPattern = /^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
-
-const indicatorSettingKeys: Readonly<Record<string, readonly string[]>> = {
-  sma: ["length", "source", "color", "timeframe"],
-  ema: ["length", "source", "color", "timeframe"],
-  wma: ["length", "source", "color", "timeframe"],
-  hma: ["length", "source", "color", "timeframe"],
-  vwap: ["anchor", "source", "offset", "calcMode", "showBand1", "bandMult1", "showBand2", "bandMult2", "showBand3", "bandMult3", "color", "band1Color", "band2Color", "band3Color"],
-  bollinger: ["length", "stdDev", "source", "basisColor", "bandColor", "timeframe"],
-  rsi: ["length", "source", "color", "overbought", "oversold", "bandColor", "timeframe"],
-  macd: ["fastPeriod", "slowPeriod", "signalPeriod", "source", "macdColor", "histUpColor", "histUpFadeColor", "histDownColor", "histDownFadeColor", "signalColor", "timeframe"],
-  stochastic: ["kPeriod", "kSmoothing", "dPeriod", "kColor", "dColor", "bandColor", "timeframe"],
-  adx: ["period", "adxPeriod", "adxColor", "plusColor", "minusColor", "timeframe"],
-  atr: ["period", "color", "timeframe"],
-  supertrend: ["period", "multiplier", "upColor", "downColor", "timeframe"],
-  ichimoku: ["conversionPeriod", "basePeriod", "laggingSpanPeriod", "displacement", "conversionColor", "baseColor", "spanAColor", "spanBColor", "laggingColor", "cloudUpColor", "cloudDownColor"],
-  donchian: ["length", "offset", "basisColor", "bandColor", "fillColor", "timeframe"],
-  "keltner-channel": ["length", "mult", "source", "exp", "bandsStyle", "atrlength", "basisColor", "bandColor", "fillColor", "timeframe"],
-  "chandelier-exit": ["length", "atrLength", "atrMultiplier", "longColor", "shortColor"],
-  zigzag: ["deviation", "color"],
-  "williams-fractals": ["periods", "showUp", "showDown", "upColor", "downColor"],
-  "pivot-points": ["kind", "frame", "showP", "show1", "show2", "show3", "show4", "show5", "pivotColor", "supportColor", "resistanceColor"],
-  cpr: ["pivotMode", "showDaily", "showWeekly", "showMonthly", "displaypivots", "displaysupport", "displayresistance", "displaycpr", "displayS1R1", "dPivotColor", "dSupportColor", "dResistanceColor", "dCprColor", "dFillColor", "wPivotColor", "wSupportColor", "wResistanceColor", "wCprColor", "wFillColor", "mPivotColor", "mSupportColor", "mResistanceColor", "mCprColor", "mFillColor"],
-  obv: ["color", "maType", "maLength", "bbMult", "maColor", "bbUpperColor", "bbLowerColor"],
-  mfi: ["period", "color", "bandColor"],
-  "chaikin-money-flow": ["length", "color"],
-};
 
 const booleanIndicatorSettings = new Set([
   "showBand1", "showBand2", "showBand3", "exp", "showUp", "showDown", "showP", "show1", "show2", "show3", "show4", "show5",
@@ -184,7 +159,7 @@ function color(value: unknown, field: string): void {
 function indicatorSettings(value: unknown, indicatorId: string, timeframe: TradeChartTimeframe): void {
   const settings = value === undefined ? {} : record(value, "indicator_settings");
   if (serializedBytes(settings, "indicator_settings") > 16_384) invalid("indicator_settings");
-  const allowed = indicatorSettingKeys[indicatorId];
+  const allowed = TRADE_CHART_INDICATOR_SETTING_KEYS[indicatorId];
   if (!allowed) invalid("indicator_id");
   exactKeys(settings, allowed, "indicator_settings");
   for (const [key, setting] of Object.entries(settings)) {

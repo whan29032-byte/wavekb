@@ -17,6 +17,8 @@ function destination(segments: string[], method: Method) {
   if (method === "PUT" && segments.length === 3 && segments[0] === "trades" && uuidPattern.test(segments[1] || "") && segments[2] === "chart-state") return `/v1/user/trading-trades/${segments[1]}/chart-state`;
   if (method === "PUT" && segments.length === 5 && segments[0] === "trades" && uuidPattern.test(segments[1] || "") && segments[2] === "fills" && fillIdPattern.test(segments[3] || "") && segments[4] === "annotation") return `/v1/user/trading-trades/${segments[1]}/fills/${segments[3]}/annotation`;
   if (method === "PUT" && segments.length === 3 && segments[0] === "trades" && segments[1] && segments[2] === "review") return `/v1/user/trading-trades/${encodeURIComponent(segments[1])}/review`;
+  if (method === "POST" && segments.length === 3 && segments[0] === "trades" && uuidPattern.test(segments[1] || "")
+    && (segments[2] === "share-preview" || segments[2] === "share-publish")) return `/v1/user/trading-trades/${segments[1]}/${segments[2]}`;
   if (method === "POST" && segments.length === 3 && segments[0] === "trades" && segments[1] && segments[2] === "ai-review") return `/v1/user/trading-trades/${encodeURIComponent(segments[1])}/ai-review`;
   return null;
 }
@@ -31,16 +33,24 @@ async function proxy(request: NextRequest, segments: string[], method: Method) {
   const [userResult, sessionResult] = await Promise.all([client.auth.getUser(), client.auth.getSession()]);
   const token = sessionResult.data.session?.access_token;
   if (!userResult.data.user || !token) return json({ error: "authentication_required" }, 401);
+  const shareWrite = method === "POST" && (target.endsWith("/share-preview") || target.endsWith("/share-publish"));
+  const bodyLimit = (shareWrite ? 64 : 32) * 1024;
   const declaredLength = Number(request.headers.get("content-length") || 0);
-  if (method !== "GET" && (!Number.isFinite(declaredLength) || declaredLength > 32 * 1024)) return json({ error: "payload_too_large" }, 413);
+  if (method !== "GET" && (!Number.isFinite(declaredLength) || declaredLength > bodyLimit)) return json({ error: "payload_too_large" }, 413);
   const body = method !== "GET" ? await request.text() : undefined;
-  if (body && new TextEncoder().encode(body).byteLength > 32 * 1024) return json({ error: "payload_too_large" }, 413);
+  if (body && new TextEncoder().encode(body).byteLength > bodyLimit) return json({ error: "payload_too_large" }, 413);
   const origin = (process.env.AUTH_GATEWAY_INTERNAL_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
   try {
     const upstream = await fetch(`${origin}${target}${method === "GET" ? request.nextUrl.search : ""}`, {
       method, cache: "no-store", headers: { authorization: `Bearer ${token}`, ...(method !== "GET" ? { "content-type": "application/json" } : {}) }, body,
     });
     const payload = await upstream.json().catch(() => ({ error: "request_failed" })) as object;
+    if (shareWrite && upstream.status === 429) {
+      const retryAfter = upstream.headers.get("retry-after");
+      if (retryAfter && /^\d{1,6}$/.test(retryAfter)) {
+        return NextResponse.json(payload, { status: 429, headers: { "cache-control": "no-store", "retry-after": retryAfter } });
+      }
+    }
     return json(payload, upstream.status);
   } catch { return json({ error: "trading_gateway_unavailable" }, 503); }
 }

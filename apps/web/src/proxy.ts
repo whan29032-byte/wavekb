@@ -3,6 +3,12 @@ import { isBoardSlug } from "@wavekb/domain";
 import { updateSession } from "@/lib/supabase/proxy";
 
 export async function proxy(request: NextRequest) {
+  if (/^\/api\/public-strategies\/[^/]+\/?$/.test(request.nextUrl.pathname)) {
+    // Keep public cache responses independent from Supabase cookie refresh.
+    const response = NextResponse.next();
+    response.headers.set("x-robots-tag", "noindex, nofollow");
+    return response;
+  }
   const boardRoute = /^\/community\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
   if (boardRoute) {
     let board = boardRoute[1];

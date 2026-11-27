@@ -1,13 +1,26 @@
-import type { ChartStateV1, FillMarkerAnnotationV1, TradeChartProjection } from "@wavekb/domain/trading-review";
+import type { ChartStateV1, FillMarkerAnnotationV1, PublicStrategyProjection, TradeChartProjection } from "@wavekb/domain/trading-review";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getPublicStrategySnapshot,
   getTradeChart,
+  previewPublicStrategy,
+  publishPublicStrategy,
   saveTradeChartState,
   saveTradeFillAnnotation,
 } from "./workbench-repository";
 
 const fetchMock = vi.fn();
 const cycleId = "22222222-2222-4222-8222-222222222222";
+const digest = "a".repeat(64);
+const previewInput = {
+  cycle_revision: 7, chart_state_version: 2, timeframe: "1h" as const,
+  from: "2026-11-01T00:00:00.000Z", to: "2026-11-02T00:00:00.000Z",
+  show_quantity: false, show_absolute_pnl: true, annotation_fill_ids: ["42"],
+};
+const publishInput = {
+  preview_token: "one-time-preview", idempotency_key: cycleId, projection_digest: digest,
+  board: "idea_sharing" as const, title: "复盘", body: "公开策略",
+};
 
 const projection = {
   schema_version: "wavekb-trade-chart-projection-v1",
@@ -77,6 +90,61 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("strategy share browser repository", () => {
+  it("fetches a public snapshot without session credentials", async () => {
+    fetchMock.mockResolvedValue(Response.json({ error: "not_found" }, { status: 404 }));
+    await expect(getPublicStrategySnapshot(cycleId)).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`/api/public-strategies/${cycleId}`, { credentials: "omit", cache: "no-cache" });
+  });
+
+  it("returns the generated preview and publishes with the original token and digest", async () => {
+    const { from, to } = previewInput;
+    const previewChart = {
+      schema_version: "wavekb-public-strategy-snapshot-v1", renderer_schema_version: "wavekb-public-trade-chart-v1",
+      calculation_engine_version: "openalgo-charts-2.7.5", provider: "binance", product: "usdt_perpetual", symbol: "BTC/USDT",
+      direction: "long", timeframe: "1h", price_type: "trade", range: { from, to }, snapshot_status: "closed",
+      candles: [{ series_basis: "trade", open_time: from, close_time: to, open: "25", high: "30", low: "25", close: "30", volume: null, status: "final", gap_before: false, gap_after: false }],
+      markers: [{ marker_key: "b".repeat(32), occurred_at: from, price: "25", allocation_role: "open", side: "buy", position_side: "long", liquidity: "maker" }],
+      coverage: { status: "complete", source: "public_api", fetched_at: to, gaps: [] }, public_annotations: [], indicators: [], drawings: [],
+      show_quantity: false, show_absolute_pnl: true, absolute_pnl: { amount: "0.15", currency: "USDT" },
+      price_return_label: "价格收益率", price_return_rate: "20", warnings: ["hidden_value_may_be_inferred"],
+    } satisfies PublicStrategyProjection;
+    const preview = {
+      preview_token: publishInput.preview_token, idempotency_key: publishInput.idempotency_key, projection_digest: digest,
+      expires_at: "2026-11-27T00:00:00.000Z", projection: previewChart,
+    };
+    const success = { post_id: cycleId, snapshot_id: cycleId, replayed: true };
+    fetchMock.mockResolvedValueOnce(Response.json(preview)).mockResolvedValueOnce(Response.json(success));
+    await expect(previewPublicStrategy(cycleId, previewInput)).resolves.toMatchObject({
+      preview_token: publishInput.preview_token, idempotency_key: cycleId, projection_digest: digest, projection: preview.projection,
+    });
+    await expect(publishPublicStrategy(cycleId, publishInput)).resolves.toEqual(success);
+    for (const [action, input] of [["share-preview", previewInput], ["share-publish", publishInput]] as const) {
+      expect(fetchMock).toHaveBeenCalledWith(`/api/trading/trades/${cycleId}/${action}`, {
+        method: "POST", cache: "no-store", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+      });
+    }
+  });
+
+  it.each([
+    [409, "public_strategy_preview_stale", "stale_preview"],
+    [410, "public_strategy_preview_expired", "expired_preview"],
+    [409, "public_strategy_preview_consumed", "consumed_preview"],
+    [400, "public_strategy_text_unsafe", "privacy_validation"],
+    [503, "trading_gateway_unavailable", "gateway_unavailable"],
+    [429, "rate_limited", "rate_limited"],
+  ])("provides a distinct browser error for %s %s", async (status, error, reason) => {
+    fetchMock.mockResolvedValue(Response.json({ error }, { status }));
+    await expect(publishPublicStrategy(cycleId, publishInput)).rejects.toMatchObject({ status, code: error, reason });
+  });
+
+  it("maps an interrupted publish to a retryable gateway error without modifying idempotency", async () => {
+    fetchMock.mockRejectedValue(new TypeError("private network failure"));
+    await expect(publishPublicStrategy(cycleId, publishInput)).rejects.toMatchObject({ reason: "gateway_unavailable" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
 
 describe("trade chart browser repository", () => {
   it("loads the owner projection with a bounded encoded query and no cache", async () => {

@@ -23,6 +23,9 @@ importers:
       '@wavekb/domain':
         specifier: workspace:*
         version: link:../packages/domain
+      openalgo-charts:
+        specifier: 2.7.5
+        version: 2.7.5
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

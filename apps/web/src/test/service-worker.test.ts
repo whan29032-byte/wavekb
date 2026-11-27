@@ -58,6 +58,7 @@ it.each([
   ["GET", "https://wavekb.com/knowledge?q=impulse"],
   ["GET", "https://cdn.wavekb.com/assets/book.png"],
   ["GET", "https://wavekb.com/api/health"],
+  ["GET", "https://wavekb.com/api/public-strategies/11111111-1111-4111-8111-111111111111"],
   ["GET", "https://wavekb.com/admin/users"],
   ["GET", "https://wavekb.com/friends"],
   ["GET", "https://wavekb.com/messages/abc"],

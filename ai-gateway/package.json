@@ -20,7 +20,8 @@
     "youtube:sync": "node src/youtube-sync-worker.ts"
   },
   "dependencies": {
-    "@wavekb/domain": "workspace:*"
+    "@wavekb/domain": "workspace:*",
+    "openalgo-charts": "2.7.5"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
