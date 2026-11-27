@@ -1,6 +1,7 @@
 import type { FillMarker, TradeChartProjection } from "@wavekb/domain/trading-review";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import { useLayoutEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { getTradeChart } from "@/lib/trading/workbench-repository";
 
 import { OpenAlgoTradeChart } from "./openalgo-trade-chart";
 
@@ -169,6 +170,26 @@ export const DarkTheme: Story = {
   name: "暗色主题",
   args: { projection: projection(shortMarkers, { direction: "short" }) },
   decorators: [(Story) => <DarkPreview><Story /></DarkPreview>],
+};
+
+function LayoutPersistenceFixture() {
+  const [value, setValue] = useState<TradeChartProjection | null>(null);
+  useEffect(() => {
+    let active = true;
+    const fixture = projection(longMarkers);
+    const { from, to } = fixture.range;
+    void getTradeChart(fixture.cycle_id, { timeframe: fixture.timeframe, from, to })
+      .then((loaded) => { if (active) setValue(loaded); })
+      .catch(() => { if (active) setValue(fixture); });
+    return () => { active = false; };
+  }, []);
+  return <OpenAlgoTradeChart projection={value} loading={value === null} />;
+}
+
+export const LayoutPersistence: Story = {
+  name: "图表对象保存",
+  args: { projection: projection(longMarkers) },
+  render: () => <LayoutPersistenceFixture />,
 };
 
 function DarkPreview({ children }: { children: ReactNode }) {
