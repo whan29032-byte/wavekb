@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -10,6 +11,41 @@ const assetFields = ["primary_figures", "figures", "supplement_figures", "source
 const referencedImages = new Set();
 const referencedBooks = new Set();
 const illustratedBookImages = new Set();
+
+const transientTransport = new Set([
+  "TimeoutError", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET",
+  "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH",
+]);
+
+async function probeAsset(url, mime, deadline) {
+  for (let attempt = 1; ; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { ok: false, status: 0, contentType: "", transport: "PROBE_DEADLINE" };
+    let response;
+    try {
+      response = await fetch(url, {
+        headers: { range: "bytes=0-31", accept: mime === "application/pdf" ? "application/pdf" : "image/*" },
+        signal: AbortSignal.timeout(Math.min(15_000, remaining)),
+      });
+    } catch (error) {
+      const causes = Array.isArray(error?.cause?.errors) ? error.cause.errors : [];
+      const codes = [error?.cause?.code, error?.code, ...causes.map((cause) => cause?.code), error?.name];
+      const transient = codes.find((code) => transientTransport.has(code));
+      if (transient && attempt < 3) {
+        await delay(Math.min(250 * attempt, Math.max(0, deadline - Date.now())));
+        continue;
+      }
+      const code = transient || codes.find((value) => typeof value === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value)) || "unknown";
+      return { ok: false, status: 0, contentType: "", transport: `${code}; ${attempt} attempt(s)` };
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    // The probe needs only status and headers; release the connection if a
+    // server ignores Range and sends the full image or PDF instead.
+    await response.body?.cancel().catch(() => undefined);
+    return { ok: response.ok, status: response.status, contentType };
+  }
+}
 
 for (const page of knowledge.pages || []) {
   for (const field of assetFields) {
@@ -59,14 +95,13 @@ if (productionOrigin && (referencedImages.size || referencedBooks.size) && !proc
     ...[...referencedBooks].sort().map((assetPath) => ({ assetPath, mime: "application/pdf" })),
   ];
   const failures = [];
+  // This runs after activation, so leave a bounded window for the rollback.
+  const deadline = Date.now() + 90_000;
   for (const { assetPath, mime } of assets) {
-    const response = await fetch(`${productionOrigin}/${assetPath}`, {
-      headers: { range: "bytes=0-31", accept: mime === "application/pdf" ? "application/pdf" : "image/*" },
-      signal: AbortSignal.timeout(15_000),
-    }).catch((error) => ({ ok: false, status: 0, headers: new Headers(), error }));
-    const contentType = response.headers.get("content-type") || "";
-    if (!response.ok || !contentType.toLowerCase().startsWith(mime)) {
-      failures.push(`${assetPath}: HTTP ${response.status}, ${contentType || "missing MIME"}`);
+    const result = await probeAsset(`${productionOrigin}/${assetPath}`, mime, deadline);
+    if (!result.ok || !result.contentType.toLowerCase().startsWith(mime)) {
+      failures.push(`${assetPath}: HTTP ${result.status}, ${result.contentType || "missing MIME"}${result.transport ? ` (${result.transport})` : ""}`);
+      if (result.transport) break;
     }
   }
   if (failures.length) {
