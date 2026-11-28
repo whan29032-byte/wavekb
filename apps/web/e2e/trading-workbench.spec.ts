@@ -36,6 +36,7 @@ test.describe("authenticated automatic trade review acceptance", () => {
     test.setTimeout(120_000);
     await login(page);
     await expect(page.getByTestId("workbench-dashboard")).toBeVisible();
+    await expect(page.getByRole("group", { name: "月度盈亏" })).toBeVisible();
 
     const providerFilter = page.getByLabel("交易平台", { exact: true }).first();
     await expect(providerFilter.locator("option")).toHaveCount(6);

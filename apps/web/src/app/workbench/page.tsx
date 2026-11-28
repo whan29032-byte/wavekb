@@ -5,7 +5,6 @@ import { requireActiveMember } from "@/lib/auth/dal";
 import { tradingWorkbenchV2Enabled } from "@/lib/trading/config";
 
 export const metadata: Metadata = { title: "交易工作台" };
-const pnlCalendarPilotUid = 33333;
 
 type WorkbenchSearchParams = {
   type?: string | string[];
@@ -20,7 +19,7 @@ export default async function WorkbenchPage({
 }) {
   const actor = await requireActiveMember("/workbench");
   if (await tradingWorkbenchV2Enabled()) {
-    return <TradingWorkbenchDashboard actorId={actor.id} pnlCalendarEnabled={actor.publicUid === pnlCalendarPilotUid} />;
+    return <TradingWorkbenchDashboard actorId={actor.id} />;
   }
   return <LegacyWorkbenchHome actorId={actor.id} searchParams={await searchParams} />;
 }

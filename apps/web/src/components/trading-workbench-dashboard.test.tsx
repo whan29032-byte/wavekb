@@ -75,7 +75,7 @@ describe("TradingWorkbenchDashboard", () => {
       ],
       trades: [...body.trades, { ...body.trades[0], id: "t3", symbol: "ETHUSDT", closed_at: "2026-11-24T20:00:00Z" }],
     })));
-    render(<TradingWorkbenchDashboard actorId="owner" pnlCalendarEnabled />);
+    render(<TradingWorkbenchDashboard actorId="owner" />);
     const calendar = await screen.findByRole("region", { name: "交易日历" });
     const byDate = (name: RegExp) => within(calendar).getByRole("button", { name });
     const loss = byDate(/2026-11-24.*-.*2\.50/);
@@ -104,7 +104,7 @@ describe("TradingWorkbenchDashboard", () => {
       ],
       trades: [{ ...body.trades[0], usd_net_pnl: "0.0001" }],
     })));
-    render(<TradingWorkbenchDashboard actorId="owner" pnlCalendarEnabled />);
+    render(<TradingWorkbenchDashboard actorId="owner" />);
     const calendar = await screen.findByRole("region", { name: "交易日历" });
     const loss = within(calendar).getByRole("button", { name: /2026-11-23.*亏损不足.*0\.01/ });
     const profit = within(calendar).getByRole("button", { name: /2026-11-24.*盈利不足.*0\.01/ });

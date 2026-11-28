@@ -32,19 +32,10 @@ describe("workbench page cutover", () => {
     expect(screen.queryByTestId("workbench-dashboard")).toBeNull();
   });
 
-  it("enables the heatmap for the authenticated pilot UID", async () => {
-    state.publicUid = 33333;
+  it.each([33333, 44444])("shows the signed heatmap for active member UID %s", async (uid) => {
+    state.publicUid = uid;
     vi.stubGlobal("fetch", async () => Response.json({ workbench }));
     render(await WorkbenchPage({ searchParams: Promise.resolve({}) }));
     expect(await screen.findByRole("button", { name: /2026-11-24.*2\.50/ })).toBeTruthy();
-  });
-
-  it("preserves the original calendar for other members regardless of query parameters", async () => {
-    vi.stubGlobal("fetch", async () => Response.json({ workbench }));
-    const searchParams = { type: "review", uid: "33333" };
-    render(await WorkbenchPage({ searchParams: Promise.resolve(searchParams) }));
-    await screen.findByRole("heading", { name: "交易日历" });
-    expect(screen.queryByRole("group", { name: "月度盈亏" })).toBeNull();
-    expect(screen.getByText("2026-11-24")).toBeTruthy();
   });
 });
