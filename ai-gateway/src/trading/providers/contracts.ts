@@ -32,6 +32,7 @@ export type ValidatedAccount = {
   account_currency: string;
   products: TradingProduct[];
   read_only_status: "verified" | "user_attested";
+  history_symbols?: readonly string[];
 };
 
 export type ProviderCapabilities = {
@@ -102,6 +103,7 @@ export type ProviderAccount = {
   account_currency: string;
   credentials: Readonly<Record<string, string>>;
   capabilities: ProviderCapabilities;
+  history_symbols?: readonly string[];
 };
 
 export type ProviderCursor = {

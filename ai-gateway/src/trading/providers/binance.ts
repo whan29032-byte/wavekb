@@ -193,6 +193,10 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
       ? account.accountAlias
       : `key-${createHash("sha256").update(resolved.apiKey).digest("hex").slice(0, 16)}`;
     const suffix = externalId.slice(-4).padStart(4, "0");
+    const symbols = Array.isArray(account.positions) ? account.positions.flatMap((position) => {
+      const symbol = position && typeof position === "object" ? position.symbol : undefined;
+      return typeof symbol === "string" && /^[A-Z0-9]{1,32}$/.test(symbol) ? [symbol] : [];
+    }) : [];
     return [{
       external_account_id: externalId,
       account_label: `Binance USD-M · ${suffix}`,
@@ -200,6 +204,7 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
       account_currency: "USDT",
       products: ["usdt_perpetual"],
       read_only_status: account.canTrade === false ? "verified" : "user_attested",
+      ...(symbols.length > 0 ? { history_symbols: [...new Set(symbols)] } : {}),
     }];
   }
 
@@ -229,7 +234,7 @@ export class BinanceTradingProviderAdapter implements TradingProviderAdapter {
     if (cursor.kind !== "time") throw Object.assign(new Error("binance_invalid_history_cursor"), { statusCode: 400 });
     const start = cursor.value === null ? this.now() - 90 * 24 * 60 * 60 * 1_000 : Number(cursor.value);
     if (!Number.isFinite(start)) throw Object.assign(new Error("binance_invalid_history_cursor"), { statusCode: 400 });
-    const page = await this.client(account.credentials).historyPage(start);
+    const page = await this.client(account.credentials).historyPage(start, account.history_symbols);
     return {
       payload: { connection_id: account.connection_id, trades: page.trades, income: page.income, exhausted: page.exhausted },
       cursor: { kind: "time", value: page.nextStartTime === null ? null : String(page.nextStartTime) },

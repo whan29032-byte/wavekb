@@ -199,6 +199,8 @@ test("web release follows the Gateway-owned cutover and requires authenticated t
 
 test("the activation updates public sharing independently and accepts the gateway's matching flag", (t) => {
   const activation = backendSteps.find((step) => /Activate gateway/.test(step.name));
+  assert.equal((backendWorkflow.on ?? backendWorkflow.true).workflow_dispatch.inputs.trading_fill_chart_scope?.default, "preserve");
+  assert.equal(activation.env.TRADING_FILL_CHART_SCOPE, "${{ inputs.trading_fill_chart_scope }}");
   const update = activation.run.match(/"\$TRADING_PUBLIC_STRATEGIES" <<'NODE'\n([\s\S]*?)\nNODE/)?.[1];
   const verify = activation.run.match(/if curl [^\n]*\/health \| \/usr\/bin\/node -e '\n([\s\S]*?)\n\s*' "\$RELEASE_SHA" "\$public_strategies_enabled"/)?.[1];
   assert.ok(update);
@@ -211,10 +213,26 @@ test("the activation updates public sharing independently and accepts the gatewa
   fs.writeFileSync(envFile, privateSettings);
   for (const [action, flag] of [["enable", "true"], ["disable", "false"]]) {
     const change = spawnSync(process.execPath, ["--input-type=module", "-", envFile,
-      ...Array(6).fill("preserve"), action], { encoding: "utf8", input: update });
+      "preserve", ...Array(6).fill("preserve"), action], { encoding: "utf8", input: update });
     assert.equal(change.status, 0, change.stderr);
     assert.equal(fs.readFileSync(envFile, "utf8"), `${privateSettings}TRADING_PUBLIC_STRATEGIES_ENABLED=${flag}\n`);
   }
+
+  for (const [scope, enable, pilot] of [["12345", "true", "12345"], ["all", "true", ""], ["disabled", "false", ""]]) {
+    const change = spawnSync(process.execPath, ["--input-type=module", "-", envFile,
+      scope, ...Array(7).fill("preserve")], { encoding: "utf8", input: update });
+    assert.equal(change.status, 0, change.stderr);
+    const applied = fs.readFileSync(envFile, "utf8");
+    assert.match(applied, new RegExp(`^TRADING_FILL_CHART_ENABLED=${enable}$`, "m"));
+    assert.match(applied, new RegExp(`^TRADING_FILL_CHART_PILOT_UIDS=${pilot}$`, "m"));
+    assert.match(applied, /^TRADING_PROVIDER_BINANCE_ENABLED=true$/m);
+    assert.match(applied, /^TRADING_PUBLIC_STRATEGIES_ENABLED=false$/m);
+  }
+  const existing = fs.readFileSync(envFile, "utf8");
+  const invalid = spawnSync(process.execPath, ["--input-type=module", "-", envFile,
+    "012345", ...Array(7).fill("preserve")], { encoding: "utf8", input: update });
+  assert.notEqual(invalid.status, 0);
+  assert.equal(fs.readFileSync(envFile, "utf8"), existing);
 
   const sha = "a".repeat(40);
   for (const [expectedFlag, actualFlag, accepted] of [
@@ -222,6 +240,16 @@ test("the activation updates public sharing independently and accepts the gatewa
   ]) {
     const health = { deployment: sha, features: { trading_fill_chart: true, trading_public_strategies: actualFlag } };
     const acceptance = spawnSync(process.execPath, ["-e", verify, sha, expectedFlag],
+      { encoding: "utf8", input: JSON.stringify(health) });
+    assert.equal(acceptance.status, accepted ? 0 : 1, acceptance.stderr);
+  }
+  for (const [scope, chart, pilot, accepted] of [
+    ["12345", false, true, true], ["12345", true, false, false],
+    ["all", true, false, true], ["all", false, true, false], ["disabled", false, false, true],
+  ]) {
+    const health = { deployment: sha, features: { trading_public_strategies: true,
+      trading_fill_chart: chart, trading_fill_chart_pilot: pilot } };
+    const acceptance = spawnSync(process.execPath, ["-e", verify, sha, "true", scope],
       { encoding: "utf8", input: JSON.stringify(health) });
     assert.equal(acceptance.status, accepted ? 0 : 1, acceptance.stderr);
   }

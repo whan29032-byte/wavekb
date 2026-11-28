@@ -70,6 +70,11 @@ on:
         type: choice
         default: preserve
         options: [preserve, enable, disable]
+      trading_fill_chart_scope:
+        description: "Preserve, disabled, all, or one active 5-6 digit WaveKB acceptance UID"
+        required: true
+        type: string
+        default: preserve
 
 permissions:
   contents: read
@@ -91,10 +96,12 @@ jobs:
       - name: Require main and explicit production confirmation
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
+          TRADING_FILL_CHART_SCOPE: ${{ inputs.trading_fill_chart_scope }}
         run: |
           set -Eeuo pipefail
           test "$GITHUB_REF" = refs/heads/main
           test "$CONFIRMATION" = DEPLOY_WAVEKB_BACKEND
+          case "$TRADING_FILL_CHART_SCOPE" in preserve|disabled|all) ;; *) [[ "$TRADING_FILL_CHART_SCOPE" =~ ^[1-9][0-9]{4,5}$ ]] ;; esac
 
       - name: Check out the release commit
         uses: actions/checkout@v4
@@ -567,17 +574,19 @@ jobs:
           TRADING_BITGET: ${{ inputs.trading_provider_bitget }}
           TRADING_EXNESS: ${{ inputs.trading_provider_exness }}
           TRADING_PUBLIC_STRATEGIES: ${{ inputs.trading_public_strategies }}
+          TRADING_FILL_CHART_SCOPE: ${{ inputs.trading_fill_chart_scope }}
           EXPECTED_SCHEMA_VERSION: ${{ steps.database_schema.outputs.marker }}
         run: |
           set -Eeuo pipefail
           [[ "$EXPECTED_SCHEMA_VERSION" =~ ^[0-9]{12}$ ]]
           case "$PRIVATE_RESEARCH" in preserve|enable|disable) ;; *) exit 1 ;; esac
           case "$MANAGED_AI" in preserve|enable|disable) ;; *) exit 1 ;; esac
+          case "$TRADING_FILL_CHART_SCOPE" in preserve|disabled|all) ;; *) [[ "$TRADING_FILL_CHART_SCOPE" =~ ^[1-9][0-9]{4,5}$ ]] ;; esac
           for trading_action in "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS" "$TRADING_PUBLIC_STRATEGIES"; do
             case "$trading_action" in preserve|enable|disable) ;; *) exit 1 ;; esac
           done
           ssh -i "$HOME/.ssh/deploy_key" -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' TRADING_CUTOVER='${TRADING_CUTOVER}' TRADING_BINANCE='${TRADING_BINANCE}' TRADING_OKX='${TRADING_OKX}' TRADING_BYBIT='${TRADING_BYBIT}' TRADING_BITGET='${TRADING_BITGET}' TRADING_EXNESS='${TRADING_EXNESS}' TRADING_PUBLIC_STRATEGIES='${TRADING_PUBLIC_STRATEGIES}' EXPECTED_SCHEMA_VERSION='${EXPECTED_SCHEMA_VERSION}' MANAGED_AI='${MANAGED_AI}' bash -s" <<'REMOTE'
+            "RELEASE_SHA='${RELEASE_SHA}' RUN_ID='${RUN_ID}' RUN_ATTEMPT='${RUN_ATTEMPT}' PRIVATE_RESEARCH='${PRIVATE_RESEARCH}' TRADING_CUTOVER='${TRADING_CUTOVER}' TRADING_BINANCE='${TRADING_BINANCE}' TRADING_OKX='${TRADING_OKX}' TRADING_BYBIT='${TRADING_BYBIT}' TRADING_BITGET='${TRADING_BITGET}' TRADING_EXNESS='${TRADING_EXNESS}' TRADING_PUBLIC_STRATEGIES='${TRADING_PUBLIC_STRATEGIES}' TRADING_FILL_CHART_SCOPE='${TRADING_FILL_CHART_SCOPE}' EXPECTED_SCHEMA_VERSION='${EXPECTED_SCHEMA_VERSION}' MANAGED_AI='${MANAGED_AI}' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           release_id="${RELEASE_SHA}-${RUN_ID}-${RUN_ATTEMPT}"
           release_root=/opt/elliott-wave-gateway
@@ -704,18 +713,23 @@ jobs:
               --backup-file "${backup_root}/gateway.env" "${runtime_arguments[@]}"
           fi
 
-          if test "$TRADING_CUTOVER" != preserve || test "$TRADING_BINANCE" != preserve || test "$TRADING_OKX" != preserve || test "$TRADING_BYBIT" != preserve || test "$TRADING_BITGET" != preserve || test "$TRADING_EXNESS" != preserve || test "$TRADING_PUBLIC_STRATEGIES" != preserve; then
+          if test "$TRADING_CUTOVER" != preserve || test "$TRADING_BINANCE" != preserve || test "$TRADING_OKX" != preserve || test "$TRADING_BYBIT" != preserve || test "$TRADING_BITGET" != preserve || test "$TRADING_EXNESS" != preserve || test "$TRADING_PUBLIC_STRATEGIES" != preserve || test "$TRADING_FILL_CHART_SCOPE" != preserve; then
             if ! sudo test -f "${backup_root}/gateway.env"; then
               sudo install -m 0600 /etc/elliott-wave/gateway.env "${backup_root}/gateway.env"
             fi
             sudo /usr/bin/node --input-type=module - /etc/elliott-wave/gateway.env \
-              "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS" "$TRADING_PUBLIC_STRATEGIES" <<'NODE'
+              "$TRADING_FILL_CHART_SCOPE" "$TRADING_CUTOVER" "$TRADING_BINANCE" "$TRADING_OKX" "$TRADING_BYBIT" "$TRADING_BITGET" "$TRADING_EXNESS" "$TRADING_PUBLIC_STRATEGIES" <<'NODE'
           import fs from "node:fs";
-          const [file, ...actions] = process.argv.slice(2);
+          const [file, chartScope, ...actions] = process.argv.slice(2);
           const names = ["TRADING_WORKBENCH_V2_ENABLED", "TRADING_PROVIDER_BINANCE_ENABLED", "TRADING_PROVIDER_OKX_ENABLED", "TRADING_PROVIDER_BYBIT_ENABLED", "TRADING_PROVIDER_BITGET_ENABLED", "TRADING_PROVIDER_EXNESS_ENABLED", "TRADING_PUBLIC_STRATEGIES_ENABLED"];
           if (!file || actions.length !== names.length || actions.some((action) => !["preserve", "enable", "disable"].includes(action))) process.exit(2);
+          if (!/^(?:preserve|disabled|all|[1-9]\d{4,5})$/.test(chartScope)) process.exit(2);
           const original = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean);
           const changes = new Map(names.flatMap((name, index) => actions[index] === "preserve" ? [] : [[name, actions[index] === "enable" ? "true" : "false"]]));
+          if (chartScope !== "preserve") {
+            changes.set("TRADING_FILL_CHART_ENABLED", chartScope === "disabled" ? "false" : "true");
+            changes.set("TRADING_FILL_CHART_PILOT_UIDS", /^\d+$/.test(chartScope) ? chartScope : "");
+          }
           const kept = original.filter((line) => ![...changes.keys()].some((name) => line.startsWith(`${name}=`)));
           const temporary = `${file}.trading-new`;
           const updated = [...kept, ...[...changes].map(([name, enabled]) => `${name}=${enabled}`)];
@@ -810,9 +824,12 @@ jobs:
           for attempt in 1 2 3 4 5 6 7 8; do
             if curl --fail --silent --show-error http://127.0.0.1:8787/health | /usr/bin/node -e '
               const health = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-              const [releaseSha, requestedFlag] = process.argv.slice(1);
+              const [releaseSha, requestedFlag, chartScope = "preserve"] = process.argv.slice(1);
               if (health.deployment !== releaseSha || (health.features?.trading_public_strategies === true) !== (requestedFlag === "true")) process.exit(1);
-            ' "$RELEASE_SHA" "$public_strategies_enabled"; then
+              if (chartScope !== "preserve" &&
+                  ((health.features?.trading_fill_chart === true) !== (chartScope === "all") ||
+                   (health.features?.trading_fill_chart_pilot === true) !== /^\d+$/.test(chartScope))) process.exit(1);
+            ' "$RELEASE_SHA" "$public_strategies_enabled" "$TRADING_FILL_CHART_SCOPE"; then
               accepted=1
               break
             fi

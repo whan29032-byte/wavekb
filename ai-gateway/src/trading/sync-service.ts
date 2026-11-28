@@ -383,6 +383,7 @@ export class TradingSyncService {
       account_currency: connection.account_currency,
       credentials,
       capabilities: connection.capabilities,
+      ...(selected.history_symbols ? { history_symbols: selected.history_symbols } : {}),
     };
   }
 
@@ -417,6 +418,10 @@ export class TradingSyncService {
         this.store.loadHistory(connection.id),
       ]);
       const initialCursor = this.initialCursor(connection, storedCursor);
+      const historySymbols = new Set(account.history_symbols);
+      if (connection.provider === "binance") {
+        for (const fill of history.fills) historySymbols.add(fill.native_symbol);
+      }
       let cursor = initialCursor;
       let publishedCursor = initialCursor;
       let freshFills: CanonicalFill[] = [];
@@ -427,8 +432,12 @@ export class TradingSyncService {
       let exhausted = false;
 
       for (let pageNumber = 0; pageNumber < this.maxPages; pageNumber += 1) {
-        const page = await adapter.fetchHistory(account, cursor);
+        const sourceAccount = historySymbols.size > 0 ? { ...account, history_symbols: [...historySymbols] } : account;
+        const page = await adapter.fetchHistory(sourceAccount, cursor);
         const normalized = assertCanonicalHistoryBatch(adapter.normalizeHistory(page));
+        if (connection.provider === "binance") {
+          for (const fill of normalized.fills) historySymbols.add(fill.native_symbol);
+        }
         freshFills = mergeById(freshFills, normalized.fills, (item) => item.native_fill_id);
         freshCash = mergeById(freshCash, normalized.cash_events, (item) => item.native_event_id);
         coverage = minTimestamp([coverage, normalized.coverage_started_at], snapshot.captured_at);

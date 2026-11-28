@@ -5,9 +5,10 @@ Gateway 使用 `TRADING_PUBLIC_STRATEGIES_ENABLED` 控制预览、发布和访�
 ## 发布顺序
 
 1. 核对目标环境的 `wavekb_schema_version()` 和本次提交。当前公开策略图迁移终点为 `202611270005`。后端工作流会校验前置版本、表权限、匿名读取条件和成交评论保护。
-2. 保持公开分享关闭，先应用数据库迁移，再发布同一提交的 Gateway 和 Next.js。后端工作流的 `trading_public_strategies` 选项默认保留已有配置。
-3. 在测试环境使用已激活 UID 和受支持的只读交易账户验证四种隐私组合、重复提交、隐藏帖子后的访客返回、评论和删除。
-4. 优先启用已批准的内测 UID。确认监测数据和只读回退后再开放分享功能。
+2. 在诊断工作流运行 `strategy-pilot-preflight`，确认专用验收账号已绑定可用的只读账户，并有完整的已平仓交易。
+3. 保持公开分享关闭，先应用数据库迁移，再发布同一提交的 Gateway 和 Next.js。后端工作流的 `trading_public_strategies` 和 `trading_fill_chart_scope` 默认保留已有配置。
+4. 验收时把 `trading_fill_chart_scope` 设为指定的 5–6 位 UID。验证四种隐私组合、重复提交、隐藏帖子后的访客返回、评论和删除。
+5. 验收通过后，将 `trading_fill_chart_scope` 设为 `all`，并确认 `trading_public_strategies` 已启用。
 
 ## 监测与关闭
 
