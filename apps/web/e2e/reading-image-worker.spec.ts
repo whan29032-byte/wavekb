@@ -139,26 +139,44 @@ test.describe("local browser without a reading worker", () => {
   test.describe("parser registration before hydration", () => {
     test.use({ serviceWorkers: "allow" });
 
-    test("real worker registration begins while stylesheets and all Next hydration scripts are still held", async ({ page, context }, testInfo) => {
-      expect(["127.0.0.1", "localhost", "[::1]"]).toContain(new URL(String(testInfo.project.use.baseURL)).hostname);
+    test("real worker registration begins while stylesheets are held and before any Next hydration script loads", async ({ page, context }, testInfo) => {
+      const baseUrl = new URL(String(testInfo.project.use.baseURL));
+      expect(["127.0.0.1", "localhost", "[::1]"]).toContain(baseUrl.hostname);
       expect(context.serviceWorkers()).toHaveLength(0);
-      let release!: () => void;
-      const held = new Promise<void>((resolve) => { release = resolve; });
+      let releaseStylesheets!: () => void;
+      let releaseHydrationScripts!: () => void;
+      const stylesheetsHeld = new Promise<void>((resolve) => { releaseStylesheets = resolve; });
+      const hydrationScriptsHeld = new Promise<void>((resolve) => { releaseHydrationScripts = resolve; });
       let heldStylesheets = 0;
       let heldHydrationScripts = 0;
-      await page.route((url) => url.pathname.startsWith("/_next/static/") && url.pathname.endsWith(".js"), async (route) => { heldHydrationScripts++; await held; await route.continue(); });
-      await page.route((url) => url.pathname.startsWith("/_next/static/") && url.pathname.endsWith(".css"), async (route) => { heldStylesheets++; await held; await route.continue(); });
+      let hydrationResponses = 0;
+      const isNextAsset = (url: URL) => url.origin === baseUrl.origin && url.pathname.startsWith("/_next/static/");
+      const isHydrationScript = (url: URL) => isNextAsset(url) && url.pathname.endsWith(".js");
+      page.on("response", (response) => {
+        if (isHydrationScript(new URL(response.url()))) hydrationResponses++;
+      });
+      // A controlled page's asset fetch may be issued by the worker itself.
+      await context.route(isHydrationScript, async (route) => { heldHydrationScripts++; await hydrationScriptsHeld; await route.continue(); });
+      await context.route((url) => isNextAsset(url) && url.pathname.endsWith(".css"), async (route) => { heldStylesheets++; await stylesheetsHeld; await route.continue(); });
       try {
         await page.goto(bookPath, { waitUntil: "commit" });
         await expect(page.locator("#wavekb-pwa-bootstrap")).toHaveCount(1);
+        await expect.poll(() => heldStylesheets).toBeGreaterThan(0);
         // A real installed controller, not a mocked registration or timing flag.
         await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL))
           .toBe(new URL("/sw.js", page.url()).href);
         expect(context.serviceWorkers()).toHaveLength(1);
-        expect(heldStylesheets).toBeGreaterThan(0);
-        expect(heldHydrationScripts).toBeGreaterThan(0);
+        expect(hydrationResponses).toBe(0);
+
+        // A stylesheet can block the parser before it requests hydration scripts.
+        // Let the parser advance only after proving early control, with JS still blocked.
+        releaseStylesheets();
+        await expect.poll(() => heldHydrationScripts).toBeGreaterThan(0);
+        expect(hydrationResponses).toBe(0);
       } finally {
-        release();
+        releaseStylesheets();
+        releaseHydrationScripts();
+        await context.unrouteAll({ behavior: "wait" });
       }
     });
   });
