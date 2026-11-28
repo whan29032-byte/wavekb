@@ -132,9 +132,7 @@ jobs:
       - name: Package immutable gateway release
         run: |
           set -Eeuo pipefail
-          printf '%s\n' "$GITHUB_SHA" > ai-gateway/DEPLOYMENT_VERSION
-          cp scripts/trading-release-preflight.mjs ai-gateway/release-preflight.mjs
-          tar -C ai-gateway -czf wavekb-gateway.tar.gz package.json src knowledge/retrieval-index.json DEPLOYMENT_VERSION release-preflight.mjs
+          node scripts/package-gateway-release.mjs "$GITHUB_SHA" wavekb-gateway.tar.gz
 
       - name: Configure pinned SSH access
         env:
