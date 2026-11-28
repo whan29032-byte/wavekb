@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { PostComment } from "@wavekb/domain";
 import { PostComments } from "./post-comments";
 
@@ -14,6 +14,8 @@ const props = {
 };
 
 describe("PostComments hydration guard", () => {
+  afterEach(cleanup);
+
   it("keeps native submission disabled until the client owns the form", () => {
     const html = renderToString(<PostComments {...props} />);
 
