@@ -5,7 +5,9 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { ArrowLeft, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
-import { Field, Input, Label, Textarea } from "@wavekb/ui";
+import { Button, Field, Input, Label, Textarea } from "@wavekb/ui";
+import { tradeXMarketForProjection } from "@/lib/trading/tradex-fill-markers";
+import { TradexTradeReview } from "./trading/tradex-trade-review";
 import {
   browserTimezone,
   getTradeChart,
@@ -62,10 +64,11 @@ function initialChartRequest(openedAt: string, closedAt: string | null) {
   };
 }
 
-export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled = false }: {
+export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled = false, liveMarketOrigin = null }: {
   tradeId: string;
   chartEnabled?: boolean;
   shareEnabled?: boolean;
+  liveMarketOrigin?: string | null;
 }) {
   const [detail, setDetail] = useState<TradingTradeDetail | null>(null);
   const [draft, setDraft] = useState<SaveTradingReviewInput | null>(null);
@@ -83,6 +86,7 @@ export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled
     loadError: "rate_limited" | "unavailable" | null;
   }>({ requestKey: "", projection: null, loadError: null });
   const [chartReloadToken, setChartReloadToken] = useState(0);
+  const [liveCycle, setLiveCycle] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -115,6 +119,7 @@ export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled
   const chartProjection = chartRequestKey !== null && chartResult.requestKey === chartRequestKey ? chartResult.projection : null;
   const chartLoadError = chartRequestKey !== null && chartResult.requestKey === chartRequestKey ? chartResult.loadError : null;
   const chartLoading = chartRequestKey !== null && chartResult.requestKey !== chartRequestKey;
+  const tradeXMarket = chartProjection && liveMarketOrigin ? tradeXMarketForProjection(chartProjection) : null;
 
   useEffect(() => {
     if (chartRequestKey === null || !chartCycleId || !chartOpenedAt) return;
@@ -218,6 +223,12 @@ export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled
       </section>
 
       {chartEnabled ? <div data-testid="trade-chart-boundary">
+        {tradeXMarket && liveMarketOrigin && chartProjection ? <div className="mb-6 grid gap-4">
+          <Button type="button" variant="secondary" className="w-fit" aria-expanded={liveCycle === tradeId}
+            onClick={() => setLiveCycle(liveCycle === tradeId ? null : tradeId)}>{liveCycle === tradeId ? "收起实时行情" : "在实时行情查看成交"}</Button>
+          {liveCycle === tradeId ? <TradexTradeReview key={`${tradeId}:${chartProjection.cycle_revision}`} origin={liveMarketOrigin}
+            market={tradeXMarket} projection={chartProjection} shareEnabled={shareEnabled} /> : null}
+        </div> : null}
         <DynamicOpenAlgoTradeChart
           projection={chartProjection}
           loading={chartLoading}

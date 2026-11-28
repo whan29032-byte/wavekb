@@ -7,11 +7,12 @@ const noSubscription = () => () => undefined;
 const noMarkers: readonly TradeXMarker[] = [];
 type Handshake = { session: string; epoch?: string };
 
-export function TradexMarketFrame({ origin, market, markers = noMarkers, onSelectMarker }: {
+export function TradexMarketFrame({ origin, market, markers = noMarkers, onSelectMarker, lockSymbol = false }: {
   origin: string;
   market: TradeXMarket;
   markers?: readonly TradeXMarker[];
   onSelectMarker?: (marker: string) => void;
+  lockSymbol?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const handshake = useRef<Handshake | null>(null);
@@ -33,7 +34,7 @@ export function TradexMarketFrame({ origin, market, markers = noMarkers, onSelec
       if (message.type === "ready") {
         if (current.epoch) return;
         current.epoch = message.epoch;
-        target.postMessage({ v: 1, type: "initialize", session: current.session, epoch: message.epoch, market }, childOrigin);
+        target.postMessage({ v: 1, type: "initialize", session: current.session, epoch: message.epoch, market, ...(lockSymbol ? { lockSymbol: true } : {}) }, childOrigin);
         setReady(current.session);
       } else if (current.epoch && markers.some(({ marker }) => marker === message.marker)) {
         onSelectMarker?.(message.marker);
@@ -41,7 +42,7 @@ export function TradexMarketFrame({ origin, market, markers = noMarkers, onSelec
     }
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [childOrigin, isolated, market, markers, onSelectMarker]);
+  }, [childOrigin, isolated, lockSymbol, market, markers, onSelectMarker]);
 
   useEffect(() => {
     if (!isolated || ready) return;

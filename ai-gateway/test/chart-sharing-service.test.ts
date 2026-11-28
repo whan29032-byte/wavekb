@@ -146,3 +146,30 @@ test("public reads use guest RLS, omit private metadata, and reject corrupt stor
   await assert.rejects(readPublicStrategySnapshot(configuration, snapshot,
     async () => Response.json([{ ...row, projection_digest: "1".repeat(64) }])), { statusCode: 503 });
 });
+
+test("a guest reads the frozen default share without private fills or edits made after publication", async () => {
+  const f = fixture();
+  const preview = await f.service.createPreview(owner, cycle, {
+    ...request, show_quantity: false, show_absolute_pnl: false,
+    annotation_fill_ids: [], drawing_ids: [], indicator_instance_ids: [],
+  });
+  await f.service.publish(owner, cycle, {
+    preview_token: preview.preview_token, idempotency_key: preview.idempotency_key, projection_digest: preview.projection_digest,
+    board: "case_submission", title: "我要验证的交易复盘", body: "发布确认后，这个快照应保持不变，不反映之后修改的交易备注。",
+  });
+  const persisted = structuredClone(f.saved()!.projection);
+  f.chart.markers[0]!.annotation!.body = "private update after publication";
+  f.chart.candles[0]!.close = "103";
+
+  const result = await readPublicStrategySnapshot({ SUPABASE_URL: "https://supabase.example", SUPABASE_PUBLISHABLE_KEY: "guest-key" }, snapshot,
+    async () => Response.json([{ id: snapshot, post_id: post, projection: persisted, projection_digest: preview.projection_digest }]));
+  const publicChart = result?.projection;
+  assert.ok(publicChart);
+  assert.equal(publicChart.candles[0]?.close, "102");
+  assert.deepEqual(publicChart.public_annotations, []);
+  assert.equal(Object.hasOwn(publicChart, "quantity"), false);
+  assert.equal(Object.hasOwn(publicChart, "absolute_pnl"), false);
+  assert.equal(Object.hasOwn(publicChart.markers[0]!, "quantity"), false);
+  assert.equal(Object.hasOwn(publicChart.markers[0]!, "fill_id"), false);
+  assert.doesNotMatch(JSON.stringify(publicChart), /private update after publication|可分享到复盘的备忘/);
+});

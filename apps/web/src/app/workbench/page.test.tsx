@@ -4,7 +4,10 @@ import WorkbenchPage from "./page";
 
 const state = vi.hoisted(() => ({ enabled: true, publicUid: 44444 }));
 vi.mock("@/lib/auth/dal", () => ({ requireActiveMember: async () => ({ id: "owner", publicUid: state.publicUid }) }));
-vi.mock("@/lib/trading/config", () => ({ tradingWorkbenchV2Enabled: async () => state.enabled }));
+vi.mock("@/lib/trading/config", async (original) => ({
+  ...await original<typeof import("@/lib/trading/config")>(),
+  tradingWorkbenchV2Enabled: async () => state.enabled,
+}));
 vi.mock("@/components/exchange-account-manager", () => ({ ExchangeAccountManager: () => null }));
 vi.mock("@/components/legacy-workbench-home", () => ({ LegacyWorkbenchHome: ({ actorId }: { actorId: string }) => <main data-testid="legacy">旧版私人记录 {actorId}</main> }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); state.enabled = true; state.publicUid = 44444; });
