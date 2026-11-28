@@ -25,7 +25,7 @@ const body = {
   ],
 };
 
-function response(value = body) { return Promise.resolve(new Response(JSON.stringify({ workbench: value }), { status: 200 })); }
+function response(value: unknown = body) { return Promise.resolve(new Response(JSON.stringify({ workbench: value }), { status: 200 })); }
 
 describe("TradingWorkbenchDashboard", () => {
   it("shows exactly six headline metrics, coverage warnings, all filters and no 11-step creation CTA", async () => {
@@ -60,5 +60,59 @@ describe("TradingWorkbenchDashboard", () => {
     links[0]!.focus(); fireEvent.keyDown(links[0]!, { key: "ArrowDown" });
     expect(document.activeElement).toBe(links[1]);
     expect(screen.getByTestId("workbench-dashboard").className).not.toContain("min-w-");
+  });
+
+  it("shows signed P&L in a monthly heatmap and opens only the trades for the selected local date", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => response({
+      ...body,
+      calendar: [
+        { local_date: "2026-10-31", trade_count: 1, net_pnl_usd: "4" },
+        ...body.calendar,
+        { local_date: "2026-11-25", trade_count: 1, net_pnl_usd: "10" },
+        { local_date: "2026-11-26", trade_count: 1, net_pnl_usd: "95" },
+        { local_date: "2026-11-27", trade_count: 1, net_pnl_usd: "0" },
+        { local_date: "2026-11-28", trade_count: 1, net_pnl_usd: null },
+      ],
+      trades: [...body.trades, { ...body.trades[0], id: "t3", symbol: "ETHUSDT", closed_at: "2026-11-24T20:00:00Z" }],
+    })));
+    render(<TradingWorkbenchDashboard actorId="owner" pnlCalendarEnabled />);
+    const calendar = await screen.findByRole("region", { name: "交易日历" });
+    const byDate = (name: RegExp) => within(calendar).getByRole("button", { name });
+    const loss = byDate(/2026-11-24.*-.*2\.50/);
+    expect(loss.className).toContain("bg-destructive/10");
+    expect(byDate(/2026-11-25.*\+.*10\.00/).className).toContain("bg-success/10");
+    expect(byDate(/2026-11-26.*\+.*95\.00/).className).toContain("bg-success/30");
+    expect(byDate(/2026-11-27.*0\.00/).className).not.toMatch(/bg-(success|destructive)/);
+    expect(byDate(/2026-11-28.*缺少估值/).className).not.toMatch(/bg-(success|destructive)/);
+    expect(byDate(/2026-11-29.*暂无记录/).className).not.toMatch(/bg-(success|destructive)/);
+
+    fireEvent.click(loss);
+    expect(loss.getAttribute("aria-pressed")).toBe("true");
+    const selected = within(calendar).getByRole("list", { name: "当日交易" });
+    expect(within(selected).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(["/workbench/trades/t1", "/workbench/trades/t2"]);
+    fireEvent.click(within(calendar).getByRole("button", { name: "上一月" }));
+    expect(byDate(/2026-10-31.*\+.*4\.00/)).toBeTruthy();
+    expect(within(calendar).queryByRole("list", { name: "当日交易" })).toBeNull();
+  });
+
+  it("does not label a real sub-cent profit or loss as zero", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => response({
+      ...body,
+      calendar: [
+        { local_date: "2026-11-23", trade_count: 1, net_pnl_usd: "-0.0001" },
+        { local_date: "2026-11-24", trade_count: 1, net_pnl_usd: "0.0001" },
+      ],
+      trades: [{ ...body.trades[0], usd_net_pnl: "0.0001" }],
+    })));
+    render(<TradingWorkbenchDashboard actorId="owner" pnlCalendarEnabled />);
+    const calendar = await screen.findByRole("region", { name: "交易日历" });
+    const loss = within(calendar).getByRole("button", { name: /2026-11-23.*亏损不足.*0\.01/ });
+    const profit = within(calendar).getByRole("button", { name: /2026-11-24.*盈利不足.*0\.01/ });
+    expect(loss.textContent).toContain("−<.01");
+    expect(profit.textContent).toContain("+<.01");
+    fireEvent.click(loss);
+    expect(within(calendar).getByText(/亏损不足.*0\.01/)).toBeTruthy();
+    fireEvent.click(profit);
+    expect(within(calendar).getByRole("link", { name: /BTCUSDT.*盈利不足.*0\.01/ })).toBeTruthy();
   });
 });

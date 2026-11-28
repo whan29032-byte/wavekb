@@ -5,13 +5,14 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowsClockwise, CaretRight, ChartLineUp, LockKey, WarningCircle } from "@phosphor-icons/react";
 import { Button } from "@wavekb/ui";
 import { ExchangeAccountManager } from "./exchange-account-manager";
+import { TradingPnlCalendar } from "./trading/pnl-calendar";
 import { browserTimezone, getTradingWorkbench, type TradingWorkbenchView } from "@/lib/trading/workbench-repository";
 import type { TradingRange } from "@wavekb/domain/trading-review";
 
 const providerLabels: Record<string, string> = { binance: "Binance", okx: "OKX", bybit: "Bybit", bitget: "Bitget", exness: "Exness" };
 const money = (value: string | null) => value === null ? "—" : new Intl.NumberFormat("zh-CN", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(Number(value));
 
-export function TradingWorkbenchDashboard({ actorId }: { actorId: string }) {
+export function TradingWorkbenchDashboard({ actorId, pnlCalendarEnabled = false }: { actorId: string; pnlCalendarEnabled?: boolean }) {
   const [range, setRange] = useState<TradingRange>("30d");
   const [provider, setProvider] = useState("");
   const [connectionId, setConnectionId] = useState("");
@@ -62,7 +63,20 @@ export function TradingWorkbenchDashboard({ actorId }: { actorId: string }) {
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-6" aria-label="核心指标">{data.headline_metrics.map((item) => <article key={item.key} data-testid={`headline-${item.key}`} className="rounded-xl border bg-surface p-4"><span className="text-xs text-muted-foreground">{item.label}</span><strong className="mt-2 block text-xl tabular-nums">{item.value}</strong></article>)}</section>
 
-      <section className="grid gap-4 lg:grid-cols-2"><article className="rounded-xl border bg-surface p-5"><h2 className="text-xl font-semibold">合并权益与累计净盈利</h2><div className="mt-4 max-h-64 overflow-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="py-2">时间</th><th>权益</th><th>净盈利</th></tr></thead><tbody>{data.series.slice(-12).map((point) => <tr key={point.at} className="border-t"><td className="py-2">{new Date(point.at).toLocaleString("zh-CN")}</td><td>{money(point.equity_usd)}</td><td>{money(point.cumulative_profit_usd)}</td></tr>)}</tbody></table></div></article><article className="rounded-xl border bg-surface p-5"><h2 className="text-xl font-semibold">交易日历</h2><div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">{data.calendar.map((day) => <div key={day.local_date} className="rounded-lg bg-muted p-3"><strong className="text-sm">{day.local_date}</strong><span className="mt-1 block text-xs text-muted-foreground">{day.trade_count} 笔 · {money(day.net_pnl_usd)}</span></div>)}</div></article></section>
+      <section className="grid gap-4 lg:grid-cols-2">
+        <article className="min-w-0 rounded-xl border bg-surface p-5"><h2 className="text-xl font-semibold">合并权益与累计净盈利</h2><div className="mt-4 max-h-64 overflow-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th className="py-2">时间</th><th>权益</th><th>净盈利</th></tr></thead><tbody>{data.series.slice(-12).map((point) => <tr key={point.at} className="border-t"><td className="py-2">{new Date(point.at).toLocaleString("zh-CN")}</td><td>{money(point.equity_usd)}</td><td>{money(point.cumulative_profit_usd)}</td></tr>)}</tbody></table></div></article>
+        {pnlCalendarEnabled ? <TradingPnlCalendar calendar={data.calendar} timezone={data.timezone} trades={data.trades} /> : (
+          <article className="rounded-xl border bg-surface p-5">
+            <h2 className="text-xl font-semibold">交易日历</h2>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {data.calendar.map((day) => <div key={day.local_date} className="rounded-lg bg-muted p-3">
+                <strong className="text-sm">{day.local_date}</strong>
+                <span className="mt-1 block text-xs text-muted-foreground">{day.trade_count} 笔 · {money(day.net_pnl_usd)}</span>
+              </div>)}
+            </div>
+          </article>
+        )}
+      </section>
 
       <section className="grid gap-4"><h2 className="text-xl font-semibold">归因分析</h2><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{Object.entries(data.attributions).map(([name, items]) => <article key={name} className="rounded-xl border bg-surface p-4"><h3 className="font-semibold">{{ provider: "平台", account: "账户", symbol: "品种", direction: "方向", session: "时段" }[name]}</h3><ul className="mt-3 grid gap-2 text-sm">{items.slice(0, 5).map((item) => <li key={item.key} className="flex justify-between gap-2"><span className="truncate">{item.label}</span><span className="tabular-nums">{money(item.net_pnl_usd)}</span></li>)}</ul></article>)}</div></section>
 
