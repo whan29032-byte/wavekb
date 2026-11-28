@@ -1,4 +1,5 @@
 import "server-only";
+import { parseTradeXOrigin } from "./tradex-bridge";
 
 type TradingEnvironment = Readonly<Record<string, string | undefined>>;
 type GatewayTradingFeatures = {
@@ -7,6 +8,13 @@ type GatewayTradingFeatures = {
   trading_fill_chart_pilot?: unknown;
   trading_public_strategies?: unknown;
 };
+
+export function workbenchLiveMarketOrigin(publicUid: number, chartEnabled: boolean, env: TradingEnvironment = process.env): string | null {
+  if (!chartEnabled || !Number.isSafeInteger(publicUid) || publicUid < 10_000 || publicUid > 999_999 || env.WORKBENCH_LIVE_MARKET_ENABLED !== "true") return null;
+  if (env.WORKBENCH_LIVE_MARKET_PUBLIC_ENABLED !== "true"
+    && !env.WORKBENCH_LIVE_MARKET_PILOT_UIDS?.split(",").some((uid) => uid.trim() === String(publicUid))) return null;
+  return parseTradeXOrigin(env.WORKBENCH_LIVE_MARKET_ORIGIN)?.origin ?? null;
+}
 
 export function tradingWorkbenchV2Enabled(
   env: TradingEnvironment = process.env,

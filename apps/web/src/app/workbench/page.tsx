@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { LegacyWorkbenchHome } from "@/components/legacy-workbench-home";
 import { TradingWorkbenchDashboard } from "@/components/trading-workbench-dashboard";
 import { requireActiveMember } from "@/lib/auth/dal";
-import { tradingWorkbenchV2Enabled } from "@/lib/trading/config";
+import { tradingChartAvailability, tradingWorkbenchV2Enabled, workbenchLiveMarketOrigin } from "@/lib/trading/config";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "交易工作台" };
 
@@ -19,7 +20,13 @@ export default async function WorkbenchPage({
 }) {
   const actor = await requireActiveMember("/workbench");
   if (await tradingWorkbenchV2Enabled()) {
-    return <TradingWorkbenchDashboard actorId={actor.id} />;
+    const marketConfigured = workbenchLiveMarketOrigin(actor.publicUid, true);
+    const liveMarketEnabled = marketConfigured ? (await tradingChartAvailability(undefined, async () => {
+      const client = await createClient();
+      const { data: { session } } = await client.auth.getSession();
+      return session?.user.id === actor.id ? session.access_token : null;
+    })).chart : false;
+    return <TradingWorkbenchDashboard actorId={actor.id} liveMarketEnabled={liveMarketEnabled} />;
   }
   return <LegacyWorkbenchHome actorId={actor.id} searchParams={await searchParams} />;
 }

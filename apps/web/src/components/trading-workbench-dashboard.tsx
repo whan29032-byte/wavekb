@@ -12,7 +12,7 @@ import type { TradingRange } from "@wavekb/domain/trading-review";
 const providerLabels: Record<string, string> = { binance: "Binance", okx: "OKX", bybit: "Bybit", bitget: "Bitget", exness: "Exness" };
 const money = (value: string | null) => value === null ? "—" : new Intl.NumberFormat("zh-CN", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(Number(value));
 
-export function TradingWorkbenchDashboard({ actorId }: { actorId: string }) {
+export function TradingWorkbenchDashboard({ actorId, liveMarketEnabled = false }: { actorId: string; liveMarketEnabled?: boolean }) {
   const [range, setRange] = useState<TradingRange>("30d");
   const [provider, setProvider] = useState("");
   const [connectionId, setConnectionId] = useState("");
@@ -45,7 +45,8 @@ export function TradingWorkbenchDashboard({ actorId }: { actorId: string }) {
 
   return <main data-testid="workbench-dashboard" className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:px-8">
     <header className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-      <div className="grid gap-2"><span className="flex items-center gap-2 text-sm font-semibold text-primary"><LockKey size={18} weight="duotone" />仅当前账号可见</span><h1 className="text-3xl font-semibold tracking-[-0.04em] md:text-5xl">交易工作台</h1><p className="max-w-2xl text-sm leading-6 text-muted-foreground">自动同步多平台只读交易记录，统一查看权益、盈利与每笔交易复盘。</p></div>
+      <div className="grid gap-2"><span className="flex items-center gap-2 text-sm font-semibold text-primary"><LockKey size={18} weight="duotone" />仅当前账号可见</span><h1 className="text-3xl font-semibold tracking-[-0.04em] md:text-5xl">交易工作台</h1><p className="max-w-2xl text-sm leading-6 text-muted-foreground">自动同步多平台只读交易记录，统一查看权益、盈利与每笔交易复盘。</p>
+        {liveMarketEnabled ? <Button asChild variant="secondary" className="w-fit"><Link href="/workbench/market">实时行情</Link></Button> : null}</div>
       <details className="rounded-xl border bg-surface p-4"><summary className="cursor-pointer font-semibold">管理交易账户</summary><div className="mt-5 max-w-4xl"><ExchangeAccountManager actorId={actorId} /></div></details>
     </header>
 
