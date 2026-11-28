@@ -6,19 +6,22 @@ import { Button } from "@wavekb/ui";
 import type { TradeXMarket } from "@/lib/trading/tradex-bridge";
 import { fitTradeXTimeframe, toTradeXMarkers } from "@/lib/trading/tradex-fill-markers";
 import { getTradeChart } from "@/lib/trading/workbench-repository";
-import { createFillAnnotationDraftScope, FillAnnotationEditor, hasDraftForStrategyShare } from "./fill-annotation-editor";
+import { createFillAnnotationDraftScope, FillAnnotationEditor, hasDraftForStrategyShare, type FillAnnotationDraftScope } from "./fill-annotation-editor";
 import { TradexMarketFrame } from "./tradex-market-frame";
 import { ShareStrategyDialog } from "./share-strategy-dialog";
 
 const actions = { open: "开仓", add: "加仓", reduce: "减仓", close: "平仓", reverse_open: "反手开仓" };
 const pageSize = 50;
 
-export function TradexTradeReview({ origin, market, projection, shareEnabled = false }: { origin: string; market: TradeXMarket; projection: TradeChartProjection; shareEnabled?: boolean }) {
+export function TradexTradeReview({ origin, market, projection, shareEnabled = false, draftScope: sharedDrafts }: {
+  origin: string; market: TradeXMarket; projection: TradeChartProjection; shareEnabled?: boolean; draftScope?: FillAnnotationDraftScope;
+}) {
   const [showMarkers, setShowMarkers] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [savedNotes, setSavedNotes] = useState(new Map<string, FillMarkerAnnotationV1 | null>());
-  const [draftScope] = useState(createFillAnnotationDraftScope);
+  const [localDrafts] = useState(createFillAnnotationDraftScope);
+  const draftScope = sharedDrafts ?? localDrafts;
   const [sharing, setSharing] = useState<{ source: TradeChartProjection; open: boolean } | null>(null);
   const [sharePending, setSharePending] = useState(false);
   const [shareError, setShareError] = useState("");
@@ -83,7 +86,7 @@ export function TradexTradeReview({ origin, market, projection, shareEnabled = f
       cycleRevision={projection.cycle_revision} fill={selectedFill} onSaved={rememberAnnotation} draftScope={draftScope} /> : null}
     {fills.length ? <details open className="rounded-card border bg-surface p-4">
       <summary className="min-h-8 cursor-pointer font-medium">逐笔成交（{fills.length} 笔）</summary>
-      <p className="text-sm text-muted-foreground">同一根 K 线的成交也可逐笔选择。图上范围之外的成交可在下方历史复盘查看。</p>
+      <p className="text-sm text-muted-foreground">同一根 K 线的成交也可逐笔选择。图上范围之外的成交可切回历史复盘查看。</p>
       <ol start={page * pageSize + 1} className="mt-2 divide-y">
         {fills.slice(page * pageSize, (page + 1) * pageSize).map((fill, offset) => {
           const id = `m${page * pageSize + offset + 1}`;

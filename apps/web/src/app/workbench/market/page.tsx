@@ -9,6 +9,7 @@ import { tradingChartAvailability, workbenchLiveMarketOrigin } from "@/lib/tradi
 import { DEFAULT_TRADEX_MARKET } from "@/lib/trading/tradex-bridge";
 
 export const metadata: Metadata = { title: "实时行情" };
+export const dynamic = "force-dynamic";
 
 export default async function LiveMarketPage() {
   const member = await requireActiveMember("/workbench/market");

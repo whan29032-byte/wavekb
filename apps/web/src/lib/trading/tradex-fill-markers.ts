@@ -4,7 +4,7 @@ import { TRADEX_TIMEFRAMES, type TradeXMarket, type TradeXMarker, type TradeXTim
 export function tradeXMarketForProjection(projection: TradeChartProjection): TradeXMarket | null {
   if (projection.provider !== "binance" || projection.product !== "usdt_perpetual" || projection.price_type !== "trade"
     || !(TRADEX_TIMEFRAMES as readonly string[]).includes(projection.timeframe)) return null;
-  const canonical = /^([A-Z0-9]{2,24})\/?USDT$/.exec(projection.symbol);
+  const canonical = /^([A-Z0-9]{1,24})\/?USDT$/.exec(projection.symbol);
   if (!canonical || projection.native_symbol !== `${canonical[1]}USDT`) return null;
   return { provider: "binance", product: "usdt_perpetual", symbol: projection.native_symbol, timeframe: projection.timeframe as TradeXTimeframe };
 }

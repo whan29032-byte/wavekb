@@ -225,9 +225,10 @@
 | 检查 | 状态 | 证据 |
 |---|---|---|
 | Binance USDⓈ-M 行情、分钟换柱 | PASS | 隔离 Chromium，公开历史请求返回 200，同一真实 K 线收到连续事件，随后换到下一分钟 |
-| 推送中断与补齐 | PASS（本地） | 实际 WebSocket 强制关闭后恢复并收到更新事件；缺柱回补和重叠事件顺序由 `wavekb-live-feed.test.mjs` 固定验证 |
-| 两笔同柱成交、点击、390px | PASS（合成成交） | `node apps/web/scripts/verify-tradex-frame.mjs <chart-build-dir>`；图源为真币安数据，标记是探针生成的虚构成交，不含真实账户信息 |
+| 推送中断与补齐 | PASS（本地） | 实际 WebSocket 强制关闭后恢复；浏览器测试省略初始历史的最后一根后观察到真实 Binance REST 补齐；单测覆盖重叠事件顺序 |
+| 同柱成交、重合展开、切周期、390px | PASS（合成成交） | `node apps/web/scripts/verify-tradex-frame.mjs <chart-build-dir>`；两笔完全重合也可分别选中，切 5m 保留画线和指标。图源为真币安数据，标记为虚构成交 |
 | 帧权限、分享预览和访客快照 | PASS（自动化） | 伪来源、失效会话和非验收 UID 被拒；默认不公开数量、绝对盈亏、私密备注；服务端快照并不随原私有记录变化 |
+| 站点自动化回归、生产构建 | PASS（本地） | `pnpm test`：根 726、网关 660、前端 1,843、领域包 43、知识库包 6；`pnpm build` 成功；工作台 E2E 桌面和移动访客阻断各通过 1 项，已登录场景未配置而跳过 |
 | 授权文件和对应源码包 | PASS（本地打包） | 干净提交的 `scripts/build_web.py --wavekb --release` 产出 `SOURCE.zip`；预览的源码说明返回 200。公开行情使用条款及生产部署配置未确认 |
 | 真实验收 UID、实际成交备注保存、iOS 真机 | BLOCKED | 当前没有已配置的隔离验收站和授权测试成交；只读行情及自动测试不等于真实账户验收 |
 | 全站发布 | NOT TESTED | 当前未发布。新入口及全员开关均默认关闭；先完成上行实测，再开放 |

@@ -23,7 +23,7 @@ import {
   type WaveKbChartTheme,
 } from "@/lib/trading/chart-engine";
 import { FillList } from "./fill-list";
-import { createFillAnnotationDraftScope, FillAnnotationEditor, hasDraftForStrategyShare } from "./fill-annotation-editor";
+import { createFillAnnotationDraftScope, FillAnnotationEditor, hasDraftForStrategyShare, type FillAnnotationDraftScope } from "./fill-annotation-editor";
 import { ChartToolPanel, type SavedStrategyLayout } from "./chart-tool-panel";
 import { ShareStrategyDialog } from "./share-strategy-dialog";
 
@@ -35,6 +35,7 @@ export interface OpenAlgoTradeChartProps {
   loadError?: ChartLoadError;
   onReload?: () => void;
   shareEnabled?: boolean;
+  draftScope?: FillAnnotationDraftScope;
 }
 
 type PreparedFill = {
@@ -231,6 +232,7 @@ export function OpenAlgoTradeChart({
   loadError = null,
   onReload,
   shareEnabled = false,
+  draftScope: sharedDrafts,
 }: OpenAlgoTradeChartProps) {
   const chartElementRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<WaveKbChartEngine | null>(null);
@@ -244,7 +246,8 @@ export function OpenAlgoTradeChart({
   const [selectedMarkerKey, setSelectedMarkerKey] = useState<string | null>(null);
   const [failedProjection, setFailedProjection] = useState<TradeChartProjection | null>(null);
   const [themeRevision, setThemeRevision] = useState(0);
-  const [annotationDraftScope] = useState(createFillAnnotationDraftScope);
+  const [localDrafts] = useState(createFillAnnotationDraftScope);
+  const annotationDraftScope = sharedDrafts ?? localDrafts;
   const [share, setShare] = useState<{ projection: TradeChartProjection; layout: SavedStrategyLayout; open: boolean } | null>(null);
   const [shareError, setShareError] = useState("");
   const [readyChart, setReadyChart] = useState<{

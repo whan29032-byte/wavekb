@@ -3,6 +3,7 @@ import type { PublicStrategyProjection, TradeChartProjection } from "@wavekb/dom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ShareStrategyDialog } from "./share-strategy-dialog";
 import { TradexTradeReview } from "./tradex-trade-review";
+import { createFillAnnotationDraftScope } from "./fill-annotation-editor";
 import { StrategyShareRepositoryError, type PreviewPublicStrategyInput } from "@/lib/trading/workbench-repository";
 
 const api = vi.hoisted(() => ({ preview: vi.fn(), publish: vi.fn(), tradeChart: vi.fn() }));
@@ -62,6 +63,17 @@ beforeEach(() => {
   api.publish.mockReset().mockResolvedValue({ post_id: "new-post", snapshot_id: "new-snapshot", replayed: false });
 });
 afterEach(cleanup);
+
+it("does not start a live-chart share when a fill note is unsaved in the same trade's shared draft scope", () => {
+  const draftScope = createFillAnnotationDraftScope();
+  draftScope.set("in-progress-old-chart-note", { context: { cycleId }, edit: 1, savedEdit: 0, running: null, operation: null } as never);
+  const trade = { ...projection, provider: "binance", symbol: "ETHUSDT", native_symbol: "ETHUSDT" } as const;
+  render(<TradexTradeReview origin="https://chart.example.net" projection={trade} shareEnabled draftScope={draftScope}
+    market={{ provider: "binance", product: "usdt_perpetual", symbol: "ETHUSDT", timeframe: "1m" }} />);
+  fireEvent.click(screen.getByRole("button", { name: "分享复盘" }));
+  expect(screen.getByRole("alert").textContent).toContain("请保存成交备忘录");
+  expect(api.preview).not.toHaveBeenCalled();
+});
 
 it("opens a fixed WaveKB share preview from TradeX without sharing the live feed or private fields", async () => {
   const trade = { ...projection, provider: "binance", symbol: "ETHUSDT", native_symbol: "ETHUSDT" } as const;

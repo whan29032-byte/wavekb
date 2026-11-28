@@ -15,6 +15,11 @@ describe("TradeX fill packet", () => {
   it("accepts the Binance adapter's stored native-style cycle symbol", () => {
     expect(tradeXMarketForProjection({ ...projection, symbol: "BTCUSDT" })).toEqual(DEFAULT_TRADEX_MARKET);
   });
+  it("matches listed contracts with a one-character base without accepting a different market", () => {
+    expect(tradeXMarketForProjection({ ...projection, symbol: "W/USDT", native_symbol: "WUSDT" })?.symbol).toBe("WUSDT");
+    expect(tradeXMarketForProjection({ ...projection, symbol: "WUSDT", native_symbol: "WUSDT" })?.symbol).toBe("WUSDT");
+    expect(tradeXMarketForProjection({ ...projection, symbol: "W/USDT", native_symbol: "SUSDT" })).toBeNull();
+  });
   it("uses a longer chart period if a previous fill would fall out of the live chart's initial history", () => {
     expect(fitTradeXTimeframe(DEFAULT_TRADEX_MARKET, projection.markers, Date.parse("2026-11-28T09:00:00Z")).timeframe).toBe("1m");
     expect(fitTradeXTimeframe(DEFAULT_TRADEX_MARKET, projection.markers, Date.parse("2026-11-29T08:00:00Z")).timeframe).toBe("5m");

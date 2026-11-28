@@ -13,6 +13,17 @@ async function run() {
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 840 }, colorScheme: 'light' });
     const errors = [];
+    await page.addInitScript(() => {
+      let api;
+      Object.defineProperty(window, 'VelaLab', {
+        configurable: true, get: () => api,
+        set(source) {
+          api = { ...source, VelaWorkspace: class extends source.VelaWorkspace {
+            constructor(...args) { super(...args); window.smokeWorkspace = this; }
+          } };
+        },
+      });
+    });
     let wire;
     let connectionCount = 0;
     await page.routeWebSocket('wss://fstream.binance.com/market/ws/**', (socket) => {
@@ -78,6 +89,57 @@ async function run() {
       await page.mouse.click(pos.x + picks[index].x, pos.y + picks[index].y);
       await page.waitForFunction((id) => document.body.dataset.selected === id, `m${index + 1}`, { timeout: 4000 });
     }
+    await page.evaluate(({ time, price }) => window.sendFills([
+      { marker: 'm1', timestamp: new Date(time * 1000 + 1000).toISOString(), price: (price - 15).toFixed(2), role: 'open' },
+      { marker: 'm2', timestamp: new Date(time * 1000 + 1000).toISOString(), price: (price - 15).toFixed(2), role: 'close' },
+    ]), tick);
+    await frame.waitForFunction(() => {
+      const marks = window.smokeWorkspace.chart.marks.all();
+      return marks.length === 2 && marks[0].time === marks[1].time;
+    });
+    const exact = await frame.waitForFunction((previous) => {
+      for (const canvas of document.querySelectorAll('canvas')) {
+        const ctx = canvas.getContext('2d');
+        if (!ctx || canvas.width < 1 || canvas.height < 1) continue;
+        const box = canvas.getBoundingClientRect();
+        if (!box.width || !box.height) continue;
+        const bits = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        let count = 0, xSum = 0, ySum = 0;
+        for (let i = 0; i < bits.length; i += 4) {
+          if (bits[i] !== 169 || bits[i + 1] !== 71 || bits[i + 2] !== 112 || bits[i + 3] !== 255) continue;
+          const x = (i / 4 % canvas.width) * box.width / canvas.width + box.left;
+          const y = Math.floor(i / 4 / canvas.width) * box.height / canvas.height + box.top;
+          if (Math.hypot(x - previous.x, y - previous.y) < 8) { count++; xSum += x; ySum += y; }
+        }
+        if (count > 4) return { x: xSum / count, y: ySum / count };
+      }
+      return false;
+    }, picks[0], { timeout: 8000 }).then((handle) => handle.jsonValue());
+    await page.mouse.click(pos.x + exact.x, pos.y + exact.y);
+    try {
+      await frame.getByRole('group', { name: '重合成交' }).getByRole('button', { name: /平仓/ }).click({ timeout: 4000 });
+    } catch (error) {
+      console.error('Collision click:', exact, await page.locator('body').getAttribute('data-selected'),
+        await frame.evaluate(({ x, y }) => ({ target: document.elementFromPoint(x, y)?.className,
+          chooser: document.querySelector('#fill-choices')?.outerHTML, status: document.querySelector('#market-status')?.textContent }), exact));
+      throw error;
+    }
+    await page.waitForFunction(() => document.body.dataset.selected === 'm2');
+    await page.mouse.click(pos.x + exact.x, pos.y + exact.y);
+    await frame.getByRole('group', { name: '重合成交' }).getByRole('button', { name: /开仓/ }).click({ timeout: 4000 });
+    await page.waitForFunction(() => document.body.dataset.selected === 'm1');
+    const drawing = await frame.evaluate(({ time, price }) => {
+      const chart = window.smokeWorkspace.chart;
+      chart.drawings.add('trendline', { paneId: 'price', anchors: [{ time: time * 1000 - 60_000, price: price - 15 }, { time: time * 1000, price }] });
+      chart.addNativeIndicator('ema');
+      return chart.drawings.toJSON().drawings.length;
+    }, tick);
+    assert.equal(drawing, 1);
+    await frame.locator('#period').selectOption('5m');
+    await frame.waitForFunction(() => document.querySelector('#market-status').dataset.state === 'live');
+    const after = await frame.evaluate(() => ({ count: window.smokeWorkspace.chart.drawings.toJSON().drawings.length, studies: window.smokeWorkspace.chart.presentNativeIndicators() }));
+    assert.equal(after.count, drawing);
+    assert.ok(after.studies.includes('ema'));
     await page.setViewportSize({ width: 390, height: 844 });
     try {
       await frame.waitForFunction(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1, null, { timeout: 2500 });

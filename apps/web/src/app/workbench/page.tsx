@@ -6,6 +6,7 @@ import { tradingChartAvailability, tradingWorkbenchV2Enabled, workbenchLiveMarke
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "交易工作台" };
+export const dynamic = "force-dynamic";
 
 type WorkbenchSearchParams = {
   type?: string | string[];
