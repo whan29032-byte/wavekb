@@ -612,6 +612,55 @@ describe("post deletion transaction", () => {
     } as never, userId)).resolves.toEqual({ cleanupPending: false });
     expect(request).toHaveBeenCalledTimes(2);
   });
+
+  it("does not turn a confirmed post deletion into an error when image cleanup rejects", async () => {
+    const post = { id: "post", author_id: "owner", status: "published" } as never;
+    const request = vi.fn(async () => Response.json({ deleted: true, storage_paths: ["owner/post/image.png"] }));
+    vi.stubGlobal("fetch", request);
+    const remove = vi.fn(async () => { throw new TypeError("storage network failure"); });
+    const client = { storage: { from: () => ({ remove }) } } as never;
+
+    await expect(deletePost(client, post, "owner")).resolves.toEqual({ cleanupPending: true });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the confirmed deletion when image cleanup stops responding", async () => {
+    vi.useFakeTimers();
+    try {
+      const post = { id: "post", author_id: "owner", status: "published" } as never;
+      const request = vi.fn(async () => Response.json({ deleted: true, storage_paths: ["owner/post/image.png"] }));
+      vi.stubGlobal("fetch", request);
+      const remove = () => new Promise(() => {});
+      const client = { storage: { from: () => ({ remove }) } } as never;
+      const outcomes: unknown[] = [];
+
+      void deletePost(client, post, "owner").then((result) => outcomes.push(result));
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      expect(outcomes).toEqual([{ cleanupPending: true }]);
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not fail a confirmed deletion or try storage when cleanup metadata is malformed", async () => {
+    const post = { id: "post", author_id: "owner", status: "published" } as never;
+    vi.stubGlobal("fetch", async () => Response.json({ deleted: true, storage_paths: "owner/post/image.png" }));
+    const from = vi.fn();
+    const client = { storage: { from } } as never;
+
+    await expect(deletePost(client, post, "owner")).resolves.toEqual({ cleanupPending: true });
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("never sends a deletion request for someone else's post or a moderated post", async () => {
+    const request = vi.fn();
+    vi.stubGlobal("fetch", request);
+    await expect(deletePost({} as never, { id: "post", author_id: "other", status: "published" } as never, "owner")).rejects.toThrow();
+    await expect(deletePost({} as never, { id: "post", author_id: "owner", status: "hidden" } as never, "owner")).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+  });
 });
 
 describe("comment publishing", () => {

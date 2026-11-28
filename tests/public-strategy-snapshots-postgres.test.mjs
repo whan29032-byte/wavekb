@@ -432,6 +432,8 @@ test("soft deletes verified authors' comments idempotently without altering repl
   await asRole(db, "authenticated", reader);
   const [{ id }] = (await db.query("insert into public.post_comments (post_id,author_id,body,marker_key) values($1,$2,'original comment',$3) returning id", [post, reader, marker])).rows;
   const [{ id: replyId }] = (await db.query("insert into public.post_comments (post_id,author_id,body,parent_id) values($1,$2,'reply stays',$3) returning id", [post, reader, id])).rows;
+  const legacyUpdate = await db.query("update public.post_comments set status='deleted_by_author', body='legacy delete' where id=$1 and author_id=$2 returning id", [id, reader]);
+  assert.deepEqual(legacyUpdate.rows, [], "the old browser update cannot silently be treated as a successful deletion");
   const softDelete = async (commentId) => (await db.query("select public.soft_delete_my_post_comment($1) as deleted", [commentId])).rows[0].deleted;
   await asRole(db, "authenticated", owner);
   assert.equal(await softDelete(id), false);

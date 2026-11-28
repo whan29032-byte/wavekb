@@ -128,15 +128,30 @@ test.describe("authenticated posting acceptance", () => {
       stage = "publish timeline update";
       await page.getByLabel("节点类型").selectOption("confirmed");
       await page.getByLabel("更新内容").fill(`${timelineMarker}，服务器应记录当前时间并保留历史节点。`);
+      await page.locator("#timeline-images").setInputFiles({
+        name: "timeline-acceptance.png",
+        mimeType: "image/png",
+        buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+      });
       await page.getByRole("button", { name: "发布更新" }).click();
       await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible({ timeout: 30_000 });
       await expect(page.getByRole("heading", { name: "判断验证" })).toBeVisible();
+      await expect(page.getByRole("img", { name: "判断验证，图片 1", exact: true })).toBeVisible();
 
       stage = "reload published detail";
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
       await expect(page.getByText(commentMarker, { exact: false })).toBeVisible();
       await expect(page.getByText(timelineMarker, { exact: false })).toBeVisible();
+
+      stage = "delete persisted own comment";
+      const disposableComment = page.locator('article[id^="comment-"]').filter({ hasText: commentMarker });
+      await expect(disposableComment).toHaveCount(1);
+      await disposableComment.getByRole("button", { name: "删除", exact: true }).click();
+      await expect(disposableComment).toHaveCount(0, { timeout: 20_000 });
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(marker);
+      await expect(disposableComment).toHaveCount(0);
 
       const authorProfileLink = page.locator("main > article").locator('header a[href^="/member/"]');
       stage = "author profile and return";
@@ -216,6 +231,10 @@ test.describe("authenticated posting acceptance", () => {
         await page.getByRole("button", { name: "删除帖子" }).click();
         try {
           await expect(page).toHaveURL(/\/community\/idea_sharing$/, { timeout: 20_000 });
+          await expect.poll(() => deletionResponses.some(({ status, body }) => status === 200 && body.includes("/timeline/"))).toBe(true);
+          await page.goto(publishedUrl, { waitUntil: "domcontentloaded" });
+          await expect(page.getByRole("heading", { name: "404", exact: true })).toBeVisible();
+          await page.goto("/community/idea_sharing", { waitUntil: "domcontentloaded" });
         } catch (error) {
           console.log("Post deletion diagnostic", JSON.stringify({
             url: page.url(),

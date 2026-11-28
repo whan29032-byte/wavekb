@@ -402,7 +402,7 @@ export async function appendPostTimelineNode(client: SupabaseClient, input: {
 
 export async function deletePost(client: SupabaseClient, post: CommunityPost, userId: string) {
   if (post.author_id !== userId || post.status === "hidden") throw new Error("你不能删除这篇帖子。");
-  type DeletePayload = { deleted?: boolean; storage_paths?: unknown[] };
+  type DeletePayload = { deleted?: boolean; storage_paths?: unknown };
   const retryableStatuses = new Set([409, 429, 500, 502, 503, 504]);
   let response: Response | null = null;
   let payload: DeletePayload | null = null;
@@ -426,12 +426,26 @@ export async function deletePost(client: SupabaseClient, post: CommunityPost, us
   if (!response?.ok || payload?.deleted !== true) {
     throw new Error(response?.status === 401 ? "登录状态已失效，请重新登录。" : "帖子未被删除，请稍后重试。");
   }
-  const paths = (payload.storage_paths ?? [])
-    .map((path) => String(path))
-    .filter((path) => path.startsWith(`${userId}/${post.id}/`));
+  if (payload.storage_paths == null) return { cleanupPending: false };
+  if (!Array.isArray(payload.storage_paths)) return { cleanupPending: true };
+  const paths = payload.storage_paths.filter((path): path is string =>
+    typeof path === "string" && path.startsWith(`${userId}/${post.id}/`));
   if (!paths.length) return { cleanupPending: false };
-  const files = await client.storage.from("post-images").remove(paths);
-  return { cleanupPending: Boolean(files.error) };
+
+  // The gateway has already confirmed deletion; optional storage cleanup
+  // must neither reverse that confirmation nor block the user's navigation.
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const cleanupPending = await Promise.race([
+      client.storage.from("post-images").remove(paths).then(({ error }) => Boolean(error)),
+      new Promise<boolean>((resolve) => { cleanupTimer = setTimeout(() => resolve(true), 3_000); }),
+    ]);
+    return { cleanupPending };
+  } catch {
+    return { cleanupPending: true };
+  } finally {
+    if (cleanupTimer !== undefined) clearTimeout(cleanupTimer);
+  }
 }
 
 export async function addPostComment(client: SupabaseClient, input: {
