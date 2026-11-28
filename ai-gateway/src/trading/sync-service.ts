@@ -67,8 +67,6 @@ type PublishedFill = Omit<CanonicalFill, "realized_pnl" | "fee"> & {
   fee_usd: string | null;
 };
 
-type PublishedCashEvent = Omit<CanonicalCashEvent, "type"> & { event_type: CanonicalCashEvent["type"] };
-
 export type PublishedCycle = ReconstructedCycle & {
   id: string;
   revision: number;
@@ -84,7 +82,7 @@ export type SyncPublication = {
   expected_generation: number;
   snapshot: PublishedSnapshot;
   fills: PublishedFill[];
-  cash_events: PublishedCashEvent[];
+  cash_events: CanonicalCashEvent[];
   cycles: PublishedCycle[];
   lineage: Array<{ alias_cycle_id: string; canonical_cycle_id: string; relation: "merged"; source_revision: number }>;
   cursor: ProviderCursor;
@@ -318,11 +316,6 @@ function publishedFill(item: CanonicalFill): PublishedFill {
   };
 }
 
-function publishedCashEvent(item: CanonicalCashEvent): PublishedCashEvent {
-  const { type, ...rest } = item;
-  return { ...rest, event_type: type };
-}
-
 function cycleUsdValue(cycle: ReconstructedCycle, snapshot: CanonicalAccountSnapshot) {
   const currency = cycle.account_currency.toUpperCase();
   const quotes = snapshot.valuation.rate && snapshot.valuation.source && snapshot.valuation.quoted_at
@@ -495,7 +488,8 @@ export class TradingSyncService {
         expected_generation: connection.sync_generation,
         snapshot: publishedSnapshot(snapshot),
         fills: fills.map(publishedFill),
-        cash_events: cashEvents.map(publishedCashEvent),
+        // The publication RPC reads the canonical `type` and writes `event_type`.
+        cash_events: cashEvents,
         cycles,
         lineage: reconciliation.aliases,
         cursor: publishedCursor,
