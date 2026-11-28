@@ -2,12 +2,15 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { PublicStrategyProjection, TradeChartProjection } from "@wavekb/domain/trading-review";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ShareStrategyDialog } from "./share-strategy-dialog";
+import { TradexTradeReview } from "./tradex-trade-review";
+import { createFillAnnotationDraftScope } from "./fill-annotation-editor";
 import { StrategyShareRepositoryError, type PreviewPublicStrategyInput } from "@/lib/trading/workbench-repository";
 
-const api = vi.hoisted(() => ({ preview: vi.fn(), publish: vi.fn() }));
+const api = vi.hoisted(() => ({ preview: vi.fn(), publish: vi.fn(), tradeChart: vi.fn() }));
 vi.mock("@/lib/trading/workbench-repository", async (original) => ({
   ...await original<typeof import("@/lib/trading/workbench-repository")>(),
   previewPublicStrategy: api.preview, publishPublicStrategy: api.publish,
+  getTradeChart: api.tradeChart,
 }));
 vi.mock("@/components/community/public-strategy-chart", () => ({
   PublicStrategyChart: ({ projection }: { projection: PublicStrategyProjection }) => (
@@ -60,6 +63,32 @@ beforeEach(() => {
   api.publish.mockReset().mockResolvedValue({ post_id: "new-post", snapshot_id: "new-snapshot", replayed: false });
 });
 afterEach(cleanup);
+
+it("does not start a live-chart share when a fill note is unsaved in the same trade's shared draft scope", () => {
+  const draftScope = createFillAnnotationDraftScope();
+  draftScope.set("in-progress-old-chart-note", { context: { cycleId }, edit: 1, savedEdit: 0, running: null, operation: null } as never);
+  const trade = { ...projection, provider: "binance", symbol: "ETHUSDT", native_symbol: "ETHUSDT" } as const;
+  render(<TradexTradeReview origin="https://chart.example.net" projection={trade} shareEnabled draftScope={draftScope}
+    market={{ provider: "binance", product: "usdt_perpetual", symbol: "ETHUSDT", timeframe: "1m" }} />);
+  fireEvent.click(screen.getByRole("button", { name: "分享复盘" }));
+  expect(screen.getByRole("alert").textContent).toContain("请保存成交备忘录");
+  expect(api.preview).not.toHaveBeenCalled();
+});
+
+it("opens a fixed WaveKB share preview from TradeX without sharing the live feed or private fields", async () => {
+  const trade = { ...projection, provider: "binance", symbol: "ETHUSDT", native_symbol: "ETHUSDT" } as const;
+  api.tradeChart.mockResolvedValueOnce(trade);
+  render(<TradexTradeReview origin="https://chart.example.net" projection={trade} shareEnabled
+    market={{ provider: "binance", product: "usdt_perpetual", symbol: "ETHUSDT", timeframe: "1m" }} />);
+  fireEvent.click(screen.getByRole("button", { name: "分享复盘" }));
+  await screen.findByLabelText("快照测试");
+  expect(api.preview).toHaveBeenCalledExactlyOnceWith(cycleId, {
+    cycle_revision: 3, chart_state_version: 0, timeframe: "1m", ...range,
+    show_quantity: false, show_absolute_pnl: false, annotation_fill_ids: [], drawing_ids: [], indicator_instance_ids: [],
+  });
+  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: "显示仓位数量" }).checked).toBe(false);
+  expect(screen.getByRole<HTMLInputElement>("checkbox", { name: "显示绝对盈亏金额" }).checked).toBe(false);
+});
 
 it("requests a new explicit preview for every privacy mode and resets confirmation", async () => {
   renderDialog();

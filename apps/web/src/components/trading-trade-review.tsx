@@ -3,9 +3,12 @@
 import type { TradeChartProjection, TradeChartTimeframe } from "@wavekb/domain/trading-review";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
-import { Field, Input, Label, Textarea } from "@wavekb/ui";
+import { Button, Field, Input, Label, Textarea } from "@wavekb/ui";
+import { tradeXMarketForProjection } from "@/lib/trading/tradex-fill-markers";
+import { TradexTradeReview } from "./trading/tradex-trade-review";
+import { createFillAnnotationDraftScope, hasDraftForStrategyShare } from "./trading/fill-annotation-editor";
 import {
   browserTimezone,
   getTradeChart,
@@ -62,10 +65,11 @@ function initialChartRequest(openedAt: string, closedAt: string | null) {
   };
 }
 
-export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled = false }: {
+export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled = false, liveMarketOrigin = null }: {
   tradeId: string;
   chartEnabled?: boolean;
   shareEnabled?: boolean;
+  liveMarketOrigin?: string | null;
 }) {
   const [detail, setDetail] = useState<TradingTradeDetail | null>(null);
   const [draft, setDraft] = useState<SaveTradingReviewInput | null>(null);
@@ -83,6 +87,9 @@ export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled
     loadError: "rate_limited" | "unavailable" | null;
   }>({ requestKey: "", projection: null, loadError: null });
   const [chartReloadToken, setChartReloadToken] = useState(0);
+  const [liveCycle, setLiveCycle] = useState<string | null>(null);
+  const [chartModeError, setChartModeError] = useState("");
+  const [draftScope] = useState(createFillAnnotationDraftScope);
 
   useEffect(() => {
     let active = true;
@@ -115,6 +122,17 @@ export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled
   const chartProjection = chartRequestKey !== null && chartResult.requestKey === chartRequestKey ? chartResult.projection : null;
   const chartLoadError = chartRequestKey !== null && chartResult.requestKey === chartRequestKey ? chartResult.loadError : null;
   const chartLoading = chartRequestKey !== null && chartResult.requestKey !== chartRequestKey;
+  const tradeXMarket = useMemo(() => chartProjection && liveMarketOrigin ? tradeXMarketForProjection(chartProjection) : null, [chartProjection, liveMarketOrigin]);
+
+  function switchChartMode() {
+    if (hasDraftForStrategyShare(draftScope, tradeId)) {
+      setChartModeError("请先保存成交备忘录，再切换图表。");
+      return;
+    }
+    setChartModeError("");
+    setLiveCycle(liveCycle === tradeId ? null : tradeId);
+    setChartReloadToken((token) => token + 1);
+  }
 
   useEffect(() => {
     if (chartRequestKey === null || !chartCycleId || !chartOpenedAt) return;
@@ -218,13 +236,21 @@ export function TradingTradeReview({ tradeId, chartEnabled = false, shareEnabled
       </section>
 
       {chartEnabled ? <div data-testid="trade-chart-boundary">
-        <DynamicOpenAlgoTradeChart
+        {tradeXMarket && liveMarketOrigin && chartProjection ? <div className="mb-6 grid gap-4">
+          <Button type="button" variant="secondary" className="w-fit" aria-expanded={liveCycle === tradeId}
+            onClick={switchChartMode}>{liveCycle === tradeId ? "返回历史复盘" : "在实时行情查看成交"}</Button>
+          {chartModeError ? <p role="alert" className="text-sm text-danger">{chartModeError}</p> : null}
+          {liveCycle === tradeId ? <TradexTradeReview key={`${tradeId}:${chartProjection.cycle_revision}`} origin={liveMarketOrigin}
+            market={tradeXMarket} projection={chartProjection} shareEnabled={shareEnabled} draftScope={draftScope} /> : null}
+        </div> : null}
+        {liveCycle === tradeId && (chartLoading || tradeXMarket) ? (chartLoading ? <p role="status" className="text-sm text-muted-foreground">正在读取最新成交…</p> : null) : <DynamicOpenAlgoTradeChart
           projection={chartProjection}
           loading={chartLoading}
           loadError={chartLoadError}
           shareEnabled={shareEnabled}
+          draftScope={draftScope}
           onReload={() => setChartReloadToken((token) => token + 1)}
-        />
+        />}
       </div> : null}
 
       {detail.reconciliation.length || detail.review?.needs_reconciliation ? <section className="rounded-xl border border-amber-300/50 bg-amber-50/50 p-5 dark:bg-amber-950/10"><h2 className="flex items-center gap-2 font-semibold"><WarningCircle />需要处理历史复盘冲突</h2><p className="mt-2 text-sm text-muted-foreground">迟到成交改变了交易周期。旧复盘没有自动覆盖，请核对后保存当前版本。</p>{detail.reconciliation.map((item) => <blockquote key={item.cycle_id} className="mt-3 border-l-2 pl-3 text-sm">{item.reason || item.next_improvement}</blockquote>)}</section> : null}

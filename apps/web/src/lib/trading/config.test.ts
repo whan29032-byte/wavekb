@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { tradingChartAvailability, tradingFillChartEnabled, tradingWorkbenchV2Enabled } from "./config";
+import { tradingChartAvailability, tradingFillChartEnabled, tradingWorkbenchV2Enabled, workbenchLiveMarketOrigin } from "./config";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -97,5 +97,17 @@ describe("trading workbench cutover flag", () => {
     expect(await tradingWorkbenchV2Enabled()).toBe(false);
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
     expect(await tradingWorkbenchV2Enabled()).toBe(false);
+  });
+});
+
+describe("live market rollout", () => {
+  const config = { WORKBENCH_LIVE_MARKET_ORIGIN: "https://charts.example.net", WORKBENCH_LIVE_MARKET_ENABLED: "true", WORKBENCH_LIVE_MARKET_PILOT_UIDS: "33333, 44444" };
+  it("requires a chart-enabled pilot member unless the separate member rollout is enabled", () => {
+    expect(workbenchLiveMarketOrigin(33333, true, config)).toBe("https://charts.example.net");
+    expect(workbenchLiveMarketOrigin(22222, true, config)).toBeNull();
+    expect(workbenchLiveMarketOrigin(33333, false, config)).toBeNull();
+    expect(workbenchLiveMarketOrigin(33333, true, {})).toBeNull();
+    expect(workbenchLiveMarketOrigin(22222, true, { ...config, WORKBENCH_LIVE_MARKET_PUBLIC_ENABLED: "true" })).toBe("https://charts.example.net");
+    expect(workbenchLiveMarketOrigin(0, true, { ...config, WORKBENCH_LIVE_MARKET_PUBLIC_ENABLED: "true" })).toBeNull();
   });
 });

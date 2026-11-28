@@ -1,7 +1,7 @@
 import { TradingTradeReview } from "@/components/trading-trade-review";
 import { requireActiveMember } from "@/lib/auth/dal";
 import { createClient } from "@/lib/supabase/server";
-import { tradingChartAvailability } from "@/lib/trading/config";
+import { tradingChartAvailability, workbenchLiveMarketOrigin } from "@/lib/trading/config";
 
 export default async function TradingTradePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,5 +11,6 @@ export default async function TradingTradePage({ params }: { params: Promise<{ i
     const { data: { session } } = await client.auth.getSession();
     return session?.user.id === member.id ? session.access_token : null;
   });
-  return <TradingTradeReview tradeId={id} chartEnabled={availability.chart} shareEnabled={availability.share} />;
+  const liveMarketOrigin = workbenchLiveMarketOrigin(member.publicUid, availability.chart);
+  return <TradingTradeReview tradeId={id} chartEnabled={availability.chart} shareEnabled={availability.share} liveMarketOrigin={liveMarketOrigin} />;
 }
