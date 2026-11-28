@@ -123,7 +123,7 @@ jobs:
             e2e/natural-law-illustrations.spec.ts e2e/knowledge-image-delivery.spec.ts \
             --workers=2 --retries=0
           pnpm --filter @wavekb/web exec playwright test e2e/reading-image-worker.spec.ts --workers=2 --retries=0
-          pnpm --filter @wavekb/web exec playwright test e2e/trading-workbench.spec.ts --workers=1 --retries=0
+          pnpm --filter @wavekb/web exec playwright test e2e/trading-workbench.spec.ts e2e/trade-chart.spec.ts --workers=1 --retries=0
           pnpm --filter @wavekb/web exec playwright test --config=playwright.ui.config.ts
 
       - name: Preserve failed local browser evidence without deployment credentials
@@ -283,7 +283,7 @@ jobs:
           E2E_POSTING_PASSWORD: ${{ secrets.E2E_POSTING_PASSWORD }}
           PLAYWRIGHT_BASE_URL: https://wavekb.com
           TRADING_LIVE_ACCEPTANCE: "1"
-        run: pnpm --filter @wavekb/web exec playwright test e2e/trading-workbench.spec.ts --project=desktop-chromium --workers=1 --retries=0
+        run: pnpm --filter @wavekb/web exec playwright test e2e/trading-workbench.spec.ts e2e/trade-chart.spec.ts --project=desktop-chromium --workers=1 --retries=0
 
       # Conditional on relevant changes since LIVE base; this mutates dedicated
       # disposable records and is not a read-only smoke test.

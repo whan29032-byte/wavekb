@@ -21,6 +21,16 @@ it.each(["/community/idea_sharing", "/community/idea_sharing/new", "/community/p
   expect(boundary.session).toHaveBeenCalledWith(request);
 });
 
+it("keeps anonymous snapshot reads outside Supabase session refresh", async () => {
+  const request = new NextRequest("https://wavekb.com/api/public-strategies/11111111-1111-4111-8111-111111111111", {
+    headers: { cookie: "session=account-cookie" },
+  });
+  const response = await proxy(request);
+  expect(boundary.session).not.toHaveBeenCalled();
+  expect(response.headers.get("set-cookie")).toBeNull();
+  expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+});
+
 it.each(["/admin/users", "/friends", "/messages/abc", "/member/profile", "/tutoring/abc", "/mentor/manage", "/workbench", "/login", "/register", "/recover", "/community/idea_sharing/new", "/community/post/abc/edit"])("marks private route %s noindex at the HTTP boundary", async (pathname) => {
   const response = await proxy(new NextRequest(`https://wavekb.com${pathname}`));
 
@@ -38,6 +48,15 @@ it("redirects anonymous visitors of the community to login", async () => {
   const response = await proxy(new NextRequest("https://wavekb.com/community/idea_sharing"));
   expect(response.status).toBe(307);
   expect(response.headers.get("location")).toBe("https://wavekb.com/login?next=%2Fcommunity%2Fidea_sharing");
+});
+
+it("lets the detail page verify public strategy access without opening other community paths", async () => {
+  boundary.session.mockResolvedValue({ response: NextResponse.next(), userId: null });
+  const id = "11111111-1111-4111-8111-111111111111";
+  const post = await proxy(new NextRequest(`https://wavekb.com/community/post/${id}`));
+  expect(post.headers.get("location")).toBeNull();
+  const edit = await proxy(new NextRequest(`https://wavekb.com/community/post/${id}/edit`));
+  expect(edit.status).toBe(307);
 });
 
 it("leaves other public pages reachable without a session", async () => {

@@ -53,8 +53,10 @@ test("reads only allowlisted trade and income history with a bounded time cursor
   const fetcher: typeof fetch = async (input) => {
     const url = new URL(String(input));
     calls.push(url);
-    if (url.pathname.endsWith("userTrades")) return json([{ id: 7, time: 1_700_000_000_100 }]);
-    if (url.pathname.endsWith("income")) return json([{ tranId: 8, time: 1_700_000_000_200 }]);
+    if (url.pathname.endsWith("userTrades") && url.searchParams.get("symbol") === "BTCUSDT") {
+      return json([{ symbol: "BTCUSDT", id: 7, time: 1_700_000_000_100 }]);
+    }
+    if (url.pathname.endsWith("income")) return json([{ symbol: "BTCUSDT", tranId: 8, time: 1_700_000_000_200 }]);
     throw new Error("unexpected endpoint");
   };
   const client = new BinanceFuturesClient("key", "secret", "https://fapi.binance.com", fetcher, () => 1_701_000_000_000);
@@ -69,4 +71,70 @@ test("reads only allowlisted trade and income history with a bounded time cursor
     assert.equal(url.searchParams.get("endTime"), "1700604800000");
     assert.equal(url.searchParams.get("limit"), "1000");
   }
+});
+
+test("finishes the last history page despite the clock advancing during the request", async () => {
+  let clock = 1_700_000_000_500;
+  const client = new BinanceFuturesClient("key", "secret", "https://fapi.binance.com", async (input) => {
+    assert.ok(new URL(String(input)).pathname.endsWith("/income"));
+    clock += 5;
+    return json([]);
+  }, () => clock);
+  const page = await client.historyPage(1_700_000_000_000);
+  assert.equal(page.exhausted, true);
+  assert.equal(page.nextStartTime, null);
+});
+
+test("checks an already-known symbol even when the income window is empty", async () => {
+  const first = 1_700_000_000_000;
+  const client = new BinanceFuturesClient("key", "secret", "https://fapi.binance.com", async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/income")) return json([]);
+    assert.equal(url.searchParams.get("symbol"), "ETHUSDT");
+    return json([{ symbol: "ETHUSDT", id: 7, time: first }]);
+  }, () => first + 100);
+  assert.equal((await client.historyPage(first, ["ETHUSDT", "ETHUSDT", "unsafe&input"])).trades.length, 1);
+});
+
+test("splits a full income window before discovering trade symbols or advancing", async () => {
+  const first = 1_700_000_000_000;
+  const incomeRanges: string[] = [];
+  const symbols: string[] = [];
+  const client = new BinanceFuturesClient("key", "secret", "https://fapi.binance.com", async (input) => {
+    const url = new URL(String(input));
+    const from = Number(url.searchParams.get("startTime"));
+    const to = Number(url.searchParams.get("endTime"));
+    if (url.pathname.endsWith("/income")) {
+      incomeRanges.push(`${from}:${to}`);
+      if (to - from >= 10) return json(Array.from({ length: 1000 }, () => ({ symbol: "BTCUSDT", time: from })));
+      return json([{ symbol: from === first ? "BTCUSDT" : "ETHUSDT", time: from }]);
+    }
+    symbols.push(url.searchParams.get("symbol") ?? "");
+    return json([]);
+  }, () => first + 10);
+  const page = await client.historyPage(first);
+  assert.equal(page.income.length, 2);
+  assert.equal(page.exhausted, true);
+  assert.deepEqual(incomeRanges, [`${first}:${first + 10}`, `${first}:${first + 5}`, `${first + 6}:${first + 10}`]);
+  assert.deepEqual(symbols, ["BTCUSDT", "ETHUSDT"]);
+});
+
+test("honors Binance Retry-After across signed calls without sending requests during cooldown", async () => {
+  let clock = 1_700_000_000_000;
+  let requests = 0;
+  const fetcher: typeof fetch = async () => {
+    requests += 1;
+    if (requests === 1) {
+      return new Response('{ "code": -1003, "msg": "quota-details" }', { status: 418, headers: { "Retry-After": "120" } });
+    }
+    return json([]);
+  };
+  const client = () => new BinanceFuturesClient("key", "secret", "https://fapi.binance.com", fetcher, () => clock);
+  const cooldown = { message: "binance_rate_limited", statusCode: 429 };
+  await assert.rejects(client().historyPage(clock - 10_000), cooldown);
+  await assert.rejects(client().historyPage(clock - 10_000), cooldown);
+  assert.equal(requests, 1);
+  clock += 120_001;
+  assert.equal((await client().historyPage(clock - 10_000)).exhausted, true);
+  assert.equal(requests, 2);
 });

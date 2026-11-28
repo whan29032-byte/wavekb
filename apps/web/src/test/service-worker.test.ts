@@ -58,6 +58,7 @@ it.each([
   ["GET", "https://wavekb.com/knowledge?q=impulse"],
   ["GET", "https://cdn.wavekb.com/assets/book.png"],
   ["GET", "https://wavekb.com/api/health"],
+  ["GET", "https://wavekb.com/api/public-strategies/11111111-1111-4111-8111-111111111111"],
   ["GET", "https://wavekb.com/admin/users"],
   ["GET", "https://wavekb.com/friends"],
   ["GET", "https://wavekb.com/messages/abc"],
@@ -92,7 +93,22 @@ it("uses network-first public knowledge navigation with the static offline fallb
   expect(cache.put).not.toHaveBeenCalled();
 });
 
-it.each(["https://wavekb.com/", "https://wavekb.com/knowledge/unit-ewp-rule-impulse-core"])("never writes navigation HTML for %s to Cache Storage", async (url) => {
+const privateTradePage = "https://wavekb.com/workbench/trades/11111111-1111-4111-8111-111111111111";
+
+it("serves only the static offline shell if private trade navigation loses the network", async () => {
+  const { listeners, caches, cache, networkFetch } = await bootServiceWorker();
+  const respondWith = vi.fn();
+  const fallback = { body: "当前网络不可用" };
+  networkFetch.mockRejectedValueOnce(new Error("offline"));
+  caches.match.mockResolvedValueOnce(fallback);
+  listeners.get("fetch")?.({ request: { url: privateTradePage, method: "GET", mode: "navigate", destination: "document" }, respondWith });
+  expect(respondWith).toHaveBeenCalledOnce();
+  await expect(respondWith.mock.calls[0][0]).resolves.toBe(fallback);
+  expect(caches.match).toHaveBeenCalledExactlyOnceWith("/offline.html");
+  expect(cache.put).not.toHaveBeenCalled();
+});
+
+it.each(["https://wavekb.com/", "https://wavekb.com/knowledge/unit-ewp-rule-impulse-core", privateTradePage])("never writes navigation HTML for %s to Cache Storage", async (url) => {
   const { listeners, caches, cache, networkFetch } = await bootServiceWorker();
   const respondWith = vi.fn();
 

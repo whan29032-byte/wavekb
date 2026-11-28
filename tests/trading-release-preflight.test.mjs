@@ -30,8 +30,8 @@ const hosts = {
 
 function release(overrides = {}) {
   return {
-    expectedSchemaVersion: "202611260001",
-    schemaVersion: "202611260001",
+    expectedSchemaVersion: "202611270005",
+    schemaVersion: "202611270005",
     releaseSha: sha,
     rollbackTarget: rollback,
     sameCodeRollback: false,
@@ -47,7 +47,8 @@ test("accepts a current reversible release and emits only safe operational field
   const result = validateTradingRelease(release({ secrets: { api_key: "must-not-leak" } }));
   assert.deepEqual(result.enabledProviders, ["binance", "okx", "bybit", "bitget", "exness"]);
   assert.equal(result.workbenchEnabled, true);
-  assert.equal(result.schemaVersion, "202611260001");
+  assert.equal(result.schemaVersion, "202611270005");
+  assert.equal(result.publicStrategiesEnabled, false);
   assert.equal(result.rollbackTarget, rollback);
   assert.equal(result.sameCodeRollback, false);
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak|api_key|secret/i);
@@ -66,6 +67,17 @@ test("allows one provider or the total workbench to be disabled for rollback", (
   assert.equal(fallback.workbenchEnabled, false);
 });
 
+test("public sharing defaults off and can be enabled independently of the private workbench", () => {
+  const result = validateTradingRelease(release({
+    flags: { ...flags, TRADING_WORKBENCH_V2_ENABLED: false, TRADING_PUBLIC_STRATEGIES_ENABLED: true },
+  }));
+  assert.equal(result.workbenchEnabled, false);
+  assert.equal(result.publicStrategiesEnabled, true);
+  assert.throws(() => validateTradingRelease(release({
+    flags: { ...flags, TRADING_PUBLIC_STRATEGIES_ENABLED: "false" },
+  })), /TRADING_PUBLIC_STRATEGIES_ENABLED must be a boolean/);
+});
+
 test("accepts isolated account failures from a completed worker run as degraded", () => {
   const result = validateTradingRelease(release({
     worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: 1 },
@@ -80,6 +92,7 @@ test("accepts isolated account failures from a completed worker run as degraded"
 test("fails closed on schema drift, unsafe origins, stale workers and invalid rollback state", () => {
   const invalid = [
     release({ schemaVersion: "202611240001" }),
+    release({ expectedSchemaVersion: "202611270004", schemaVersion: "202611270004" }),
     release({ providerOrigins: { ...hosts, okx: "http://attacker.invalid" } }),
     release({ worker: { lastRunAt: "2026-11-24T10:00:00Z", checked: 5, failed: 0 } }),
     release({ worker: { lastRunAt: "2026-11-24T11:55:00Z", checked: 5, failed: -1 } }),
@@ -93,10 +106,26 @@ test("fails closed on schema drift, unsafe origins, stale workers and invalid ro
 
 test("repository preflight enforces migration order, compatibility routes, retention and read-only adapters", () => {
   const result = inspectTradingReleaseFiles(path.resolve(import.meta.dirname, ".."));
-  assert.deepEqual(result.migrations, ["202611240001_multi_exchange_trade_review.sql", "202611240002_trade_review_ai.sql"]);
+  assert.deepEqual(result.migrations, [
+    "202611240001_multi_exchange_trade_review.sql",
+    "202611240002_trade_review_ai.sql",
+    "202611270001_trade_chart_private.sql",
+    "202611270002_trade_chart_snapshot_hardening.sql",
+    "202611270003_public_strategy_snapshots.sql",
+    "202611270004_public_strategy_publish.sql",
+    "202611270005_strategy_marker_comments.sql",
+  ]);
   assert.equal(result.legacyCompatibility, true);
   assert.equal(result.retentionMaintenance, true);
   assert.deepEqual(result.readOnlyProviders, ["binance", "okx", "bybit", "bitget", "exness"]);
+});
+
+test("the schema marker command returns the same marker required by release validation", () => {
+  const result = spawnSync(process.execPath, [
+    path.resolve(import.meta.dirname, "../scripts/trading-release-preflight.mjs"), "--schema-version",
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), release().expectedSchemaVersion);
 });
 
 test("packaged runtime mode validates a bounded safe observation file without repository files", (t) => {

@@ -158,7 +158,7 @@ function workflowStep() {
 
 test("workflow uses an independent opt-in operation and no lease/config/service mutations", () => {
   const { source, step } = workflowStep();
-  assert.match(source, /options: \[[^\]]*integration-config, tron-readiness\]/);
+  assert.match(source, /options: \[[^\]]*\bintegration-config, tron-readiness(?=,|\])/);
   assert.match(step, /if: inputs\.operation == 'tron-readiness'/);
   assert.match(source, /main-only read-only TRON readiness \(no orders\)/);
   assert.match(step, /test "\$GITHUB_REF" = "refs\/heads\/main"/);

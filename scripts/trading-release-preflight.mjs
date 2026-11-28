@@ -2,6 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const MIGRATIONS = [
+  "202611240001_multi_exchange_trade_review.sql",
+  "202611240002_trade_review_ai.sql",
+  "202611270001_trade_chart_private.sql",
+  "202611270002_trade_chart_snapshot_hardening.sql",
+  "202611270003_public_strategy_snapshots.sql",
+  "202611270004_public_strategy_publish.sql",
+  "202611270005_strategy_marker_comments.sql",
+];
+const SCHEMA_VERSION = MIGRATIONS.at(-1).split("_", 1)[0];
 const PROVIDERS = ["binance", "okx", "bybit", "bitget", "exness"];
 const FLAG_BY_PROVIDER = {
   binance: "TRADING_PROVIDER_BINANCE_ENABLED",
@@ -38,7 +48,7 @@ function normalizedOrigin(value, provider) {
 
 export function validateTradingRelease(input) {
   invariant(input && typeof input === "object", "release input is required");
-  invariant(input.expectedSchemaVersion === "202611260001", "expected schema marker is invalid");
+  invariant(input.expectedSchemaVersion === SCHEMA_VERSION, "expected schema marker is invalid");
   invariant(input.schemaVersion === input.expectedSchemaVersion, "database schema is not current");
   invariant(/^[0-9a-f]{40}$/.test(input.releaseSha ?? ""), "release SHA is invalid");
   invariant(/^[0-9a-f]{40}$/.test(input.rollbackTarget ?? ""), "rollback target is invalid");
@@ -46,6 +56,8 @@ export function validateTradingRelease(input) {
   invariant(sameCodeRollback === (input.releaseSha === input.rollbackTarget), "rollback mode does not match code state");
 
   const workbenchEnabled = strictBoolean(input.flags?.TRADING_WORKBENCH_V2_ENABLED, "TRADING_WORKBENCH_V2_ENABLED");
+  const { TRADING_PUBLIC_STRATEGIES_ENABLED: publicStrategies = false } = input.flags;
+  const publicStrategiesEnabled = strictBoolean(publicStrategies, "TRADING_PUBLIC_STRATEGIES_ENABLED");
   const enabledProviders = PROVIDERS.filter((provider) => strictBoolean(input.flags?.[FLAG_BY_PROVIDER[provider]], FLAG_BY_PROVIDER[provider]));
   if (workbenchEnabled) invariant(enabledProviders.length > 0, "at least one provider must be enabled with the workbench");
   for (const provider of PROVIDERS) normalizedOrigin(input.providerOrigins?.[provider], provider);
@@ -63,6 +75,7 @@ export function validateTradingRelease(input) {
   return {
     schemaVersion: input.schemaVersion,
     workbenchEnabled,
+    publicStrategiesEnabled,
     enabledProviders,
     rollbackTarget: input.rollbackTarget,
     sameCodeRollback,
@@ -81,11 +94,14 @@ function read(root, relative) {
 export function inspectTradingReleaseFiles(root) {
   const migrationDirectory = path.join(root, "supabase", "migrations");
   const migrations = fs.readdirSync(migrationDirectory)
-    .filter((name) => /^20261124000[12]_/.test(name))
+    .filter((name) => /^202611(?:24000[12]|2700\d{2})_.*\.sql$/.test(name))
     .sort();
-  invariant(migrations.length === 2, "the two trading migrations must both be present");
-  invariant(migrations[0] === "202611240001_multi_exchange_trade_review.sql", "multi-exchange migration order is invalid");
-  invariant(migrations[1] === "202611240002_trade_review_ai.sql", "trade-review AI migration order is invalid");
+  invariant(migrations.length === MIGRATIONS.length, "the trading release migrations must match the reviewed list");
+  for (const [index, name] of MIGRATIONS.entries()) {
+    invariant(migrations[index] === name, `trading migration order is invalid at ${name}`);
+    const marker = name.split("_", 1)[0];
+    invariant(read(migrationDirectory, name).includes(`select '${marker}'::text`), `trading schema marker is missing from ${name}`);
+  }
 
   const migration = read(root, "supabase/migrations/202611240001_multi_exchange_trade_review.sql");
   const server = read(root, "ai-gateway/src/server.ts");
@@ -112,20 +128,23 @@ export function inspectTradingReleaseFiles(root) {
   return { migrations, legacyCompatibility, retentionMaintenance, readOnlyProviders };
 }
 
-function envBoolean(name) {
-  const value = process.env[name];
+function envBoolean(name, defaultValue) {
+  const value = process.env[name] ?? defaultValue;
   if (value === "true") return true;
   if (value === "false") return false;
   throw new Error(`${name} must be set to true or false`);
 }
 
 function runtimeInputFromEnv() {
-  const flags = { TRADING_WORKBENCH_V2_ENABLED: envBoolean("TRADING_WORKBENCH_V2_ENABLED") };
+  const flags = {
+    TRADING_WORKBENCH_V2_ENABLED: envBoolean("TRADING_WORKBENCH_V2_ENABLED"),
+    TRADING_PUBLIC_STRATEGIES_ENABLED: envBoolean("TRADING_PUBLIC_STRATEGIES_ENABLED", "false"),
+  };
   for (const name of Object.values(FLAG_BY_PROVIDER)) flags[name] = envBoolean(name);
   const releaseSha = process.env.TRADING_RELEASE_SHA;
   const rollbackTarget = process.env.TRADING_ROLLBACK_SHA;
   return {
-    expectedSchemaVersion: "202611260001",
+    expectedSchemaVersion: SCHEMA_VERSION,
     schemaVersion: process.env.TRADING_SCHEMA_VERSION,
     releaseSha,
     rollbackTarget,
@@ -157,7 +176,9 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolv
 if (isMain) {
   const runtimeFileIndex = process.argv.indexOf("--runtime-file");
   let output;
-  if (runtimeFileIndex !== -1) {
+  if (process.argv.length === 3 && process.argv[2] === "--schema-version") {
+    process.stdout.write(`${SCHEMA_VERSION}\n`);
+  } else if (runtimeFileIndex !== -1) {
     invariant(process.argv.length === runtimeFileIndex + 2, "runtime mode accepts exactly one observation file");
     output = { runtime: validateTradingRelease(runtimeInputFromFile(process.argv[runtimeFileIndex + 1])) };
   } else {
@@ -167,5 +188,5 @@ if (isMain) {
       ? { files }
       : { files, runtime: validateTradingRelease(runtimeInputFromEnv()) };
   }
-  process.stdout.write(`${JSON.stringify(output)}\n`);
+  if (output) process.stdout.write(`${JSON.stringify(output)}\n`);
 }

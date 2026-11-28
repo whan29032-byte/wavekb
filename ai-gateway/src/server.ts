@@ -1,11 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import type { PublicStrategySnapshot } from "@wavekb/domain/trading-review";
 import { UserAdministrationApi } from "./admin/user-administration.ts";
 import { AuthApi } from "./auth/auth-api.ts";
 import { loadConfig, type GatewayConfig } from "./config.ts";
 import { SupabaseGatewayApi } from "./routes/gateway-api.ts";
 import { AuthRateLimiter } from "./security/auth-rate-limit.ts";
+import { SupabaseRest } from "./storage/supabase-rest.ts";
+import { ChartSharingService, readPublicStrategySnapshot, SupabaseChartSharingStore } from "./trading/chart-sharing-service.ts";
 import { youtubeRoute, type YouTubeRouteApi } from "./youtube/routes.ts";
 import { loadYouTubeSyncConfig } from "./youtube/config.ts";
 import { GoogleYouTubeProvider } from "./youtube/provider.ts";
@@ -32,10 +35,15 @@ export type ServerDeps = {
   youtubeApi?: YouTubeRouteApi;
   exchangeConnections?: ExchangeConnectionService;
   tradingWorkbench?: TradingWorkbenchService;
+  chartSharing?: Pick<ChartSharingService, "createPreview" | "publish">;
+  readPublicStrategy?: (id: string) => Promise<PublicStrategySnapshot | null>;
+  strategyMetric?: (event: "strategy_preview" | "strategy_publish", values: {
+    status: number; error?: string; bytes?: number; candles?: number; replayed?: boolean;
+  }) => void;
   tradingSync?: Pick<TradingSyncService, "syncConnection">;
 };
 
-export type GatewayUser = { id: string; role: string };
+export type GatewayUser = { id: string; role: string; publicUid?: number };
 export type GatewayApi = {
   authorize(token: string): Promise<GatewayUser | null>;
   listDirectoryResources(includeInactive?: boolean): Promise<unknown[]>;
@@ -154,6 +162,11 @@ function healthPayload(deps: ServerDeps): object {
     deployment,
     features: {
       trading_workbench_v2: deps.config.TRADING_WORKBENCH_V2_ENABLED,
+      ...(deps.config.TRADING_PUBLIC_STRATEGIES_ENABLED ? { trading_public_strategies: true } : {}),
+      trading_fill_chart: deps.config.TRADING_FILL_CHART_ENABLED && deps.config.TRADING_FILL_CHART_PILOT_UIDS.length === 0,
+      ...(deps.config.TRADING_FILL_CHART_ENABLED && deps.config.TRADING_FILL_CHART_PILOT_UIDS.length > 0
+        ? { trading_fill_chart_pilot: true }
+        : {}),
     },
     time: (deps.now ?? (() => new Date()))().toISOString(),
   };
@@ -221,6 +234,18 @@ function authFailure(error: unknown): RouteResult {
     "trade_cycle_not_found",
     "stale_trade_cycle_revision",
     "invalid_trade_review",
+    "invalid_trade_chart_query",
+    "invalid_trade_chart_request",
+    "invalid_trade_chart_state",
+    "invalid_trade_chart_annotation",
+    "invalid_trade_chart_annotation_images",
+    "request_too_large",
+    "trade_chart_invalid_state_price_type",
+    "trade_chart_fill_not_owned",
+    "trade_chart_cycle_not_owned",
+    "trade_chart_account_restricted",
+    "stale_trade_chart_state",
+    "stale_trade_chart_annotation",
     "invalid_trade_cycle_id",
     "invalid_trade_review_request",
     "trade_not_found",
@@ -258,7 +283,39 @@ function authFailure(error: unknown): RouteResult {
 function routeFailure(error: unknown): RouteResult {
   const candidate = error as { statusCode?: number; message?: string };
   const code = String(candidate?.message || "");
+  const chartStatus = new Map<string, number>([
+    ["invalid_trade_chart_state", 400],
+    ["invalid_trade_chart_annotation", 400],
+    ["invalid_trade_chart_annotation_images", 400],
+    ["trade_chart_fill_not_owned", 404],
+    ["trade_chart_cycle_not_owned", 404],
+    ["trade_chart_account_restricted", 403],
+    ["stale_trade_chart_state", 409],
+    ["stale_trade_chart_annotation", 409],
+  ]);
   const allowed = new Set([
+    "public_strategy_source_not_found",
+    "public_strategy_preview_not_found",
+    "public_strategy_preview_expired",
+    "public_strategy_preview_stale",
+    "public_strategy_preview_consumed",
+    "public_strategy_publish_forbidden",
+    "public_strategy_publish_invalid",
+    "public_strategy_selection_invalid",
+    "public_strategy_range_invalid",
+    "public_strategy_range_too_large",
+    "public_strategy_coverage_unavailable",
+    "public_strategy_coverage_invalid",
+    "public_strategy_indicator_unavailable",
+    "public_strategy_indicator_data_unavailable",
+    "public_strategy_indicator_output_invalid",
+    "public_strategy_indicator_output_missing",
+    "public_strategy_source_invalid",
+    "public_strategy_amount_invalid",
+    "public_strategy_payload_too_large",
+    "public_strategy_text_unsafe",
+    "public_strategy_drawing_outside_range",
+    "public_strategy_unavailable",
     "ai_connection_required",
     "invalid_provider_url",
     "provider_host_not_allowed",
@@ -310,6 +367,18 @@ function routeFailure(error: unknown): RouteResult {
     "trade_cycle_not_found",
     "stale_trade_cycle_revision",
     "invalid_trade_review",
+    "invalid_trade_chart_query",
+    "invalid_trade_chart_request",
+    "invalid_trade_chart_state",
+    "invalid_trade_chart_annotation",
+    "invalid_trade_chart_annotation_images",
+    "request_too_large",
+    "trade_chart_invalid_state_price_type",
+    "trade_chart_fill_not_owned",
+    "trade_chart_cycle_not_owned",
+    "trade_chart_account_restricted",
+    "stale_trade_chart_state",
+    "stale_trade_chart_annotation",
     "binance_1021",
     "binance_1022",
     "binance_2014",
@@ -337,20 +406,29 @@ function routeFailure(error: unknown): RouteResult {
     "exness_account_trading_disabled",
     "reason_required",
   ]);
-  return {
-    statusCode: Number(candidate?.statusCode || 500),
-    body: {
+  return authResult(
+    Number(candidate?.statusCode || chartStatus.get(code) || 500),
+    {
       error: allowed.has(code) || isPublicTradingProviderError(code)
         ? code
         : "request_failed",
     },
-  };
+  );
 }
 
 function authOriginAllowed(config: GatewayConfig, headers: Record<string, string>): boolean {
   const origin = String(headers.origin || "").trim().toLowerCase();
   return !origin || config.ALLOWED_WEB_ORIGINS.includes(origin);
 }
+
+function canUseTradeChart(config: GatewayConfig, actor: GatewayUser): boolean {
+  return config.TRADING_FILL_CHART_ENABLED && (config.TRADING_FILL_CHART_PILOT_UIDS.length === 0
+    || (actor.publicUid !== undefined && config.TRADING_FILL_CHART_PILOT_UIDS.includes(actor.publicUid)));
+}
+
+const shareWritePath = /^\/v1\/user\/trading-trades\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/(share-preview|share-publish)$/i;
+const publicSnapshotPath = /^\/v1\/public\/strategy-snapshots\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+const shareRequestLimit = 64 * 1024;
 
 function clientIp(headers: Record<string, string>): string {
   const chain = String(headers["x-forwarded-for"] || "unknown").split(",");
@@ -476,6 +554,20 @@ async function route(
   if (method === "GET" && path === "/health") {
     return { statusCode: 200, body: healthPayload(deps) };
   }
+  const snapshotId = path.match(publicSnapshotPath)?.[1];
+  if (snapshotId) {
+    if (method !== "GET" || !deps.config.TRADING_PUBLIC_STRATEGIES_ENABLED || requestUrl.search) {
+      return authResult(404, { error: "not_found" });
+    }
+    if (!deps.readPublicStrategy) return authResult(503, { error: "public_strategy_unavailable" });
+    const snapshot = await deps.readPublicStrategy(snapshotId.toLowerCase());
+    if (!snapshot) return authResult(404, { error: "not_found" });
+    const etag = `"${snapshot.projection_digest}"`;
+    const cache = { etag, "cache-control": "public, max-age=0, must-revalidate", "x-content-type-options": "nosniff" };
+    const candidates = headers["if-none-match"]?.split(",").map((value) => value.trim().replace(/^W\//, ""));
+    if (candidates?.some((value) => value === etag || value === "*")) return { statusCode: 304, body: {}, headers: cache };
+    return { statusCode: 200, body: snapshot, headers: cache };
+  }
   const auth = await authRoute(deps, method, path, headers, payload);
   if (auth) return auth;
   const api = deps.api;
@@ -495,7 +587,9 @@ async function route(
       headers: { "cache-control": "no-store" },
     };
   }
+  const shareAction = path.match(shareWritePath);
   const actor = await actorFor(deps, headers);
+  if (!actor && shareAction) return authResult(401, { error: "authentication_required" });
   if (!actor) return { statusCode: 401, body: { error: "authentication_required" } };
   if (path.startsWith("/v1/youtube/")) {
     if (!authOriginAllowed(deps.config, headers)) return { statusCode: 403, body: { error: "invalid_request" } };
@@ -609,6 +703,91 @@ async function route(
   if (method === "GET" && path === "/v1/user/trading-workbench") {
     if (!deps.tradingWorkbench) return { statusCode: 503, body: { error: "gateway_not_configured" } };
     return { statusCode: 200, body: { workbench: await deps.tradingWorkbench.getDashboard(actor.id, query) }, headers: { "cache-control": "no-store" } };
+  }
+  if (method === "GET" && path === "/v1/user/trading-chart-access") {
+    const enabled = canUseTradeChart(deps.config, actor);
+    return authResult(200, {
+      enabled,
+      ...(deps.config.TRADING_PUBLIC_STRATEGIES_ENABLED && enabled ? { share_enabled: true } : {}),
+    });
+  }
+  if (shareAction?.[1]) {
+    if (method !== "POST" || requestUrl.search || !deps.config.TRADING_PUBLIC_STRATEGIES_ENABLED || !canUseTradeChart(deps.config, actor)) {
+      return authResult(404, { error: "not_found" });
+    }
+    if (!authOriginAllowed(deps.config, headers)) return authResult(403, { error: "invalid_request" });
+    if (!deps.chartSharing || !deps.authRateLimiter) return authResult(503, { error: "public_strategy_unavailable" });
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return authResult(400, { error: "invalid_request" });
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > shareRequestLimit) return authResult(413, { error: "request_too_large" });
+    const preview = shareAction[2]?.toLowerCase() === "share-preview";
+    const limiter = deps.authRateLimiter;
+    const decision = limiter.consume(preview ? "strategy_preview" : "strategy_publish",
+      limiter.subject(actor.id), preview ? 12 : 8, 60_000);
+    if (!decision.allowed) return authResult(429, { error: "rate_limited" }, { "retry-after": String(decision.retryAfterSeconds) });
+    const id = shareAction[1].toLowerCase();
+    try {
+      if (preview) {
+        const result = await deps.chartSharing.createPreview(actor.id, id, payload);
+        deps.strategyMetric?.("strategy_preview", {
+          status: 201, bytes: Buffer.byteLength(JSON.stringify(result.projection), "utf8"), candles: result.projection.candles.length,
+        });
+        return authResult(201, result);
+      }
+      const result = await deps.chartSharing.publish(actor.id, id, payload);
+      const status = result.replayed ? 200 : 201;
+      deps.strategyMetric?.("strategy_publish", { status, replayed: result.replayed });
+      return authResult(status, result);
+    } catch (error) {
+      const result = routeFailure(error);
+      const { error: reason } = result.body as { error: string };
+      deps.strategyMetric?.(preview ? "strategy_preview" : "strategy_publish", { status: result.statusCode, error: reason });
+      return result;
+    }
+  }
+  const tradeChartMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart$/i);
+  if (tradeChartMatch?.[1]) {
+    if (!canUseTradeChart(deps.config, actor)) return authResult(404, { error: "not_found" });
+    if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
+    const cycleId = decodeURIComponent(tradeChartMatch[1]);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)
+      || method !== "GET") return authResult(404, { error: "not_found" });
+    return authResult(200, { chart: await deps.tradingWorkbench.getChart(actor.id, cycleId, query) });
+  }
+  const tradeChartStateMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/chart-state$/i);
+  if (tradeChartStateMatch?.[1]) {
+    if (!canUseTradeChart(deps.config, actor)) return authResult(404, { error: "not_found" });
+    if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
+    const cycleId = decodeURIComponent(tradeChartStateMatch[1]);
+    if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {
+      return authResult(404, { error: "not_found" });
+    }
+    if (!authOriginAllowed(deps.config, headers)) return authResult(403, { error: "invalid_request" });
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return authResult(400, { error: "invalid_trade_chart_request" });
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 32 * 1024) return authResult(413, { error: "request_too_large" });
+    return authResult(200, {
+      chart_state: await deps.tradingWorkbench.saveChartState(actor.id, cycleId, payload, bearer(headers)),
+    });
+  }
+  const tradeFillAnnotationMatch = path.match(/^\/v1\/user\/trading-trades\/([0-9a-f-]+)\/fills\/([1-9]\d{0,29})\/annotation$/i);
+  if (tradeFillAnnotationMatch?.[1] && tradeFillAnnotationMatch[2]) {
+    if (!canUseTradeChart(deps.config, actor)) return authResult(404, { error: "not_found" });
+    if (!deps.tradingWorkbench) return authResult(503, { error: "gateway_not_configured" });
+    const cycleId = decodeURIComponent(tradeFillAnnotationMatch[1]);
+    if (method !== "PUT" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cycleId)) {
+      return authResult(404, { error: "not_found" });
+    }
+    if (!authOriginAllowed(deps.config, headers)) return authResult(403, { error: "invalid_request" });
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return authResult(400, { error: "invalid_trade_chart_request" });
+    if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 32 * 1024) return authResult(413, { error: "request_too_large" });
+    return authResult(200, {
+      annotation: await deps.tradingWorkbench.saveFillAnnotation(
+        actor.id,
+        cycleId,
+        tradeFillAnnotationMatch[2],
+        payload,
+        bearer(headers),
+      ),
+    });
   }
   const tradingAiReviewMatch = path.match(/^\/v1\/user\/trading-trades\/([^/]+)\/ai-review$/);
   if (method === "POST" && tradingAiReviewMatch?.[1]) {
@@ -830,17 +1009,30 @@ export function buildServer(deps: ServerDeps): GatewayServer {
           response.end();
           return;
         }
-        let raw = "";
+        const requestPath = new URL(request.url ?? "/", "http://gateway.local").pathname;
+        const isTradeChartWrite = request.method === "PUT" && (
+          /^\/v1\/user\/trading-trades\/[0-9a-f-]+\/chart-state$/i.test(requestPath)
+          || /^\/v1\/user\/trading-trades\/[0-9a-f-]+\/fills\/[1-9]\d{0,29}\/annotation$/i.test(requestPath)
+        );
+        const requestLimit = request.method === "POST" && shareWritePath.test(requestPath)
+          ? shareRequestLimit
+          : isTradeChartWrite
+          ? 32 * 1024
+          : requestPath.startsWith("/api/auth/")
+            ? 64 * 1024
+            : runtimeDeps.config.AI_MAX_IMAGE_BYTES + 1024 * 1024;
+        const chunks: Buffer[] = [];
+        let receivedBytes = 0;
         try {
           for await (const chunk of request) {
-            raw += chunk;
-            const requestLimit = String(request.url || "").startsWith("/api/auth/")
-              ? 64 * 1024
-              : runtimeDeps.config.AI_MAX_IMAGE_BYTES + 1024 * 1024;
-            if (Buffer.byteLength(raw) > requestLimit) {
-              throw Object.assign(new Error("request too large"), { statusCode: 413 });
+            const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            receivedBytes += bytes.byteLength;
+            if (receivedBytes > requestLimit) {
+              throw Object.assign(new Error("request_too_large"), { statusCode: 413 });
             }
+            chunks.push(bytes);
           }
+          const raw = Buffer.concat(chunks, receivedBytes).toString("utf8");
           const payload = raw ? JSON.parse(raw) : undefined;
           const headers = Object.fromEntries(
             Object.entries(request.headers).map(([key, value]) => [key, String(value ?? "")]),
@@ -862,6 +1054,9 @@ export function buildServer(deps: ServerDeps): GatewayServer {
           const failure = routeFailure(error);
           response.statusCode = failure.statusCode;
           response.setHeader("content-type", "application/json; charset=utf-8");
+          for (const [key, value] of Object.entries(failure.headers ?? {})) {
+            response.setHeader(key, value);
+          }
           response.end(JSON.stringify(failure.body));
         }
       });
@@ -894,13 +1089,17 @@ if (isMain) {
     // existing Gateway services offline. Never print configuration values.
     console.warn("youtube_configuration_unavailable");
   }
+  const tradingWorkbench = createTradingWorkbenchService(config);
   const server = buildServer({
     config,
     api: new SupabaseGatewayApi(config),
     authApi: new AuthApi(config),
     userAdministrationApi: new UserAdministrationApi(config),
     exchangeConnections: createExchangeConnectionService(config),
-    tradingWorkbench: createTradingWorkbenchService(config),
+    tradingWorkbench,
+    chartSharing: new ChartSharingService(new SupabaseChartSharingStore(new SupabaseRest(config)), tradingWorkbench),
+    readPublicStrategy: (id) => readPublicStrategySnapshot(config, id),
+    strategyMetric: (event, values) => process.stdout.write(`${JSON.stringify({ event, ...values })}\n`),
     tradingSync: createTradingSyncService(config),
     ...(youtubeApi ? { youtubeApi } : {}),
   });

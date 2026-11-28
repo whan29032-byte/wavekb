@@ -65,6 +65,12 @@ test("net-zero reconstruction deduplicates and sorts fills while preserving add 
   const cycle = cycles[0];
   assert.ok(cycle);
   assert.deepEqual(cycle.fill_ids, ["f1", "f2", "f3", "f4"]);
+  assert.deepEqual(cycle.allocations, [
+    { native_fill_id: "f1", quantity: "1", role: "open", sort_order: 0 },
+    { native_fill_id: "f2", quantity: "1", role: "add", sort_order: 1 },
+    { native_fill_id: "f3", quantity: "1", role: "reduce", sort_order: 2 },
+    { native_fill_id: "f4", quantity: "1", role: "close", sort_order: 3 },
+  ]);
   assert.equal(cycle.entry_price, "105");
   assert.equal(cycle.exit_price, "125");
   assert.equal(cycle.quantity, "2");
@@ -105,6 +111,117 @@ test("hedge positions stay separate and an over-close reverses through zero into
     ["long", "10", "-2", "8"],
     ["short", "5", "-2", "3"],
   ]);
+  assert.deepEqual(reversal[0]?.allocations, [
+    { native_fill_id: "r1", quantity: "1", role: "open", sort_order: 0 },
+    { native_fill_id: "r2", quantity: "1", role: "close", sort_order: 1 },
+  ]);
+  assert.deepEqual(reversal[1]?.allocations, [
+    { native_fill_id: "r2", quantity: "1", role: "reverse_open", sort_order: 0 },
+    { native_fill_id: "r3", quantity: "1", role: "close", sort_order: 1 },
+  ]);
+});
+
+test("allocation quantities preserve exact decimals across add, reduce, full close, and reversal", () => {
+  const cycles = reconstructNetZeroCycles({
+    provider: "binance", connection_id: connectionId, account_currency: "USDT", cash_events: [],
+    fills: [
+      fill({ native_fill_id: "d1", occurred_at: "2026-11-24T01:00:00Z", position_side: "both", quantity: "0.100000000000000001" }),
+      fill({ native_fill_id: "d2", occurred_at: "2026-11-24T02:00:00Z", position_side: "both", quantity: "0.200000000000000002" }),
+      fill({ native_fill_id: "d3", occurred_at: "2026-11-24T03:00:00Z", position_side: "both", side: "sell", action: "close", quantity: "0.100000000000000001" }),
+      fill({ native_fill_id: "d4", occurred_at: "2026-11-24T04:00:00Z", position_side: "both", side: "sell", action: "close", quantity: "0.300000000000000003" }),
+    ],
+  });
+
+  assert.equal(cycles.length, 2);
+  assert.deepEqual(cycles[0]?.allocations, [
+    { native_fill_id: "d1", quantity: "0.100000000000000001", role: "open", sort_order: 0 },
+    { native_fill_id: "d2", quantity: "0.200000000000000002", role: "add", sort_order: 1 },
+    { native_fill_id: "d3", quantity: "0.100000000000000001", role: "reduce", sort_order: 2 },
+    { native_fill_id: "d4", quantity: "0.200000000000000002", role: "close", sort_order: 3 },
+  ]);
+  assert.deepEqual(cycles[1]?.allocations, [
+    { native_fill_id: "d4", quantity: "0.100000000000000001", role: "reverse_open", sort_order: 0 },
+  ]);
+  assert.deepEqual(cycles[0]?.fill_ids, ["d1", "d2", "d3", "d4"]);
+  assert.deepEqual(cycles[1]?.fill_ids, ["d4"]);
+});
+
+test("same-timestamp native fill IDs use explicit code-point ordering", () => {
+  const cycles = reconstructNetZeroCycles({
+    provider: "binance", connection_id: connectionId, account_currency: "USDT", cash_events: [],
+    fills: [
+      fill({ native_fill_id: "a", occurred_at: "2026-11-24T01:00:00Z", quantity: "1" }),
+      fill({ native_fill_id: "Z", occurred_at: "2026-11-24T01:00:00Z", quantity: "1" }),
+      fill({ native_fill_id: "close", occurred_at: "2026-11-24T02:00:00Z", side: "sell", action: "close", quantity: "2" }),
+    ],
+  });
+
+  assert.deepEqual(cycles[0]?.fill_ids, ["Z", "a", "close"]);
+  assert.deepEqual(cycles[0]?.allocations.map(({ native_fill_id, sort_order }) => ({ native_fill_id, sort_order })), [
+    { native_fill_id: "Z", sort_order: 0 },
+    { native_fill_id: "a", sort_order: 1 },
+    { native_fill_id: "close", sort_order: 2 },
+  ]);
+});
+
+test("allocation fact changes advance a known allocation-aware revision but legacy revisions backfill once", () => {
+  const initial = reconstructNetZeroCycles({
+    provider: "binance", connection_id: connectionId, account_currency: "USDT", cash_events: [],
+    fills: [fill({ native_fill_id: "same-fill", occurred_at: "2026-11-24T01:00:00Z", quantity: "1" })],
+  })[0];
+  const corrected = reconstructNetZeroCycles({
+    provider: "binance", connection_id: connectionId, account_currency: "USDT", cash_events: [],
+    fills: [fill({ native_fill_id: "same-fill", occurred_at: "2026-11-24T01:00:00Z", quantity: "2" })],
+  })[0];
+  assert.ok(initial && corrected);
+  assert.equal(initial.fill_digest, corrected.fill_digest);
+  assert.match(initial.allocation_digest, /^[a-f0-9]{64}$/);
+  assert.notEqual(initial.allocation_digest, corrected.allocation_digest);
+
+  const allocationAware = reconcileCycleLineage(
+    [{
+      ...previous({ id: "cycle-id", created_at: "2026-11-24T01:00:00Z", anchor_fill_id: "same-fill", fill_ids: ["same-fill"] }),
+      fill_digest: initial.fill_digest,
+      allocation_digest: initial.allocation_digest,
+    }],
+    [corrected],
+    () => "unused",
+  );
+  assert.equal(allocationAware.assignments[0]?.revision, 2);
+
+  const legacy = reconcileCycleLineage(
+    [{
+      ...previous({ id: "cycle-id", created_at: "2026-11-24T01:00:00Z", anchor_fill_id: "same-fill", fill_ids: ["same-fill"] }),
+      fill_digest: initial.fill_digest,
+    }],
+    [initial],
+    () => "unused",
+  );
+  assert.equal(legacy.assignments[0]?.revision, 1);
+});
+
+test("legacy locale-ordered fill identity advances instead of reusing an immutable revision", () => {
+  const result = reconcileCycleLineage(
+    [{
+      ...previous({ id: "cycle-id", created_at: "2026-11-24T01:00:00Z", anchor_fill_id: "a", fill_ids: ["a", "Z"] }),
+      fill_digest: "same-unordered-digest",
+    }],
+    [{
+      stable_key: "code-point-order",
+      anchor_fill_id: "Z",
+      fill_ids: ["Z", "a"],
+      fill_digest: "same-unordered-digest",
+      allocation_digest: "new-allocation-digest",
+    }],
+    () => "unused",
+  );
+
+  assert.deepEqual(result.assignments, [{
+    candidate_index: 0,
+    id: "cycle-id",
+    revision: 2,
+    previous_ids: ["cycle-id"],
+  }]);
 });
 
 test("a closing fill before any opening evidence is excluded as incomplete opening history", () => {
@@ -122,6 +239,9 @@ test("a closing fill before any opening evidence is excluded as incomplete openi
   assert.ok(incomplete && complete);
   assert.equal(incomplete.completeness, "incomplete_opening_history");
   assert.deepEqual(incomplete.fill_ids, ["cut-1"]);
+  assert.deepEqual(incomplete.allocations, [
+    { native_fill_id: "cut-1", quantity: "1", role: "close", sort_order: 0 },
+  ]);
   assert.equal(complete.completeness, "complete");
 });
 
@@ -148,6 +268,11 @@ test("Exness position IDs remain independent through partial closes and receive 
   const positionB = cycles.find((cycle) => cycle.native_position_id === "position-b");
   assert.ok(positionA && positionB);
   assert.deepEqual(positionA.fill_ids, ["a-open", "a-part", "a-close"]);
+  assert.deepEqual(positionA.allocations, [
+    { native_fill_id: "a-open", quantity: "2", role: "open", sort_order: 0 },
+    { native_fill_id: "a-part", quantity: "1", role: "reduce", sort_order: 1 },
+    { native_fill_id: "a-close", quantity: "1", role: "close", sort_order: 2 },
+  ]);
   assert.equal(positionA.funding_or_swap, "-2");
   assert.equal(positionA.dividends, "3");
   assert.equal(positionB.funding_or_swap, "-1");
@@ -173,7 +298,7 @@ function previous(overrides: Partial<PreviousCycleIdentity> & Pick<PreviousCycle
 }
 
 function next(overrides: Partial<NextCycleCandidate> & Pick<NextCycleCandidate, "stable_key" | "anchor_fill_id" | "fill_ids">): NextCycleCandidate {
-  return { fill_digest: `digest-${overrides.stable_key}`, ...overrides };
+  return { fill_digest: `digest-${overrides.stable_key}`, allocation_digest: `allocation-${overrides.stable_key}`, ...overrides };
 }
 
 test("lineage retains the stable ID and increments revision when a late fill extends a cycle", () => {

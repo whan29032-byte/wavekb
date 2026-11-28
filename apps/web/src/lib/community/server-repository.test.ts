@@ -82,6 +82,27 @@ it("reaches comments after two hundred while preserving visible-only chronology"
   expect(db.calls[0]).toMatchObject({ range: [200, 250], filters: [["post_id", "post"], ["status", "visible"]], orders: [["created_at", true], ["id", true]] });
 });
 
+it("filters a marker and its visible replies before paginating and preserves their images", async () => {
+  const marker = "a".repeat(32);
+  const other = "b".repeat(32);
+  const shared = { post_id: "post", author_id: "author", status: "visible", body: "comment", created_at: "2026-11-27" };
+  db.rows.post_comments = [
+    { ...shared, id: "a", marker_key: null },
+    { ...shared, id: "b", marker_key: marker },
+    { ...shared, id: "c", marker_key: marker, parent_id: "b", post_comment_images: [{ id: "img", storage_path: "owner/comment/img", sort_order: 0 }] },
+    { ...shared, id: "d", marker_key: marker, status: "hidden_by_admin" },
+    { ...shared, id: "e", marker_key: other },
+  ];
+  const result = await listPostComments("post", 1, marker);
+  expect(result.total).toBe(2);
+  expect(result.items.map(({ id, marker_key }) => ({ id, marker_key }))).toEqual([{ id: "b", marker_key: marker }, { id: "c", marker_key: marker }]);
+  expect(result.items[1].images?.[0].storage_path).toBe("owner/comment/img");
+  expect(db.calls[0].select).toContain("marker_key");
+  expect(db.calls[0].filters).toContainEqual(["marker_key", marker]);
+  expect((await listPostComments("post")).map(({ id }) => id)).toEqual(["a", "b", "c", "e"]);
+  await expect(listPostComments("post", 1, "private-fill-id")).resolves.toEqual({ items: [], hasNext: false, total: 0 });
+});
+
 it("keeps legacy array callers compatible and details retain chart/timeline payloads", async () => {
   db.rows.posts = posts(25);
   expect(await listPosts("idea_sharing")).toHaveLength(20);

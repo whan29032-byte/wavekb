@@ -193,11 +193,16 @@ export type PostCommentImage = {
   sort_order: number;
 };
 
+export function isStrategyMarkerKey(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+}
+
 export type PostComment = {
   id: string;
   post_id: string;
   author_id: string;
   parent_id: string | null;
+  marker_key: string | null;
   body: string;
   status: "visible" | "deleted_by_author" | "hidden_by_admin";
   created_at: string;
@@ -667,7 +672,9 @@ export function parseExternalReferences(rawUrls: string[] | undefined): {
   const seen = new Set<string>();
   for (const value of values) {
     const parsed = parseExternalReference(value);
-    if (!parsed.ok || !parsed.kind) return { ok: false, references: [], error: parsed.error };
+    if (!parsed.ok || !parsed.kind) {
+      return { ok: false, references: [], ...(parsed.error === undefined ? {} : { error: parsed.error }) };
+    }
     if (seen.has(parsed.url)) continue;
     seen.add(parsed.url);
     references.push({ url: parsed.url, kind: parsed.kind, sort_order: references.length });
@@ -691,7 +698,7 @@ export function validatePost(input: PostInput): PostValidation {
   }
 
   const external = parseExternalReferences(input.externalUrls ?? [input.externalUrl ?? ""]);
-  if (!external.ok) fields.externalUrl = external.error;
+  if (!external.ok && external.error !== undefined) fields.externalUrl = external.error;
   const firstExternal = external.references[0];
 
   return {

@@ -1,8 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isBoardSlug } from "@wavekb/domain";
 import { updateSession } from "@/lib/supabase/proxy";
+import { strategySnapshotIdPattern } from "@/lib/trading/public-strategy-contract";
 
 export async function proxy(request: NextRequest) {
+  if (/^\/api\/public-strategies\/[^/]+\/?$/.test(request.nextUrl.pathname)) {
+    // Keep public cache responses independent from Supabase cookie refresh.
+    const response = NextResponse.next();
+    response.headers.set("x-robots-tag", "noindex, nofollow");
+    return response;
+  }
   const boardRoute = /^\/community\/([^/]+)\/?$/.exec(request.nextUrl.pathname);
   if (boardRoute) {
     let board = boardRoute[1];
@@ -21,8 +28,11 @@ export async function proxy(request: NextRequest) {
   }
   const { response, userId } = await updateSession(request);
 
-  // 社区需要注册并登录后才能进入。
-  if (!userId && /^\/community(?:\/|$)/.test(request.nextUrl.pathname)) {
+  const postDetail = /^\/community\/post\/([^/]+)\/?$/.exec(request.nextUrl.pathname)?.[1];
+  const canCheckPublicStrategy = postDetail !== undefined && strategySnapshotIdPattern.test(postDetail);
+  // The detail page verifies the snapshot is public and attached to this exact
+  // post before displaying it to a visitor.
+  if (!userId && !canCheckPublicStrategy && /^\/community(?:\/|$)/.test(request.nextUrl.pathname)) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);

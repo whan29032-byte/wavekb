@@ -11,6 +11,373 @@ export type TradingRange = "7d" | "30d" | "90d" | "all";
 export type TradePlanCompliance = "unset" | "yes" | "partial" | "no";
 export type TradingValuationStatus = "direct" | "approximate" | "triangulated" | "unavailable";
 
+export const TRADE_CHART_STATE_SCHEMA_VERSION = "wavekb-trade-chart-v1" as const;
+export const TRADE_CHART_PROJECTION_SCHEMA_VERSION = "wavekb-trade-chart-projection-v1" as const;
+
+export const TRADE_CHART_TIMEFRAMES = [
+  "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "1w", "1M",
+] as const;
+export type TradeChartTimeframe = (typeof TRADE_CHART_TIMEFRAMES)[number];
+
+export const TRADE_CHART_PRICE_TYPES = ["trade", "mark", "bid", "ask", "both"] as const;
+export type TradeChartPriceType = (typeof TRADE_CHART_PRICE_TYPES)[number];
+
+export const TRADE_CHART_CANDLE_SERIES_BASES = ["trade", "mark", "bid", "ask"] as const;
+export type TradeChartCandleSeriesBasis = (typeof TRADE_CHART_CANDLE_SERIES_BASES)[number];
+/** @deprecated Use TRADE_CHART_CANDLE_SERIES_BASES. */
+export const TRADE_CHART_CANDLE_PRICE_BASES = TRADE_CHART_CANDLE_SERIES_BASES;
+/** @deprecated Use TradeChartCandleSeriesBasis. */
+export type TradeChartCandlePriceBasis = TradeChartCandleSeriesBasis;
+
+export const TRADE_CHART_CANDLE_SOURCES = ["public_api", "signed_account"] as const;
+export type TradeChartCandleSource = (typeof TRADE_CHART_CANDLE_SOURCES)[number];
+
+export const TRADE_CHART_COVERAGE_STATUSES = ["complete", "partial", "gapped", "stale", "empty", "unavailable"] as const;
+export type TradeChartCoverageStatus = (typeof TRADE_CHART_COVERAGE_STATUSES)[number];
+
+export const TRADE_CHART_WARNING_CODES = [
+  "historical_gap",
+  "candles_unavailable",
+  "empty_range",
+  "partial_coverage",
+  "stale_cache",
+  "rate_limited",
+  "provider_limit_reached",
+  "time_limit_reached",
+] as const;
+export type TradeChartWarningCode = (typeof TRADE_CHART_WARNING_CODES)[number];
+
+export const TRADE_CHART_INDICATOR_IDS = [
+  "sma", "ema", "wma", "hma", "vwap", "bollinger", "rsi", "macd", "stochastic", "adx", "atr",
+  "supertrend", "ichimoku", "donchian", "keltner-channel", "chandelier-exit", "zigzag",
+  "williams-fractals", "pivot-points", "cpr", "obv", "mfi", "chaikin-money-flow",
+] as const;
+export type TradeChartIndicatorId = (typeof TRADE_CHART_INDICATOR_IDS)[number];
+
+export const TRADE_CHART_INDICATOR_SETTING_KEYS: Readonly<Record<string, readonly string[]>> = {
+  sma: ["length", "source", "color", "timeframe"],
+  ema: ["length", "source", "color", "timeframe"],
+  wma: ["length", "source", "color", "timeframe"],
+  hma: ["length", "source", "color", "timeframe"],
+  vwap: ["anchor", "source", "offset", "calcMode", "showBand1", "bandMult1", "showBand2", "bandMult2", "showBand3", "bandMult3", "color", "band1Color", "band2Color", "band3Color"],
+  bollinger: ["length", "stdDev", "source", "basisColor", "bandColor", "timeframe"],
+  rsi: ["length", "source", "color", "overbought", "oversold", "bandColor", "timeframe"],
+  macd: ["fastPeriod", "slowPeriod", "signalPeriod", "source", "macdColor", "histUpColor", "histUpFadeColor", "histDownColor", "histDownFadeColor", "signalColor", "timeframe"],
+  stochastic: ["kPeriod", "kSmoothing", "dPeriod", "kColor", "dColor", "bandColor", "timeframe"],
+  adx: ["period", "adxPeriod", "adxColor", "plusColor", "minusColor", "timeframe"],
+  atr: ["period", "color", "timeframe"],
+  supertrend: ["period", "multiplier", "upColor", "downColor", "timeframe"],
+  ichimoku: ["conversionPeriod", "basePeriod", "laggingSpanPeriod", "displacement", "conversionColor", "baseColor", "spanAColor", "spanBColor", "laggingColor", "cloudUpColor", "cloudDownColor"],
+  donchian: ["length", "offset", "basisColor", "bandColor", "fillColor", "timeframe"],
+  "keltner-channel": ["length", "mult", "source", "exp", "bandsStyle", "atrlength", "basisColor", "bandColor", "fillColor", "timeframe"],
+  "chandelier-exit": ["length", "atrLength", "atrMultiplier", "longColor", "shortColor"],
+  zigzag: ["deviation", "color"],
+  "williams-fractals": ["periods", "showUp", "showDown", "upColor", "downColor"],
+  "pivot-points": ["kind", "frame", "showP", "show1", "show2", "show3", "show4", "show5", "pivotColor", "supportColor", "resistanceColor"],
+  cpr: ["pivotMode", "showDaily", "showWeekly", "showMonthly", "displaypivots", "displaysupport", "displayresistance", "displaycpr", "displayS1R1", "dPivotColor", "dSupportColor", "dResistanceColor", "dCprColor", "dFillColor", "wPivotColor", "wSupportColor", "wResistanceColor", "wCprColor", "wFillColor", "mPivotColor", "mSupportColor", "mResistanceColor", "mCprColor", "mFillColor"],
+  obv: ["color", "maType", "maLength", "bbMult", "maColor", "bbUpperColor", "bbLowerColor"],
+  mfi: ["period", "color", "bandColor"],
+  "chaikin-money-flow": ["length", "color"],
+};
+
+export const TRADE_CHART_BASIC_DRAWING_TOOL_IDS = [
+  "trend-line", "ray", "horizontal-line", "vertical-line", "rectangle", "text", "long-position", "short-position",
+] as const;
+export const TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS = [
+  "fib-retracement", "fib-extension", "fib-time-zone", "fib-fan", "fib-channel",
+] as const;
+export const TRADE_CHART_ELLIOTT_DRAWING_TOOL_IDS = [
+  "elliott-impulse", "elliott-correction", "elliott-triangle", "elliott-double-combo", "elliott-triple-combo",
+] as const;
+export const TRADE_CHART_DRAWING_TOOL_IDS = [
+  ...TRADE_CHART_BASIC_DRAWING_TOOL_IDS,
+  ...TRADE_CHART_FIBONACCI_DRAWING_TOOL_IDS,
+  ...TRADE_CHART_ELLIOTT_DRAWING_TOOL_IDS,
+] as const;
+export type TradeChartDrawingToolId = (typeof TRADE_CHART_DRAWING_TOOL_IDS)[number];
+
+export type TradeChartDrawingFieldKey =
+  | "color" | "lineWidth" | "lineStyle" | "fill" | "fillColor" | "fillOpacity"
+  | "extendLeft" | "extendRight" | "showLabels" | "showStats" | "accountSize" | "risk" | "levels";
+export type TradeChartDrawingTextKey =
+  | "value" | "color" | "fontSize" | "fontFamily" | "bold" | "italic" | "align" | "valign";
+export type TradeChartDrawingPropertyKey =
+  | "degree" | "labelStyle" | "showHeader" | "showLossSize" | "showTargetLabel"
+  | "showStopLabel" | "showPrices" | "profitColor" | "lossColor" | "stopTime" | "stopPrice";
+
+const BASE_LINE_STYLE = ["color", "lineWidth", "lineStyle"] as const;
+const LABEL_TEXT_STYLE = ["color", "fontSize", "fontFamily", "bold", "italic"] as const;
+const CONTENT_TEXT_STYLE = ["value", ...LABEL_TEXT_STYLE, "align", "valign"] as const;
+const POSITION_PROPERTIES = [
+  "showHeader", "showLossSize", "showTargetLabel", "showStopLabel", "showPrices", "profitColor", "lossColor",
+  "stopTime", "stopPrice",
+] as const;
+const ELLIOTT_PROPERTIES = ["degree", "labelStyle"] as const;
+
+export type TradeChartDrawingToolSchema = {
+  pointCount: number;
+  styleKeys: readonly TradeChartDrawingFieldKey[];
+  textKeys: readonly TradeChartDrawingTextKey[];
+  textRequired: boolean;
+  propertyKeys: readonly TradeChartDrawingPropertyKey[];
+};
+
+export const TRADE_CHART_DRAWING_TOOL_SCHEMAS = {
+  "trend-line": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight", "showStats"], textKeys: [], textRequired: false, propertyKeys: [] },
+  ray: { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "extendLeft", "extendRight", "showStats"], textKeys: [], textRequired: false, propertyKeys: [] },
+  "horizontal-line": { pointCount: 1, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "vertical-line": { pointCount: 1, styleKeys: BASE_LINE_STYLE, textKeys: [], textRequired: false, propertyKeys: [] },
+  rectangle: { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "fill", "fillColor", "fillOpacity"], textKeys: CONTENT_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  text: { pointCount: 1, styleKeys: [], textKeys: CONTENT_TEXT_STYLE, textRequired: true, propertyKeys: [] },
+  "long-position": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels", "accountSize", "risk"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
+  "short-position": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "fillOpacity", "showLabels", "accountSize", "risk"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: POSITION_PROPERTIES },
+  "fib-retracement": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels", "fill", "fillColor", "fillOpacity", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-extension": { pointCount: 3, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels", "fill", "fillColor", "fillOpacity", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-time-zone": { pointCount: 2, styleKeys: [...BASE_LINE_STYLE, "levels", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-fan": { pointCount: 2, styleKeys: ["lineWidth", "lineStyle", "levels", "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "fib-channel": { pointCount: 3, styleKeys: ["lineWidth", "lineStyle", "levels", "showLabels", "extendLeft", "extendRight"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: [] },
+  "elliott-impulse": { pointCount: 6, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-correction": { pointCount: 4, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-triangle": { pointCount: 6, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-double-combo": { pointCount: 4, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+  "elliott-triple-combo": { pointCount: 6, styleKeys: [...BASE_LINE_STYLE, "showLabels"], textKeys: LABEL_TEXT_STYLE, textRequired: false, propertyKeys: ELLIOTT_PROPERTIES },
+} as const satisfies Record<TradeChartDrawingToolId, TradeChartDrawingToolSchema>;
+
+export const TRADE_CHART_MAX_CANDLES = 3_000;
+export const TRADE_CHART_MAX_MARKERS = 10_000;
+export const TRADE_CHART_MAX_INDICATORS = 32;
+export const TRADE_CHART_MAX_DRAWINGS = 200;
+export const TRADE_CHART_MAX_DRAWING_POINTS = 32;
+
+export type IndicatorSettingV1 = string | number | boolean;
+
+export type IndicatorSpecV1 = {
+  instanceId: string;
+  indicatorId: TradeChartIndicatorId;
+  settings?: Record<string, IndicatorSettingV1>;
+  paneIndex?: number;
+};
+
+export type DrawingPointV1 = {
+  time: number;
+  price: number;
+};
+
+export type DrawingStyleV1 = {
+  color?: string;
+  lineWidth?: number;
+  lineStyle?: "solid" | "dashed" | "dotted";
+  fill?: boolean;
+  fillColor?: string;
+  fillOpacity?: number;
+  extendLeft?: boolean;
+  extendRight?: boolean;
+  showLabels?: boolean;
+  showStats?: boolean;
+  accountSize?: number;
+  risk?: number;
+  levels?: Array<{
+    ratio: number;
+    color?: string;
+    enabled?: boolean;
+    label?: string;
+  }>;
+};
+
+export type DrawingTextV1 = {
+  value?: string;
+  color?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  bold?: boolean;
+  italic?: boolean;
+  align?: "left" | "center" | "right";
+  valign?: "top" | "middle" | "bottom";
+};
+
+export type DrawingPropertiesV1 = {
+  degree?: "grand-supercycle" | "supercycle" | "cycle" | "primary" | "intermediate" | "minor" | "minute" | "minuette" | "subminuette";
+  labelStyle?: "degree" | "plain" | "parentheses" | "circled";
+  showHeader?: boolean;
+  showLossSize?: boolean;
+  showTargetLabel?: boolean;
+  showStopLabel?: boolean;
+  showPrices?: boolean;
+  profitColor?: string;
+  lossColor?: string;
+  /** WaveKB-owned binding for a non-default draggable position stop anchor. */
+  stopTime?: number;
+  stopPrice?: number;
+};
+
+export type DrawingSpecV1 = {
+  id: string;
+  tool: TradeChartDrawingToolId;
+  points: DrawingPointV1[];
+  style: DrawingStyleV1;
+  text?: DrawingTextV1;
+  properties?: DrawingPropertiesV1;
+  paneIndex: number;
+  locked?: boolean;
+  visible?: boolean;
+  zIndex: number;
+};
+
+export type ChartStateV1 = {
+  schema_version: typeof TRADE_CHART_STATE_SCHEMA_VERSION;
+  cycle_id: string;
+  cycle_revision: number;
+  timeframe: TradeChartTimeframe;
+  price_type: TradeChartPriceType;
+  viewport: { from: number; to: number };
+  indicators: IndicatorSpecV1[];
+  drawings: DrawingSpecV1[];
+  version: number;
+  updated_at: string;
+};
+
+export type TradeChartCandleV1 = {
+  provider: TradingProvider;
+  product: TradingProduct;
+  native_symbol: string;
+  normalized_symbol: string;
+  timeframe: TradeChartTimeframe;
+  series_basis: TradeChartCandleSeriesBasis;
+  open_time: string;
+  close_time: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string | null;
+  source: TradeChartCandleSource;
+  source_timestamp: string;
+  fetched_at: string;
+  status: "final" | "partial";
+  gap_before: boolean;
+  gap_after: boolean;
+};
+
+export type FillMarkerAnnotationV1 = {
+  id: string;
+  body: string;
+  tags: string[];
+  image_count: number;
+  version: number;
+  remap_status: "current" | "remapped" | "needs_confirmation";
+};
+
+export type FillMarker = {
+  marker_key: string;
+  fill_id: string;
+  occurred_at: string;
+  price: string;
+  allocated_quantity: string;
+  allocation_role: "open" | "add" | "reduce" | "close" | "reverse_open";
+  sort_order: number;
+  side: "buy" | "sell";
+  position_side: "both" | "long" | "short";
+  liquidity: "maker" | "taker" | "unknown";
+  provider_fill_id_mask: string;
+  annotation: FillMarkerAnnotationV1 | null;
+};
+
+export type TradeChartGapV1 = { series_basis: TradeChartCandleSeriesBasis; from: string; to: string };
+
+export type TradeChartProjection = {
+  schema_version: typeof TRADE_CHART_PROJECTION_SCHEMA_VERSION;
+  cycle_id: string;
+  cycle_revision: number;
+  provider: TradingProvider;
+  product: TradingProduct;
+  symbol: string;
+  native_symbol: string;
+  direction: "long" | "short";
+  opened_at: string;
+  closed_at: string | null;
+  timeframe: TradeChartTimeframe;
+  price_type: TradeChartPriceType;
+  range: { from: string; to: string };
+  candles: TradeChartCandleV1[];
+  markers: FillMarker[];
+  /** Private notes whose original fill could not be matched to this revision. */
+  unmatched_annotations?: Array<FillMarkerAnnotationV1 & { remap_status: "needs_confirmation" }>;
+  /** The last saved layout may predate the current cycle revision or candle timeframe. */
+  chart_state: ChartStateV1 | null;
+  coverage: {
+    status: TradeChartCoverageStatus;
+    source: TradeChartCandleSource | null;
+    fetched_at: string | null;
+    gaps: TradeChartGapV1[];
+    unavailable_reason: string | null;
+  };
+  warnings: TradeChartWarningCode[];
+};
+
+export const PUBLIC_STRATEGY_SCHEMA_VERSION = "wavekb-public-strategy-snapshot-v1";
+export const PUBLIC_STRATEGY_RENDERER_VERSION = "wavekb-public-trade-chart-v1";
+export const PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION = "openalgo-charts-2.7.5";
+export const PUBLIC_STRATEGY_MAX_BYTES = 4 * 1024 * 1024;
+
+export type PublicAmount = { amount: string; currency: string };
+export type PublicMarker = Pick<FillMarker, "marker_key" | "occurred_at" | "price" | "allocation_role" | "side" | "position_side" | "liquidity"> & {
+  quantity?: string;
+  absolute_pnl?: PublicAmount;
+};
+export type PublicCandle = Pick<TradeChartCandleV1,
+  "series_basis" | "open_time" | "close_time" | "open" | "high" | "low" | "close" | "volume" | "status" | "gap_before" | "gap_after">;
+export type PublicAnnotation = { marker_key: string; body: string; tags: string[] };
+export type IndicatorPoint = { time: string; value: string | null };
+export type IndicatorSeries = { points: IndicatorPoint[] };
+export type PublicIndicator = {
+  id: string;
+  indicator_id: IndicatorSpecV1["indicatorId"];
+  settings?: IndicatorSpecV1["settings"];
+  pane_index?: number;
+  series: IndicatorSeries[];
+};
+
+export type PublicStrategyChoices = {
+  show_quantity?: boolean;
+  show_absolute_pnl?: boolean;
+  annotation_fill_ids?: readonly string[];
+  drawing_ids?: readonly string[];
+  indicator_instance_ids?: readonly string[];
+};
+
+export type PublicStrategyProjection = Pick<TradeChartProjection, "provider" | "product" | "symbol" | "direction" | "timeframe" | "price_type" | "range"> & {
+  schema_version: typeof PUBLIC_STRATEGY_SCHEMA_VERSION;
+  renderer_schema_version: typeof PUBLIC_STRATEGY_RENDERER_VERSION;
+  calculation_engine_version: typeof PUBLIC_STRATEGY_CALCULATION_ENGINE_VERSION;
+  snapshot_status: "closed" | "open_at_snapshot";
+  candles: PublicCandle[];
+  markers: PublicMarker[];
+  public_annotations: PublicAnnotation[];
+  indicators: PublicIndicator[];
+  drawings: DrawingSpecV1[];
+  coverage: Pick<TradeChartProjection["coverage"], "status" | "source" | "fetched_at" | "gaps">;
+  show_quantity: boolean;
+  show_absolute_pnl: boolean;
+  price_return_rate: string | null;
+  price_return_label: string;
+  warnings: Array<TradeChartWarningCode | "hidden_value_may_be_inferred">;
+  quantity?: string;
+  absolute_pnl?: PublicAmount;
+};
+
+export type PublicStrategySnapshot = {
+  id: string;
+  post_id: string;
+  projection_digest: string;
+  projection: PublicStrategyProjection;
+};
+
+export function isPublicStrategyText(value: string): boolean {
+  const comparison = value.normalize("NFKC").replace(/\s/g, "").toLowerCase();
+  return !/[<>\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069\uD800-\uDFFF]/u.test(value)
+    && !/(?:[<>]|https?:\/\/|ftp:\/\/|www\.|javascript:|data:|expression\(|url\(|-----begin|api[_-]?key[:=]|api[_-]?secret[:=]|private[_-]?key[:=]|authorization:bearer)/u.test(comparison);
+}
+
 export function isTradingProvider(value: unknown): value is TradingProvider {
   return typeof value === "string" && (TRADING_PROVIDERS as readonly string[]).includes(value);
 }

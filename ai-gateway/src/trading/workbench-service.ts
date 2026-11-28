@@ -1,5 +1,11 @@
 import type {
+  ChartStateV1,
   ExchangeConnectionView,
+  FillMarker,
+  FillMarkerAnnotationV1,
+  TradeChartPriceType,
+  TradeChartProjection,
+  TradeChartTimeframe,
   TradeCycleView,
   TradePlanCompliance,
   TradingMetricSummary,
@@ -8,10 +14,38 @@ import type {
   TradingRange,
   TradingValuationStatus,
 } from "@wavekb/domain/trading-review";
+import {
+  TRADE_CHART_MAX_CANDLES,
+  TRADE_CHART_PROJECTION_SCHEMA_VERSION,
+  TRADE_CHART_TIMEFRAMES,
+} from "@wavekb/domain/trading-review";
 import type { GatewayConfig } from "../config.ts";
+import { decryptSecret, type EncryptedSecret } from "../secrets/crypto.ts";
 import { SupabaseRest } from "../storage/supabase-rest.ts";
 import { buildPortfolioSeries, calculateTradingMetrics, type PortfolioPoint } from "./accounting.ts";
-import type { CanonicalAccountSnapshot, CanonicalCashEvent } from "./providers/contracts.ts";
+import { assertChartStateV1, assertTradeChartProjection, isChartStateTimestamp } from "./chart-contracts.ts";
+import { configuredTradingProviders } from "./provider-flags.ts";
+import { BinanceTradingProviderAdapter } from "./providers/binance.ts";
+import { BitgetTradingProviderAdapter } from "./providers/bitget.ts";
+import { BybitTradingProviderAdapter } from "./providers/bybit.ts";
+import {
+  assertCanonicalCandleBatch,
+  unavailableCandleBatch,
+  type CandleRequest,
+  type CanonicalAccountSnapshot,
+  type CanonicalCashEvent,
+  type CanonicalCandleBatch,
+  type TradingProviderAdapter,
+} from "./providers/contracts.ts";
+import { ExnessTradingProviderAdapter } from "./providers/exness.ts";
+import { OkxTradingProviderAdapter } from "./providers/okx.ts";
+import { createTradingProviderRegistry } from "./providers/registry.ts";
+import {
+  hashExternalTradingAccount,
+  SupabaseTradingSyncStore,
+  type SyncConnectionRecord,
+  type TradingSyncStore,
+} from "./sync-service.ts";
 
 const DAY_MS = 86_400_000;
 const FALLBACK_TIMEZONE = "Asia/Shanghai";
@@ -56,10 +90,171 @@ export type WorkbenchTradeBundle = {
   conflicting_reviews: WorkbenchReviewRecord[];
 };
 
+export type WorkbenchChartAllocationRecord = {
+  cycle_revision: number;
+  fill_id: string;
+  native_fill_id: string;
+  allocation_quantity: string;
+  allocation_role: FillMarker["allocation_role"];
+  sort_order: number;
+};
+
+export type WorkbenchChartFillRecord = {
+  id: string;
+  native_fill_id: string;
+  native_symbol: string;
+  occurred_at: string;
+  price: string;
+  side: FillMarker["side"];
+  position_side: FillMarker["position_side"];
+  liquidity: FillMarker["liquidity"];
+};
+
+export type WorkbenchChartAnnotationRecord = {
+  id: string;
+  fill_id: string;
+  native_fill_id: string;
+  cycle_revision: number;
+  body: string;
+  tags: string[];
+  remap_status: NonNullable<FillMarker["annotation"]>["remap_status"];
+  remapped_from_revision: number | null;
+  version: number;
+  deleted_at: string | null;
+};
+
+export type WorkbenchChartImageRecord = {
+  id: string;
+  annotation_id: string;
+  mime_type: "image/jpeg" | "image/png" | "image/webp";
+  byte_size: number;
+  sort_order: number;
+  deleted_at: string | null;
+};
+
+export type WorkbenchChartCycleRecord = Pick<
+  WorkbenchCycleRecord,
+  "id" | "connection_id" | "provider" | "revision" | "product" | "symbol"
+  | "direction" | "opened_at" | "closed_at" | "generation" | "is_current"
+>;
+
+export type WorkbenchChartConnectionRecord = Pick<
+  WorkbenchConnectionRecord,
+  "id" | "owner_id" | "provider" | "sync_generation"
+>;
+
+export type WorkbenchChartFacts = {
+  cycle: WorkbenchChartCycleRecord;
+  connection: WorkbenchChartConnectionRecord;
+  allocations: WorkbenchChartAllocationRecord[];
+  fills: WorkbenchChartFillRecord[];
+  annotations: WorkbenchChartAnnotationRecord[];
+  images: WorkbenchChartImageRecord[];
+  chart_state: ChartStateV1 | null;
+};
+
+export type WorkbenchChartStateSave = {
+  cycle_id: string;
+  cycle_revision: number;
+  schema_version: ChartStateV1["schema_version"];
+  timeframe: ChartStateV1["timeframe"];
+  price_type: ChartStateV1["price_type"];
+  viewport: ChartStateV1["viewport"];
+  indicators: ChartStateV1["indicators"];
+  drawings: ChartStateV1["drawings"];
+  expected_version: number;
+  expected_updated_at: string | null;
+};
+
+export type WorkbenchFillAnnotationSave = {
+  annotation_id: string;
+  cycle_id: string;
+  fill_id: string;
+  cycle_revision: number;
+  body: string;
+  tags: string[];
+  images: Array<{ id: string; storage_path: string; mime_type: "image/jpeg" | "image/png" | "image/webp"; byte_size: number }>;
+  expected_version: number;
+  deleted: boolean;
+};
+
+export interface TradingWorkbenchCandleLoader {
+  fetch(input: {
+    owner_id: string;
+    connection_id: string;
+    provider: TradingProvider;
+    request: CandleRequest;
+  }): Promise<CanonicalCandleBatch>;
+}
+
+export class SupabaseTradingWorkbenchCandleLoader implements TradingWorkbenchCandleLoader {
+  private readonly store: Pick<TradingSyncStore, "getConnection" | "loadCredentialEnvelope">;
+  private readonly adapters: ReadonlyMap<TradingProvider, TradingProviderAdapter>;
+  private readonly masterKey: Buffer;
+  private readonly identityKey: Buffer;
+  private readonly decrypt: (encrypted: EncryptedSecret, key: Buffer) => string;
+
+  constructor(input: {
+    store: Pick<TradingSyncStore, "getConnection" | "loadCredentialEnvelope">;
+    adapters: ReadonlyMap<TradingProvider, TradingProviderAdapter>;
+    masterKey: Buffer;
+    identityKey: Buffer;
+    decrypt?: (encrypted: EncryptedSecret, key: Buffer) => string;
+  }) {
+    this.store = input.store;
+    this.adapters = input.adapters;
+    this.masterKey = input.masterKey;
+    this.identityKey = input.identityKey;
+    this.decrypt = input.decrypt ?? decryptSecret;
+  }
+
+  async fetch(input: {
+    owner_id: string;
+    connection_id: string;
+    provider: TradingProvider;
+    request: CandleRequest;
+  }): Promise<CanonicalCandleBatch> {
+    const connection: SyncConnectionRecord | null = await this.store.getConnection(input.connection_id);
+    if (!connection || connection.owner_id !== input.owner_id || connection.provider !== input.provider) {
+      throw chartError("trade_cycle_not_found", 404);
+    }
+    const adapter = this.adapters.get(connection.provider);
+    if (!adapter) throw chartError("trading_candles_unavailable", 503);
+    let parsed: unknown;
+    try {
+      const envelope = await this.store.loadCredentialEnvelope(connection.owner_id, connection.credential_set_id);
+      parsed = JSON.parse(this.decrypt(envelope, this.masterKey));
+    } catch {
+      throw chartError("exchange_secret_invalid", 500);
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+      || Object.values(parsed).some((value) => typeof value !== "string")) {
+      throw chartError("exchange_secret_invalid", 500);
+    }
+    const credentials = parsed as Record<string, string>;
+    const accounts = await adapter.validateCredentials({ provider: connection.provider, credentials, read_only_ack: true });
+    const matches = accounts.filter((account) => connection.external_account_id_hash === null
+      ? accounts.length === 1
+      : hashExternalTradingAccount(this.identityKey, connection.provider, account.external_account_id) === connection.external_account_id_hash);
+    if (matches.length !== 1) throw chartError("exchange_account_unavailable", 409);
+    const account = matches[0]!;
+    return adapter.fetchCandles({
+      connection_id: connection.id,
+      external_account_id: account.external_account_id,
+      account_currency: connection.account_currency,
+      credentials,
+      capabilities: connection.capabilities,
+    }, input.request);
+  }
+}
+
 export interface TradingWorkbenchStore {
   listConnections(ownerId: string): Promise<WorkbenchConnectionRecord[]>;
   loadFacts(ownerId: string, connectionIds: string[], from: string, to: string): Promise<WorkbenchFacts>;
   getTrade(ownerId: string, cycleId: string): Promise<WorkbenchTradeBundle | null>;
+  loadChartFacts(ownerId: string, cycleId: string): Promise<WorkbenchChartFacts | null>;
+  saveChartState(accessToken: string, input: WorkbenchChartStateSave): Promise<ChartStateV1>;
+  saveFillAnnotation(accessToken: string, input: WorkbenchFillAnnotationSave): Promise<WorkbenchChartAnnotationRecord>;
   saveReview(input: WorkbenchReviewRecord & { owner_id: string }): Promise<WorkbenchReviewRecord>;
 }
 
@@ -171,10 +366,81 @@ function emptyMetrics(): TradingMetricSummary {
   return { current_equity_usd: null, cumulative_profit_usd: null, time_weighted_return: null, maximum_drawdown: null, realized_net_pnl_usd: null, win_rate: null, average_win_loss_ratio: null, profit_factor: null, closed_trade_count: 0, included_connection_count: 0, excluded_connection_count: 0, is_complete: true, incomplete_reasons: [] };
 }
 
+const utcTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const positiveDecimalPattern = /^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function chartError(code: string, statusCode: number) {
+  return Object.assign(new Error(code), { statusCode });
+}
+
+function chartTimestamp(value: unknown): string {
+  if (typeof value !== "string" || !utcTimestampPattern.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw chartError("invalid_trade_chart_query", 400);
+  }
+  return value;
+}
+
+function exactChartKeys(value: Record<string, unknown>, allowed: readonly string[]) {
+  if (Reflect.ownKeys(value).some((key) => typeof key !== "string" || !allowed.includes(key))) {
+    throw chartError("invalid_trade_chart_request", 400);
+  }
+}
+
+function chartRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw chartError("invalid_trade_chart_request", 400);
+  return value as Record<string, unknown>;
+}
+
+function chartPlainText(value: unknown, maximum: number): string {
+  if (typeof value !== "string" || value.length > maximum) throw chartError("invalid_trade_chart_request", 400);
+  const compact = value.toLowerCase().replaceAll(" ", "");
+  if (value.includes("<") || value.includes(">") || compact.includes("javascript:")
+    || compact.includes("data:text/html") || compact.includes("expression(") || compact.includes("url(")) {
+    throw chartError("invalid_trade_chart_request", 400);
+  }
+  return value;
+}
+
+function chartQuery(input: Record<string, unknown>): { timeframe: TradeChartTimeframe; from: string; to: string } {
+  const keys = Object.keys(input);
+  if (keys.some((key) => !["timeframe", "from", "to"].includes(key))
+    || typeof input.timeframe !== "string"
+    || !(TRADE_CHART_TIMEFRAMES as readonly string[]).includes(input.timeframe)) {
+    throw chartError("invalid_trade_chart_query", 400);
+  }
+  const from = chartTimestamp(input.from);
+  const to = chartTimestamp(input.to);
+  if (Date.parse(from) >= Date.parse(to)) throw chartError("invalid_trade_chart_query", 400);
+  return { timeframe: input.timeframe as TradeChartTimeframe, from, to };
+}
+
+function providerFillMask(nativeFillId: string): string {
+  const suffix = nativeFillId.slice(-4);
+  if (!/^[A-Za-z0-9]{4}$/.test(suffix)) throw chartError("trade_chart_facts_invalid", 500);
+  return `••••${suffix}`;
+}
+
+function sameCandleRequest(left: CandleRequest, right: CandleRequest): boolean {
+  return left.product === right.product
+    && left.native_symbol === right.native_symbol
+    && left.normalized_symbol === right.normalized_symbol
+    && left.timeframe === right.timeframe
+    && left.price_mode === right.price_mode
+    && left.from === right.from
+    && left.to === right.to
+    && left.limit === right.limit;
+}
+
 export class TradingWorkbenchService {
   private readonly store: TradingWorkbenchStore;
   private readonly now: () => number;
-  constructor(input: { store: TradingWorkbenchStore; now?: () => number }) { this.store = input.store; this.now = input.now ?? Date.now; }
+  private readonly candleLoader: TradingWorkbenchCandleLoader | null;
+  constructor(input: { store: TradingWorkbenchStore; candleLoader?: TradingWorkbenchCandleLoader; now?: () => number }) {
+    this.store = input.store;
+    this.candleLoader = input.candleLoader ?? null;
+    this.now = input.now ?? Date.now;
+  }
 
   async getDashboard(ownerId: string, input: DashboardInput): Promise<TradingWorkbenchDashboard> {
     const timezone = safeTimezone(input.timezone);
@@ -251,6 +517,255 @@ export class TradingWorkbenchService {
     return { timezone, trade, review: bundle.review, provider_facts, reconciliation: bundle.conflicting_reviews };
   }
 
+  async getChart(ownerId: string, cycleId: string, raw: Record<string, unknown>): Promise<TradeChartProjection> {
+    const query = chartQuery(raw);
+    const facts = await this.store.loadChartFacts(ownerId, cycleId);
+    if (!facts
+      || facts.connection.owner_id !== ownerId
+      || facts.cycle.id !== cycleId
+      || facts.cycle.connection_id !== facts.connection.id
+      || !facts.cycle.is_current
+      || facts.cycle.generation !== facts.connection.sync_generation) {
+      throw chartError("trade_cycle_not_found", 404);
+    }
+    if (Date.parse(query.from) > Date.parse(facts.cycle.opened_at)
+      || (facts.cycle.closed_at !== null && Date.parse(query.to) < Date.parse(facts.cycle.closed_at))) {
+      throw chartError("invalid_trade_chart_query", 400);
+    }
+
+    const allocations = [...facts.allocations].sort((left, right) => left.sort_order - right.sort_order);
+    const fills = new Map(facts.fills.map((fill) => [fill.id, fill]));
+    if (facts.annotations.some((annotation) => annotation.cycle_revision > facts.cycle.revision)) {
+      throw chartError("trade_chart_facts_invalid", 500);
+    }
+    const activeAnnotations = facts.annotations.filter((annotation) => annotation.deleted_at === null);
+    const annotations = new Map(activeAnnotations
+      .filter((annotation) => annotation.remap_status !== "needs_confirmation")
+      .map((annotation) => [`${annotation.fill_id}\u0000${annotation.native_fill_id}`, annotation]));
+    const imageCounts = new Map<string, number>();
+    for (const image of facts.images) {
+      if (image.deleted_at !== null) continue;
+      imageCounts.set(image.annotation_id, (imageCounts.get(image.annotation_id) ?? 0) + 1);
+    }
+    const toAnnotation = <Status extends FillMarkerAnnotationV1["remap_status"]>(
+      note: WorkbenchChartAnnotationRecord, remapStatus: Status,
+    ) => ({
+      id: note.id,
+      body: note.body,
+      tags: note.tags,
+      image_count: imageCounts.get(note.id) ?? 0,
+      version: note.version,
+      remap_status: remapStatus,
+    });
+    const unmatchedAnnotations = activeAnnotations.flatMap((note) => note.remap_status === "needs_confirmation"
+      ? [toAnnotation(note, "needs_confirmation")]
+      : []);
+    const markers: FillMarker[] = allocations.map((allocation, index) => {
+      const fill = fills.get(allocation.fill_id);
+      if (!fill
+        || allocation.cycle_revision !== facts.cycle.revision
+        || allocation.sort_order !== index
+        || allocation.native_fill_id !== fill.native_fill_id
+        || !positiveDecimalPattern.test(allocation.allocation_quantity)) {
+        throw chartError("trade_chart_facts_invalid", 500);
+      }
+      const annotation = annotations.get(`${fill.id}\u0000${fill.native_fill_id}`);
+      return {
+        marker_key: `${cycleId}:${fill.id}`,
+        fill_id: fill.id,
+        occurred_at: fill.occurred_at,
+        price: fill.price,
+        allocated_quantity: allocation.allocation_quantity,
+        allocation_role: allocation.allocation_role,
+        sort_order: allocation.sort_order,
+        side: fill.side,
+        position_side: fill.position_side,
+        liquidity: fill.liquidity,
+        provider_fill_id_mask: providerFillMask(fill.native_fill_id),
+        annotation: annotation ? toAnnotation(annotation,
+          annotation.cycle_revision < facts.cycle.revision ? "remapped" : annotation.remap_status,
+        ) : null,
+      };
+    });
+    if (markers.length !== facts.fills.length || markers.length === 0) throw chartError("trade_chart_facts_invalid", 500);
+
+    const firstFill = facts.fills[0]!;
+    if (facts.fills.some((fill) => fill.native_symbol !== firstFill.native_symbol)) throw chartError("trade_chart_facts_invalid", 500);
+    const requestedState = facts.chart_state;
+    const defaultPriceType: TradeChartPriceType = facts.cycle.provider === "exness" ? "both" : "trade";
+    if (requestedState && (requestedState.cycle_id !== cycleId || requestedState.cycle_revision > facts.cycle.revision)) {
+      throw chartError("trade_chart_facts_invalid", 500);
+    }
+    const priceType = requestedState?.price_type ?? defaultPriceType;
+    const request: CandleRequest = {
+      product: facts.cycle.product,
+      native_symbol: firstFill.native_symbol,
+      normalized_symbol: facts.cycle.symbol,
+      timeframe: query.timeframe,
+      price_mode: priceType,
+      from: query.from,
+      to: query.to,
+      limit: TRADE_CHART_MAX_CANDLES,
+    };
+    let batch = unavailableCandleBatch(facts.cycle.provider, request, "upstream_unavailable");
+    if (this.candleLoader) {
+      try {
+        batch = assertCanonicalCandleBatch(await this.candleLoader.fetch({
+          owner_id: ownerId,
+          connection_id: facts.connection.id,
+          provider: facts.cycle.provider,
+          request,
+        }));
+        if (batch.provider !== facts.cycle.provider || !sameCandleRequest(batch.request, request)) {
+          throw chartError("trade_chart_candles_invalid", 502);
+        }
+      } catch {
+        batch = unavailableCandleBatch(facts.cycle.provider, request, "upstream_unavailable");
+      }
+    }
+    const projection: TradeChartProjection = {
+      schema_version: TRADE_CHART_PROJECTION_SCHEMA_VERSION,
+      cycle_id: facts.cycle.id,
+      cycle_revision: facts.cycle.revision,
+      provider: facts.cycle.provider,
+      product: facts.cycle.product,
+      symbol: facts.cycle.symbol,
+      native_symbol: firstFill.native_symbol,
+      direction: facts.cycle.direction,
+      opened_at: facts.cycle.opened_at,
+      closed_at: facts.cycle.closed_at,
+      timeframe: query.timeframe,
+      price_type: priceType,
+      range: { from: query.from, to: query.to },
+      candles: batch.candles,
+      markers,
+      ...(unmatchedAnnotations.length > 0 ? { unmatched_annotations: unmatchedAnnotations } : {}),
+      // Drawings have absolute anchors. Preserve the saved version and price
+      // preference even when a new cycle revision changes the default frame.
+      chart_state: requestedState,
+      coverage: {
+        status: batch.coverage.status,
+        source: batch.coverage.source,
+        fetched_at: batch.coverage.fetched_at,
+        gaps: batch.coverage.gaps,
+        unavailable_reason: batch.coverage.unavailable_reason,
+      },
+      warnings: batch.warnings,
+    };
+    return assertTradeChartProjection(projection);
+  }
+
+  async saveChartState(ownerId: string, cycleId: string, rawInput: unknown, accessToken: string): Promise<ChartStateV1> {
+    const raw = chartRecord(rawInput);
+    exactChartKeys(raw, ["cycle_revision", "schema_version", "timeframe", "price_type", "viewport", "indicators", "drawings", "expected_version", "expected_updated_at"]);
+    const expectedVersion = raw.expected_version;
+    const expectedUpdatedAt = raw.expected_updated_at;
+    if (!Number.isInteger(expectedVersion) || (expectedVersion as number) < 0
+      || ((expectedVersion as number) === 0 ? expectedUpdatedAt !== null : typeof expectedUpdatedAt !== "string")
+      || (typeof expectedUpdatedAt === "string" && !isChartStateTimestamp(expectedUpdatedAt))
+      || typeof accessToken !== "string" || accessToken.length === 0) {
+      throw chartError("invalid_trade_chart_request", 400);
+    }
+    const candidate = assertChartStateV1({
+      schema_version: raw.schema_version,
+      cycle_id: cycleId,
+      cycle_revision: raw.cycle_revision,
+      timeframe: raw.timeframe,
+      price_type: raw.price_type,
+      viewport: raw.viewport,
+      indicators: raw.indicators,
+      drawings: raw.drawings,
+      version: Math.max(1, expectedVersion as number),
+      updated_at: typeof expectedUpdatedAt === "string" ? expectedUpdatedAt : "1970-01-01T00:00:00.000Z",
+    });
+    const facts = await this.store.loadChartFacts(ownerId, cycleId);
+    if (!facts || facts.connection.owner_id !== ownerId || !facts.cycle.is_current
+      || facts.cycle.generation !== facts.connection.sync_generation || candidate.cycle_revision !== facts.cycle.revision) {
+      throw chartError("trade_cycle_not_found", 404);
+    }
+    if ((facts.cycle.provider === "exness" && !["bid", "ask", "both"].includes(candidate.price_type))
+      || (facts.cycle.provider !== "exness" && !["trade", "mark"].includes(candidate.price_type))) {
+      throw chartError("trade_chart_invalid_state_price_type", 400);
+    }
+    return assertChartStateV1(await this.store.saveChartState(accessToken, {
+      cycle_id: cycleId,
+      cycle_revision: candidate.cycle_revision,
+      schema_version: candidate.schema_version,
+      timeframe: candidate.timeframe,
+      price_type: candidate.price_type,
+      viewport: candidate.viewport,
+      indicators: candidate.indicators,
+      drawings: candidate.drawings,
+      expected_version: expectedVersion as number,
+      expected_updated_at: expectedUpdatedAt as string | null,
+    }));
+  }
+
+  async saveFillAnnotation(ownerId: string, cycleId: string, fillId: string, rawInput: unknown, accessToken: string) {
+    const raw = chartRecord(rawInput);
+    exactChartKeys(raw, ["annotation_id", "cycle_revision", "body", "tags", "images", "expected_version", "deleted"]);
+    if (typeof raw.annotation_id !== "string" || !uuidPattern.test(raw.annotation_id)
+      || typeof fillId !== "string" || !/^[1-9]\d{0,29}$/.test(fillId)
+      || !Number.isInteger(raw.cycle_revision) || (raw.cycle_revision as number) < 1
+      || !Number.isInteger(raw.expected_version) || (raw.expected_version as number) < 0
+      || typeof raw.deleted !== "boolean" || typeof accessToken !== "string" || accessToken.length === 0
+      || !Array.isArray(raw.tags) || raw.tags.length > 10 || !Array.isArray(raw.images) || raw.images.length > 5) {
+      throw chartError("invalid_trade_chart_request", 400);
+    }
+    const body = chartPlainText(raw.body, 5_000);
+    const tags: string[] = [];
+    for (const value of raw.tags) {
+      if (typeof value !== "string" || value.length < 1 || value.length > 40 || value !== value.trim().toLowerCase() || tags.includes(value)) {
+        throw chartError("invalid_trade_chart_request", 400);
+      }
+      tags.push(value);
+    }
+    const images = raw.images.map((value) => {
+      const image = chartRecord(value);
+      exactChartKeys(image, ["id", "storage_path", "mime_type", "byte_size"]);
+      if (typeof image.id !== "string" || !uuidPattern.test(image.id)
+        || typeof image.storage_path !== "string"
+        || typeof image.mime_type !== "string"
+        || !["image/jpeg", "image/png", "image/webp"].includes(image.mime_type)
+        || !Number.isInteger(image.byte_size) || (image.byte_size as number) < 1 || (image.byte_size as number) > 2_097_152) {
+        throw chartError("invalid_trade_chart_request", 400);
+      }
+      const extension = image.mime_type === "image/jpeg" ? ".jpg" : image.mime_type === "image/png" ? ".png" : ".webp";
+      if (image.storage_path !== `${ownerId}/${raw.annotation_id}/${image.id}${extension}`) throw chartError("invalid_trade_chart_request", 400);
+      return { id: image.id, storage_path: image.storage_path, mime_type: image.mime_type, byte_size: image.byte_size } as WorkbenchFillAnnotationSave["images"][number];
+    });
+    if (new Set(images.map((image) => image.id)).size !== images.length
+      || new Set(images.map((image) => image.storage_path)).size !== images.length) throw chartError("invalid_trade_chart_request", 400);
+
+    const facts = await this.store.loadChartFacts(ownerId, cycleId);
+    if (!facts || facts.connection.owner_id !== ownerId || !facts.cycle.is_current
+      || facts.cycle.generation !== facts.connection.sync_generation || raw.cycle_revision !== facts.cycle.revision) {
+      throw chartError("trade_cycle_not_found", 404);
+    }
+    const allocation = facts.allocations.find((item) => item.fill_id === fillId && item.cycle_revision === facts.cycle.revision);
+    const fill = facts.fills.find((item) => item.id === fillId);
+    if (!allocation || !fill || allocation.native_fill_id !== fill.native_fill_id) throw chartError("trade_chart_fill_not_owned", 404);
+    const saved = await this.store.saveFillAnnotation(accessToken, {
+      annotation_id: raw.annotation_id,
+      cycle_id: cycleId,
+      fill_id: fillId,
+      cycle_revision: raw.cycle_revision as number,
+      body,
+      tags,
+      images,
+      expected_version: raw.expected_version as number,
+      deleted: raw.deleted,
+    });
+    return {
+      id: saved.id,
+      body: saved.body,
+      tags: saved.tags,
+      image_count: raw.deleted ? 0 : images.length,
+      version: saved.version,
+      remap_status: saved.remap_status,
+    } satisfies NonNullable<FillMarker["annotation"]>;
+  }
+
   async saveReview(ownerId: string, cycleId: string, raw: Record<string, unknown>) {
     const detail = await this.getTrade(ownerId, cycleId, FALLBACK_TIMEZONE);
     const expected = Number(raw.expected_cycle_revision);
@@ -290,6 +805,36 @@ function mapCycle(row: any): WorkbenchCycleRecord {
     realized_pnl: String(row.realized_pnl), fees: String(row.fees), funding_or_swap: String(row.funding_or_swap), dividends: String(row.dividends), net_pnl: String(row.net_pnl),
     usd_net_pnl: row.usd_net_pnl === null ? null : String(row.usd_net_pnl),
   } as WorkbenchCycleRecord;
+}
+
+function chartFactTimestamp(value: unknown): string {
+  if (!isChartStateTimestamp(value)) throw chartError("trade_chart_snapshot_inconsistent", 500);
+  return new Date(value).toISOString();
+}
+
+function mapChartCycle(row: any): WorkbenchChartCycleRecord {
+  return {
+    id: String(row.id),
+    connection_id: String(row.connection_id),
+    provider: row.provider,
+    revision: Number(row.revision),
+    product: row.product,
+    symbol: String(row.symbol),
+    direction: row.direction,
+    opened_at: chartFactTimestamp(row.opened_at),
+    closed_at: row.closed_at === null ? null : chartFactTimestamp(row.closed_at),
+    generation: Number(row.generation),
+    is_current: row.is_current === true,
+  };
+}
+
+function mapChartConnection(row: any): WorkbenchChartConnectionRecord {
+  return {
+    id: String(row.id),
+    owner_id: String(row.owner_id),
+    provider: row.provider,
+    sync_generation: Number(row.sync_generation),
+  };
 }
 
 function mapReview(row: any): WorkbenchReviewRecord {
@@ -359,6 +904,176 @@ export class SupabaseTradingWorkbenchStore implements TradingWorkbenchStore {
     const conflicts = aliasIds.length ? await this.rest.request(`/rest/v1/trading_trade_reviews?owner_id=eq.${owner}&cycle_id=${encodeURIComponent(inList(aliasIds))}&select=*`) : [];
     return { cycle: mapCycle(cycleRow), connection: mapConnection(connection), review: Array.isArray(reviews) && reviews[0] ? mapReview(reviews[0]) : null, conflicting_reviews: (Array.isArray(conflicts) ? conflicts : []).map(mapReview) };
   }
+  async loadChartFacts(ownerId: string, cycleId: string): Promise<WorkbenchChartFacts | null> {
+    const result = await this.rest.request("/rest/v1/rpc/load_private_trade_chart_facts", {
+      method: "POST",
+      body: { p_owner_id: ownerId, p_cycle_id: cycleId },
+    });
+    const payload = Array.isArray(result) ? result[0] : result;
+    if (payload === null || payload === undefined) return null;
+    if (typeof payload !== "object" || Array.isArray(payload)) throw chartError("trade_chart_snapshot_inconsistent", 500);
+    const raw = payload as Record<string, any>;
+    if (!raw.cycle || !raw.connection || !raw.snapshot_token
+      || !Array.isArray(raw.allocations) || !Array.isArray(raw.fills)
+      || !Array.isArray(raw.annotations) || !Array.isArray(raw.images)) {
+      throw chartError("trade_chart_snapshot_inconsistent", 500);
+    }
+    const cycle = mapChartCycle(raw.cycle);
+    const connection = mapChartConnection(raw.connection);
+    const snapshotToken = raw.snapshot_token as Record<string, unknown>;
+    if (String(raw.cycle.owner_id) !== ownerId
+      || String(raw.connection.owner_id) !== ownerId
+      || cycle.id !== cycleId
+      || cycle.connection_id !== connection.id
+      || !cycle.is_current
+      || cycle.generation !== connection.sync_generation
+      || Number(snapshotToken.cycle_revision) !== cycle.revision
+      || Number(snapshotToken.cycle_generation) !== cycle.generation
+      || Number(snapshotToken.sync_generation) !== connection.sync_generation) {
+      throw chartError("trade_chart_snapshot_inconsistent", 500);
+    }
+    const allocations = raw.allocations as any[];
+    const fillRows = raw.fills as any[];
+    const annotationRows = raw.annotations as any[];
+    const imageRows = raw.images as any[];
+    const fillIds = allocations.map((row) => String(row.fill_id));
+    const fillById = new Map(fillRows.map((row) => [String(row.id), row]));
+    if (fillIds.length === 0
+      || fillIds.some((fillId) => !/^[1-9]\d{0,29}$/.test(fillId))
+      || new Set(fillIds).size !== fillIds.length
+      || fillRows.length !== fillIds.length
+      || allocations.some((allocation) => {
+        const fill = fillById.get(String(allocation.fill_id));
+        return Number(allocation.cycle_revision) !== cycle.revision
+          || !fill
+          || String(allocation.native_fill_id) !== String(fill.native_fill_id);
+      })) {
+      throw chartError("trade_chart_snapshot_inconsistent", 500);
+    }
+    const stateRow = raw.chart_state && typeof raw.chart_state === "object" && !Array.isArray(raw.chart_state)
+      ? raw.chart_state
+      : null;
+    return {
+      cycle,
+      connection,
+      allocations: allocations.map((row: any) => ({
+        cycle_revision: Number(row.cycle_revision),
+        fill_id: String(row.fill_id),
+        native_fill_id: String(row.native_fill_id),
+        allocation_quantity: typeof row.allocation_quantity === "string" ? row.allocation_quantity : "",
+        allocation_role: row.allocation_role,
+        sort_order: Number(row.sort_order),
+      })) as WorkbenchChartAllocationRecord[],
+      fills: fillRows.map((row: any) => ({
+        id: String(row.id),
+        native_fill_id: String(row.native_fill_id),
+        native_symbol: String(row.native_symbol),
+        occurred_at: chartFactTimestamp(row.occurred_at),
+        price: typeof row.price === "string" ? row.price : "",
+        side: row.side,
+        position_side: row.position_side,
+        liquidity: row.liquidity,
+      })) as WorkbenchChartFillRecord[],
+      annotations: annotationRows.map((row: any) => ({
+        id: String(row.id),
+        fill_id: String(row.fill_id),
+        native_fill_id: String(row.native_fill_id),
+        cycle_revision: Number(row.cycle_revision),
+        body: String(row.body ?? ""),
+        tags: Array.isArray(row.tags) ? row.tags : [],
+        remap_status: row.remap_status,
+        remapped_from_revision: row.remapped_from_revision === null
+          ? null
+          : Number(row.remapped_from_revision),
+        version: Number(row.version),
+        deleted_at: row.deleted_at === null ? null : String(row.deleted_at),
+      })) as WorkbenchChartAnnotationRecord[],
+      images: imageRows.map((row: any) => ({
+        id: String(row.id),
+        annotation_id: String(row.annotation_id),
+        mime_type: row.mime_type,
+        byte_size: Number(row.byte_size),
+        sort_order: Number(row.sort_order),
+        deleted_at: row.deleted_at === null ? null : String(row.deleted_at),
+      })) as WorkbenchChartImageRecord[],
+      chart_state: stateRow ? assertChartStateV1({
+        schema_version: stateRow.schema_version,
+        cycle_id: stateRow.cycle_id,
+        cycle_revision: Number(stateRow.cycle_revision),
+        timeframe: stateRow.timeframe,
+        price_type: stateRow.price_type,
+        viewport: stateRow.viewport,
+        indicators: stateRow.indicators,
+        drawings: stateRow.drawings,
+        version: Number(stateRow.version),
+        updated_at: stateRow.updated_at,
+      }) : null,
+    };
+  }
+  async saveChartState(accessToken: string, input: WorkbenchChartStateSave): Promise<ChartStateV1> {
+    const result = await this.rest.request("/rest/v1/rpc/upsert_trading_chart_state", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: {
+        p_cycle_id: input.cycle_id,
+        p_cycle_revision: input.cycle_revision,
+        p_schema_version: input.schema_version,
+        p_timeframe: input.timeframe,
+        p_price_type: input.price_type,
+        p_viewport: input.viewport,
+        p_indicators: input.indicators,
+        p_drawings: input.drawings,
+        p_expected_version: input.expected_version,
+        p_expected_updated_at: input.expected_updated_at,
+      },
+    });
+    const row = Array.isArray(result) ? result[0] : result;
+    return assertChartStateV1({
+      schema_version: row?.schema_version,
+      cycle_id: row?.cycle_id,
+      cycle_revision: Number(row?.cycle_revision),
+      timeframe: row?.timeframe,
+      price_type: row?.price_type,
+      viewport: row?.viewport,
+      indicators: row?.indicators,
+      drawings: row?.drawings,
+      version: Number(row?.version),
+      updated_at: row?.updated_at,
+    });
+  }
+  async saveFillAnnotation(accessToken: string, input: WorkbenchFillAnnotationSave): Promise<WorkbenchChartAnnotationRecord> {
+    const result = await this.rest.request("/rest/v1/rpc/upsert_trading_fill_annotation", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: {
+        p_annotation_id: input.annotation_id,
+        p_cycle_id: input.cycle_id,
+        p_fill_id: input.fill_id,
+        p_cycle_revision: input.cycle_revision,
+        p_body: input.body,
+        p_tags: input.tags,
+        p_images: input.images,
+        p_expected_version: input.expected_version,
+        p_deleted: input.deleted,
+      },
+    });
+    const row = Array.isArray(result) ? result[0] : result;
+    if (!row || typeof row !== "object") throw chartError("trade_chart_annotation_save_failed", 500);
+    return {
+      id: String(row.id),
+      fill_id: String(row.fill_id),
+      native_fill_id: String(row.native_fill_id),
+      cycle_revision: Number(row.cycle_revision),
+      body: String(row.body ?? ""),
+      tags: Array.isArray(row.tags) ? row.tags.map(String) : [],
+      remap_status: row.remap_status,
+      remapped_from_revision: row.remapped_from_revision === null
+        ? null
+        : Number(row.remapped_from_revision),
+      version: Number(row.version),
+      deleted_at: row.deleted_at === null ? null : String(row.deleted_at),
+    } as WorkbenchChartAnnotationRecord;
+  }
   async saveReview(input: WorkbenchReviewRecord & { owner_id: string }) {
     const rows = await this.rest.request("/rest/v1/rpc/save_trading_trade_review", { method: "POST", body: {
       p_owner_id: input.owner_id, p_cycle_id: input.cycle_id, p_expected_revision: input.cycle_revision,
@@ -370,5 +1085,21 @@ export class SupabaseTradingWorkbenchStore implements TradingWorkbenchStore {
 }
 
 export function createTradingWorkbenchService(config: GatewayConfig) {
-  return new TradingWorkbenchService({ store: new SupabaseTradingWorkbenchStore(new SupabaseRest(config)) });
+  const enabledProviders = configuredTradingProviders(config);
+  const adapters = createTradingProviderRegistry([
+    new BinanceTradingProviderAdapter(config.BINANCE_FUTURES_API_URL),
+    new OkxTradingProviderAdapter(),
+    new BybitTradingProviderAdapter(),
+    new BitgetTradingProviderAdapter(),
+    new ExnessTradingProviderAdapter(),
+  ], enabledProviders);
+  return new TradingWorkbenchService({
+    store: new SupabaseTradingWorkbenchStore(new SupabaseRest(config)),
+    candleLoader: new SupabaseTradingWorkbenchCandleLoader({
+      store: new SupabaseTradingSyncStore(config),
+      adapters,
+      masterKey: config.AI_SECRET_MASTER_KEY,
+      identityKey: config.TRADING_ACCOUNT_HMAC_KEY,
+    }),
+  });
 }

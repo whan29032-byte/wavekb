@@ -1,3 +1,5 @@
+import { validateUid } from "./auth/uid.ts";
+
 const splitHosts = (value: string): string[] =>
   value.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
 
@@ -22,6 +24,9 @@ export type GatewayConfig = {
   TRADING_ACCOUNT_HMAC_KEY: Buffer;
   TRADING_SYNC_MINUTES: number;
   TRADING_WORKBENCH_V2_ENABLED: boolean;
+  TRADING_FILL_CHART_ENABLED: boolean;
+  TRADING_FILL_CHART_PILOT_UIDS: readonly number[];
+  TRADING_PUBLIC_STRATEGIES_ENABLED: boolean;
   TRADING_PROVIDER_BINANCE_ENABLED: boolean;
   TRADING_PROVIDER_OKX_ENABLED: boolean;
   TRADING_PROVIDER_BYBIT_ENABLED: boolean;
@@ -43,6 +48,15 @@ const boolean = (value: string | undefined, fallback: boolean): boolean => {
   if (value === "false") return false;
   throw new Error(`invalid boolean setting: ${value}`);
 };
+
+function tradingFillChartPilotUids(value: string | undefined): readonly number[] {
+  if (value === undefined || value === "") return [];
+  try {
+    return [...new Set(value.split(",").map(validateUid))];
+  } catch {
+    throw new Error("TRADING_FILL_CHART_PILOT_UIDS must contain comma-separated WaveKB UIDs");
+  }
+}
 
 export function loadConfig(env: Record<string, string | undefined>): GatewayConfig {
   const supabaseUrl = env.SUPABASE_URL ?? "";
@@ -114,6 +128,9 @@ export function loadConfig(env: Record<string, string | undefined>): GatewayConf
     TRADING_ACCOUNT_HMAC_KEY: tradingAccountHmacKey,
     TRADING_SYNC_MINUTES: integer(env.TRADING_SYNC_MINUTES, 15, 5, 1440),
     TRADING_WORKBENCH_V2_ENABLED: boolean(env.TRADING_WORKBENCH_V2_ENABLED, false),
+    TRADING_FILL_CHART_ENABLED: boolean(env.TRADING_FILL_CHART_ENABLED, false),
+    TRADING_FILL_CHART_PILOT_UIDS: tradingFillChartPilotUids(env.TRADING_FILL_CHART_PILOT_UIDS),
+    TRADING_PUBLIC_STRATEGIES_ENABLED: boolean(env.TRADING_PUBLIC_STRATEGIES_ENABLED, false),
     TRADING_PROVIDER_BINANCE_ENABLED: boolean(env.TRADING_PROVIDER_BINANCE_ENABLED, false),
     TRADING_PROVIDER_OKX_ENABLED: boolean(env.TRADING_PROVIDER_OKX_ENABLED, false),
     TRADING_PROVIDER_BYBIT_ENABLED: boolean(env.TRADING_PROVIDER_BYBIT_ENABLED, false),

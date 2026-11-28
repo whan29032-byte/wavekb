@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  CandleRequest,
+  CanonicalCandleBatch,
   CanonicalAccountSnapshot,
   CanonicalCashEvent,
   CanonicalFill,
@@ -13,6 +15,7 @@ import type {
   TradingProviderAdapter,
 } from "../src/trading/providers/contracts.ts";
 import {
+  SupabaseTradingSyncStore,
   TradingSyncService,
   hashExternalTradingAccount,
   type SyncConnectionRecord,
@@ -32,6 +35,10 @@ const capabilities: ProviderCapabilities = {
   has_position_id: false, has_realized_pnl: true, has_fee_asset: true,
   has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true,
   account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: [],
+  candles: {
+    availability: "unavailable", timeframes: [], maximum_page_size: null,
+    maximum_range_seconds: null, price_modes: [], unavailable_reason: "implementation_pending",
+  },
 };
 
 function fill(id: string, occurredAt: string, action: "open" | "close", side: "buy" | "sell", pnl = "0"): CanonicalFill {
@@ -83,6 +90,16 @@ class Adapter implements TradingProviderAdapter {
     return { payload: next, cursor: next.next_cursor ?? cursor, fetched_at: new Date(now).toISOString() };
   }
   normalizeHistory(page: ProviderHistoryPage) { return page.payload as CanonicalHistoryBatch; }
+  async fetchCandles(_account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
+    return {
+      provider: this.provider, request, candles: [],
+      coverage: {
+        status: "unavailable", range_start: request.from, range_end: request.to,
+        source: null, fetched_at: null, gaps: [], unavailable_reason: "implementation_pending",
+      },
+      warnings: ["candles_unavailable"],
+    };
+  }
 }
 
 class Store implements TradingSyncStore {
@@ -139,6 +156,10 @@ test("performs the first 90-day backfill and deduplicates overlapping facts befo
   assert.deepEqual(adapter.cursors, [{ kind: "time", value: null }]);
   assert.equal(store.publication?.fills.length, 2);
   assert.equal(store.publication?.cycles.length, 1);
+  assert.deepEqual(store.publication?.cycles[0]?.allocations, [
+    { native_fill_id: "fill-1", quantity: "1", role: "open", sort_order: 0 },
+    { native_fill_id: "fill-2", quantity: "1", role: "close", sort_order: 1 },
+  ]);
   assert.equal(store.publication?.coverage_started_at, "2026-08-26T12:00:00.000Z");
   assert.equal(store.publications, 1);
 });
@@ -187,6 +208,111 @@ test("rebuilds a reviewed cycle identity when a late closing fill arrives", asyn
   assert.equal(store.publication?.cycles[0]?.id, "55555555-5555-4555-8555-555555555555");
   assert.equal(store.publication?.cycles[0]?.revision, 2);
   assert.equal(store.publication?.cycles[0]?.closed_at, "2026-11-21T00:00:00.000Z");
+  assert.deepEqual(store.publication?.cycles[0]?.fill_ids, ["open-1", "close-1"]);
+  assert.deepEqual(store.publication?.cycles[0]?.allocations, [
+    { native_fill_id: "open-1", quantity: "1", role: "open", sort_order: 0 },
+    { native_fill_id: "close-1", quantity: "1", role: "close", sort_order: 1 },
+  ]);
+});
+
+test("advances the cycle revision when normalized allocation facts change without changing fill IDs", async () => {
+  const firstStore = new Store();
+  const original = fill("same-fill", "2026-11-20T00:00:00.000Z", "open", "buy");
+  await service(firstStore, new Adapter([batch({ fills: [original] })])).syncConnection(connectionId);
+  const firstCycle = firstStore.publication?.cycles[0];
+  assert.ok(firstCycle);
+  assert.equal(firstCycle.revision, 1);
+
+  const corrected = { ...original, quantity: "2" };
+  const secondStore = new Store();
+  secondStore.existingFills = [corrected];
+  secondStore.previousCycles = [{
+    id: firstCycle.id,
+    created_at: "2026-11-20T00:05:00.000Z",
+    anchor_fill_id: firstCycle.anchor_fill_id,
+    fill_ids: firstCycle.fill_ids,
+    revision: firstCycle.revision,
+    fill_digest: firstCycle.fill_digest,
+    allocation_digest: firstCycle.allocation_digest,
+    has_review: false,
+  }];
+  await service(secondStore, new Adapter([batch()])).syncConnection(connectionId);
+
+  assert.equal(secondStore.publication?.cycles[0]?.id, firstCycle.id);
+  assert.equal(secondStore.publication?.cycles[0]?.fill_digest, firstCycle.fill_digest);
+  assert.notEqual(secondStore.publication?.cycles[0]?.allocation_digest, firstCycle.allocation_digest);
+  assert.equal(secondStore.publication?.cycles[0]?.revision, 2);
+});
+
+test("loads allocation digest evidence from immutable revision facts", async () => {
+  const requests: string[] = [];
+  const database = {
+    async request(path: string) {
+      requests.push(path);
+      if (path.includes("/trading_fills?")) return [];
+      if (path.includes("/trading_cash_events?")) return [];
+      if (path.includes("/trading_trade_cycles?")) {
+        return [{
+          id: "55555555-5555-4555-8555-555555555555",
+          created_at: "2026-11-20T00:05:00.000Z",
+          revision: 3,
+          fill_digest: "fill-digest",
+        }];
+      }
+      if (path.includes("/trading_trade_cycle_revisions?")) {
+        return [{
+          cycle_id: "55555555-5555-4555-8555-555555555555",
+          facts: {
+            stable_key: "stable-cycle-key",
+            anchor_fill_id: "open-1",
+            fill_ids: ["open-1"],
+            allocation_digest: "allocation-digest",
+          },
+        }];
+      }
+      if (path.includes("/trading_trade_reviews?")) return [];
+      throw new Error(`unexpected_request:${path}`);
+    },
+  };
+  const store = new SupabaseTradingSyncStore(database);
+
+  const history = await store.loadHistory(connectionId);
+
+  assert.equal(history.previous_cycles[0]?.allocation_digest, "allocation-digest");
+  assert.equal(history.previous_cycles[0]?.stable_key, "stable-cycle-key");
+  assert.equal(requests.length, 5);
+});
+
+test("legacy locale-ordered fill facts advance revision under code-point reconstruction without a sync deadlock", async () => {
+  const store = new Store();
+  const timestamp = "2026-11-20T00:00:00.000Z";
+  store.existingFills = [
+    fill("a", timestamp, "open", "buy"),
+    fill("Z", timestamp, "open", "buy"),
+  ];
+  const baselineStore = new Store();
+  baselineStore.existingFills = [...store.existingFills];
+  await service(baselineStore, new Adapter([batch()])).syncConnection(connectionId);
+  const reconstructed = baselineStore.publication?.cycles[0];
+  assert.ok(reconstructed);
+  assert.deepEqual(reconstructed.fill_ids, ["Z", "a"]);
+
+  store.previousCycles = [{
+    id: "55555555-5555-4555-8555-555555555555",
+    created_at: "2026-11-20T00:05:00.000Z",
+    anchor_fill_id: "a",
+    fill_ids: ["a", "Z"],
+    revision: 1,
+    fill_digest: reconstructed.fill_digest,
+    has_review: false,
+  }];
+
+  const result = await service(store, new Adapter([batch()])).syncConnection(connectionId);
+
+  assert.equal(result.status, "published");
+  assert.equal(store.publication?.cycles[0]?.id, "55555555-5555-4555-8555-555555555555");
+  assert.equal(store.publication?.cycles[0]?.revision, 2);
+  assert.deepEqual(store.publication?.cycles[0]?.fill_ids, ["Z", "a"]);
 });
 
 test("isolates one connection failure while synchronizing the remaining due accounts", async () => {

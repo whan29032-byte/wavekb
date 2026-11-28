@@ -11,6 +11,59 @@ const config = loadConfig({
   AUTH_SITE_URL: "https://knowledge.example.com/",
 });
 
+test("strategy sharing writes are disabled by default and scoped to the authorized trade and origin", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const url = `/v1/user/trading-trades/${id}/share-preview`;
+  const headers = { authorization: "Bearer user-token", origin: "http://localhost:8765" };
+  const calls: unknown[] = [];
+  const chartSharing = {
+    async createPreview(...arguments_: unknown[]) { calls.push(arguments_); return { preview_token: "opaque" }; },
+    async publish() { throw Object.assign(new Error("public_strategy_preview_stale"), { statusCode: 409 }); },
+  } as any;
+  const disabled = buildServer({ config, api, chartSharing });
+  assert.equal((await disabled.inject({ method: "POST", url, headers, payload: {} })).statusCode, 404);
+  const enabled = buildServer({ config: {
+    ...config, TRADING_FILL_CHART_ENABLED: true, TRADING_PUBLIC_STRATEGIES_ENABLED: true,
+  }, api, chartSharing });
+  assert.equal((await enabled.inject({ method: "POST", url, payload: {} })).statusCode, 401);
+  assert.equal((await enabled.inject({ method: "POST", url, headers: { ...headers, origin: "https://foreign.example" }, payload: {} })).statusCode, 403);
+  assert.equal((await enabled.inject({ method: "POST", url, headers, payload: { body: "x".repeat(65_536) } })).statusCode, 413);
+  const created = await enabled.inject({ method: "POST", url, headers, payload: { cycle_revision: 2 } });
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.headers["cache-control"], "no-store");
+  assert.deepEqual(created.json(), { preview_token: "opaque" });
+  assert.deepEqual(calls, [["user-1", id, { cycle_revision: 2 }]]);
+  const stale = await enabled.inject({ method: "POST", url: url.replace("share-preview", "share-publish"), headers, payload: {} });
+  assert.equal(stale.statusCode, 409);
+  assert.deepEqual(stale.json(), { error: "public_strategy_preview_stale" });
+});
+
+test("public strategy cache revalidation requires a still-visible snapshot without an actor", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const url = `/v1/public/strategy-snapshots/${id}`;
+  const projectionDigest = "1".repeat(64);
+  let visible = true;
+  const server = buildServer({
+    config: { ...config, TRADING_PUBLIC_STRATEGIES_ENABLED: true },
+    async readPublicStrategy(snapshotId) {
+      assert.equal(snapshotId, id);
+      return visible ? {
+        id, post_id: "22222222-2222-4222-8222-222222222222", projection_digest: projectionDigest, projection: {},
+      } as any : null;
+    },
+  });
+  const result = await server.inject({ url });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.headers["cache-control"], "public, max-age=0, must-revalidate");
+  assert.equal(result.headers.etag, `"${projectionDigest}"`);
+  const request = { url, headers: { "if-none-match": result.headers.etag! } };
+  assert.equal((await server.inject(request)).statusCode, 304);
+  visible = false;
+  const removed = await server.inject(request);
+  assert.equal(removed.statusCode, 404);
+  assert.equal(removed.headers["cache-control"], "no-store");
+});
+
 let lastEnqueue: unknown[] = [];
 
 const api = {
@@ -290,6 +343,182 @@ test("trading leaderboard is public while exchange credentials remain owner-scop
   });
   assert.equal(publicConnection.statusCode, 200);
   assert.equal((publicConnection.json() as any).connection.public_amounts_consented, true);
+});
+
+test("disabled fill chart makes no chart reads or writes and keeps the text review available", async () => {
+  const cycleId = "11111111-1111-4111-8111-111111111111";
+  const base = `/v1/user/trading-trades/${cycleId}`;
+  const chartCalls: string[] = [];
+  const chartStub = async () => {
+    chartCalls.push("chart");
+    return {};
+  };
+  const server = buildServer({
+    config,
+    api,
+    tradingWorkbench: {
+      getChart: chartStub, saveChartState: chartStub, saveFillAnnotation: chartStub,
+      async getTrade(ownerId: string, id: string) {
+        return { trade: { id, ownerId }, review: { reason: "保留文字复盘" } };
+      },
+    } as any,
+  });
+  try {
+    const headers = { authorization: "Bearer user-token", origin: "http://localhost:8765" };
+    for (const [method, suffix] of [["GET", "/chart"], ["PUT", "/chart-state"], ["PUT", "/fills/101/annotation"]] as const) {
+      const result = await server.inject({ method, url: base + suffix, headers, ...(method === "PUT" ? { payload: {} } : {}) });
+      assert.equal(result.statusCode, 404, suffix);
+      assert.equal(result.headers["cache-control"], "no-store");
+    }
+    assert.deepEqual(chartCalls, []);
+    const detail = await server.inject({ url: base, headers });
+    assert.equal(detail.statusCode, 200);
+    assert.deepEqual(detail.json(), { detail: { trade: { id: cycleId, ownerId: "user-1" }, review: { reason: "保留文字复盘" } } });
+  } finally {
+    await server.close();
+  }
+});
+
+test("private trade chart routes are owner-authenticated, fixed, no-store and origin/body bounded", async () => {
+  const cycleId = "11111111-1111-4111-8111-111111111111";
+  const calls: unknown[] = [];
+  const tradingWorkbench = {
+    async getChart(ownerId: string, id: string, query: unknown) {
+      calls.push(["get", ownerId, id, query]);
+      return { schema_version: "wavekb-trade-chart-projection-v1", cycle_id: id, markers: [] };
+    },
+    async saveChartState(ownerId: string, id: string, input: unknown, accessToken: string) {
+      calls.push(["state", ownerId, id, input, accessToken]);
+      return { cycle_id: id, version: 2 };
+    },
+    async saveFillAnnotation(ownerId: string, id: string, fillId: string, input: unknown, accessToken: string) {
+      calls.push(["annotation", ownerId, id, fillId, input, accessToken]);
+      return { id: "22222222-2222-4222-8222-222222222222", fill_id: fillId, version: 2 };
+    },
+  } as any;
+  const server = buildServer({ config: { ...config, TRADING_FILL_CHART_ENABLED: true }, api, tradingWorkbench });
+
+  assert.equal((await server.inject({ url: `/v1/user/trading-trades/${cycleId}/chart?timeframe=1m&from=2026-11-23T17%3A59%3A00.000Z&to=2026-11-23T18%3A03%3A00.000Z` })).statusCode, 401);
+  const chart = await server.inject({
+    url: `/v1/user/trading-trades/${cycleId}/chart?timeframe=1m&from=2026-11-23T17%3A59%3A00.000Z&to=2026-11-23T18%3A03%3A00.000Z`,
+    headers: { authorization: "Bearer user-token" },
+  });
+  assert.equal(chart.statusCode, 200);
+  assert.equal(chart.headers["cache-control"], "no-store");
+  assert.deepEqual(calls[0], ["get", "user-1", cycleId, { timeframe: "1m", from: "2026-11-23T17:59:00.000Z", to: "2026-11-23T18:03:00.000Z" }]);
+
+  const stateBody = { cycle_revision: 3, schema_version: "wavekb-trade-chart-v1", timeframe: "1m", price_type: "trade", viewport: { from: 1, to: 2 }, indicators: [], drawings: [], expected_version: 1, expected_updated_at: "2026-11-23T18:03:00.000Z" };
+  const state = await server.inject({
+    method: "PUT",
+    url: `/v1/user/trading-trades/${cycleId}/chart-state`,
+    headers: { authorization: "Bearer user-token", origin: "http://localhost:8765" },
+    payload: stateBody,
+  });
+  assert.equal(state.statusCode, 200);
+  assert.equal(state.headers["cache-control"], "no-store");
+  assert.deepEqual(calls[1], ["state", "user-1", cycleId, stateBody, "user-token"]);
+
+  const annotationBody = { annotation_id: "22222222-2222-4222-8222-222222222222", cycle_revision: 3, body: "note", tags: ["breakout"], images: [], expected_version: 1, deleted: false };
+  const annotation = await server.inject({
+    method: "PUT",
+    url: `/v1/user/trading-trades/${cycleId}/fills/101/annotation`,
+    headers: { authorization: "Bearer user-token", origin: "http://localhost:8765" },
+    payload: annotationBody,
+  });
+  assert.equal(annotation.statusCode, 200);
+  assert.equal(annotation.headers["cache-control"], "no-store");
+  assert.deepEqual(calls[2], ["annotation", "user-1", cycleId, "101", annotationBody, "user-token"]);
+
+  const foreignOrigin = await server.inject({
+    method: "PUT",
+    url: `/v1/user/trading-trades/${cycleId}/chart-state`,
+    headers: { authorization: "Bearer user-token", origin: "https://evil.example" },
+    payload: stateBody,
+  });
+  assert.equal(foreignOrigin.statusCode, 403);
+  assert.deepEqual(foreignOrigin.json(), { error: "invalid_request" });
+  const oversized = await server.inject({
+    method: "PUT",
+    url: `/v1/user/trading-trades/${cycleId}/fills/101/annotation`,
+    headers: { authorization: "Bearer user-token", origin: "http://localhost:8765" },
+    payload: { ...annotationBody, body: "x".repeat(32 * 1024) },
+  });
+  assert.equal(oversized.statusCode, 413);
+  assert.equal((await server.inject({
+    url: `/v1/user/trading-trades/${cycleId}/chart/anything`,
+    headers: { authorization: "Bearer user-token" },
+  })).statusCode, 404);
+});
+
+test("pilot chart access applies to reads and writes using the authorized account UID", async () => {
+  const cycleId = "11111111-1111-4111-8111-111111111111";
+  const server = buildServer({
+    config: { ...config, TRADING_FILL_CHART_ENABLED: true, TRADING_FILL_CHART_PILOT_UIDS: [12345] },
+    api: {
+      ...api,
+      authorize: async (token: string) => token === "pilot" ? { id: "pilot-id", role: "user", publicUid: 12345 }
+        : token === "regular" ? { id: "other-id", role: "user", publicUid: 42345 } : null,
+    },
+    tradingWorkbench: {
+      getChart: async (owner: string) => ({ owner }),
+      saveChartState: async (owner: string) => ({ owner }),
+      saveFillAnnotation: async (owner: string) => ({ owner }),
+    } as any,
+  });
+  try {
+    for (const token of ["pilot", "regular"]) {
+      const headers = { authorization: `Bearer ${token}`, origin: "http://localhost:8765", "x-wavekb-uid": "12345" };
+      const availability = await server.inject({ url: "/v1/user/trading-chart-access", headers });
+      assert.equal(availability.statusCode, 200);
+      assert.deepEqual(availability.json(), { enabled: token === "pilot" });
+      assert.equal(availability.headers["cache-control"], "no-store");
+      for (const [method, suffix] of [["GET", "chart"], ["PUT", "chart-state"], ["PUT", "fills/101/annotation"]] as const) {
+        const result = await server.inject({ method, url: `/v1/user/trading-trades/${cycleId}/${suffix}`, headers, payload: {} });
+        assert.equal(result.statusCode, token === "pilot" ? 200 : 404, suffix);
+      }
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+test("private trade chart failures preserve only fixed safe codes and no-store headers", async () => {
+  const cycleId = "11111111-1111-4111-8111-111111111111";
+  const tradingWorkbench = {
+    async getChart() {
+      throw Object.assign(new Error("invalid_trade_chart_query"), {
+        statusCode: 400,
+        cause: new Error("private provider host and token"),
+      });
+    },
+  } as any;
+  const server = buildServer({ config: { ...config, TRADING_FILL_CHART_ENABLED: true }, api, tradingWorkbench });
+  const response = await server.inject({
+    url: `/v1/user/trading-trades/${cycleId}/chart?timeframe=1m&from=a&to=b`,
+    headers: { authorization: "Bearer user-token" },
+  });
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(response.json(), { error: "invalid_trade_chart_query" });
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.body.includes("private provider host"), false);
+
+  const conflictServer = buildServer({
+    config: { ...config, TRADING_FILL_CHART_ENABLED: true },
+    api,
+    tradingWorkbench: {
+      async saveChartState() {
+        throw Object.assign(new Error("stale_trade_chart_state"), { status: 400 });
+      },
+    } as any,
+  });
+  const conflict = await conflictServer.inject({
+    method: "PUT",
+    url: `/v1/user/trading-trades/${cycleId}/chart-state`,
+    headers: { authorization: "Bearer user-token", origin: "http://localhost:8765" },
+    payload: {},
+  });
+  assert.equal(conflict.statusCode, 409, "known optimistic RPC conflicts must not inherit PostgREST's generic 400");
+  assert.deepEqual(conflict.json(), { error: "stale_trade_chart_state" });
 });
 
 test("exchange validation preserves fixed Exness errors without exposing upstream details", async () => {

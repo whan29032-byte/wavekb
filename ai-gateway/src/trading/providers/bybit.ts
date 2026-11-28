@@ -1,5 +1,9 @@
 import { createHmac } from "node:crypto";
+import { createCandleFetchGuard, finalizeCanonicalCandleBatch } from "./contracts.ts";
 import type {
+  CandleRequest,
+  CanonicalCandle,
+  CanonicalCandleBatch,
   CanonicalCashEvent,
   CanonicalFill,
   CanonicalHistoryBatch,
@@ -17,6 +21,17 @@ const HISTORY_LIMIT_MS = 90 * 24 * 60 * 60 * 1_000;
 const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
 const ALLOWED_HOSTS = new Set(["api.bybit.com"]);
 const ALLOWED_PATHS = new Set(["/v5/user/query-api", "/v5/account/wallet-balance", "/v5/execution/list", "/v5/account/transaction-log"]);
+const ALLOWED_CANDLE_PATHS = new Set(["/v5/market/kline", "/v5/market/mark-price-kline"]);
+const BYBIT_CANDLE_MAXIMUM_PAGE_SIZE = 1_000;
+const BYBIT_CANDLE_MAXIMUM_RANGE_SECONDS = 90 * 24 * 60 * 60;
+const BYBIT_CANDLE_INTERVALS: Readonly<Partial<Record<CandleRequest["timeframe"], string>>> = {
+  "1m": "1", "3m": "3", "5m": "5", "15m": "15", "30m": "30", "1h": "60", "2h": "120", "4h": "240",
+  "6h": "360", "12h": "720", "1d": "D", "1w": "W", "1M": "M",
+};
+const timeframeMilliseconds: Readonly<Partial<Record<CandleRequest["timeframe"], number>>> = {
+  "1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000,
+  "2h": 7_200_000, "4h": 14_400_000, "6h": 21_600_000, "12h": 43_200_000, "1d": 86_400_000, "1w": 604_800_000,
+};
 
 function record(value: unknown, field: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw Object.assign(new Error(`bybit_invalid_${field}`), { statusCode: 502 });
@@ -46,7 +61,8 @@ function resolveCredentials(value: Readonly<Record<string, string>>) {
 function safeError(code: number, status: number) {
   const rateLimited = code === 10006 || status === 429;
   const permissionDenied = code === 10005;
-  return Object.assign(new Error(rateLimited ? "bybit_rate_limited" : permissionDenied ? "bybit_permission_denied" : "bybit_unavailable"), {
+  const unauthorized = code === 10003 || code === 10004 || status === 401;
+  return Object.assign(new Error(rateLimited ? "bybit_rate_limited" : permissionDenied ? "bybit_permission_denied" : unauthorized ? "bybit_unauthorized" : "bybit_unavailable"), {
     statusCode: rateLimited ? 429 : status >= 500 ? 503 : 400,
   });
 }
@@ -64,7 +80,57 @@ function capabilities(): ProviderCapabilities {
     pagination: "opaque", position_grouping: "hedge_zero_cycle", has_position_id: false, has_realized_pnl: true,
     has_fee_asset: true, has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true,
     account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: ["USDT/USD"],
+    candles: {
+      availability: "available", timeframes: Object.keys(BYBIT_CANDLE_INTERVALS) as CandleRequest["timeframe"][],
+      maximum_page_size: BYBIT_CANDLE_MAXIMUM_PAGE_SIZE, maximum_range_seconds: BYBIT_CANDLE_MAXIMUM_RANGE_SECONDS,
+      price_modes: ["trade", "mark"], unavailable_reason: null,
+    },
   };
+}
+
+function candleFailure(code: string, statusCode: number): Error {
+  return Object.assign(new Error(code), { statusCode });
+}
+
+function validCandleRequestIdentity(request: CandleRequest): boolean {
+  const exactUtc = (value: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+    && new Date(value).toISOString() === value;
+  return /^[A-Z0-9]{1,100}$/.test(request.native_symbol)
+    && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(request.normalized_symbol)
+    && exactUtc(request.from)
+    && exactUtc(request.to);
+}
+
+function candleEnd(openTime: number, timeframe: CandleRequest["timeframe"]): number {
+  if (timeframe !== "1M") {
+    const milliseconds = timeframeMilliseconds[timeframe];
+    if (!milliseconds) throw candleFailure("bybit_invalid_candle_request", 400);
+    return openTime + milliseconds;
+  }
+  const date = new Date(openTime);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+}
+
+function finiteTimestamp(value: unknown, field: string): number {
+  const result = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(result) || result < 0) throw candleFailure(`bybit_invalid_${field}`, 502);
+  return result;
+}
+
+function canonicalUnsignedDecimal(value: unknown, field: string, allowZero: boolean): string {
+  if (typeof value !== "string") throw candleFailure(`bybit_invalid_${field}`, 502);
+  const raw = value;
+  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) throw candleFailure(`bybit_invalid_${field}`, 502);
+  const [whole = "0", fraction = ""] = raw.split(".");
+  const normalizedFraction = fraction.replace(/0+$/, "");
+  const result = normalizedFraction ? `${whole}.${normalizedFraction}` : whole;
+  if (!allowZero && result === "0") throw candleFailure(`bybit_invalid_${field}`, 502);
+  return result;
+}
+
+function candleRow(value: unknown, priceMode: "trade" | "mark"): unknown[] {
+  if (!Array.isArray(value) || value.length < (priceMode === "mark" ? 5 : 7)) throw candleFailure("bybit_invalid_candles", 502);
+  return value;
 }
 
 type BybitResponse = { result: Record<string, unknown> };
@@ -127,6 +193,26 @@ export class BybitTradingProviderAdapter implements TradingProviderAdapter {
     return { result: record(root.result, "response_result") };
   }
 
+  private async publicCandles(path: string, parameters: Record<string, string>, signal: AbortSignal): Promise<{ rows: unknown[]; sourceTime: number }> {
+    if (!ALLOWED_CANDLE_PATHS.has(path)) throw candleFailure("bybit_path_not_allowed", 500);
+    const query = new URLSearchParams(parameters);
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.baseUrl}${path}?${query}`, {
+        method: "GET", redirect: "error", signal, headers: { accept: "application/json" },
+      });
+    } catch {
+      throw candleFailure("bybit_unavailable", 503);
+    }
+    const payload: unknown = await response.json().catch(() => null);
+    const root = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+    const code = typeof root.retCode === "number" ? root.retCode : Number(root.retCode);
+    if (!response.ok || code !== 0) throw safeError(Number.isFinite(code) ? code : -1, response.status);
+    const result = root.result && typeof root.result === "object" && !Array.isArray(root.result) ? root.result as Record<string, unknown> : {};
+    if (!Array.isArray(result.list)) throw candleFailure("bybit_invalid_candles", 502);
+    return { rows: result.list, sourceTime: finiteTimestamp(root.time, "candle_source_time") };
+  }
+
   async validateCredentials(input: ProviderCredentialInput): Promise<ValidatedAccount[]> {
     if (input.provider !== this.provider) throw Object.assign(new Error("bybit_provider_mismatch"), { statusCode: 400 });
     if (!input.read_only_ack) throw Object.assign(new Error("bybit_read_only_ack_required"), { statusCode: 400 });
@@ -141,9 +227,9 @@ export class BybitTradingProviderAdapter implements TradingProviderAdapter {
       throw Object.assign(new Error("bybit_non_usdt_product_not_supported"), { statusCode: 400 });
     }
     const id = text(keyInfo.result.id, "account_id");
-    const suffix = id.slice(-4);
+    const suffix = id.slice(-4).padStart(4, "0");
     return [{
-      external_account_id: id, account_label: `Bybit · ${suffix}`, account_identifier_mask: `••••${suffix}`,
+      external_account_id: id, account_label: `Bybit · ${suffix}`, account_identifier_mask: `\u2022\u2022\u2022\u2022${suffix}`,
       account_currency: "USDT", products: ["usdt_perpetual"], read_only_status: "verified",
     }];
   }
@@ -198,6 +284,74 @@ export class BybitTradingProviderAdapter implements TradingProviderAdapter {
       cursor: { kind: "opaque", value: JSON.stringify({ execution_cursor: nextExecution, transaction_cursor: nextTransaction, window_start: windowStart, window_end: windowEnd }) },
       fetched_at: new Date(this.now()).toISOString(),
     };
+  }
+
+  async fetchCandles(account: ProviderAccount, request: CandleRequest): Promise<CanonicalCandleBatch> {
+    resolveCredentials(account.credentials);
+    const interval = BYBIT_CANDLE_INTERVALS[request.timeframe];
+    if (!validCandleRequestIdentity(request) || request.product !== "usdt_perpetual" || !interval || (request.price_mode !== "trade" && request.price_mode !== "mark")
+      || !Number.isInteger(request.limit) || request.limit < 1 || request.limit > 3_000) throw candleFailure("bybit_invalid_candle_request", 400);
+    const seriesBasis: "trade" | "mark" = request.price_mode;
+    const from = Date.parse(request.from);
+    const to = Date.parse(request.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || to - from > BYBIT_CANDLE_MAXIMUM_RANGE_SECONDS * 1_000) {
+      throw candleFailure("bybit_invalid_candle_request", 400);
+    }
+    const fetchedAtMs = this.now();
+    const fetchedAt = new Date(fetchedAtMs).toISOString();
+    const rows = new Map<number, { row: unknown[]; sourceTime: number }>();
+    let cursor = to;
+    let stopReason: "complete" | "provider_limit" | "time_limit" = "complete";
+    const guard = createCandleFetchGuard(request.limit, BYBIT_CANDLE_MAXIMUM_PAGE_SIZE, fetchedAtMs, this.now);
+    while (cursor > from && rows.size < request.limit) {
+      const decision = guard.nextPage();
+      if (decision !== "request") {
+        stopReason = decision;
+        break;
+      }
+      let page: { rows: unknown[]; sourceTime: number };
+      try {
+        page = await this.publicCandles(request.price_mode === "mark" ? "/v5/market/mark-price-kline" : "/v5/market/kline", {
+          category: "linear", symbol: request.native_symbol, interval, start: String(from), end: String(cursor - 1),
+          limit: String(Math.min(BYBIT_CANDLE_MAXIMUM_PAGE_SIZE, request.limit - rows.size)),
+        }, guard.signal);
+      } catch (error) {
+        if (guard.signal.aborted) {
+          stopReason = "time_limit";
+          break;
+        }
+        throw error;
+      }
+      if (page.rows.length === 0) break;
+      let earliest = Number.POSITIVE_INFINITY;
+      for (const value of page.rows) {
+        const row = candleRow(value, seriesBasis);
+        const openTime = finiteTimestamp(row[0], "candle_time");
+        earliest = Math.min(earliest, openTime);
+        const closeTime = candleEnd(openTime, request.timeframe);
+        if (openTime < to && closeTime > from && rows.size < request.limit) rows.set(openTime, { row, sourceTime: page.sourceTime });
+      }
+      if (!Number.isFinite(earliest) || earliest >= cursor) {
+        stopReason = "provider_limit";
+        break;
+      }
+      cursor = earliest;
+    }
+    if (rows.size >= request.limit && cursor > from) stopReason = "provider_limit";
+    const candles: CanonicalCandle[] = [...rows.entries()].sort(([left], [right]) => left - right).map(([openTime, value]) => {
+      const closeTime = candleEnd(openTime, request.timeframe);
+      return {
+        provider: this.provider, product: request.product, native_symbol: request.native_symbol,
+        normalized_symbol: request.normalized_symbol, timeframe: request.timeframe, series_basis: seriesBasis,
+        open_time: new Date(openTime).toISOString(), close_time: new Date(closeTime).toISOString(),
+        open: canonicalUnsignedDecimal(value.row[1], "candle_open", false), high: canonicalUnsignedDecimal(value.row[2], "candle_high", false),
+        low: canonicalUnsignedDecimal(value.row[3], "candle_low", false), close: canonicalUnsignedDecimal(value.row[4], "candle_close", false),
+        volume: request.price_mode === "mark" ? null : canonicalUnsignedDecimal(value.row[5], "candle_volume", true), source: "public_api",
+        source_timestamp: new Date(Math.min(value.sourceTime, fetchedAtMs)).toISOString(), fetched_at: fetchedAt,
+        status: closeTime <= fetchedAtMs ? "final" : "partial", gap_before: false, gap_after: false,
+      };
+    });
+    return finalizeCanonicalCandleBatch(this.provider, request, candles, fetchedAt, stopReason);
   }
 
   normalizeHistory(page: ProviderHistoryPage): CanonicalHistoryBatch {

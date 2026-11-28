@@ -21,6 +21,7 @@ import {
 
 export interface TradingMaintenanceStore {
   purgeDue(now: string): Promise<number>;
+  purgeExpiredStrategyPreviews(): Promise<number>;
 }
 
 export class SupabaseTradingMaintenanceStore implements TradingMaintenanceStore {
@@ -39,6 +40,18 @@ export class SupabaseTradingMaintenanceStore implements TradingMaintenanceStore 
     const purged = Number(value ?? 0);
     if (!Number.isInteger(purged) || purged < 0) throw new Error("invalid trading purge result");
     return purged;
+  }
+
+  async purgeExpiredStrategyPreviews(): Promise<number> {
+    try {
+      const result = await this.database.request("/rest/v1/rpc/purge_expired_strategy_share_previews", {
+        method: "POST", body: {},
+      });
+      if (Number.isInteger(result) && result >= 0 && result <= 500) return result;
+    } catch {
+      throw new Error("strategy_preview_cleanup_unavailable");
+    }
+    throw new Error("strategy_preview_cleanup_result_invalid");
   }
 }
 
@@ -85,12 +98,14 @@ export async function runTradingMaintenance(
     maintenanceStore?: TradingMaintenanceStore;
   } = {},
   limit = 100,
-): Promise<SyncBatchResult & { purged: number }> {
+): Promise<SyncBatchResult & { purged: number; expired_previews: number }> {
   const { maintenanceStore, ...syncDependencies } = dependencies;
   const result = await runTradingSyncBatch(config, syncDependencies, limit);
   const now = new Date(dependencies.now?.() ?? Date.now()).toISOString();
-  const purged = await (maintenanceStore ?? new SupabaseTradingMaintenanceStore(config)).purgeDue(now);
-  return { ...result, purged };
+  const maintenance = maintenanceStore ?? new SupabaseTradingMaintenanceStore(config);
+  const purged = await maintenance.purgeDue(now);
+  const expiredPreviews = await maintenance.purgeExpiredStrategyPreviews();
+  return { ...result, purged, expired_previews: expiredPreviews };
 }
 
 const isMain = process.argv[1] ? fileURLToPath(import.meta.url) === process.argv[1] : false;

@@ -47,7 +47,7 @@ jobs:
       - name: Verify generated knowledge is current
         run: node scripts/validate-knowledge.mjs
 
-      - name: Verify root and deployment contracts
+      - name: Full Linux test suite
         run: pnpm test
 
       - name: Verify wallet concurrency in disposable PostgreSQL sessions

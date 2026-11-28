@@ -8,6 +8,9 @@ import { BitgetTradingProviderAdapter } from "./providers/bitget.ts";
 import { BybitTradingProviderAdapter } from "./providers/bybit.ts";
 import {
   isTradingProvider,
+  assertProviderCapabilities,
+  normalizeProviderCapabilities,
+  unavailableCandleCapabilities,
   type ProviderAccount,
   type ProviderCapabilities,
   type TradingProviderAdapter,
@@ -88,7 +91,29 @@ function recordFrom(payload: unknown): ConnectionRecord {
   if (!item || typeof item !== "object" || !("id" in item)) {
     throw Object.assign(new Error("exchange_connection_failed"), { statusCode: 500 });
   }
-  return item as ConnectionRecord;
+  const row = item as Record<string, unknown>;
+  const stringFields = [
+    "id", "owner_id", "credential_set_id", "external_account_id_hash", "account_label",
+    "account_identifier_mask", "account_currency", "last_error_code",
+  ];
+  if (!isTradingProvider(row.provider)
+    || stringFields.some((field) => typeof row[field] !== "string")
+    || !/^(?:\u2022{4}|\*{4})[A-Za-z0-9]{4}$/u.test(String(row.account_identifier_mask))
+    || !new Set(["pending_verification", "active", "error", "disabled", "deleting"]).has(String(row.status))
+    || typeof row.public_enabled !== "boolean"
+    || ["history_coverage_started_at", "equity_tracking_started_at", "last_synced_at"].some(
+      (field) => row[field] !== null && typeof row[field] !== "string",
+    )) throw Object.assign(new Error("exchange_connection_failed"), { statusCode: 500 });
+  return {
+    ...row,
+    provider: row.provider,
+    capabilities: normalizeProviderCapabilities(row.capabilities, { allowLegacyMissingCandles: true }),
+  } as ConnectionRecord;
+}
+
+function recordsFrom(payload: unknown): ConnectionRecord[] {
+  if (!Array.isArray(payload)) throw Object.assign(new Error("exchange_connection_failed"), { statusCode: 500 });
+  return payload.map((item) => recordFrom(item));
 }
 
 export class SupabaseTradingConnectionStore implements TradingConnectionStore {
@@ -99,16 +124,16 @@ export class SupabaseTradingConnectionStore implements TradingConnectionStore {
   }
 
   async list(ownerId: string) {
-    return this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&status=neq.deleting&select=${connectionSelect}&order=created_at.asc`) as Promise<ConnectionRecord[]>;
+    return recordsFrom(await this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&status=neq.deleting&select=${connectionSelect}&order=created_at.asc`));
   }
 
   async get(ownerId: string, id: string) {
-    const rows = await this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&id=eq.${encodeURIComponent(id)}&select=${connectionSelect}&limit=1`) as ConnectionRecord[];
+    const rows = recordsFrom(await this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&id=eq.${encodeURIComponent(id)}&select=${connectionSelect}&limit=1`));
     return rows[0] ?? null;
   }
 
   async listByCredentialSet(ownerId: string, credentialSetId: string) {
-    return this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&credential_set_id=eq.${encodeURIComponent(credentialSetId)}&status=neq.deleting&select=${connectionSelect}&order=created_at.asc`) as Promise<ConnectionRecord[]>;
+    return recordsFrom(await this.database.request(`/rest/v1/exchange_connections?owner_id=eq.${encodeURIComponent(ownerId)}&credential_set_id=eq.${encodeURIComponent(credentialSetId)}&status=neq.deleting&select=${connectionSelect}&order=created_at.asc`));
   }
 
   async createCredentialSet(input: CredentialSetInput) {
@@ -160,7 +185,7 @@ export class SupabaseTradingConnectionStore implements TradingConnectionStore {
         p_account_label: input.account_label,
         p_account_identifier_mask: input.account_identifier_mask,
         p_account_currency: input.account_currency,
-        p_capabilities: input.capabilities,
+        p_capabilities: assertProviderCapabilities(input.capabilities),
         p_history_coverage_started_at: input.history_coverage_started_at,
         p_equity_tracking_started_at: input.equity_tracking_started_at,
       },
@@ -253,11 +278,12 @@ function defaultCapabilities(account: ValidatedAccount, selectedProvider: Tradin
     account_currency: account.account_currency,
     settlement_assets: [account.account_currency],
     valuation_pairs: [],
+    candles: unavailableCandleCapabilities(),
   };
 }
 
 function safe(connection: ConnectionRecord): SafeConnection {
-  const readOnlyStatus = (connection.capabilities as ProviderCapabilities & { read_only_status?: "verified" | "user_attested" }).read_only_status;
+  const readOnlyStatus = connection.capabilities.read_only_status;
   return {
     id: connection.id,
     provider: connection.provider,
@@ -317,7 +343,7 @@ export class ExchangeConnectionService {
 
   private credentialMask(input: Record<string, string>) {
     const key = input.apiKey ?? input.api_key ?? "";
-    return `••••${key.slice(-4)}`;
+    return `\u2022\u2022\u2022\u2022${key.slice(-4).padStart(4, "0")}`;
   }
 
   private encrypted(input: Record<string, string>) {
@@ -333,6 +359,9 @@ export class ExchangeConnectionService {
       provider: selectedProvider, credentials: credentialInput, read_only_ack: true,
     });
     if (!accounts.length || accounts.length > 10) throw Object.assign(new Error("exchange_accounts_invalid"), { statusCode: 400 });
+    if (accounts.some((account) => !/^(?:\u2022{4}|\*{4})[A-Za-z0-9]{4}$/u.test(account.account_identifier_mask))) {
+      throw Object.assign(new Error("exchange_accounts_invalid"), { statusCode: 502 });
+    }
     return { selectedProvider, credentialInput, accounts: accounts.map((account) => ({
       account,
       ref: this.accountRef(ownerId, selectedProvider, account.external_account_id),
@@ -378,14 +407,14 @@ export class ExchangeConnectionService {
     try {
       for (const { account } of selected) {
         const baseCapabilities = defaultCapabilities(account, result.selectedProvider);
-        const discovered = await this.adapter(result.selectedProvider).discoverCapabilities({
+        const discovered = assertProviderCapabilities(await this.adapter(result.selectedProvider).discoverCapabilities({
           connection_id: "pending",
           external_account_id: account.external_account_id,
           account_currency: account.account_currency,
           credentials: result.credentialInput,
           capabilities: baseCapabilities,
-        });
-        const capabilitiesWithStatus = { ...discovered, read_only_status: account.read_only_status } as ProviderCapabilities;
+        }));
+        const capabilitiesWithStatus = assertProviderCapabilities({ ...discovered, read_only_status: account.read_only_status });
         connected.push(await this.store.upsertConnection({
           owner_id: ownerId,
           provider: result.selectedProvider,

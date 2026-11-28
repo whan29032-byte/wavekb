@@ -210,6 +210,8 @@ export class SupabaseTradingSyncStore implements TradingSyncStore {
           id: row.id, created_at: row.created_at, anchor_fill_id: facts.anchor_fill_id,
           fill_ids: facts.fill_ids.filter((item: unknown): item is string => typeof item === "string"),
           revision: Number(row.revision), fill_digest: String(row.fill_digest), has_review: reviewedIds.has(row.id),
+          ...(typeof facts.stable_key === "string" ? { stable_key: facts.stable_key } : {}),
+          ...(typeof facts.allocation_digest === "string" ? { allocation_digest: facts.allocation_digest } : {}),
         }];
       }),
     };
@@ -381,6 +383,7 @@ export class TradingSyncService {
       account_currency: connection.account_currency,
       credentials,
       capabilities: connection.capabilities,
+      ...(selected.history_symbols ? { history_symbols: selected.history_symbols } : {}),
     };
   }
 
@@ -415,6 +418,10 @@ export class TradingSyncService {
         this.store.loadHistory(connection.id),
       ]);
       const initialCursor = this.initialCursor(connection, storedCursor);
+      const historySymbols = new Set(account.history_symbols);
+      if (connection.provider === "binance") {
+        for (const fill of history.fills) historySymbols.add(fill.native_symbol);
+      }
       let cursor = initialCursor;
       let publishedCursor = initialCursor;
       let freshFills: CanonicalFill[] = [];
@@ -425,8 +432,12 @@ export class TradingSyncService {
       let exhausted = false;
 
       for (let pageNumber = 0; pageNumber < this.maxPages; pageNumber += 1) {
-        const page = await adapter.fetchHistory(account, cursor);
+        const sourceAccount = historySymbols.size > 0 ? { ...account, history_symbols: [...historySymbols] } : account;
+        const page = await adapter.fetchHistory(sourceAccount, cursor);
         const normalized = assertCanonicalHistoryBatch(adapter.normalizeHistory(page));
+        if (connection.provider === "binance") {
+          for (const fill of normalized.fills) historySymbols.add(fill.native_symbol);
+        }
         freshFills = mergeById(freshFills, normalized.fills, (item) => item.native_fill_id);
         freshCash = mergeById(freshCash, normalized.cash_events, (item) => item.native_event_id);
         coverage = minTimestamp([coverage, normalized.coverage_started_at], snapshot.captured_at);
@@ -467,7 +478,9 @@ export class TradingSyncService {
         const cycle = reconstructed[assignment.candidate_index]!;
         const valuation = cycleUsdValue(cycle, snapshot);
         return {
-          ...cycle, id: assignment.id, revision: assignment.revision,
+          ...cycle,
+          allocations: cycle.allocations.map((allocation) => ({ ...allocation })),
+          id: assignment.id, revision: assignment.revision,
           usd_net_pnl: valuation.usd_value, valuation_status: valuation.status,
           is_current: true as const, needs_reconciliation: reconciliationIds.has(assignment.id),
         };

@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 import { loadPrivateTheorySnapshot, rankPrivateTheory, privateTheoryDigest } from "../src/research/private-theory.ts";
 import { KnowledgeRuntime } from "../src/knowledge/runtime.ts";
@@ -10,14 +7,54 @@ import { buildKnowledgeIndex } from "../src/knowledge/index.ts";
 import type { ResolvedUserConnection } from "../src/secrets/user-connection.ts";
 
 const exporter = await import(new URL("../../scripts/lib/hermes-theory-artifact.mjs", import.meta.url).href);
-function artifactFixture(t: test.TestContext) {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "wavekb-private-runtime-test-")));
-  fs.chmodSync(dir, 0o700); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(dir, "references"), { mode: 0o700 });
-  for (const [i, file] of (exporter.HERMES_THEORY_SOURCE_ALLOWLIST as string[]).entries()) {
-    fs.writeFileSync(path.join(dir, file), `# 结构 ${i}\n推动浪与波浪结构是候选判断。应观察浪2起点、浪4价格与失效条件。\n`, { mode: 0o600 });
-  }
-  return exporter.buildCuratedHermesTheoryArtifact({ sourceRoot: dir });
+const sourceLabels = [
+  "book-distillation-001", "book-distillation-002", "book-distillation-003", "book-distillation-004",
+  "rule-supplement", "course-distillation", "structure-context", "market-context", "integration-context",
+];
+function artifactFixture(_t?: test.TestContext) {
+  const chunks: Record<string, unknown>[] = [];
+  const privateSourceTerms = new Set<string>();
+  const sources = (exporter.HERMES_THEORY_SOURCE_ALLOWLIST as string[]).map((relativePath, index) => {
+    const original = `结构 ${index}：推动浪与波浪结构是候选判断，应观察浪2起点、浪4价格与失效条件。\n`;
+    const originalSha256 = crypto.createHash("sha256").update(original).digest("hex");
+    const curated = exporter.curateHermesTheoryText(original) as { text: string; counts: Record<string, number>; privateSourceTerms: string[] };
+    const curatedSha256 = crypto.createHash("sha256").update(curated.text).digest("hex");
+    const id = `s_${crypto.createHash("sha256").update(`${relativePath}\0${originalSha256}`).digest("hex").slice(0, 32)}`;
+    const receipt = {
+      schemaVersion: "hermes-theory-curation-receipt-v1",
+      originalSha256,
+      curatedSha256,
+      counts: curated.counts,
+    };
+    chunks.push({
+      id: `h_${crypto.createHash("sha256").update(`${id}\0${0}\0${curated.text}`).digest("hex").slice(0, 32)}`,
+      sourceId: id,
+      index: 0,
+      text: curated.text,
+      sha256: curatedSha256,
+      authority: "supplement",
+    });
+    for (const term of curated.privateSourceTerms) privateSourceTerms.add(term);
+    return {
+      id,
+      relativePath,
+      sourceLabel: sourceLabels[index],
+      authority: "supplement",
+      original: { sha256: originalSha256, bytes: Buffer.byteLength(original), version: `sha256:${originalSha256}` },
+      curated: { sha256: curatedSha256, bytes: Buffer.byteLength(curated.text), version: "hermes-theory-curation-v1" },
+      receipt: { ...receipt, transformSha256: privateTheoryDigest(receipt) },
+    };
+  });
+  const payload = {
+    schemaVersion: "hermes-private-theory-v2",
+    classification: "server-private",
+    authority: "supplement",
+    curationVersion: "hermes-theory-curation-v1",
+    privateSourceTerms: [...privateSourceTerms].sort(),
+    sources,
+    chunks,
+  };
+  return { ...payload, artifactSha256: privateTheoryDigest(payload) };
 }
 function signedTextCopy(artifact: any, text: string, chunkBoundary?: number) {
   const copy = structuredClone(artifact), source = copy.sources[0];
@@ -68,7 +105,7 @@ test("enabled private research fails closed before audit/provider if active snap
 });
 
 test("matching canonical signatures do not bypass private text checks or split-boundary protections", (t) => {
-  const artifact = artifactFixture(t), original = artifact.chunks[0].text as string;
+  const artifact = artifactFixture(t), original = artifact.chunks[0]!.text as string;
   for (const malicious of ["sk_live_syntheticsecret", "bot_token=synthetic", "context_token:synthetic", "seed_phrase=synthetic",
     "eyJsynthetic.payload.signature", "auth.json", "用户：私聊", "https://example.invalid", "%2fUsers%2fexample", "&#47;Users&#47;example",
     "references/old-source.md", "\\\\host\\sensitive", "user_id=synthetic"]) {
@@ -87,7 +124,7 @@ test("private research uses service-only audit, opaque prompt fragments and refe
   const runtime = new KnowledgeRuntime({ database: { request: async () => { throw new Error("owner-readable audit must not receive private data"); } },
     privateResearchEnabled: true, privateRepository: { loadActiveArtifact: async () => ({ artifact, expectedSha256: artifact.artifactSha256 }), recordRetrieval: async (value) => { audits.push(value); } } });
   const connection = { modelName: "mock", contextTokens: 131072, maxOutputTokens: 4096, temperature: .2, timeoutMs: 1000,
-    provider: { invoke: async (req: any) => { requests.push(req); return { text: JSON.stringify({ ...model, knowledge_citations: [artifact.chunks[0].id] }), usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" }; } } } as ResolvedUserConnection;
+    provider: { invoke: async (req: any) => { requests.push(req); return { text: JSON.stringify({ ...model, knowledge_citations: [artifact.chunks[0]!.id] }), usage: { inputTokens: 2, outputTokens: 3 }, finishReason: "stop" }; } } } as ResolvedUserConnection;
   const result = await runtime.run({ job: { id: "job", task_type: "wave_analysis", execution_source: "managed", input_payload: request }, analysis, connection });
   assert.equal((result.output as any).source_visibility, "private_research");
   assert.deepEqual((result.output as any).knowledge_citations, []); assert.deepEqual(result.output.citations, []);
@@ -111,7 +148,7 @@ test("private audit failure fails closed and single-public-book scope is not bro
 
 test("private names and opaque source IDs in narrative are rejected with exact provider usage retained", async (t) => {
   const artifact = artifactFixture(t);
-  for (const narrative of [artifact.chunks[0].id, artifact.privateSourceTerms[0]]) {
+  for (const narrative of [artifact.chunks[0]!.id, artifact.privateSourceTerms[0]!]) {
     let calls = 0;
     const runtime = new KnowledgeRuntime({ database: { request: async () => [] }, privateResearchEnabled: true,
       privateRepository: { loadActiveArtifact: async () => ({ artifact, expectedSha256: artifact.artifactSha256 }), recordRetrieval: async () => {} } });

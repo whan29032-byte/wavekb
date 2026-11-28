@@ -18,7 +18,11 @@ self.WaveKBReadingImageSizes = Object.freeze({"0041f149f7ac2f3f2983af04faa083615
   function classify(request) {
     if (!request || request.method !== "GET") return null;
     var url = new URL(request.url);
-    if (url.origin !== scope.location.origin || url.search || isPrivate(url.pathname)) return null;
+    if (url.origin !== scope.location.origin || url.search) return null;
+    // A trade-detail document is network-only with the public, account-free
+    // fallback. Its HTML and authenticated API requests never enter caches.
+    if (request.mode === "navigate" && /^\/workbench\/trades\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(url.pathname)) return "navigation";
+    if (isPrivate(url.pathname)) return null;
     if (request.mode === "navigate" && isPublicNavigation(url.pathname)) return "navigation";
     if (isImmutableAsset(url.pathname)) return "asset";
     return null;

@@ -26,6 +26,10 @@ function reason(error) {
   if (["EACCES", "EPERM"].includes(error?.code)) return "unreadable";
   return "read_error";
 }
+function currentUid() {
+  try { return typeof process.getuid === "function" ? process.getuid() : undefined; }
+  catch { return undefined; }
+}
 function canonicalDirectory(directory) {
   return path.isAbsolute(directory) && path.resolve(directory) === directory
     && fs.lstatSync(directory).isDirectory() && fs.realpathSync(directory) === directory;
@@ -43,11 +47,12 @@ function fileState(file) {
     return { state: "present", kind, mode: (info.mode & 0o777).toString(8) };
   } catch (error) { return { state: reason(error) }; }
 }
-function readMetadata(file, releaseId, candidate) {
+function readMetadata(file, releaseId, candidate, metadataOwnerUid, metadataStat = fs.statSync) {
   try {
+    if (!Number.isInteger(metadataOwnerUid)) return { result: { state: "unsafe_metadata_permissions" } };
     if (!regularFile(file)) return { result: { state: "unsafe_path" } };
-    const info = fs.statSync(file);
-    if (info.uid !== process.getuid() || (info.mode & 0o022) !== 0) return { result: { state: "unsafe_metadata_permissions" } };
+    const info = metadataStat(file);
+    if (info.uid !== metadataOwnerUid || (info.mode & 0o022) !== 0) return { result: { state: "unsafe_metadata_permissions" } };
     if (info.size > 65536) return { result: { state: "invalid_metadata" } };
     let value;
     try { value = JSON.parse(fs.readFileSync(file, "utf8")); }
@@ -146,10 +151,10 @@ function unitState(unit, execute) {
 }
 
 /** Injected roots/commands are for fixtures only; the CLI takes only an identity. */
-export function diagnoseReleaseState(releaseId, { applicationRoot = "/srv/wavekb-next-preview", backupRoot = "/var/backups/wavekb-next-production", execute = execFileSync, researchReader = readResearchForOwner } = {}) {
+export function diagnoseReleaseState(releaseId, { applicationRoot = "/srv/wavekb-next-preview", backupRoot = "/var/backups/wavekb-next-production", execute = execFileSync, researchReader = readResearchForOwner, metadataOwnerUid = currentUid(), metadataStat = fs.statSync } = {}) {
   if (!identity.test(releaseId)) throw new Error("Invalid release identity");
   const releases = path.join(applicationRoot, "releases"), candidate = path.join(releases, releaseId);
-  const metadata = readMetadata(path.join(backupRoot, releaseId, "rollback.json"), releaseId, candidate);
+  const metadata = readMetadata(path.join(backupRoot, releaseId, "rollback.json"), releaseId, candidate, metadataOwnerUid, metadataStat);
   return {
     releaseId, metadata: metadata.result,
     current: currentState(path.join(applicationRoot, "current"), candidate, metadata.value?.previousRelease, releases),

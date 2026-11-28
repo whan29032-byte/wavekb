@@ -1,9 +1,66 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { tradingWorkbenchV2Enabled } from "./config";
+import { tradingChartAvailability, tradingFillChartEnabled, tradingWorkbenchV2Enabled } from "./config";
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+describe("fill chart availability", () => {
+  it("reads its own Gateway flag and treats an older or unreachable Gateway as disabled", async () => {
+    const env = { AUTH_GATEWAY_INTERNAL_URL: "http://127.0.0.1:8787/" };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_workbench_v2: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart: "true" } }))
+      .mockRejectedValueOnce(new Error("offline"));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await tradingFillChartEnabled({})).toBe(false);
+    expect(await tradingFillChartEnabled(env)).toBe(false);
+    expect(await tradingFillChartEnabled(env)).toBe(true);
+    expect(await tradingFillChartEnabled(env)).toBe(false);
+    expect(await tradingFillChartEnabled(env)).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it("supports a Web kill switch while keeping the Gateway authoritative for enabling", async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ ok: true, features: { trading_fill_chart: false } }));
+    vi.stubGlobal("fetch", fetcher);
+    const env = { AUTH_GATEWAY_INTERNAL_URL: "http://127.0.0.1:8787/" };
+    expect(await tradingFillChartEnabled({ ...env, TRADING_FILL_CHART_ENABLED: "false" })).toBe(false);
+    expect(await tradingFillChartEnabled({ ...env, TRADING_FILL_CHART_ENABLED: "no" })).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(await tradingFillChartEnabled({ ...env, TRADING_FILL_CHART_ENABLED: "true" })).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("consults Gateway pilot access with the verified session token", async () => {
+    const env = { AUTH_GATEWAY_INTERNAL_URL: "http://127.0.0.1:8787/" };
+    const fetcher = vi.fn(async (url: string) => url.endsWith("/health")
+      ? Response.json({ ok: true, features: { trading_fill_chart: false, trading_fill_chart_pilot: true } })
+      : Response.json({ enabled: true }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await tradingFillChartEnabled(env)).toBe(false);
+    expect(await tradingFillChartEnabled(env, async () => "verified-token")).toBe(true);
+    expect(fetcher).toHaveBeenLastCalledWith("http://127.0.0.1:8787/v1/user/trading-chart-access", expect.objectContaining({
+      cache: "no-store", headers: { authorization: "Bearer verified-token" },
+    }));
+  });
+
+  it("exposes sharing only when both the chart and sharing are enabled for this member", async () => {
+    const env = { AUTH_GATEWAY_INTERNAL_URL: "http://127.0.0.1:8787" };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_public_strategies: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart: true } }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart_pilot: true, trading_public_strategies: true } }))
+      .mockResolvedValueOnce(Response.json({ enabled: false, share_enabled: true }))
+      .mockResolvedValueOnce(Response.json({ ok: true, features: { trading_fill_chart: true, trading_public_strategies: true } }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await tradingChartAvailability(env)).toEqual({ chart: false, share: false });
+    expect(await tradingChartAvailability(env)).toEqual({ chart: true, share: false });
+    expect(await tradingChartAvailability(env, async () => "verified-token")).toEqual({ chart: false, share: false });
+    expect(await tradingChartAvailability(env)).toEqual({ chart: true, share: true });
+  });
 });
 
 describe("trading workbench cutover flag", () => {

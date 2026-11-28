@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  CandleRequest,
+  CanonicalCandleBatch,
   ProviderAccount,
   ProviderCapabilities,
   ProviderCredentialInput,
@@ -9,6 +11,7 @@ import type {
 } from "../src/trading/providers/contracts.ts";
 import {
   ExchangeConnectionService,
+  SupabaseTradingConnectionStore,
   createExchangeConnectionService,
   type ConnectionRecord,
   type TradingConnectionStore,
@@ -25,6 +28,10 @@ const capabilities: ProviderCapabilities = {
   has_position_id: false, has_realized_pnl: true, has_fee_asset: true,
   has_funding_or_swap: true, has_external_cash_flow: true, has_usd_valuation: true,
   account_currency: "USDT", settlement_assets: ["USDT"], valuation_pairs: [],
+  candles: {
+    availability: "unavailable", timeframes: [], maximum_page_size: null,
+    maximum_range_seconds: null, price_modes: [], unavailable_reason: "implementation_pending",
+  },
 };
 
 class Adapter implements TradingProviderAdapter {
@@ -48,6 +55,7 @@ class Adapter implements TradingProviderAdapter {
   async fetchAccountSnapshot(): Promise<never> { throw new Error("not_used"); }
   async fetchHistory(): Promise<never> { throw new Error("not_used"); }
   normalizeHistory(): never { throw new Error("not_used"); }
+  async fetchCandles(_account: ProviderAccount, _request: CandleRequest): Promise<CanonicalCandleBatch> { throw new Error("not_used"); }
 }
 
 class Store implements TradingConnectionStore {
@@ -133,6 +141,39 @@ test("requires a read-only acknowledgement and returns only masked discovered ac
   });
   assert.equal(JSON.stringify(result).includes("secret-api"), false);
   assert.equal(JSON.stringify(result).includes("binance-1001"), false);
+});
+
+test("database capability boundaries normalize legacy rows to explicit candle unavailability", async () => {
+  const legacyCapabilities = { ...capabilities } as Record<string, unknown>;
+  delete legacyCapabilities.candles;
+  const row = {
+    id: "connection-legacy",
+    owner_id: owner,
+    provider: "binance",
+    credential_set_id: "credential-legacy",
+    external_account_id_hash: "hash",
+    account_label: "Legacy",
+    account_identifier_mask: "\u2022\u2022\u2022\u20221001",
+    account_currency: "USDT",
+    capabilities: legacyCapabilities,
+    history_coverage_started_at: null,
+    equity_tracking_started_at: null,
+    status: "active",
+    public_enabled: false,
+    last_synced_at: null,
+    last_error_code: "",
+  };
+  const store = new SupabaseTradingConnectionStore({ async request() { return [structuredClone(row)]; } });
+
+  const [normalized] = await store.list(owner);
+  assert.deepEqual(normalized?.capabilities.candles, {
+    availability: "unavailable",
+    timeframes: [],
+    maximum_page_size: null,
+    maximum_range_seconds: null,
+    price_modes: [],
+    unavailable_reason: "legacy_capability_missing",
+  });
 });
 
 test("factory rejects disabled providers before credential validation", async () => {

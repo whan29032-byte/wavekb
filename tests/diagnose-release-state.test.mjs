@@ -27,6 +27,12 @@ function fixture(t, { wal = false, open = false, user = "wavekb" } = {}) {
     phase: "rolled-back", diagnosticStage: "research-preheat", webMutated: false,
     unsafe: sentinel, tline: { user, backupComplete: true, preheatComplete: false, unitsInstalled: false, lastSuccess: "2026-10-09T12:00:00Z", credentials: sentinel } };
   fs.writeFileSync(metadata, JSON.stringify(value), { mode: 0o600 });
+  const metadataOwnerUid = fs.statSync(metadata).uid;
+  let metadataMode = 0o600;
+  const metadataStat = (target) => {
+    const info = fs.statSync(target);
+    return target === metadata ? { ...info, mode: (info.mode & ~0o777) | metadataMode } : info;
+  };
   const file = path.join(applicationRoot, "data/tline/research.sqlite");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const writer = new DatabaseSync(file);
@@ -48,7 +54,7 @@ function fixture(t, { wal = false, open = false, user = "wavekb" } = {}) {
     return `LoadState=loaded\nActiveState=inactive\nSubState=dead\nResult=success\nUnitFileState=disabled\nEnvironment=${sentinel}\n`;
   };
   const researchReader = (target) => readResearchState(target, { now: () => now });
-  return { directory, applicationRoot, backupRoot, candidate, previous, metadata, value, file, writer, calls, execute, researchReader };
+  return { directory, applicationRoot, backupRoot, candidate, previous, metadata, metadataOwnerUid, metadataStat, setMetadataMode: (mode) => { metadataMode = mode; }, value, file, writer, calls, execute, researchReader };
 }
 
 test("metadata and real SQLite state project only fixed fields, without record or file changes", (t) => {
@@ -60,7 +66,7 @@ test("metadata and real SQLite state project only fixed fields, without record o
   assert.deepEqual(result.research, { state: "read", lastAttempt: "2026-10-09T13:42:20.000Z", lastSuccess: "2026-10-09T12:00:00.000Z",
     errorCode: "rate_limited", retryAt: "2026-10-09T14:42:20.000Z", leaseValid: true });
   assert.equal(result.candidate.server.kind, "file");
-  assert.equal(result.candidate.launcher.mode, "755");
+  assert.equal(result.candidate.launcher.mode, (fs.statSync(path.join(f.candidate, "start-release.sh")).mode & 0o777).toString(8));
   assert.doesNotMatch(JSON.stringify(result), /SECRET_DO_NOT_OUTPUT|\/application|\/backups|credentials|lease_owner|Environment/);
   assert.deepEqual(fs.readFileSync(f.file), before);
   assert.deepEqual(fs.readdirSync(path.dirname(f.file)), names);
@@ -102,6 +108,12 @@ test("invalid identity is rejected before reads or commands", () => {
   }
 });
 
+test("missing metadata owner UID fails closed", (t) => {
+  const f = fixture(t);
+  const result = diagnoseReleaseState(releaseId, { ...f, metadataOwnerUid: null });
+  assert.equal(result.metadata.state, "unsafe_metadata_permissions");
+});
+
 test("malformed, oversized and mismatched metadata classify safely", (t) => {
   const f = fixture(t);
   for (const [text, state] of [[sentinel, "invalid_metadata"], ["x".repeat(65537), "invalid_metadata"],
@@ -113,6 +125,7 @@ test("malformed, oversized and mismatched metadata classify safely", (t) => {
     assert.doesNotMatch(JSON.stringify(result), /SECRET_DO_NOT_OUTPUT/);
   }
   fs.chmodSync(f.metadata, 0o622);
+  f.setMetadataMode(0o622);
   assert.equal(diagnoseReleaseState(releaseId, f).metadata.state, "unsafe_metadata_permissions");
 });
 
@@ -237,7 +250,10 @@ test("new workflow operation is isolated and preserves all prior operation contr
   const workflow = yaml.load(fs.readFileSync(new URL("../.github/workflows/diagnose-next-production.yml", import.meta.url), "utf8"));
   const inputs = (workflow.on ?? workflow.true).workflow_dispatch.inputs;
   assert.equal(inputs.operation.default, "release");
-  assert.deepEqual(inputs.operation.options, ["release", "release-state", "knowledge-transport", "mentor-account", "integration-config", "tron-readiness"]);
+  assert.deepEqual(inputs.operation.options, [
+    "release", "release-state", "knowledge-transport", "mentor-account", "integration-config", "tron-readiness",
+    "strategy-pilot-preflight",
+  ]);
   const steps = workflow.jobs.diagnose.steps, step = steps.find((value) => value.if === "inputs.operation == 'release-state'");
   assert.match(step.run, /< scripts\/diagnose-release-state\.mjs/);
   assert.match(step.run, /sudo -n \/usr\/bin\/node --input-type=module - '\$\{RELEASE_ID\}'/);
@@ -246,4 +262,9 @@ test("new workflow operation is isolated and preserves all prior operation contr
   assert.match(steps.find((value) => value.if === "inputs.operation == 'release'").run, /< scripts\/diagnose-release\.mjs/);
   assert.match(steps.find((value) => value.if === "inputs.operation == 'mentor-account'").run, /CREATE_DISPOSABLE_MENTOR_AUDIT_ACCOUNT/);
   assert.match(steps.find((value) => value.if === "inputs.operation == 'integration-config'").run, /< scripts\/integration-config-audit\.mjs/);
+  const pilot = steps.find((value) => value.if === "inputs.operation == 'strategy-pilot-preflight'");
+  assert.equal(pilot.run, "node scripts/strategy-pilot-preflight.mjs");
+  assert.deepEqual(Object.keys(pilot.env).sort(), ["E2E_POSTING_IDENTIFIER", "E2E_POSTING_PASSWORD"]);
+  assert.equal(steps.find((value) => value.name === "Configure pinned SSH access").if,
+    "inputs.operation != 'strategy-pilot-preflight'");
 });
