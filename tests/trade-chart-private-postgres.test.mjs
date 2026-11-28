@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
+import { BinanceTradingProviderAdapter } from "../ai-gateway/src/trading/providers/binance.ts";
+import { hashExternalTradingAccount, SupabaseTradingSyncStore, TradingSyncService } from "../ai-gateway/src/trading/sync-service.ts";
 
 const baseMigrationUrl = new URL(
   "../supabase/migrations/202611240001_multi_exchange_trade_review.sql",
@@ -479,6 +481,72 @@ test("trade cycle allocation schema enforces composite identity, ownership, chec
   } finally {
     await database.close();
   }
+});
+
+test("the first Binance sync commits funding events and its snapshot through the real publication RPC", async () => {
+  const database = await migratedDatabase();
+  try {
+    await database.query("update public.exchange_connections set last_synced_at = null where id = $1", [connectionOne]);
+    const { rows: [connection] } = await database.query("select * from public.exchange_connections where id = $1", [connectionOne]);
+    const identityKey = Buffer.alloc(32, 4);
+    const now = Date.parse("2026-11-25T10:00:00Z");
+    const event = { tranId: 4321, incomeType: "FUNDING_FEE", symbol: "BTCUSDT", asset: "USDT", income: "-0.5", time: now - 60_000 };
+    const trades = [
+      { id: 1, orderId: 11, side: "BUY", price: "100", realizedPnl: "0", time: now - 120_000 },
+      { id: 2, orderId: 22, side: "SELL", price: "110", realizedPnl: "10", time: now - 30_000 },
+    ].map((trade) => ({ ...trade, symbol: "BTCUSDT", positionSide: "BOTH", qty: "1", commissionAsset: "USDT", commission: "0.1", maker: false }));
+    const adapter = new BinanceTradingProviderAdapter("https://fapi.binance.com", async (request) => {
+      const url = new URL(request);
+      const withinWindow = ({ time }) => time >= Number(url.searchParams.get("startTime")) && time <= Number(url.searchParams.get("endTime"));
+      switch (url.pathname) {
+        case "/fapi/v3/account": return Response.json({ accountAlias: "fixture", canTrade: false, totalMarginBalance: "1000", totalWalletBalance: "1000", totalUnrealizedProfit: "0" });
+        case "/fapi/v1/accountConfig": return Response.json({ multiAssetsMargin: false });
+        case "/fapi/v1/income": return Response.json([event].filter(withinWindow));
+        case "/fapi/v1/userTrades": return Response.json(trades.filter(withinWindow));
+        default: throw new Error(`unexpected fixture endpoint: ${url.pathname}`);
+      }
+    }, () => now);
+    const capabilities = await adapter.discoverCapabilities();
+    const rpc = new SupabaseTradingSyncStore({ async request(path, { body }) {
+      assert.equal(path, "/rest/v1/rpc/publish_exchange_sync_generation");
+      const result = await database.query(`select public.publish_exchange_sync_generation(
+        $1::uuid, $2::uuid, $3::bigint, $4::jsonb, $5::jsonb, $6::jsonb,
+        $7::jsonb, $8::jsonb, $9::jsonb, $10::timestamptz) as generation`, [
+        body.p_connection_id, body.p_owner_id, body.p_expected_generation,
+        ...[body.p_snapshot, body.p_fills, body.p_cash_events, body.p_cycles, body.p_lineage, body.p_cursor].map((entry) => JSON.stringify(entry)),
+        body.p_coverage_started_at,
+      ]);
+      return result.rows[0].generation;
+    } });
+    const service = new TradingSyncService({
+      store: {
+        async getConnection() { return { ...connection, capabilities, external_account_id_hash: hashExternalTradingAccount(identityKey, "binance", "fixture") }; },
+        async claim() { return true; },
+        async loadCredentialEnvelope() { return {}; },
+        async loadCursor() { return null; },
+        async loadHistory() { return { fills: [], cash_events: [], previous_cycles: [] }; },
+        publish: rpc.publish.bind(rpc),
+        async recordFailure() {},
+      },
+      adapters: new Map([["binance", adapter]]), enabledProviders: new Set(["binance"]),
+      workerId: connectionTwo, identityKey, masterKey: Buffer.alloc(32), now: () => now,
+      decrypt: () => JSON.stringify({ apiKey: "fixture-key", secretKey: "fixture-secret" }),
+    });
+
+    const result = await service.syncConnection(connectionOne);
+    assert.equal(result.status, "published");
+    assert.equal(result.generation, 1);
+    assert.equal(result.fills, 2);
+    assert.equal(result.cycles, 1);
+    const published = await database.query(`select c.status, c.last_synced_at::text, e.event_type, e.amount::text
+      from public.exchange_connections c join public.trading_cash_events e on e.connection_id = c.id
+      where c.id = $1 and e.native_event_id = 'FUNDING_FEE:4321'`, [connectionOne]);
+    assert.equal(published.rows.length, 1);
+    assert.equal(published.rows[0].status, "active");
+    assert.equal(Date.parse(published.rows[0].last_synced_at), now);
+    assert.equal(published.rows[0].event_type, "funding");
+    assert.equal(Number(published.rows[0].amount), -0.5);
+  } finally { await database.close(); }
 });
 
 test("atomic publication keeps the RPC signature, fill IDs, revisions, and owner-bound allocations", async () => {
